@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore Matrix SDK package
+        uses: actions/cache@v4
+        with:
+          path: .build/native-sdk-package
+          key: matrix-sdk-${{ runner.arch }}-${{ hashFiles('scripts/build-sdk.sh', 'Support/MatrixSDK/patches/**') }}
+
+      - name: Build Matrix SDK
+        run: scripts/build-sdk.sh
+
+      - name: Lint
+        run: scripts/lint.sh
+
+      - name: Test
+        run: scripts/test.sh
+
+      - name: Build app
+        run: scripts/build-app.sh

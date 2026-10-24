@@ -1,0 +1,123 @@
+name: Release
+
+# Push an annotated tag like v1.2.3; its message (or the body of a release already drafted for the tag) becomes the
+# release notes. SPARKLE_ED_PRIVATE_KEY comes from scripts/setup-update-key.sh. With the Developer ID and notary
+# secrets set, the app is signed with that identity and notarized; without them it is signed ad hoc.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore Matrix SDK package
+        uses: actions/cache@v4
+        with:
+          path: .build/native-sdk-package
+          key: matrix-sdk-${{ runner.arch }}-${{ hashFiles('scripts/build-sdk.sh', 'Support/MatrixSDK/patches/**') }}
+
+      - name: Build Matrix SDK
+        run: scripts/build-sdk.sh
+
+      - name: Read version
+        run: |
+          version=$(scripts/version-from-tag.sh "$TAG")
+          if ! plutil -extract SUPublicEDKey raw Config/Info.plist >/dev/null; then
+              echo "::error::Config/Info.plist has no SUPublicEDKey; run scripts/setup-update-key.sh first."
+              exit 1
+          fi
+          echo "SLATRIX_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Import Developer ID certificate
+        env:
+          DEVELOPER_ID_CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ -z $DEVELOPER_ID_CERTIFICATE_P12 ]]; then
+              echo "::notice::No DEVELOPER_ID_CERTIFICATE_P12 secret, so this release is signed ad hoc and not notarized."
+              exit 0
+          fi
+          keychain=$RUNNER_TEMP/signing.keychain-db
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$DEVELOPER_ID_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+              -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/ { print $2; exit }')
+          if [[ -z $identity ]]; then
+              echo "::error::DEVELOPER_ID_CERTIFICATE_P12 holds no Developer ID Application identity."
+              exit 1
+          fi
+          echo "SLATRIX_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Build and sign
+        run: scripts/build-app.sh
+
+      - name: Notarize and staple
+        env:
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+        run: |
+          # Only Developer ID builds can be notarized.
+          if [[ -z ${SLATRIX_SIGN_IDENTITY:-} ]]; then exit 0; fi
+          : "${NOTARY_API_KEY_P8:?a Developer ID release also needs the NOTARY_API_KEY_P8 secret}"
+          : "${NOTARY_API_KEY_ID:?a Developer ID release also needs the NOTARY_API_KEY_ID secret}"
+          : "${NOTARY_API_ISSUER_ID:?a Developer ID release also needs the NOTARY_API_ISSUER_ID secret}"
+          key=$RUNNER_TEMP/notary.p8
+          printf '%s' "$NOTARY_API_KEY_P8" > "$key"
+          ditto -c -k --keepParent build/Slatrix.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --wait \
+              --key "$key" --key-id "$NOTARY_API_KEY_ID" --issuer "$NOTARY_API_ISSUER_ID"
+          rm "$key"
+          xcrun stapler staple build/Slatrix.app
+
+      - name: Package update and appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          mkdir -p build/release
+          ditto -c -k --sequesterRsrc --keepParent build/Slatrix.app "build/release/Slatrix-$SLATRIX_VERSION.zip"
+          # generate_appcast embeds the Markdown file named like the archive as the update's release notes.
+          notes=build/release/Slatrix-$SLATRIX_VERSION.md
+          # actions/checkout fetches annotated tags as lightweight ones, which loses the message.
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          if ! gh release view "$TAG" --json body --jq .body > "$notes" 2>/dev/null; then
+              git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$TAG" > "$notes"
+          fi
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | .build/slatrix-spm/artifacts/sparkle/Sparkle/bin/generate_appcast \
+              --ed-key-file - --embed-release-notes \
+              --download-url-prefix "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG/" \
+              -o build/release/appcast.xml build/release
+          # generate_appcast only warns when SUPublicEDKey does not match the private key, and leaves the update unsigned.
+          if ! grep -q 'sparkle:edSignature=' build/release/appcast.xml; then
+              echo "::error::The update is unsigned: SPARKLE_ED_PRIVATE_KEY does not match SUPublicEDKey in Config/Info.plist."
+              exit 1
+          fi
+
+      - name: Publish release
+        run: |
+          assets=("build/release/Slatrix-$SLATRIX_VERSION.zip" build/release/appcast.xml)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" "${assets[@]}" --clobber
+              gh release edit "$TAG" --draft=false
+          else
+              gh release create "$TAG" "${assets[@]}" --verify-tag --title "Slatrix $SLATRIX_VERSION" \
+                  --notes-file "build/release/Slatrix-$SLATRIX_VERSION.md"
+          fi
