@@ -41,5 +41,13 @@ jobs:
       - name: Test
         run: scripts/test.sh
 
+      - name: Upload crash reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-reports
+          path: ~/Library/Logs/DiagnosticReports/
+          if-no-files-found: ignore
+
       - name: Build app
         run: scripts/build-app.sh
