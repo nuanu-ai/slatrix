@@ -1,0 +1,787 @@
+diff --git a/crates/matrix-sdk/src/event_cache/search_backfill.rs b/crates/matrix-sdk/src/event_cache/search_backfill.rs
+index 8316105..6fefd64 100644
+--- a/crates/matrix-sdk/src/event_cache/search_backfill.rs
++++ b/crates/matrix-sdk/src/event_cache/search_backfill.rs
+@@ -33,6 +33,11 @@ use super::{
+ };
+ use crate::Client;
+ 
++#[cfg(feature = "experimental-search")]
++mod replay;
++#[cfg(feature = "experimental-search")]
++use replay::CachedSearchReplay;
++
+ /// A week.
+ const WEEK: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+ 
+@@ -101,6 +106,12 @@ impl EventCache {
+ 
+         let mut rooms = rooms_by_relevancy(&client);
+         let total_rooms = rooms.len();
++        #[cfg(feature = "experimental-search")]
++        let mut cached_replay = CachedSearchReplay::new();
++        #[cfg(feature = "experimental-search")]
++        for room_id in &rooms {
++            cached_replay.room(self, &client, room_id).await;
++        }
+         let target_age = MAX_BACKFILL_WEEKS * WEEK;
+         info!(
+             ?strategy,
+@@ -147,6 +158,12 @@ impl EventCache {
+ 
+                 for (room_id, handle) in handles {
+                     let reason = handle.join().await.reason;
++                    // Existing pagination may have initialized a room skipped
++                    // above. Replay it once, without initializing it ourselves.
++                    #[cfg(feature = "experimental-search")]
++                    if week == 1 {
++                        cached_replay.room(self, &client, &room_id).await;
++                    }
+                     trace!(
+                         %room_id,
+                         week,
+@@ -161,6 +178,9 @@ impl EventCache {
+             }
+         }
+ 
++        #[cfg(feature = "experimental-search")]
++        cached_replay.report();
++
+         info!(
+             total_rooms,
+             rooms_drained = drained.len(),
+@@ -266,6 +286,94 @@ mod tests {
+         assert!(stop_when_older_than(Duration::from_secs(3600))(&outcome).is_break());
+     }
+ 
++    /// A client can have persisted history from before a persistent search
++    /// index was configured. Ordinary cache loading must not be confused with
++    /// populating that new index.
++    #[cfg(all(feature = "experimental-search", feature = "sqlite"))]
++    #[async_test]
++    async fn test_search_backfill_replays_persisted_cache_into_new_index() {
++        use crate::search_index::SearchIndexStoreKind;
++        use futures_util::FutureExt;
++
++        let cache_path = tempfile::tempdir().unwrap();
++        let index_path = tempfile::tempdir().unwrap();
++        let server = MatrixMockServer::new().await;
++        let room_id = room_id!("!cached:localhost");
++        let original_id = event_id!("$cached-original");
++        let f = EventFactory::new().room(room_id).sender(*BOB);
++
++        // Client A has a durable event cache but only the default transient
++        // search index. Only synthetic data is written to this temporary store.
++        {
++            let first = server
++                .client_builder()
++                .on_builder(|builder| builder.sqlite_store(cache_path.path(), None))
++                .build()
++                .await;
++            first.event_cache().subscribe().unwrap();
++            let room = server.sync_joined_room(&first, room_id).await;
++            let (cache, _handles) = room.event_cache().await.unwrap();
++            server
++                .sync_room(
++                    &first,
++                    JoinedRoomBuilder::new(room_id).add_timeline_event(
++                        f.text_msg("cachedneedle")
++                            .event_id(original_id)
++                            .server_ts(ts_ago(Duration::from_secs(60))),
++                    ),
++                )
++                .await;
++            assert!(cache.find_event(original_id).await.unwrap().is_some());
++            first.pause().await.unwrap();
++        }
++
++        // Client B opens the same event cache and a brand-new encrypted index.
++        let second = server
++            .client_builder()
++            .on_builder(|builder| {
++                builder
++                    .sqlite_store(cache_path.path(), None)
++                    .search_index_store(SearchIndexStoreKind::EncryptedDirectory(
++                        index_path.path().to_path_buf(),
++                        "synthetic-test-password".to_owned(),
++                    ))
++                    .with_enable_automatic_back_pagination(true)
++            })
++            .build()
++            .await;
++        let event_cache = second.event_cache();
++        event_cache.subscribe().unwrap();
++        // Normal room lifecycle initializes the cache before the read-only pass.
++        let room = server.sync_joined_room(&second, room_id).await;
++        let (cache, _handles) = room.event_cache().await.unwrap();
++        assert!(cache.find_event(original_id).await.unwrap().is_some());
++        assert!(room.search("cachedneedle", 10, None).await.unwrap().events.is_empty());
++        let (_initial, mut updates) = cache.subscribe().await.unwrap();
++        let raw_before =
++            cache.find_event(original_id).await.unwrap().unwrap().raw().json().get().to_owned();
++
++        event_cache.run_search_backfill(SearchBackfillStrategy::Foreground).await;
++        let hits = room.search("cachedneedle", 10, None).await.unwrap();
++        assert_eq!(hits.events.len(), 1, "persisted history was not replayed into the new index");
++        assert_eq!(hits.events[0].1, original_id);
++        assert_eq!(
++            cache.find_event(original_id).await.unwrap().unwrap().raw().json().get(),
++            raw_before
++        );
++        assert!(updates.recv().now_or_never().is_none(), "replay must not emit timeline diffs");
++
++        // A repeated explicit pass does not duplicate the existing document.
++        event_cache.run_search_backfill(SearchBackfillStrategy::Foreground).await;
++        assert_eq!(room.search("cachedneedle", 10, None).await.unwrap().events.len(), 1);
++        for request in server.received_requests().await.unwrap() {
++            let path = request.url.path();
++            assert!(
++                !path.ends_with("/messages") && !path.contains("/receipt/"),
++                "cache replay performed pagination or receipts"
++            );
++        }
++    }
++
+     /// A search backfill sweeps the rooms, back-paginating each until it
+     /// reaches the start of the timeline.
+     #[async_test]
+diff --git a/crates/matrix-sdk/src/search_index/mod.rs b/crates/matrix-sdk/src/search_index/mod.rs
+index cc03a2b..519f403 100644
+--- a/crates/matrix-sdk/src/search_index/mod.rs
++++ b/crates/matrix-sdk/src/search_index/mod.rs
+@@ -461,7 +461,7 @@ fn handle_poll_start(
+ 
+ /// Prepare a [`TimelineEvent`] into a [`RoomIndexOperation`] for search
+ /// indexing.
+-async fn parse_timeline_event(
++pub(crate) async fn parse_timeline_event(
+     cache: &RoomEventCache,
+     event: TimelineEvent,
+     redaction_rules: &RedactionRules,
+diff --git a/crates/matrix-sdk/src/event_cache/search_backfill/replay.rs b/crates/matrix-sdk/src/event_cache/search_backfill/replay.rs
+new file mode 100644
+index 0000000..2a62675
+--- /dev/null
++++ b/crates/matrix-sdk/src/event_cache/search_backfill/replay.rs
+@@ -0,0 +1,621 @@
++// Copyright 2026 The Matrix.org Foundation C.I.C.
++// SPDX-License-Identifier: Apache-2.0
++
++//! Bounded, additive replay of already-cached room history into search.
++//! This never initializes a cache, paginates, saves events or broadcasts diffs.
++//! Thread-only/out-of-band history is not enumerated, nor is this an index GC.
++
++use std::{collections::HashSet, time::Duration};
++
++use futures_util::future::join_all;
++use matrix_sdk_base::{
++    cross_process_lock::MappedCrossProcessLockState,
++    linked_chunk::{ChunkContent, LinkedChunkId},
++    timeout::timeout,
++};
++use ruma::{OwnedEventId, OwnedRoomId, RoomId, time::Instant};
++use tracing::{info, warn};
++
++use super::{MAX_BACKFILL_WEEKS, WEEK, age_of};
++use crate::{
++    Client, Room, RoomState,
++    event_cache::{EventCache, Result, RoomEventCache},
++    search_index::parse_timeline_event,
++};
++
++const MAX_CHUNKS_PER_ROOM: usize = 32;
++const MAX_EVENTS_PER_ROOM: usize = 4_096;
++const MAX_EVENTS_TOTAL: usize = 32_768;
++const MAX_REPLAY_TIME: Duration = Duration::from_secs(30);
++
++pub(super) struct CachedSearchReplay {
++    visited: HashSet<OwnedRoomId>,
++    examined: usize,
++    spent: Duration,
++}
++
++impl CachedSearchReplay {
++    pub(super) fn new() -> Self {
++        Self { visited: HashSet::new(), examined: 0, spent: Duration::ZERO }
++    }
++
++    pub(super) async fn room(&mut self, cache: &EventCache, client: &Client, room_id: &RoomId) {
++        if self.visited.contains(room_id) || self.examined >= MAX_EVENTS_TOTAL {
++            return;
++        }
++        let remaining = MAX_REPLAY_TIME.saturating_sub(self.spent);
++        if remaining.is_zero() {
++            return;
++        }
++        let started = Instant::now();
++        // Cancellation drops this future and its guards; no detached work is
++        // spawned. A synchronous index commit can finish its current batch.
++        match timeout(self.room_inner(cache, client, room_id), remaining).await {
++            Ok(Ok(())) => {}
++            Ok(Err(_)) => warn!("Cached search replay could not read a cache batch"),
++            Err(_) => warn!("Cached search replay reached its time budget"),
++        }
++        self.spent += started.elapsed();
++    }
++
++    async fn room_inner(
++        &mut self,
++        cache: &EventCache,
++        client: &Client,
++        room_id: &RoomId,
++    ) -> Result<()> {
++        let Some(room) = client.get_room(room_id).filter(|room| room.state() == RoomState::Joined)
++        else {
++            return Ok(());
++        };
++        // Calling EventCache::room here would initialize unopened caches,
++        // enumerate all chunk metadata, and potentially repair bad storage.
++        let initialized = {
++            let rooms = cache.inner.by_room.read().await;
++            rooms.get(room_id).map(|caches| caches.room.clone())
++        };
++        let Some(room_cache) = initialized else { return Ok(()) };
++        self.visited.insert(room_id.to_owned());
++
++        let mut before = None;
++        let mut seen_chunks = HashSet::new();
++        let mut seen_events = HashSet::new();
++        let mut room_events = 0;
++        for _ in 0..MAX_CHUNKS_PER_ROOM {
++            if room.state() != RoomState::Joined
++                || room_events >= MAX_EVENTS_PER_ROOM
++                || self.examined >= MAX_EVENTS_TOTAL
++            {
++                break;
++            }
++            let capacity =
++                (MAX_EVENTS_PER_ROOM - room_events).min(MAX_EVENTS_TOTAL - self.examined).min(128);
++            // Copy only a bounded set of identities. Never wait for the search
++            // lock while retaining the cross-process event-store lock.
++            let snapshot = {
++                let locked = client.event_cache_store().lock().await?;
++                let MappedCrossProcessLockState::Clean(store) = locked else {
++                    // Leave dirty-store recovery to the normal cache lifecycle.
++                    return Ok(());
++                };
++                let id = LinkedChunkId::Room(room_id);
++                let raw = match before {
++                    None => store.load_last_chunk(id).await?.0,
++                    Some(previous) => store.load_previous_chunk(id, previous).await?,
++                };
++                raw.map(|raw| {
++                    let mut examined = 0;
++                    let ids = match raw.content {
++                        ChunkContent::Gap(_) => Vec::new(),
++                        ChunkContent::Items(events) => events
++                            .into_iter()
++                            .rev()
++                            .take(capacity)
++                            .filter_map(|event| {
++                                examined += 1;
++                                // Server timestamps are not monotonic. Exclude
++                                // known-old events individually; do not stop at
++                                // an old, missing or future timestamp.
++                                if event
++                                    .timestamp()
++                                    .and_then(age_of)
++                                    .is_some_and(|age| age > MAX_BACKFILL_WEEKS * WEEK)
++                                {
++                                    return None;
++                                }
++                                event.event_id().map(ToOwned::to_owned)
++                            })
++                            .collect::<Vec<_>>(),
++                    };
++                    (raw.identifier, raw.previous, examined, ids)
++                })
++            };
++            let Some((identifier, previous, examined, ids)) = snapshot else { break };
++            if !seen_chunks.insert(identifier) {
++                warn!("Cached search replay stopped at a repeated chunk");
++                break;
++            }
++            room_events += examined;
++            self.examined += examined;
++            let ids =
++                ids.into_iter().filter(|id| seen_events.insert(id.clone())).collect::<Vec<_>>();
++            if !replay_batch(client, &room, &room_cache, ids).await? {
++                break;
++            }
++            if previous.is_none() {
++                break;
++            }
++            before = Some(identifier);
++            tokio::task::yield_now().await;
++        }
++        Ok(())
++    }
++
++    pub(super) fn report(&self) {
++        info!(rooms_considered = self.visited.len(), events_considered = self.examined,
++            elapsed = ?self.spent, "Bounded cached search replay finished; coverage may be partial");
++    }
++}
++
++/// Keep the existing index→cache lock order. A live edit/redaction that won
++/// the index lock first is observed by these current-form reads; one arriving
++/// later is indexed after this batch. No old raw snapshot is ever re-added.
++async fn replay_batch(
++    client: &Client,
++    room: &Room,
++    cache: &RoomEventCache,
++    ids: Vec<OwnedEventId>,
++) -> Result<bool> {
++    if ids.is_empty() || room.state() != RoomState::Joined {
++        return Ok(true);
++    }
++    let mut index = client.search_index().lock().await;
++    if room.state() != RoomState::Joined {
++        return Ok(true);
++    }
++    let mut current = Vec::with_capacity(ids.len());
++    for id in ids {
++        if let Some(event) = cache.find_event(&id).await? {
++            current.push(event);
++        }
++    }
++    let rules = room.clone_info().room_version_rules_or_default().redaction;
++    let operations =
++        join_all(current.into_iter().map(|event| parse_timeline_event(cache, event, &rules)))
++            .await
++            .into_iter()
++            .flatten()
++            .collect::<Vec<_>>();
++    // Parsing awaits current relations. A room left during those awaits must
++    // not get a newly committed replay batch.
++    if !operations.is_empty() && room.state() == RoomState::Joined {
++        if index.bulk_execute(operations, room.room_id()).is_err() {
++            warn!("Cached search replay could not commit an index batch");
++            return Ok(false);
++        }
++    }
++    Ok(true)
++}
++
++#[cfg(test)]
++mod tests {
++    use std::sync::Arc;
++
++    use matrix_sdk_base::{
++        cross_process_lock::CrossProcessLockConfig,
++        event_cache::store::MemoryStore,
++        linked_chunk::{ChunkIdentifier, Position, Update},
++        store::StoreConfig,
++    };
++    use matrix_sdk_test::{BOB, JoinedRoomBuilder, async_test, event_factory::EventFactory};
++    use ruma::{
++        MilliSecondsSinceUnixEpoch, OwnedEventId, event_id,
++        events::{
++            AnySyncTimelineEvent,
++            room::{ImageInfo, message::RoomMessageEventContentWithoutRelation},
++        },
++        owned_mxc_uri, room_id,
++        serde::Raw,
++        user_id,
++    };
++    use tokio::time::{sleep, timeout};
++
++    use super::*;
++    use crate::test_utils::mocks::MatrixMockServer;
++
++    fn factory() -> EventFactory {
++        EventFactory::new()
++            .room(room_id!("!replay:localhost"))
++            .sender(*BOB)
++            .server_ts(MilliSecondsSinceUnixEpoch::now().0.into())
++    }
++
++    struct Fixture {
++        server: MatrixMockServer,
++        client: Client,
++        room: Room,
++        cache: RoomEventCache,
++    }
++
++    async fn fixture(events: Vec<Raw<AnySyncTimelineEvent>>) -> Fixture {
++        let room_id = room_id!("!replay:localhost");
++        let last = events.last().unwrap().get_field::<OwnedEventId>("event_id").unwrap().unwrap();
++        let server = MatrixMockServer::new().await;
++        let store = Arc::new(MemoryStore::new());
++        {
++            let first = server
++                .client_builder()
++                .on_builder(|builder| {
++                    builder.store_config(
++                        StoreConfig::new(CrossProcessLockConfig::SingleProcess)
++                            .event_cache_store(store.clone()),
++                    )
++                })
++                .build()
++                .await;
++            first.event_cache().subscribe().unwrap();
++            let room = server.sync_joined_room(&first, room_id).await;
++            let (cache, _) = room.event_cache().await.unwrap();
++            server
++                .sync_room(&first, JoinedRoomBuilder::new(room_id).add_timeline_bulk(events))
++                .await;
++            wait_cached(&cache, &last).await;
++        }
++        let client = server
++            .client_builder()
++            .on_builder(|builder| {
++                builder.store_config(
++                    StoreConfig::new(CrossProcessLockConfig::SingleProcess)
++                        .event_cache_store(store),
++                )
++            })
++            .build()
++            .await;
++        client.event_cache().subscribe().unwrap();
++        let room = server.sync_joined_room(&client, room_id).await;
++        let (cache, _) = room.event_cache().await.unwrap();
++        wait_cached(&cache, &last).await;
++        Fixture { server, client, room, cache }
++    }
++
++    async fn wait_cached(cache: &RoomEventCache, id: &ruma::EventId) {
++        timeout(Duration::from_secs(5), async {
++            loop {
++                if cache.find_event(id).await.unwrap().is_some() {
++                    break;
++                }
++                tokio::task::yield_now().await;
++            }
++        })
++        .await
++        .unwrap();
++    }
++
++    #[async_test]
++    async fn test_replay_latest_valid_edit_and_redaction() {
++        let f = factory();
++        let root = event_id!("$root");
++        let deleted = event_id!("$deleted");
++        let fixture = fixture(vec![
++            f.text_msg("beforetext").event_id(root).into_raw_sync(),
++            f.text_msg("* freshneedle")
++                .event_id(event_id!("$valid-edit"))
++                .edit(root, RoomMessageEventContentWithoutRelation::text_plain("freshneedle"))
++                .into_raw_sync(),
++            f.text_msg("* forgedneedle")
++                .sender(user_id!("@forger:localhost"))
++                .edit(root, RoomMessageEventContentWithoutRelation::text_plain("forgedneedle"))
++                .into_raw_sync(),
++            f.text_msg("deletedneedle").event_id(deleted).into_raw_sync(),
++            f.redaction(deleted).into_raw_sync(),
++        ])
++        .await;
++        let mut replay = CachedSearchReplay::new();
++        replay.room(fixture.client.event_cache(), &fixture.client, fixture.room.room_id()).await;
++        let hits = fixture.room.search("freshneedle", 10, None).await.unwrap();
++        assert_eq!(hits.events.len(), 1);
++        assert_eq!(hits.events[0].1, event_id!("$valid-edit"));
++        for absent in ["beforetext", "forgedneedle", "deletedneedle"] {
++            assert!(fixture.room.search(absent, 10, None).await.unwrap().events.is_empty());
++        }
++    }
++
++    #[async_test]
++    async fn test_snapshot_ids_reload_after_live_edit_and_sticker_redaction() {
++        let f = factory();
++        let root = event_id!("$root");
++        let sticker = event_id!("$sticker");
++        let fixture = fixture(vec![
++            f.text_msg("oldneedle").event_id(root).into_raw_sync(),
++            f.sticker("stickerneedle", ImageInfo::new(), owned_mxc_uri!("mxc://localhost/sticker"))
++                .event_id(sticker)
++                .into_raw_sync(),
++        ])
++        .await;
++        let ids = vec![root.to_owned(), sticker.to_owned()];
++        assert!(
++            replay_batch(&fixture.client, &fixture.room, &fixture.cache, ids.clone())
++                .await
++                .unwrap()
++        );
++        assert_eq!(fixture.room.search("stickerneedle", 10, None).await.unwrap().events.len(), 1);
++        fixture
++            .server
++            .sync_room(
++                &fixture.client,
++                JoinedRoomBuilder::new(fixture.room.room_id())
++                    .add_timeline_event(
++                        f.text_msg("* latestneedle").event_id(event_id!("$live-edit")).edit(
++                            root,
++                            RoomMessageEventContentWithoutRelation::text_plain("latestneedle"),
++                        ),
++                    )
++                    .add_timeline_event(f.redaction(sticker)),
++            )
++            .await;
++        timeout(Duration::from_secs(5), async {
++            loop {
++                if fixture.room.search("latestneedle", 10, None).await.unwrap().events.len() == 1
++                    && fixture
++                        .room
++                        .search("stickerneedle", 10, None)
++                        .await
++                        .unwrap()
++                        .events
++                        .is_empty()
++                {
++                    break;
++                }
++                sleep(Duration::from_millis(10)).await;
++            }
++        })
++        .await
++        .unwrap();
++        // These IDs were copied before the live writes. Replaying them must
++        // not bring back the old text or the redacted non-message attachment.
++        replay_batch(&fixture.client, &fixture.room, &fixture.cache, ids).await.unwrap();
++        assert_eq!(fixture.room.search("latestneedle", 10, None).await.unwrap().events.len(), 1);
++        assert!(fixture.room.search("oldneedle", 10, None).await.unwrap().events.is_empty());
++        assert!(fixture.room.search("stickerneedle", 10, None).await.unwrap().events.is_empty());
++    }
++
++    #[async_test]
++    async fn test_global_event_budget_and_explicit_restart() {
++        let f = factory();
++        let fixture = fixture(vec![
++            f.text_msg("limitneedle older").into_raw_sync(),
++            f.text_msg("limitneedle newer").into_raw_sync(),
++        ])
++        .await;
++        let mut replay = CachedSearchReplay::new();
++        replay.examined = MAX_EVENTS_TOTAL - 1;
++        replay.room(fixture.client.event_cache(), &fixture.client, fixture.room.room_id()).await;
++        assert_eq!(replay.examined, MAX_EVENTS_TOTAL);
++        assert_eq!(fixture.room.search("limitneedle", 10, None).await.unwrap().events.len(), 1);
++        let mut next = CachedSearchReplay::new();
++        next.room(fixture.client.event_cache(), &fixture.client, fixture.room.room_id()).await;
++        assert_eq!(fixture.room.search("limitneedle", 10, None).await.unwrap().events.len(), 2);
++        let mut expired = CachedSearchReplay::new();
++        expired.spent = MAX_REPLAY_TIME;
++        expired.room(fixture.client.event_cache(), &fixture.client, fixture.room.room_id()).await;
++        assert_eq!(expired.examined, 0);
++    }
++
++    #[async_test]
++    async fn test_cancelled_queued_replay_does_not_write_later() {
++        let f = factory();
++        let fixture = fixture(vec![f.text_msg("cancelneedle").into_raw_sync()]).await;
++        let guard = fixture.client.search_index().lock().await;
++        let client = fixture.client.clone();
++        let room_id = fixture.room.room_id().to_owned();
++        let task = tokio::spawn(async move {
++            CachedSearchReplay::new().room(client.event_cache(), &client, &room_id).await;
++        });
++        for _ in 0..10 {
++            tokio::task::yield_now().await;
++        }
++        task.abort();
++        assert!(task.await.unwrap_err().is_cancelled());
++        drop(guard);
++        assert!(fixture.room.search("cancelneedle", 10, None).await.unwrap().events.is_empty());
++        CachedSearchReplay::new()
++            .room(fixture.client.event_cache(), &fixture.client, fixture.room.room_id())
++            .await;
++        assert_eq!(fixture.room.search("cancelneedle", 10, None).await.unwrap().events.len(), 1);
++    }
++
++    #[async_test]
++    async fn test_room_chunks_only_and_no_forced_room_initialization() {
++        let f = factory();
++        let root = event_id!("$root");
++        let fixture = fixture(vec![f.text_msg("rootneedle").event_id(root).into_raw_sync()]).await;
++        let unopened = room_id!("!unopened:localhost");
++        fixture.client.base_client().get_or_create_room(unopened, RoomState::Joined);
++        {
++            let locked = fixture.client.event_cache_store().lock().await.unwrap();
++            let store = locked.as_clean().unwrap();
++            store
++                .handle_linked_chunk_updates(
++                    LinkedChunkId::Thread(fixture.room.room_id(), root),
++                    vec![
++                        Update::NewItemsChunk {
++                            previous: None,
++                            new: ChunkIdentifier::new(0),
++                            next: None,
++                        },
++                        Update::PushItems {
++                            at: Position::new(ChunkIdentifier::new(0), 0),
++                            items: vec![
++                                f.text_msg("threadonlyneedle").in_thread(root, root).into_event(),
++                            ],
++                        },
++                    ],
++                )
++                .await
++                .unwrap();
++        }
++        let mut replay = CachedSearchReplay::new();
++        replay.room(fixture.client.event_cache(), &fixture.client, unopened).await;
++        assert!(!replay.visited.contains(unopened));
++        assert!(!fixture.client.event_cache().inner.by_room.read().await.contains_key(unopened));
++        replay.room(fixture.client.event_cache(), &fixture.client, fixture.room.room_id()).await;
++        assert_eq!(fixture.room.search("rootneedle", 10, None).await.unwrap().events.len(), 1);
++        assert!(fixture.room.search("threadonlyneedle", 10, None).await.unwrap().events.is_empty());
++    }
++
++    #[async_test]
++    async fn test_non_monotonic_timestamps_and_recent_edit_of_old_original() {
++        let f = factory();
++        let old =
++            MilliSecondsSinceUnixEpoch::from_system_time(ruma::time::SystemTime::now() - 14 * WEEK)
++                .unwrap();
++        let future =
++            MilliSecondsSinceUnixEpoch::from_system_time(ruma::time::SystemTime::now() + WEEK)
++                .unwrap();
++        let old_root = event_id!("$old-root");
++        let fixture = fixture(vec![
++            f.text_msg("recentneedle").into_raw_sync(),
++            f.text_msg("ancientneedle").event_id(old_root).server_ts(old).into_raw_sync(),
++            f.text_msg("futureneedle").server_ts(future).into_raw_sync(),
++            f.text_msg("* editedoldneedle")
++                .edit(
++                    old_root,
++                    RoomMessageEventContentWithoutRelation::text_plain("editedoldneedle"),
++                )
++                .into_raw_sync(),
++        ])
++        .await;
++        CachedSearchReplay::new()
++            .room(fixture.client.event_cache(), &fixture.client, fixture.room.room_id())
++            .await;
++        for present in ["recentneedle", "futureneedle", "editedoldneedle"] {
++            assert_eq!(
++                fixture.room.search(present, 10, None).await.unwrap().events.len(),
++                1,
++                "{present}"
++            );
++        }
++        assert!(fixture.room.search("ancientneedle", 10, None).await.unwrap().events.is_empty());
++    }
++
++    #[async_test]
++    async fn test_chunk_cap_bounds_recent_and_future_history() {
++        // Legal sparse chunks exercise the actual 32-chunk boundary without
++        // indexing thousands of unrelated messages as fixture setup.
++        let server = MatrixMockServer::new().await;
++        let store = Arc::new(MemoryStore::new());
++        let client = server
++            .client_builder()
++            .on_builder(|builder| {
++                builder.store_config(
++                    StoreConfig::new(CrossProcessLockConfig::SingleProcess)
++                        .event_cache_store(store),
++                )
++            })
++            .build()
++            .await;
++        let room_id = room_id!("!replay:localhost");
++        let f = factory();
++        let mut writes = Vec::new();
++        for i in 0..33 {
++            let id = ChunkIdentifier::new(i);
++            writes.push(Update::NewItemsChunk {
++                previous: if i == 0 { None } else { Some(ChunkIdentifier::new(i - 1)) },
++                new: id,
++                next: None,
++            });
++            writes.push(Update::PushItems {
++                at: Position::new(id, 0),
++                items: vec![
++                    f.text_msg(if i == 0 { "beyondcapneedle" } else { "boundedneedle" })
++                        .into_event(),
++                ],
++            });
++        }
++        {
++            let locked = client.event_cache_store().lock().await.unwrap();
++            locked
++                .as_clean()
++                .unwrap()
++                .handle_linked_chunk_updates(LinkedChunkId::Room(room_id), writes)
++                .await
++                .unwrap();
++        }
++        client.event_cache().subscribe().unwrap();
++        let room = server.sync_joined_room(&client, room_id).await;
++        let (_cache, _handles) = room.event_cache().await.unwrap();
++        let mut replay = CachedSearchReplay::new();
++        replay.room(client.event_cache(), &client, room.room_id()).await;
++        assert_eq!(replay.examined, 32);
++        assert!(room.search("beyondcapneedle", 10, None).await.unwrap().events.is_empty());
++        assert!(!room.search("boundedneedle", 10, None).await.unwrap().events.is_empty());
++    }
++
++    #[async_test]
++    async fn test_dirty_snapshot_is_skipped_without_cache_recovery() {
++        let server = MatrixMockServer::new().await;
++        let store = Arc::new(MemoryStore::new());
++        let primary = server
++            .client_builder()
++            .on_builder(|builder| {
++                builder.store_config(
++                    StoreConfig::new(CrossProcessLockConfig::multi_process("replay-primary"))
++                        .event_cache_store(store.clone()),
++                )
++            })
++            .build()
++            .await;
++        primary.event_cache().subscribe().unwrap();
++        let room = server.sync_joined_room(&primary, room_id!("!replay:localhost")).await;
++        let (cache, _) = room.event_cache().await.unwrap();
++        let (_initial, mut updates) = cache.subscribe().await.unwrap();
++        let foreign = server
++            .client_builder()
++            .on_builder(|builder| {
++                builder.store_config(
++                    StoreConfig::new(CrossProcessLockConfig::multi_process("replay-foreign"))
++                        .event_cache_store(store),
++                )
++            })
++            .build()
++            .await;
++        drop(foreign.event_cache_store().lock().await.unwrap());
++        let mut replay = CachedSearchReplay::new();
++        replay.room(primary.event_cache(), &primary, room.room_id()).await;
++        assert_eq!(replay.examined, 0);
++        assert!(
++            primary.event_cache_store().lock().await.unwrap().as_clean().is_none(),
++            "replay must not mark dirty state recovered"
++        );
++        assert!(matches!(
++            updates.try_recv(),
++            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
++        ));
++    }
++
++    #[async_test]
++    async fn test_room_left_while_queued_is_not_indexed() {
++        let fixture = fixture(vec![factory().text_msg("leftneedle").into_raw_sync()]).await;
++        let guard = fixture.client.search_index().lock().await;
++        let client = fixture.client.clone();
++        let id = fixture.room.room_id().to_owned();
++        let task = tokio::spawn(async move {
++            CachedSearchReplay::new().room(client.event_cache(), &client, &id).await;
++        });
++        for _ in 0..10 {
++            tokio::task::yield_now().await;
++        }
++        fixture
++            .server
++            .mock_sync()
++            .ok_and_run(&fixture.client, |builder| {
++                builder
++                    .add_left_room(matrix_sdk_test::LeftRoomBuilder::new(fixture.room.room_id()));
++            })
++            .await;
++        assert_eq!(fixture.room.state(), RoomState::Left);
++        drop(guard);
++        task.await.unwrap();
++        assert!(fixture.room.search("leftneedle", 10, None).await.unwrap().events.is_empty());
++    }
++}

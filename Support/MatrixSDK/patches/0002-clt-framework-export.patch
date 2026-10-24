@@ -1,0 +1,101 @@
+diff --git a/xtask/src/swift.rs b/xtask/src/swift.rs
+index e3b2f2e..2081edf 100644
+--- a/xtask/src/swift.rs
++++ b/xtask/src/swift.rs
+@@ -28,6 +28,16 @@ enum SwiftCommand {
+         #[clap(long)]
+         release: bool,
+ 
++        /// Stop after compiling, localizing private symbols and generating
++        /// bindings. Leave the intermediate outputs for an external packager.
++        /// This is incompatible with `--components-path`.
++        #[clap(long)]
++        skip_xcodebuild: bool,
++
++        /// Rust toolchain for tier 1/2 targets. Defaults to the stable channel.
++        #[clap(long, default_value = "stable")]
++        stable_toolchain: String,
++
+         /// Build with a custom profile, takes precedence over `--release`
+         #[clap(long)]
+         profile: Option<String>,
+@@ -87,6 +97,8 @@ impl SwiftArgs {
+             SwiftCommand::BuildLibrary => build_library(),
+             SwiftCommand::BuildFramework {
+                 release,
++                skip_xcodebuild,
++                stable_toolchain,
+                 profile,
+                 target: targets,
+                 tier3_targets,
+@@ -107,6 +119,8 @@ impl SwiftArgs {
+                     tier3_targets,
+                     components_path,
+                     sequentially,
++                    skip_xcodebuild,
++                    &stable_toolchain,
+                     macos_deployment_target.as_deref(),
+                     ios_deployment_target.as_deref(),
+                     watchos_deployment_target.as_deref(),
+@@ -291,10 +305,15 @@ fn build_xcframework(
+     tier3_targets: bool,
+     components_path: Option<Utf8PathBuf>,
+     sequentially: bool,
++    skip_xcodebuild: bool,
++    stable_toolchain: &str,
+     macos_deployment_target: Option<&str>,
+     ios_deployment_target: Option<&str>,
+     watchos_deployment_target: Option<&str>,
+ ) -> Result<()> {
++    if skip_xcodebuild && components_path.is_some() {
++        return Err("--skip-xcodebuild cannot be combined with --components-path".into());
++    }
+     let root_dir = workspace::root_path()?;
+     let apple_dir = root_dir.join("bindings/apple");
+     let generated_dir = apple_dir.join("generated");
+@@ -327,6 +346,7 @@ fn build_xcframework(
+         targets,
+         profile,
+         sequentially,
++        stable_toolchain,
+         macos_deployment_target,
+         ios_deployment_target,
+         watchos_deployment_target,
+@@ -343,6 +363,11 @@ fn build_xcframework(
+     move_files("swift", &generated_dir, &swift_dir)?;
+     update_swift_module_imports(&swift_dir)?;
+ 
++    if skip_xcodebuild {
++        println!("-- Skipping xcodebuild; localized libraries, headers and Swift are in {generated_dir}");
++        return Ok(());
++    }
++
+     println!("-- Generating MatrixSDKFFI.xcframework framework");
+     let xcframework_path = generated_dir.join("MatrixSDKFFI.xcframework");
+     if xcframework_path.exists() {
+@@ -399,6 +424,7 @@ fn build_targets(
+     targets: Vec<&Target>,
+     profile: &str,
+     sequentially: bool,
++    stable_toolchain: &str,
+     macos_deployment_target: Option<&str>,
+     ios_deployment_target: Option<&str>,
+     watchos_deployment_target: Option<&str>,
+@@ -424,7 +450,7 @@ fn build_targets(
+ 
+             println!("-- Building for {}", target.description);
+             if target.status == TargetStatus::TopTier {
+-                cmd!(sh, "rustup run stable cargo build -p matrix-sdk-ffi --target {triple} --profile {profile} --features {FFI_FEATURES}")
++                cmd!(sh, "rustup run {stable_toolchain} cargo build -p matrix-sdk-ffi --target {triple} --profile {profile} --features {FFI_FEATURES}")
+                     .run()?;
+             } else {
+                 cmd!(sh, "rustup run nightly cargo build -p matrix-sdk-ffi -Zbuild-std --target {triple} --profile {profile} --features {FFI_FEATURES}")
+@@ -437,7 +463,7 @@ fn build_targets(
+ 
+         if !stable_targets.is_empty() {
+             let triples = stable_targets.iter().map(|target| target.triple).collect::<Vec<_>>();
+-            let mut cmd = cmd!(sh, "rustup run stable cargo build -p matrix-sdk-ffi");
++            let mut cmd = cmd!(sh, "rustup run {stable_toolchain} cargo build -p matrix-sdk-ffi");
+             for triple in &triples {
+                 cmd = cmd.arg("--target").arg(triple);
+             }

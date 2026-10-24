@@ -1,0 +1,1175 @@
+diff --git a/crates/matrix-sdk-ui/src/timeline/controller/aggregations.rs b/crates/matrix-sdk-ui/src/timeline/controller/aggregations.rs
+index d234dab..eda2e3c 100644
+--- a/crates/matrix-sdk-ui/src/timeline/controller/aggregations.rs
++++ b/crates/matrix-sdk-ui/src/timeline/controller/aggregations.rs
+@@ -590,9 +590,9 @@ impl Aggregations {
+     /// Add a given aggregation that relates to the [`TimelineItemContent`]
+     /// identified by the given [`TimelineEventItemId`].
+     pub fn add(&mut self, related_to: TimelineEventItemId, aggregation: Aggregation) {
+-        // If the aggregation is a redaction, it invalidates all the other
+-        // aggregations; remove them.
+-        if matches!(aggregation.kind, AggregationKind::Redaction) {
++        // Only an irreversible redaction invalidates prior aggregations;
++        // a local redaction may still be canceled.
++        if matches!(aggregation.kind, AggregationKind::Redaction) && !aggregation.is_local() {
+             for agg in self.related_events.remove(&related_to).unwrap_or_default() {
+                 self.inverted_map.remove(&agg.own_id);
+             }
+@@ -645,10 +645,10 @@ impl Aggregations {
+         aggregation_id: &TimelineEventItemId,
+         items: &mut ObservableItemsTransaction<'_>,
+     ) -> Result<bool, AggregationError> {
+-        let Some(found) = self.inverted_map.get(aggregation_id) else { return Ok(false) };
++        let Some(found) = self.inverted_map.remove(aggregation_id) else { return Ok(false) };
+ 
+         // Find and remove the aggregation in the other mapping.
+-        let aggregation = if let Some(aggregations) = self.related_events.get_mut(found) {
++        let aggregation = if let Some(aggregations) = self.related_events.get_mut(&found) {
+             let removed = aggregations
+                 .iter()
+                 .position(|agg| agg.own_id == *aggregation_id)
+@@ -657,7 +657,7 @@ impl Aggregations {
+             // If this was the last aggregation, remove the entry in the
+             // `related_events` mapping.
+             if aggregations.is_empty() {
+-                self.related_events.remove(found);
++                self.related_events.remove(&found);
+             }
+ 
+             removed
+@@ -673,7 +673,7 @@ impl Aggregations {
+             return Ok(false);
+         };
+ 
+-        if let Some((item_pos, item)) = rfind_event_by_item_id(items, found) {
++        if let Some((item_pos, item)) = rfind_event_by_item_id(items, &found) {
+             let mut cowed = Cow::Borrowed(&*item);
+             match aggregation.unapply(&mut cowed) {
+                 ApplyAggregationResult::UpdatedItem => {
+@@ -692,7 +692,7 @@ impl Aggregations {
+                     // still applies.
+                     let resolved = self
+                         .related_events
+-                        .get(found)
++                        .get(&found)
+                         .is_some_and(|aggregations| resolve_edits(aggregations, items, &mut cowed));
+                     // Otherwise nothing is pending anymore: put back what our
+                     // edits replaced.
+@@ -716,6 +716,7 @@ impl Aggregations {
+                             item.content = TimelineItemContent::MsgLike(content.with_kind(kind));
+                         }
+                         item.edit_send_state = None;
++                        *item = item.with_content_and_latest_edit(item.content.clone(), None);
+                     }
+                     items.replace(
+                         item_pos,
+@@ -1044,10 +1045,8 @@ fn resolve_edits(
+         if edit_item(event, edit, is_local_echo) {
+             let send_state = edit_send_state(aggregations);
+             let item = event.to_mut();
+-            if send_state.is_none() {
+-                // No edit of ours is pending anymore, so drop the snapshot too.
+-                item.unedited_kind = None;
+-            }
++            // Keep the original content for a later redaction of the final
++            // remote edit as well as cancellation of our local edits.
+             item.edit_send_state = send_state;
+             true
+         } else {
+@@ -1122,7 +1121,7 @@ fn edit_item(
+                 TimelineItemContent::MsgLike(content.with_kind(MsgLikeKind::Message(new_msg))),
+                 edit_json,
+             );
+-            if is_local_echo && item.edit_send_state.is_none() {
++            if item.unedited_kind.is_none() {
+                 new_item.unedited_kind = Some(Box::new(MsgLikeKind::Message(msg.clone())));
+             }
+             *item = Cow::Owned(new_item);
+@@ -1140,7 +1139,7 @@ fn edit_item(
+                     ),
+                     edit_json,
+                 );
+-                if is_local_echo && item.edit_send_state.is_none() {
++                if item.unedited_kind.is_none() {
+                     new_item.unedited_kind = Some(Box::new(MsgLikeKind::Poll(poll_state.clone())));
+                 }
+                 *item = Cow::Owned(new_item);
+@@ -1284,3 +1283,41 @@ pub(crate) enum AggregationError {
+     )]
+     InvalidType { expected: String, actual: String },
+ }
++
++#[cfg(test)]
++mod focused_cache_regressions {
++    use super::*;
++    use crate::timeline::controller::ObservableItems;
++    use ruma::{event_id, user_id};
++
++    #[test]
++    fn removing_aggregation_is_idempotent_and_keeps_siblings() {
++        let target = TimelineEventItemId::EventId(event_id!("$target").to_owned());
++        let removed = TimelineEventItemId::EventId(event_id!("$removed").to_owned());
++        let sibling = TimelineEventItemId::EventId(event_id!("$sibling").to_owned());
++        let mut aggregations = Aggregations::default();
++        for id in [&removed, &sibling] {
++            aggregations.add(
++                target.clone(),
++                Aggregation {
++                    kind: AggregationKind::Reaction {
++                        key: "👍".into(),
++                        sender: user_id!("@alice:example.org").to_owned(),
++                        timestamp: MilliSecondsSinceUnixEpoch::now(),
++                    },
++                    own_id: id.clone(),
++                    send_state: None,
++                    send_handle: None,
++                },
++            );
++        }
++        let mut items = ObservableItems::new();
++        let mut transaction = items.transaction();
++        assert!(aggregations.try_remove_aggregation(&removed, &mut transaction).unwrap());
++        assert!(!aggregations.inverted_map.contains_key(&removed));
++        assert!(!aggregations.try_remove_aggregation(&removed, &mut transaction).unwrap());
++        assert_eq!(aggregations.related_events[&target].len(), 1);
++        assert_eq!(aggregations.related_events[&target][0].own_id, sibling);
++        assert_eq!(aggregations.inverted_map[&sibling], target);
++    }
++}
+diff --git a/crates/matrix-sdk-ui/src/timeline/event_item/mod.rs b/crates/matrix-sdk-ui/src/timeline/event_item/mod.rs
+index d1a762d..416af9e 100644
+--- a/crates/matrix-sdk-ui/src/timeline/event_item/mod.rs
++++ b/crates/matrix-sdk-ui/src/timeline/event_item/mod.rs
+@@ -96,7 +96,7 @@ pub struct EventTimelineItem {
+     pub(super) edit_send_state: Option<EventSendState>,
+     /// The reactions of the event, grouped by key and then by sender.
+     pub(super) reactions: ReactionsByKeyBySender,
+-    /// The message before our pending edits, put back if they're all dropped.
++    /// The original message, restored if no valid edits remain.
+     pub(super) unedited_kind: Option<Box<MsgLikeKind>>,
+     /// The kind of event timeline item, local or remote.
+     pub(super) kind: EventTimelineItemKind,
+@@ -156,6 +156,9 @@ pub(super) struct UnredactedEventTimelineItem {
+     /// The reactions before redaction.
+     reactions: ReactionsByKeyBySender,
+ 
++    /// Original content retained across reversible local redaction.
++    unedited_kind: Option<Box<MsgLikeKind>>,
++
+     /// JSON of the original event.
+     pub(crate) original_json: Option<Raw<AnySyncTimelineEvent>>,
+ 
+@@ -593,6 +596,7 @@ impl EventTimelineItem {
+         let unredacted_item = is_local.then(|| UnredactedEventTimelineItem {
+             content: self.content.clone(),
+             reactions: self.reactions.clone(),
++            unedited_kind: self.unedited_kind.clone(),
+             original_json: self.original_json().cloned(),
+             latest_edit_json: self.latest_edit_json().cloned(),
+         });
+@@ -644,7 +648,7 @@ impl EventTimelineItem {
+             redaction_send_state: None,
+             edit_send_state: None,
+             reactions: unredacted_item.reactions.clone(),
+-            unedited_kind: None,
++            unedited_kind: unredacted_item.unedited_kind.clone(),
+             kind,
+             is_room_encrypted: self.is_room_encrypted,
+         }
+diff --git a/crates/matrix-sdk-ui/src/timeline/tests/redaction.rs b/crates/matrix-sdk-ui/src/timeline/tests/redaction.rs
+index 16c3f01..3cf9ebe 100644
+--- a/crates/matrix-sdk-ui/src/timeline/tests/redaction.rs
++++ b/crates/matrix-sdk-ui/src/timeline/tests/redaction.rs
+@@ -340,3 +340,47 @@ async fn test_local_redaction_send_state() {
+ 
+     assert_pending!(stream);
+ }
++
++#[async_test]
++async fn test_failed_local_redaction_preserves_remote_edit_rollback() {
++    let timeline = TestTimeline::new().await;
++    let f = &timeline.factory;
++    let original = event_id!("$original-with-edit");
++    let edit = event_id!("$remote-edit");
++    timeline.handle_live_event(f.text_msg("original").sender(*ALICE).event_id(original)).await;
++    timeline
++        .handle_live_event(f.text_msg("* edited").sender(*ALICE).event_id(edit).edit(
++            original,
++            ruma::events::room::message::RoomMessageEventContent::text_plain("edited").into(),
++        ))
++        .await;
++    let redaction = timeline.handle_local_redaction(original.to_owned()).await;
++    timeline
++        .controller
++        .update_event_send_state(
++            &redaction,
++            EventSendState::SendingFailed {
++                error: Arc::new(matrix_sdk::Error::SendQueueWedgeError(Box::new(
++                    QueueWedgeError::GenericApiError { msg: "fixture failure".into() },
++                ))),
++                is_recoverable: false,
++            },
++        )
++        .await;
++    assert!(timeline.controller.discard_local_echo(&redaction).await);
++    let items = timeline.controller.items().await;
++    let item = items.iter().filter_map(|item| item.as_event()).next().unwrap();
++    assert_eq!(item.content().as_message().unwrap().body(), "edited");
++    assert!(item.unedited_kind.is_some());
++    timeline.handle_live_event(f.redaction(edit).sender(*ALICE)).await;
++    let items = timeline.controller.items().await;
++    let item = items.iter().filter_map(|item| item.as_event()).next().unwrap();
++    assert_eq!(item.content().as_message().unwrap().body(), "original");
++    assert!(item.latest_edit_json().is_none());
++    timeline.handle_live_event(f.redaction(original).sender(*ALICE)).await;
++    let items = timeline.controller.items().await;
++    let item = items.iter().filter_map(|item| item.as_event()).next().unwrap();
++    assert!(item.content().is_redacted());
++    assert!(item.unedited_kind.is_none());
++    assert!(item.unredacted_item.is_none());
++}
+diff --git a/crates/matrix-sdk-ui/tests/integration/timeline/focus_event.rs b/crates/matrix-sdk-ui/tests/integration/timeline/focus_event.rs
+index 460256a..5530b65 100644
+--- a/crates/matrix-sdk-ui/tests/integration/timeline/focus_event.rs
++++ b/crates/matrix-sdk-ui/tests/integration/timeline/focus_event.rs
+@@ -908,3 +908,448 @@ async fn test_focused_timeline_filters_out_threaded_events() {
+     assert_let!(VectorDiff::PushBack { value: item } = &timeline_updates[0]);
+     assert_eq!(item.as_event().unwrap().content().as_message().unwrap().body(), "Next no thread");
+ }
++
++// A newly built timeline must not replay the stale /context body of a reused cache.
++#[async_test]
++async fn test_focused_cache_reuses_current_edits() {
++    check_focused_cache_reuses_current_edits(false, false).await;
++}
++
++#[async_test]
++async fn test_focused_cache_reuses_current_thread_edits() {
++    check_focused_cache_reuses_current_edits(true, false).await;
++}
++
++#[async_test]
++async fn test_focused_cache_reuses_current_bundled_edits() {
++    check_focused_cache_reuses_current_edits(false, true).await;
++}
++
++#[async_test]
++async fn test_focused_cache_reuses_current_bundled_thread_edits() {
++    check_focused_cache_reuses_current_edits(true, true).await;
++}
++
++async fn check_focused_cache_reuses_current_edits(threaded: bool, bundled: bool) {
++    let room_id = room_id!("!focused-freshness:example.org");
++    let target = event_id!("$focused-original");
++    let root = event_id!("$thread-root");
++    let old_edit = event_id!("$old-edit");
++    let new_edit = event_id!("$new-edit");
++    let server = MatrixMockServer::new().await;
++    let client = server.client_builder().build().await;
++    let f = EventFactory::new().room(room_id).sender(*ALICE);
++    let original = f.text_msg("original").event_id(target);
++    let original = if threaded { original.in_thread(root, root) } else { original };
++    let original = if bundled {
++        original.with_bundled_edit(
++            f.text_msg("* old")
++                .event_id(old_edit)
++                .edit(target, RoomMessageEventContent::text_plain("old edit").into()),
++        )
++    } else {
++        original
++    };
++    server
++        .mock_room_event_context()
++        .room(room_id)
++        .ok(RoomContextResponseTemplate::new(original.into_event())
++            .events_after(if bundled {
++                vec![]
++            } else {
++                vec![
++                    f.text_msg("* old")
++                        .event_id(old_edit)
++                        .edit(target, RoomMessageEventContent::text_plain("old edit").into())
++                        .into_event(),
++                ]
++            })
++            .start("before-focus")
++            .end("after-focus"))
++        .mock_once()
++        .mount()
++        .await;
++    server.mock_room_state_encryption().plain().mount().await;
++    let room = server.sync_joined_room(&client, room_id).await;
++    let focus = TimelineFocus::Event {
++        target: target.to_owned(),
++        num_context_events: 20,
++        thread_mode: TimelineEventFocusThreadMode::Automatic { hide_threaded_events: false },
++    };
++    let timeline = TimelineBuilder::new(&room)
++        .track_read_marker_and_receipts(
++            matrix_sdk_ui::timeline::TimelineReadReceiptTracking::Disabled,
++        )
++        .with_focus(focus.clone())
++        .build()
++        .await
++        .unwrap();
++    // An automatic thread window filters the unthreaded edit in /context;
++    // seed its prior edit through a real sync as well.
++    server
++        .sync_room(
++            &client,
++            JoinedRoomBuilder::new(room_id).add_timeline_event(
++                f.text_msg("* old")
++                    .event_id(old_edit)
++                    .edit(target, RoomMessageEventContent::text_plain("old edit").into()),
++            ),
++        )
++        .await;
++    wait_for_focused_body(&timeline, "old edit").await;
++    server
++        .sync_room(
++            &client,
++            JoinedRoomBuilder::new(room_id).add_timeline_bulk([
++                f.text_msg("* new")
++                    .event_id(new_edit)
++                    .edit(target, RoomMessageEventContent::text_plain("current edit").into())
++                    .into(),
++                f.text_msg("unrelated live message").into(),
++                f.text_msg("unrelated thread message").in_thread(root, target).into(),
++            ]),
++        )
++        .await;
++    wait_for_focused_body(&timeline, "current edit").await;
++    let reused = TimelineBuilder::new(&room)
++        .track_read_marker_and_receipts(
++            matrix_sdk_ui::timeline::TimelineReadReceiptTracking::Disabled,
++        )
++        .with_focus(focus.clone())
++        .build()
++        .await
++        .unwrap();
++    wait_for_focused_body(&reused, "current edit").await;
++    assert_eq!(reused.items().await.iter().filter(|item| item.as_event().is_some()).count(), 1);
++    let (cache, _handles) = client
++        .event_cache()
++        .event_focused(room_id, target, matrix_sdk::event_cache::EventFocusThreadMode::Automatic, 0)
++        .await
++        .unwrap();
++    assert!(!cache.hit_timeline_start().await.unwrap());
++    assert!(!cache.hit_timeline_end().await.unwrap());
++    if threaded {
++        assert_eq!(cache.thread_root().await.unwrap().as_deref(), Some(root));
++    }
++    // Redacting the newer edit restores the older valid edit in both observers
++    // and a later subscriber, without refetching /context.
++    server
++        .sync_room(
++            &client,
++            JoinedRoomBuilder::new(room_id).add_timeline_event(f.redaction(new_edit)),
++        )
++        .await;
++    wait_for_focused_body(&timeline, "old edit").await;
++    wait_for_focused_body(&reused, "old edit").await;
++    let reopened = TimelineBuilder::new(&room)
++        .track_read_marker_and_receipts(
++            matrix_sdk_ui::timeline::TimelineReadReceiptTracking::Disabled,
++        )
++        .with_focus(focus)
++        .build()
++        .await
++        .unwrap();
++    wait_for_focused_body(&reopened, "old edit").await;
++    let baseline_body = if bundled {
++        server
++            .sync_room(
++                &client,
++                JoinedRoomBuilder::new(room_id).add_timeline_event(f.redaction(old_edit)),
++            )
++            .await;
++        wait_for_focused_body(&timeline, "original").await;
++        let unbundled = TimelineBuilder::new(&room)
++            .track_read_marker_and_receipts(
++                matrix_sdk_ui::timeline::TimelineReadReceiptTracking::Disabled,
++            )
++            .with_focus(TimelineFocus::Event {
++                target: target.to_owned(),
++                num_context_events: 0,
++                thread_mode: TimelineEventFocusThreadMode::Automatic {
++                    hide_threaded_events: false,
++                },
++            })
++            .build()
++            .await
++            .unwrap();
++        wait_for_focused_body(&unbundled, "original").await;
++        "original"
++    } else {
++        "old edit"
++    };
++    // An edit by another sender is still rejected by the official SDK validator.
++    let forged = event_id!("$forged-edit");
++    server
++        .sync_room(
++            &client,
++            JoinedRoomBuilder::new(room_id).add_timeline_event(
++                f.text_msg("* forged")
++                    .sender(*BOB)
++                    .event_id(forged)
++                    .edit(target, RoomMessageEventContent::text_plain("forged body").into()),
++            ),
++        )
++        .await;
++    wait_for_focused_cache_event(&cache, forged).await;
++    let validated = TimelineBuilder::new(&room)
++        .track_read_marker_and_receipts(
++            matrix_sdk_ui::timeline::TimelineReadReceiptTracking::Disabled,
++        )
++        .with_focus(TimelineFocus::Event {
++            target: target.to_owned(),
++            num_context_events: 0,
++            thread_mode: TimelineEventFocusThreadMode::Automatic { hide_threaded_events: false },
++        })
++        .build()
++        .await
++        .unwrap();
++    wait_for_focused_body(&validated, baseline_body).await;
++    // Reachability is order-independent: the redaction precedes its edit in
++    // the same sync, and must not be discarded as an unrelated event.
++    let batch_edit = event_id!("$already-redacted-edit");
++    server
++        .sync_room(
++            &client,
++            JoinedRoomBuilder::new(room_id).add_timeline_bulk([
++                f.redaction(batch_edit).into(),
++                f.text_msg("* discarded")
++                    .event_id(batch_edit)
++                    .edit(target, RoomMessageEventContent::text_plain("must stay redacted").into())
++                    .into(),
++            ]),
++        )
++        .await;
++    wait_for_focused_cache_event(&cache, batch_edit).await;
++    let after_batch = TimelineBuilder::new(&room)
++        .track_read_marker_and_receipts(
++            matrix_sdk_ui::timeline::TimelineReadReceiptTracking::Disabled,
++        )
++        .with_focus(TimelineFocus::Event {
++            target: target.to_owned(),
++            num_context_events: 0,
++            thread_mode: TimelineEventFocusThreadMode::Automatic { hide_threaded_events: false },
++        })
++        .build()
++        .await
++        .unwrap();
++    wait_for_focused_body(&after_batch, baseline_body).await;
++    // A later-arriving historical page must not outrank a live edit, and must
++    // continue using the exact original /context token.
++    let latest = event_id!("$latest-live-edit");
++    server
++        .sync_room(
++            &client,
++            JoinedRoomBuilder::new(room_id).add_timeline_event(
++                f.text_msg("* latest")
++                    .event_id(latest)
++                    .edit(target, RoomMessageEventContent::text_plain("latest live edit").into()),
++            ),
++        )
++        .await;
++    wait_for_focused_cache_event(&cache, latest).await;
++    wait_for_focused_body(&timeline, "latest live edit").await;
++    let historical_edit = f
++        .text_msg("* historical")
++        .event_id(event_id!("$historical-edit"))
++        .edit(target, RoomMessageEventContent::text_plain("historical edit").into());
++    if threaded {
++        server
++            .mock_room_relations()
++            .match_from("after-focus")
++            .ok(RoomRelationsResponseTemplate {
++                chunk: vec![historical_edit.into_raw_timeline()],
++                prev_batch: None,
++                next_batch: Some("after-focus-2".to_owned()),
++                recursion_depth: None,
++            })
++            .mock_once()
++            .mount()
++            .await;
++    } else {
++        server
++            .mock_room_messages()
++            .match_from("after-focus")
++            .ok(RoomMessagesResponseTemplate::default()
++                .events(vec![historical_edit.into_raw_timeline()])
++                .end_token("after-focus-2"))
++            .mock_once()
++            .mount()
++            .await;
++    }
++    assert!(!timeline.paginate_forwards(10).await.unwrap());
++    wait_for_focused_body(&timeline, "latest live edit").await;
++    let after_page = TimelineBuilder::new(&room)
++        .track_read_marker_and_receipts(
++            matrix_sdk_ui::timeline::TimelineReadReceiptTracking::Disabled,
++        )
++        .with_focus(TimelineFocus::Event {
++            target: target.to_owned(),
++            num_context_events: 0,
++            thread_mode: TimelineEventFocusThreadMode::Automatic { hide_threaded_events: false },
++        })
++        .build()
++        .await
++        .unwrap();
++    wait_for_focused_body(&after_page, "latest live edit").await;
++    server
++        .sync_room(&client, JoinedRoomBuilder::new(room_id).add_timeline_event(f.redaction(target)))
++        .await;
++    for view in [&timeline, &reused, &reopened] {
++        tokio::time::timeout(Duration::from_secs(3), async {
++            loop {
++                if view
++                    .items()
++                    .await
++                    .iter()
++                    .filter_map(|item| item.as_event())
++                    .any(|item| item.content().is_redacted())
++                {
++                    break;
++                }
++                sleep(Duration::from_millis(10)).await;
++            }
++        })
++        .await
++        .expect("focused original redaction must be current");
++    }
++    // Redacting an edit after the original was redacted must never restore
++    // the retained original-content snapshot.
++    server
++        .sync_room(&client, JoinedRoomBuilder::new(room_id).add_timeline_event(f.redaction(latest)))
++        .await;
++    let tombstone = TimelineBuilder::new(&room)
++        .track_read_marker_and_receipts(
++            matrix_sdk_ui::timeline::TimelineReadReceiptTracking::Disabled,
++        )
++        .with_focus(TimelineFocus::Event {
++            target: target.to_owned(),
++            num_context_events: 0,
++            thread_mode: TimelineEventFocusThreadMode::Automatic { hide_threaded_events: false },
++        })
++        .build()
++        .await
++        .unwrap();
++    for view in [&timeline, &reused, &reopened, &tombstone] {
++        assert!(
++            view.items()
++                .await
++                .iter()
++                .filter_map(|item| item.as_event())
++                .any(|item| item.content().is_redacted())
++        );
++    }
++    assert!(server.server().received_requests().await.unwrap().iter().all(|request| {
++        let path = request.url.path();
++        !path.contains("/receipt/") && !path.ends_with("/read_markers") && !path.contains("/send/")
++    }));
++}
++
++async fn wait_for_focused_body(timeline: &matrix_sdk_ui::Timeline, expected: &str) {
++    tokio::time::timeout(Duration::from_secs(3), async {
++        loop {
++            if timeline
++                .items()
++                .await
++                .iter()
++                .filter_map(|item| item.as_event())
++                .filter_map(|item| item.content().as_message())
++                .any(|message| message.body() == expected)
++            {
++                break;
++            }
++            sleep(Duration::from_millis(10)).await;
++        }
++    })
++    .await
++    .unwrap_or_else(|_| panic!("focused body must become {expected:?}"));
++}
++
++async fn wait_for_focused_cache_event(
++    cache: &matrix_sdk::event_cache::EventFocusedCache,
++    id: &ruma::EventId,
++) {
++    tokio::time::timeout(Duration::from_secs(3), async {
++        loop {
++            if cache.events().await.unwrap().iter().any(|event| event.event_id() == Some(id)) {
++                break;
++            }
++            sleep(Duration::from_millis(10)).await;
++        }
++    })
++    .await
++    .expect("live aggregation must reach the reused focused cache");
++}
++
++#[async_test]
++async fn test_focused_cache_reuses_redacted_sync_original() {
++    use ruma::events::room::message::RedactedRoomMessageEventContent;
++    let server = MatrixMockServer::new().await;
++    let client = server.client_builder().build().await;
++    let room_id = room_id!("!focused-redacted:example.org");
++    let target = event_id!("$focused-redacted-original");
++    let f = EventFactory::new().room(room_id).sender(*ALICE);
++    server
++        .mock_room_event_context()
++        .room(room_id)
++        .ok(RoomContextResponseTemplate::new(f.text_msg("original").event_id(target).into_event())
++            .start("before")
++            .end("after"))
++        .mock_once()
++        .mount()
++        .await;
++    server.mock_room_state_encryption().plain().mount().await;
++    let room = server.sync_joined_room(&client, room_id).await;
++    let focus = TimelineFocus::Event {
++        target: target.to_owned(),
++        num_context_events: 0,
++        thread_mode: TimelineEventFocusThreadMode::Automatic { hide_threaded_events: false },
++    };
++    let existing = TimelineBuilder::new(&room)
++        .track_read_marker_and_receipts(
++            matrix_sdk_ui::timeline::TimelineReadReceiptTracking::Disabled,
++        )
++        .with_focus(focus.clone())
++        .build()
++        .await
++        .unwrap();
++    server
++        .sync_room(
++            &client,
++            JoinedRoomBuilder::new(room_id).set_timeline_limited().add_timeline_event(
++                f.redacted(*ALICE, RedactedRoomMessageEventContent::new()).event_id(target),
++            ),
++        )
++        .await;
++    tokio::time::timeout(Duration::from_secs(3), async {
++        loop {
++            if existing
++                .items()
++                .await
++                .iter()
++                .filter_map(|item| item.as_event())
++                .any(|item| item.content().is_redacted())
++            {
++                break;
++            }
++            sleep(Duration::from_millis(10)).await;
++        }
++    })
++    .await
++    .expect("same-ID sync redacted form must update existing focus");
++    let rebuilt = TimelineBuilder::new(&room)
++        .track_read_marker_and_receipts(
++            matrix_sdk_ui::timeline::TimelineReadReceiptTracking::Disabled,
++        )
++        .with_focus(focus)
++        .build()
++        .await
++        .unwrap();
++    assert!(
++        rebuilt
++            .items()
++            .await
++            .iter()
++            .filter_map(|item| item.as_event())
++            .any(|item| item.content().is_redacted())
++    );
++}
+diff --git a/crates/matrix-sdk/src/event_cache/caches/aggregator.rs b/crates/matrix-sdk/src/event_cache/caches/aggregator.rs
+index 0bb4648..2ac112b 100644
+--- a/crates/matrix-sdk/src/event_cache/caches/aggregator.rs
++++ b/crates/matrix-sdk/src/event_cache/caches/aggregator.rs
+@@ -12,7 +12,7 @@
+ // See the License for the specific language governing permissions and
+ // limitations under the License.
+ 
+-use std::collections::{BTreeMap, HashMap};
++use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+ 
+ use matrix_sdk_base::{
+     serde_helpers::{extract_redaction_target, extract_relation, extract_thread_root},
+@@ -220,6 +220,8 @@ pub fn aggregate_timeline_for_pinned_events(
+         return new_timeline;
+     }
+ 
++    let pinned_event_ids: HashSet<_> = pinned_event_ids.iter().cloned().collect();
++
+     // Look for events that relate to pinned events. We already know the
+     // pinned-events, we don't need to look for them. We are only interested by
+     // related events.
+@@ -258,6 +260,46 @@ pub fn aggregate_timeline_for_pinned_events(
+     new_timeline
+ }
+ 
++/// Keep only live aggregations of loaded focused events, including redactions
++/// of their edits/reactions. Ordinary room or thread messages do not extend the window.
++pub fn aggregate_timeline_for_focused_events(
++    timeline: &Timeline,
++    mut known_event_ids: HashSet<OwnedEventId>,
++    redaction_rules: &RedactionRules,
++) -> Timeline {
++    let mut related = HashMap::<OwnedEventId, Vec<OwnedEventId>>::new();
++    for event in &timeline.events {
++        let target = match extract_relation(event.raw()) {
++            Some((RelationType::Annotation | RelationType::Replacement, target)) => Some(target),
++            Some(_) => None,
++            None => extract_redaction_target(event.raw(), redaction_rules),
++        };
++        if let (Some(target), Some(id)) = (target, event.event_id()) {
++            related.entry(target).or_default().push(id.to_owned());
++        }
++    }
++    // Traverse each incoming relation once, even if a redaction precedes its
++    // edit in this sync batch. Final event order remains the server's order.
++    let mut pending: VecDeque<_> = known_event_ids.iter().cloned().collect();
++    while let Some(target) = pending.pop_front() {
++        if let Some(ids) = related.remove(&target) {
++            for id in ids {
++                if known_event_ids.insert(id.clone()) {
++                    pending.push_back(id);
++                }
++            }
++        }
++    }
++    let ids = known_event_ids.into_iter().collect::<Vec<_>>();
++    let mut result = aggregate_timeline_for_pinned_events(timeline, &ids, redaction_rules);
++    result.events.retain(|event| match extract_relation(event.raw()) {
++        Some((RelationType::Annotation | RelationType::Replacement, _)) => true,
++        Some(_) => false,
++        None => extract_redaction_target(event.raw(), redaction_rules).is_some(),
++    });
++    result
++}
++
+ /// Filter (deserialised) ephemeral events to only keep the read receipts
+ /// matching a particular predicate.
+ ///
+diff --git a/crates/matrix-sdk/src/event_cache/caches/event_focused/mod.rs b/crates/matrix-sdk/src/event_cache/caches/event_focused/mod.rs
+index 9fb107b..e081c0a 100644
+--- a/crates/matrix-sdk/src/event_cache/caches/event_focused/mod.rs
++++ b/crates/matrix-sdk/src/event_cache/caches/event_focused/mod.rs
+@@ -29,16 +29,26 @@
+ //! case where we'd want to persist these caches on disk (e.g., for permalinks
+ //! to work across sessions).
+ 
+-use std::sync::Arc;
++use std::{
++    collections::{HashMap, HashSet},
++    sync::Arc,
++};
+ 
+ use eyeball_im::VectorDiff;
+ use matrix_sdk_base::{
++    apply_redaction,
+     deserialized_responses::TimelineEvent,
+     event_cache::{Event, Gap},
+     linked_chunk::OwnedLinkedChunkId,
++    serde_helpers::extract_redaction_target,
++    sync::Timeline,
+ };
+ use matrix_sdk_common::{linked_chunk::ChunkIdentifier, serde_helpers::extract_thread_root};
+-use ruma::{OwnedEventId, OwnedRoomId, RoomId, UInt, api::Direction};
++use ruma::{
++    OwnedEventId, OwnedRoomId, RoomId, UInt, api::Direction,
++    events::room::redaction::SyncRoomRedactionEvent, room_version_rules::RedactionRules,
++    serde::Raw,
++};
+ use tokio::sync::broadcast::{Receiver, Sender};
+ use tracing::{instrument, trace};
+ 
+@@ -52,6 +62,7 @@ use super::{
+         },
+     },
+     TimelineVectorDiffs,
++    aggregator::aggregate_timeline_for_focused_events,
+     event_linked_chunk::EventLinkedChunk,
+ };
+ use crate::{
+@@ -107,6 +118,9 @@ pub struct EventFocusedCacheState {
+     /// The linked chunk for this event-focused cache.
+     chunk: EventLinkedChunk,
+ 
++    /// Live aggregations stay after historical events, but before the terminal gap.
++    live_aggregation_ids: HashSet<OwnedEventId>,
++
+     /// The `num_context_events` given to [`Self::start_from`].
+     ///
+     /// This is useful for [`Self::reload`] to load the same amount of events.
+@@ -298,6 +312,7 @@ impl EventFocusedCacheState {
+     ) {
+         // Clear all existing events as we are about to insert initial events.
+         self.chunk.reset();
++        self.live_aggregation_ids.clear();
+ 
+         // Insert backward gap at the back if we have a token, and the events
+         // themselves.
+@@ -311,6 +326,118 @@ impl EventFocusedCacheState {
+         }
+     }
+ 
++    fn handle_sync(&mut self, timeline: &Timeline, redaction_rules: &RedactionRules) {
++        if timeline.events.is_empty() {
++            return;
++        }
++        let loaded: HashMap<_, _> = self
++            .chunk
++            .events()
++            .filter_map(|(position, event)| {
++                event.event_id().map(|id| (id.to_owned(), (position, event.clone())))
++            })
++            .collect();
++        let mut changed = false;
++        // Limited sync can contain an already-redacted original without its
++        // redaction event. Only update a matching loaded event's redacted form.
++        for incoming in &timeline.events {
++            let Ok(redacted) = incoming.raw().deserialize() else { continue };
++            if !redacted.is_redacted() {
++                continue;
++            }
++            let existing = incoming.event_id().and_then(|id| loaded.get(id)).cloned();
++            if let Some((position, mut existing)) = existing
++                && let Ok(original) = existing.raw().deserialize()
++                && !original.is_redacted()
++                && original.sender() == redacted.sender()
++                && (original.event_type() == redacted.event_type()
++                    || (existing.kind.encryption_info().is_some()
++                        && redacted.event_type() == ruma::events::TimelineEventType::RoomEncrypted))
++            {
++                let raw_redaction = (|| -> Option<Raw<SyncRoomRedactionEvent>> {
++                    let unsigned: Raw<serde_json::Value> =
++                        incoming.raw().get_field("unsigned").ok()??;
++                    unsigned.get_field("redacted_because").ok()?
++                })();
++                if let Some(raw) = raw_redaction
++                    .and_then(|raw| apply_redaction(existing.raw(), &raw, redaction_rules))
++                {
++                    existing.replace_raw(raw.cast_unchecked());
++                    self.chunk
++                        .replace_event_at(position, existing)
++                        .expect("position read from this chunk");
++                    changed = true;
++                }
++            }
++        }
++        let mut known_ids = HashSet::new();
++        for (_, event) in loaded.values() {
++            known_ids.extend(event.event_id().map(ToOwned::to_owned));
++            // A bundled edit is not a separate chunk item, but its redaction
++            // must still reach the official timeline aggregation handler.
++            let bundled_id = (|| -> Option<OwnedEventId> {
++                let unsigned: Raw<serde_json::Value> = event.raw().get_field("unsigned").ok()??;
++                let relations: Raw<serde_json::Value> =
++                    unsigned.get_field("m.relations").ok()??;
++                let edit: Raw<serde_json::Value> = relations.get_field("m.replace").ok()??;
++                edit.get_field("event_id").ok()?
++            })();
++            known_ids.extend(bundled_id);
++        }
++        let mut related =
++            aggregate_timeline_for_focused_events(timeline, known_ids.clone(), redaction_rules);
++        related.events.retain(|event| event.event_id().is_some_and(|id| !known_ids.contains(id)));
++        if related.events.is_empty() && !changed {
++            return;
++        }
++        self.live_aggregation_ids.extend(
++            related.events.iter().filter_map(|event| event.event_id().map(ToOwned::to_owned)),
++        );
++        self.append_live_aggregations(&related.events);
++        // Use the same official redaction path as pinned caches. Persisting
++        // redacted raw forms also prevents a future subscriber reviving an edit.
++        let loaded: HashMap<_, _> = self
++            .chunk
++            .events()
++            .filter_map(|(position, event)| {
++                event.event_id().map(|id| (id.to_owned(), (position, event.clone())))
++            })
++            .collect();
++        for redaction in &related.events {
++            let Some(target) = extract_redaction_target(redaction.raw(), redaction_rules) else {
++                continue;
++            };
++            let existing = loaded.get(&target).cloned();
++            if let Some((position, mut event)) = existing
++                && !event.raw().deserialize().is_ok_and(|event| event.is_redacted())
++                && let Some(raw) = apply_redaction(
++                    event.raw(),
++                    redaction.raw().cast_ref_unchecked::<SyncRoomRedactionEvent>(),
++                    redaction_rules,
++                )
++            {
++                event.replace_raw(raw.cast_unchecked());
++                self.chunk
++                    .replace_event_at(position, event)
++                    .expect("position read from this chunk");
++            }
++        }
++        self.propagate_changes();
++        self.notify_subscribers(EventsOrigin::Sync);
++    }
++
++    fn append_live_aggregations(&mut self, events: &[Event]) {
++        if events.is_empty() {
++            return;
++        }
++        let next = self.last_chunk_as_gap();
++        self.chunk.push_forwards_pagination_events(
++            next.as_ref().map(|(id, _)| *id),
++            next.map(|(_, gap)| gap),
++            events,
++        );
++    }
++
+     /// Propagate changes to the linked chunk update sender.
+     fn propagate_changes(&mut self) {
+         let updates = self.chunk.store_updates().take();
+@@ -499,8 +626,29 @@ impl EventFocusedCacheState {
+             events
+         };
+ 
+-        // Replace the gap and insert new events.
++        // Live edits are newer than this historical page. Keep their relative
++        // precedence even when a page arrives after the live update.
++        let live: Vec<_> = self
++            .chunk
++            .events()
++            .filter(|(_, event)| {
++                event.event_id().is_some_and(|id| self.live_aggregation_ids.contains(id))
++            })
++            .map(|(position, event)| (position, event.clone()))
++            .collect();
++        self.chunk
++            .remove_events_by_position(live.iter().map(|(position, _)| *position).collect())
++            .expect("positions were read from this chunk");
++        let events: Vec<_> = events
++            .into_iter()
++            .filter(|event| {
++                !event.event_id().is_some_and(|id| self.live_aggregation_ids.contains(id))
++            })
++            .collect();
+         self.chunk.push_forwards_pagination_events(Some(gap_id), new_gap, &events);
++        self.append_live_aggregations(
++            &live.into_iter().map(|(_, event)| event).collect::<Vec<_>>(),
++        );
+ 
+         self.propagate_changes();
+         self.notify_subscribers(EventsOrigin::Pagination);
+@@ -592,6 +740,7 @@ impl EventFocusedCache {
+                             hide_thread_events: false,
+                         },
+                         chunk: EventLinkedChunk::new(),
++                        live_aggregation_ids: HashSet::new(),
+                         initial_num_context_events: 0, // dummy value
+                         thread_mode: EventFocusThreadMode::Automatic, // dummy value
+                         update_sender: Sender::new(32),
+@@ -604,6 +753,15 @@ impl EventFocusedCache {
+         Ok(Self { room_id, inner: Arc::new(cache_state) })
+     }
+ 
++    pub(super) async fn handle_sync(
++        &self,
++        timeline: &Timeline,
++        redaction_rules: &RedactionRules,
++    ) -> Result<()> {
++        self.inner.write().await?.handle_sync(timeline, redaction_rules);
++        Ok(())
++    }
++
+     /// Get the room ID of this cache.
+     pub fn room_id(&self) -> &RoomId {
+         &self.room_id
+@@ -713,3 +871,155 @@ pub struct EventFocusedCacheKey {
+ 
+ /// A small type to send updates in all channels.
+ pub type EventFocusedCacheUpdateSender = Sender<TimelineVectorDiffs>;
++
++#[cfg(test)]
++mod focused_sync_regressions {
++    use super::*;
++    use crate::{
++        deserialized_responses::{
++            AlgorithmInfo, DecryptedRoomEvent, EncryptionInfo, VerificationState,
++        },
++        test_utils::mocks::{MatrixMockServer, RoomContextResponseTemplate},
++    };
++    use matrix_sdk_test::{ALICE, JoinedRoomBuilder, async_test, event_factory::EventFactory};
++    use ruma::{event_id, room_id, serde::Raw};
++    use serde_json::json;
++    use std::{collections::BTreeMap, time::Duration};
++
++    #[async_test]
++    async fn test_focused_decrypted_original_receives_encrypted_redacted_sync() {
++        let server = MatrixMockServer::new().await;
++        let client = server.client_builder().build().await;
++        let room_id = room_id!("!encrypted-focused:example.org");
++        let target = event_id!("$decrypted-original");
++        let edit_id = event_id!("$decrypted-edit");
++        let f = EventFactory::new().room(room_id).sender(*ALICE);
++        server
++            .mock_room_event_context()
++            .room(room_id)
++            .ok(RoomContextResponseTemplate::new(
++                f.text_msg("fixture original").event_id(target).into_event(),
++            )
++            .start("before")
++            .end("after"))
++            .mock_once()
++            .mount()
++            .await;
++        server.sync_joined_room(&client, room_id).await;
++        client.event_cache().subscribe().unwrap();
++        let (cache, _handles) = client
++            .event_cache()
++            .event_focused(room_id, target, EventFocusThreadMode::Automatic, 0)
++            .await
++            .unwrap();
++        let encryption_info = Arc::new(EncryptionInfo {
++            sender: (*ALICE).to_owned(),
++            sender_device: None,
++            forwarder: None,
++            algorithm_info: AlgorithmInfo::MegolmV1AesSha2 {
++                curve25519_key: "fixture-key".into(),
++                sender_claimed_keys: BTreeMap::new(),
++                session_id: Some("fixture-session".into()),
++            },
++            verification_state: VerificationState::Verified,
++        });
++        // Model the official decryptor's cached clear event, retaining its
++        // original encryption metadata. No keys/network decryption are involved.
++        {
++            let mut state = cache.inner.write().await.unwrap();
++            let position = state.chunk.events().next().unwrap().0;
++            state
++                .chunk
++                .replace_event_at(
++                    position,
++                    TimelineEvent::from_decrypted(
++                        DecryptedRoomEvent {
++                            event: f
++                                .text_msg("fixture original")
++                                .event_id(target)
++                                .into_raw_timeline(),
++                            encryption_info: encryption_info.clone(),
++                            unsigned_encryption_info: None,
++                        },
++                        None,
++                    ),
++                )
++                .unwrap();
++            let _ = state.chunk.updates_as_vector_diffs();
++        }
++        let (_, mut old_subscriber) = cache.subscribe().await.unwrap();
++        let incoming = Raw::new(&json!({
++            "type":"m.room.encrypted", "event_id":target, "sender":*ALICE,
++            "origin_server_ts":1, "content":{},
++            "unsigned":{"redacted_because":{
++                "type":"m.room.redaction", "event_id":"$redaction", "sender":*ALICE,
++                "origin_server_ts":2, "content":{"redacts":target}, "redacts":target
++            }}
++        }))
++        .unwrap()
++        .cast_unchecked::<ruma::events::AnySyncTimelineEvent>();
++        server
++            .sync_room(
++                &client,
++                JoinedRoomBuilder::new(room_id).set_timeline_limited().add_timeline_event(incoming),
++            )
++            .await;
++        let update = tokio::time::timeout(Duration::from_secs(3), old_subscriber.recv())
++            .await
++            .unwrap()
++            .unwrap();
++        assert!(update.diffs.iter().any(|diff| matches!(diff, VectorDiff::Set { value, .. }
++            if value.raw().deserialize().is_ok_and(|event| event.is_redacted()))));
++        let (reused, _handles2) = client
++            .event_cache()
++            .event_focused(room_id, target, EventFocusThreadMode::Automatic, 20)
++            .await
++            .unwrap();
++        for view in [&cache, &reused] {
++            let events = view.events().await.unwrap();
++            let original = events.iter().find(|event| event.event_id() == Some(target)).unwrap();
++            assert!(original.raw().deserialize().unwrap().is_redacted());
++            assert_eq!(
++                original.raw().deserialize().unwrap().event_type(),
++                ruma::events::TimelineEventType::RoomMessage
++            );
++            assert_eq!(original.kind.encryption_info().unwrap(), &encryption_info);
++            assert!(!view.hit_timeline_start().await.unwrap());
++            assert!(!view.hit_timeline_end().await.unwrap());
++        }
++        // Neither an edit nor its later redaction may restore clear content.
++        server
++            .sync_room(
++                &client,
++                JoinedRoomBuilder::new(room_id)
++                    .add_timeline_event(
++                        f.text_msg("* edited").event_id(edit_id).edit(
++                            target,
++                            ruma::events::room::message::RoomMessageEventContent::text_plain(
++                                "fixture edit",
++                            )
++                            .into(),
++                        ),
++                    )
++                    .add_timeline_event(f.redaction(edit_id)),
++            )
++            .await;
++        let _ = tokio::time::timeout(Duration::from_secs(3), old_subscriber.recv())
++            .await
++            .unwrap()
++            .unwrap();
++        assert!(
++            reused
++                .events()
++                .await
++                .unwrap()
++                .iter()
++                .find(|event| event.event_id() == Some(target))
++                .unwrap()
++                .raw()
++                .deserialize()
++                .unwrap()
++                .is_redacted()
++        );
++    }
++}
+diff --git a/crates/matrix-sdk/src/event_cache/caches/mod.rs b/crates/matrix-sdk/src/event_cache/caches/mod.rs
+index 5186e15..131af9e 100644
+--- a/crates/matrix-sdk/src/event_cache/caches/mod.rs
++++ b/crates/matrix-sdk/src/event_cache/caches/mod.rs
+@@ -389,9 +389,11 @@ impl Caches {
+ 
+         // Event-focused.
+         {
+-            // An event-focused cache isn't listening to live update.
+-            // Consequently, it is not interested by this kind of update.
+-            let _ = event_focused;
++            for cache in event_focused.read().await.values() {
++                cache
++                    .handle_sync(&original_timeline, &internals.room_version_rules.redaction)
++                    .await?;
++            }
+         }
+ 
+         Ok(())
+@@ -467,9 +469,11 @@ impl Caches {
+ 
+         // Event-focused.
+         {
+-            // An event-focused cache isn't listening to live update.
+-            // Consequently, it is not interested by this kind of update.
+-            let _ = event_focused;
++            for cache in event_focused.read().await.values() {
++                cache
++                    .handle_sync(&original_timeline, &internals.room_version_rules.redaction)
++                    .await?;
++            }
+         }
+ 
+         Ok(())

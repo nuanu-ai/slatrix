@@ -1,0 +1,279 @@
+diff --git a/crates/matrix-sdk-ui/tests/integration/timeline/focus_event.rs b/crates/matrix-sdk-ui/tests/integration/timeline/focus_event.rs
+index 5530b65..1ae7a24 100644
+--- a/crates/matrix-sdk-ui/tests/integration/timeline/focus_event.rs
++++ b/crates/matrix-sdk-ui/tests/integration/timeline/focus_event.rs
+@@ -1353,3 +1353,199 @@ async fn test_focused_cache_reuses_redacted_sync_original() {
+             .any(|item| item.content().is_redacted())
+     );
+ }
++
++// These use the actual event cache and HTTP /context endpoint, not an injected
++// cache result: a failed or cancelled initializer must not poison a later retry.
++mod focused_init_retry {
++    use super::*;
++    use std::sync::Arc;
++    use tokio::sync::Notify;
++    use wiremock::{
++        Mock, ResponseTemplate,
++        matchers::{method, path},
++    };
++
++    fn focus(target: &ruma::EventId) -> TimelineFocus {
++        TimelineFocus::Event {
++            target: target.to_owned(),
++            num_context_events: 0,
++            thread_mode: TimelineEventFocusThreadMode::Automatic { hide_threaded_events: false },
++        }
++    }
++
++    async fn setup() -> (MatrixMockServer, matrix_sdk::Client, matrix_sdk::Room) {
++        let server = MatrixMockServer::new().await;
++        let client = server.client_builder().build().await;
++        server.mock_room_state_encryption().plain().mount().await;
++        let room = server.sync_joined_room(&client, room_id!("!focused-retry:example.org")).await;
++        (server, client, room)
++    }
++
++    async fn context_count(server: &MatrixMockServer) -> usize {
++        server
++            .received_requests()
++            .await
++            .unwrap()
++            .iter()
++            .filter(|request| request.url.path().contains("/context/"))
++            .count()
++    }
++
++    #[async_test]
++    async fn test_focused_init_retry_after_context_failure() {
++        let (server, _client, room) = setup().await;
++        let target = event_id!("$retry");
++        let context_path = format!("/_matrix/client/v3/rooms/{}/context/{target}", room.room_id());
++        let failure = Mock::given(method("GET"))
++            .and(path(context_path))
++            .respond_with(ResponseTemplate::new(500))
++            .expect(1)
++            .mount_as_scoped(server.server())
++            .await;
++        let result = TimelineBuilder::new(&room).with_focus(focus(target)).build().await;
++        assert!(result.is_err(), "first actual context request must fail");
++        assert_eq!(context_count(&server).await, 1);
++        drop(failure);
++
++        let f = EventFactory::new().room(room.room_id()).sender(*ALICE);
++        server
++            .mock_room_event_context()
++            .room(room.room_id())
++            .match_event_id()
++            .ok(RoomContextResponseTemplate::new(
++                f.text_msg("recovered context").event_id(target).into_event(),
++            ))
++            .mock_once()
++            .mount()
++            .await;
++        let recovered = TimelineBuilder::new(&room).with_focus(focus(target)).build().await
++            .expect("same-client same-key retry must reach recovered HTTP context instead of CacheStateAlreadyExists");
++        wait_for_focused_body(&recovered, "recovered context").await;
++        let reused = TimelineBuilder::new(&room).with_focus(focus(target)).build().await.unwrap();
++        wait_for_focused_body(&reused, "recovered context").await;
++        assert_eq!(
++            context_count(&server).await,
++            2,
++            "reusing a successful cache must not refetch/reset it"
++        );
++    }
++
++    #[async_test]
++    async fn test_focused_init_retry_after_cancellation() {
++        let (server, _client, room) = setup().await;
++        let target = event_id!("$cancel-retry");
++        let started = Arc::new(Notify::new());
++        let signal = started.clone();
++        let delayed = Mock::given(method("GET"))
++            .and(path(format!("/_matrix/client/v3/rooms/{}/context/{target}", room.room_id())))
++            .respond_with(move |_: &wiremock::Request| {
++                signal.notify_one();
++                ResponseTemplate::new(500).set_delay(Duration::from_secs(10))
++            })
++            .expect(1)
++            .mount_as_scoped(server.server())
++            .await;
++        let first_room = room.clone();
++        let first = tokio::spawn(async move {
++            TimelineBuilder::new(&first_room).with_focus(focus(target)).build().await
++        });
++        tokio::time::timeout(Duration::from_secs(3), started.notified())
++            .await
++            .expect("initializer reached HTTP before abort");
++        drop(delayed);
++
++        let f = EventFactory::new().room(room.room_id()).sender(*ALICE);
++        server
++            .mock_room_event_context()
++            .room(room.room_id())
++            .match_event_id()
++            .ok(RoomContextResponseTemplate::new(
++                f.text_msg("after cancelled context").event_id(target).into_event(),
++            ))
++            .mock_once()
++            .mount()
++            .await;
++        let retry_room = room.clone();
++        let retry = tokio::spawn(async move {
++            TimelineBuilder::new(&retry_room).with_focus(focus(target)).build().await
++        });
++        tokio::task::yield_now().await;
++        assert_eq!(
++            context_count(&server).await,
++            1,
++            "same-key waiter cannot fetch while first initializer owns registry lock"
++        );
++        first.abort();
++        assert!(first.await.unwrap_err().is_cancelled());
++        let recovered = retry.await.unwrap().expect(
++            "cancelled initializer must not leave orphan state blocking queued same-key retry",
++        );
++        wait_for_focused_body(&recovered, "after cancelled context").await;
++        assert_eq!(context_count(&server).await, 2);
++    }
++
++    #[async_test]
++    async fn test_focused_init_retry_concurrent_success_reuses_streams() {
++        let (server, client, room) = setup().await;
++        let target = event_id!("$shared-context");
++        let f = EventFactory::new().room(room.room_id()).sender(*ALICE);
++        server
++            .mock_room_event_context()
++            .room(room.room_id())
++            .match_event_id()
++            .ok(RoomContextResponseTemplate::new(
++                f.text_msg("shared context").event_id(target).into_event(),
++            )
++            .start("before")
++            .end("after"))
++            .mock_once()
++            .mount()
++            .await;
++        let first = TimelineBuilder::new(&room).with_focus(focus(target));
++        let second = TimelineBuilder::new(&room).with_focus(focus(target));
++        let (first, second) = tokio::join!(first.build(), second.build());
++        let (first, second) = (first.unwrap(), second.unwrap());
++        assert_eq!(
++            context_count(&server).await,
++            1,
++            "same-key initialization is serialized and shared"
++        );
++        let (_, mut first_updates) = first.subscribe().await;
++        let (_, mut second_updates) = second.subscribe().await;
++        server
++            .sync_room(
++                &client,
++                JoinedRoomBuilder::new(room.room_id()).add_timeline_bulk([
++                    f.text_msg("* shared edit")
++                        .event_id(event_id!("$shared-edit"))
++                        .edit(
++                            target,
++                            RoomMessageEventContent::text_plain("shared current edit").into(),
++                        )
++                        .into(),
++                    f.text_msg("unrelated live message").event_id(event_id!("$unrelated")).into(),
++                ]),
++            )
++            .await;
++        assert_let_timeout!(Some(_) = first_updates.next());
++        assert_let_timeout!(Some(_) = second_updates.next());
++        for timeline in [&first, &second] {
++            wait_for_focused_body(timeline, "shared current edit").await;
++            assert!(
++                !timeline
++                    .items()
++                    .await
++                    .iter()
++                    .filter_map(|item| item.as_event())
++                    .any(|item| item.event_id() == Some(event_id!("$unrelated")))
++            );
++        }
++        assert_eq!(context_count(&server).await, 1);
++        assert!(server.received_requests().await.unwrap().iter().all(|request| {
++            let path = request.url.path();
++            !path.contains("/receipt/")
++                && !path.ends_with("/read_markers")
++                && !path.contains("/send/")
++        }));
++    }
++}
+diff --git a/crates/matrix-sdk/src/event_cache/caches/event_focused/mod.rs b/crates/matrix-sdk/src/event_cache/caches/event_focused/mod.rs
+index e081c0a..6b72fbe 100644
+--- a/crates/matrix-sdk/src/event_cache/caches/event_focused/mod.rs
++++ b/crates/matrix-sdk/src/event_cache/caches/event_focused/mod.rs
+@@ -720,10 +720,11 @@ pub struct EventFocusedCache {
+ }
+ 
+ impl EventFocusedCache {
+-    /// Create a new empty event-focused cache.
++    /// Initialize a new event-focused cache before publishing its state.
+     pub(super) async fn new(
+         room: WeakRoom,
+         key: EventFocusedCacheKey,
++        number_of_initial_events: u16,
+         state: &StateLock,
+         linked_chunk_update_sender: Sender<RoomEventCacheLinkedChunkUpdate>,
+     ) -> Result<Self> {
+@@ -733,7 +734,8 @@ impl EventFocusedCache {
+             .try_insert_once_with(
+                 EventFocusedStateSelector::new(room_id.clone(), key.clone()),
+                 |_store_guard| async {
+-                    Ok(EventFocusedCacheState {
++                    let thread_mode = key.thread_mode;
++                    let mut initialized = EventFocusedCacheState {
+                         room,
+                         focused_event_id: key.focused_event_id,
+                         pagination_mode: EventFocusedPaginationMode::Room {
+@@ -745,7 +747,11 @@ impl EventFocusedCache {
+                         thread_mode: EventFocusThreadMode::Automatic, // dummy value
+                         update_sender: Sender::new(32),
+                         linked_chunk_update_sender,
+-                    })
++                    };
++                    // A failed/cancelled context request must not register an
++                    // orphan state that prevents the same focus from retrying.
++                    initialized.start_from(number_of_initial_events, thread_mode).await?;
++                    Ok(initialized)
+                 },
+             )
+             .await?;
+@@ -797,16 +803,6 @@ impl EventFocusedCache {
+         Ok(self.inner.read().await?.last_chunk_as_gap().is_none())
+     }
+ 
+-    /// Start the event-focused timeline from the focused event, fetching
+-    /// context events and detecting thread membership.
+-    pub(super) async fn start_from(
+-        &self,
+-        num_context_events: u16,
+-        thread_mode: EventFocusThreadMode,
+-    ) -> Result<StartFromResult> {
+-        self.inner.write().await?.start_from(num_context_events, thread_mode).await
+-    }
+-
+     /// Paginate backwards in this event-focused timeline, be it room or thread
+     /// pagination depending on the mode.
+     pub async fn paginate_backwards(&self, num_events: u16) -> Result<PaginationResult> {
+diff --git a/crates/matrix-sdk/src/event_cache/caches/mod.rs b/crates/matrix-sdk/src/event_cache/caches/mod.rs
+index 131af9e..7d98e29 100644
+--- a/crates/matrix-sdk/src/event_cache/caches/mod.rs
++++ b/crates/matrix-sdk/src/event_cache/caches/mod.rs
+@@ -270,12 +270,11 @@ impl Caches {
+                     let cache = event_focused::EventFocusedCache::new(
+                         self.room.weak_room().clone(),
+                         key.clone(),
++                        number_of_initial_events,
+                         &self.internals.state,
+                         self.internals.linked_chunk_update_sender.clone(),
+                     )
+                     .await?;
+-                    cache.start_from(number_of_initial_events, thread_mode).await?;
+-
+                     event_focused_caches.insert(key.clone(), cache);
+ 
+                     OwnedRwLockWriteGuard::downgrade_map(

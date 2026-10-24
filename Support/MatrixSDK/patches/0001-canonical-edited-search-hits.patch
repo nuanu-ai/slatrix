@@ -1,0 +1,237 @@
+diff --git a/crates/matrix-sdk-ui/src/search_service.rs b/crates/matrix-sdk-ui/src/search_service.rs
+index f639344..b8e70c6 100644
+--- a/crates/matrix-sdk-ui/src/search_service.rs
++++ b/crates/matrix-sdk-ui/src/search_service.rs
+@@ -33,7 +33,11 @@ use futures_util::{Stream, StreamExt as _};
+ use matrix_sdk::{
+     Client, deserialized_responses::TimelineEvent, message_search::SearchError, room::Room,
+ };
+-use ruma::{MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedUserId};
++use matrix_sdk_base::check_validity_of_replacement_events;
++use ruma::{
++    MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedUserId,
++    events::{AnySyncMessageLikeEvent, AnySyncTimelineEvent, room::message::Relation},
++};
+ use tokio::sync::Mutex as AsyncMutex;
+ 
+ use crate::timeline::{Profile, TimelineDetails, TimelineItemContent};
+@@ -84,11 +88,45 @@ impl MessageResult {
+     /// Resolve a search hit into a full result by loading its content and
+     /// sender profile, returning `None` if the event can't be rendered.
+     async fn from_event(room: &Room, event: TimelineEvent) -> Option<Self> {
+-        let sender = event.sender()?;
+-        let event_id = event.event_id()?.to_owned();
+-        let timestamp = event.timestamp().unwrap_or_else(MilliSecondsSinceUnixEpoch::now);
+-
+-        let content = TimelineItemContent::from_event(room, event).await?;
++        // The search index stores the latest replacement's ID. A replacement
++        // is an aggregation, not a standalone timeline item: use the original
++        // message's identity so clients can focus the result in a timeline.
++        let replacement = match event.raw().deserialize().ok()? {
++            AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(message)) => {
++                message.as_original().and_then(|message| match &message.content.relates_to {
++                    Some(Relation::Replacement(replacement)) => Some(replacement.clone()),
++                    _ => None,
++                })
++            }
++            _ => None,
++        };
++        let (identity, content) = if let Some(replacement) = replacement {
++            // Resolve within this room, retaining the SDK's encryption and
++            // sender/type validation rather than trusting the relation alone.
++            let original = room.load_or_fetch_event(&replacement.event_id, None).await.ok()?;
++            check_validity_of_replacement_events(
++                original.raw(),
++                original.encryption_info().map(|info| &**info),
++                event.raw(),
++                event.encryption_info().map(|info| &**info),
++            )
++            .ok()?;
++            let mut content = TimelineItemContent::from_event(room, original.clone()).await?;
++            let TimelineItemContent::MsgLike(msg_like) = &mut content else { return None };
++            let crate::timeline::MsgLikeKind::Message(message) = &mut msg_like.kind else {
++                // In particular, an old indexed edit must not resurrect a
++                // redacted original.
++                return None;
++            };
++            message.apply_edit(replacement.new_content);
++            (original, content)
++        } else {
++            let content = TimelineItemContent::from_event(room, event.clone()).await?;
++            (event, content)
++        };
++        let sender = identity.sender()?;
++        let event_id = identity.event_id()?.to_owned();
++        let timestamp = identity.timestamp().unwrap_or_else(MilliSecondsSinceUnixEpoch::now);
+         let sender_profile =
+             TimelineDetails::from_initial_value(Profile::load(room, &sender).await);
+ 
+@@ -231,7 +269,167 @@ mod tests {
+     use stream_assert::{assert_next_matches, assert_pending};
+     use tokio::time::sleep;
+ 
+-    use super::{PaginationState, ResultType, SearchService};
++    use super::{MessageResult, PaginationState, ResultType, SearchService};
++
++    async fn resolve_edit_hit(
++        threaded: bool,
++        forged: bool,
++        redacted: bool,
++    ) -> Option<MessageResult> {
++        use ruma::events::room::message::{
++            RedactedRoomMessageEventContent, RoomMessageEventContentWithoutRelation,
++        };
++
++        let server = MatrixMockServer::new().await;
++        let client = server.client_builder().build().await;
++        client.event_cache().subscribe().unwrap();
++        let room_id = room_id!("!room:localhost");
++        let original_id = event_id!("$original:localhost");
++        let sender = user_id!("@author:localhost");
++        let f = EventFactory::new().room(room_id).sender(sender);
++        let original = if redacted {
++            f.redacted(sender, RedactedRoomMessageEventContent::new())
++                .event_id(original_id)
++                .into_raw_sync()
++        } else {
++            let mut original = f.text_msg("original text").event_id(original_id);
++            if threaded {
++                original = original
++                    .in_thread(event_id!("$thread:localhost"), event_id!("$thread:localhost"));
++            }
++            original.server_ts(1_000).into_raw_sync()
++        };
++        let room = server.sync_joined_room(&client, room_id).await;
++        server
++            .sync_room(&client, JoinedRoomBuilder::new(room_id).add_timeline_event(original))
++            .await;
++        let edit = f
++            .text_msg("* edited text")
++            .sender(if forged { user_id!("@forger:localhost") } else { sender })
++            .event_id(event_id!("$edit:localhost"))
++            .server_ts(2_000)
++            .edit(original_id, RoomMessageEventContentWithoutRelation::text_plain("edited text"))
++            .into_event();
++        MessageResult::from_event(&room, edit).await
++    }
++
++    #[async_test]
++    async fn test_search_hit_original_identity() {
++        let server = MatrixMockServer::new().await;
++        let client = server.client_builder().build().await;
++        let room_id = room_id!("!room:localhost");
++        let room = server.sync_joined_room(&client, room_id).await;
++        let f = EventFactory::new().room(room_id).sender(user_id!("@author:localhost"));
++        let result = MessageResult::from_event(
++            &room,
++            f.text_msg("original text").event_id(event_id!("$original:localhost")).into_event(),
++        )
++        .await
++        .unwrap();
++        assert_eq!(result.event_id, event_id!("$original:localhost"));
++        assert_eq!(result.content.as_message().unwrap().body(), "original text");
++    }
++
++    #[async_test]
++    async fn test_search_hit_edit_uses_original_identity() {
++        let result = resolve_edit_hit(false, false, false).await.unwrap();
++        assert_eq!(result.event_id, event_id!("$original:localhost"));
++        assert_eq!(result.sender, user_id!("@author:localhost"));
++        assert_eq!(result.timestamp.0, 1_000_u32.into());
++        assert_eq!(result.content.as_message().unwrap().body(), "edited text");
++        assert!(result.content.as_message().unwrap().is_edited());
++    }
++
++    #[async_test]
++    async fn test_search_hit_edited_thread_reply_uses_reply_identity() {
++        let result = resolve_edit_hit(true, false, false).await.unwrap();
++        assert_eq!(result.event_id, event_id!("$original:localhost"));
++        assert_ne!(result.event_id, event_id!("$thread:localhost"));
++        assert_eq!(result.content.as_message().unwrap().body(), "edited text");
++    }
++
++    #[async_test]
++    async fn test_search_hit_forged_sender_is_rejected() {
++        assert!(resolve_edit_hit(false, true, false).await.is_none());
++    }
++
++    #[async_test]
++    async fn test_search_hit_redacted_original_is_not_resurrected() {
++        let result = resolve_edit_hit(false, false, true).await;
++        assert!(result.is_none() || result.unwrap().content.is_redacted());
++    }
++
++    #[async_test]
++    async fn test_search_hit_edited_index_result_is_canonical() {
++        use ruma::events::room::message::RoomMessageEventContentWithoutRelation;
++
++        let server = MatrixMockServer::new().await;
++        let client = server.client_builder().build().await;
++        client.event_cache().subscribe().unwrap();
++        let room_id = room_id!("!room:localhost");
++        let original_id = event_id!("$original:localhost");
++        let edit_id = event_id!("$edit:localhost");
++        let f = EventFactory::new().room(room_id).sender(user_id!("@author:localhost"));
++        server
++            .sync_room(
++                &client,
++                JoinedRoomBuilder::new(room_id)
++                    .add_timeline_event(f.text_msg("before").event_id(original_id))
++                    .add_timeline_event(f.text_msg("* canonicalneedle").event_id(edit_id).edit(
++                        original_id,
++                        RoomMessageEventContentWithoutRelation::text_plain("canonicalneedle"),
++                    )),
++            )
++            .await;
++        sleep(Duration::from_millis(300)).await;
++
++        let search = SearchService::new(client.clone());
++        search.set_query("canonicalneedle".to_owned()).await.unwrap();
++        let results = search.results().await;
++        assert_eq!(results.len(), 1);
++        assert_let!(ResultType::Message(message) = &results[0]);
++        assert_eq!(message.event_id, original_id);
++        assert_eq!(message.content.as_message().unwrap().body(), "canonicalneedle");
++
++        // This is the API used by clients to preview or navigate a search hit.
++        // An edit ID has no standalone item; its original ID must resolve.
++        use crate::timeline::{
++            TimelineBuilder, TimelineEventFocusThreadMode, TimelineFocus,
++            TimelineReadReceiptTracking,
++        };
++        use matrix_sdk::test_utils::mocks::RoomContextResponseTemplate;
++        server.mock_room_state_encryption().plain().mount().await;
++        server
++            .mock_room_event_context()
++            .room(room_id)
++            .ok(RoomContextResponseTemplate::new(
++                f.text_msg("before")
++                    .event_id(original_id)
++                    .with_bundled_edit(f.text_msg("* canonicalneedle").event_id(edit_id).edit(
++                        original_id,
++                        RoomMessageEventContentWithoutRelation::text_plain("canonicalneedle"),
++                    ))
++                    .into_event(),
++            ))
++            .mount()
++            .await;
++        let room = client.get_room(room_id).unwrap();
++        let timeline = TimelineBuilder::new(&room)
++            .track_read_marker_and_receipts(TimelineReadReceiptTracking::Disabled)
++            .with_focus(TimelineFocus::Event {
++                target: message.event_id.clone(),
++                num_context_events: 0,
++                thread_mode: TimelineEventFocusThreadMode::Automatic {
++                    hide_threaded_events: false,
++                },
++            })
++            .build()
++            .await
++            .unwrap();
++        let item = timeline.item_by_event_id(&message.event_id).await.unwrap();
++        assert_eq!(item.event_id(), Some(original_id));
++        assert_eq!(item.content().as_message().unwrap().body(), "canonicalneedle");
++    }
+ 
+     #[async_test]
+     async fn test_search_pagination() {
