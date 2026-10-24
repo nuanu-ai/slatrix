@@ -12,3 +12,6 @@ applied in order:
 - `0005-focused-initialization-retry`: lets a failed or cancelled event-focused timeline initialization be retried instead of failing with `CacheStateAlreadyExists`.
 
 Send each patch upstream and drop it once an SDK release includes it.
+
+When the pin or the patches change on `main`, `.github/workflows/sdk.yml` builds the package once and
+publishes it as an `sdk-<key>` prerelease; `scripts/build-sdk.sh` downloads it instead of compiling.

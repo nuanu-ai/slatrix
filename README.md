@@ -28,7 +28,7 @@ scripts/build-app.sh
 open build/Slatrix.app
 ```
 
-The first build compiles the Matrix Rust SDK for macOS, which takes about ten minutes. Rust is installed into `.build/` and your system toolchain is left alone. The SDK revision and the few patches applied on top of it are described in [Support/MatrixSDK](Support/MatrixSDK/README.md).
+The first build downloads a prebuilt Matrix Rust SDK for macOS. If you change the SDK pin or its patches, it compiles one instead, which takes about ten minutes; Rust is then installed into `.build/` and your system toolchain is left alone. The SDK revision and the few patches applied on top of it are described in [Support/MatrixSDK](Support/MatrixSDK/README.md).
 
 ## Develop
 
