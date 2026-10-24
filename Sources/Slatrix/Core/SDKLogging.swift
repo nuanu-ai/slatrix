@@ -13,7 +13,7 @@ enum SDKLogging {
             default: .info
             }
         let files = TracingFileConfiguration(
-            path: AppPaths.logs.path, filePrefix: "slatrix", fileSuffix: "log",
+            path: AppPaths.logs.path, filePrefix: "slatrix", fileSuffix: ".log",
             maxTotalSizeBytes: 100_000_000, maxAgeSeconds: 7 * 24 * 3600)
         let config = TracingConfiguration(
             logLevel: level, traceLogPacks: [], extraTargets: [], writeToStdoutOrSystem: false,
