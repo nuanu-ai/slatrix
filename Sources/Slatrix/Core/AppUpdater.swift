@@ -1,7 +1,7 @@
 import Foundation
 import Sparkle
 
-/// Sparkle checks once a day, downloads in the background and installs when Slatrix quits. Instead of alerts it
+/// Sparkle checks every hour, downloads in the background and installs when Slatrix quits. Instead of alerts it
 /// raises `updateAvailable`, which the title bar shows as the Update pill; the pill opens Sparkle's update window.
 @MainActor final class AppUpdater: NSObject, ObservableObject {
     static let shared = AppUpdater()

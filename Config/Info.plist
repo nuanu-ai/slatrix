@@ -20,6 +20,7 @@
     <key>SUFeedURL</key><string>https://github.com/nuanu-ai/slatrix/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key><string>x39A6G7/iOI8F/kjZSDRXA/pXIpTQZvNw7JD/8RPBq8=</string>
     <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUScheduledCheckInterval</key><integer>3600</integer>
     <key>SUAutomaticallyUpdate</key><true/>
 </dict>
 </plist>

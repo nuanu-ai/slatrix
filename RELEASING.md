@@ -1,6 +1,6 @@
 # Releasing
 
-Slatrix updates itself with [Sparkle](https://sparkle-project.org). Once a day it reads `appcast.xml` from the latest GitHub release, downloads a newer version in the background and installs it when you quit. Until then an Update button in the title bar shows the release notes and can restart into the new version right away.
+Slatrix updates itself with [Sparkle](https://sparkle-project.org). Every hour it reads `appcast.xml` from the latest GitHub release, downloads a newer version in the background and installs it when you quit. Until then an Update button in the title bar shows the release notes and can restart into the new version right away.
 
 ## Ship a version
 
