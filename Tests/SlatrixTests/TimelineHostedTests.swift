@@ -241,7 +241,7 @@ struct TimelineHostedTests {
 @MainActor
 struct MessageRowLayoutTests {
     @Test(
-        "The hover toolbar overlays a one-line message without reserving height",
+        "Hovering a one-line message shows its time and toolbar without changing its height",
         arguments: [CGFloat(360), 800], [MessageDensity.comfortable, .compact])
     func toolbarOverlays(width: CGFloat, density: MessageDensity) throws {
         let appearance = AppearanceStore()
@@ -256,7 +256,7 @@ struct MessageRowLayoutTests {
         func height(hovered: Bool) -> CGFloat {
             let row = MessageRow(
                 matrix: matrix, message: message, grouped: true, onThread: {}, onReply: {}, onEdit: {}, onSave: {},
-                onDelete: {}, hovered: hovered
+                onDelete: {}, hovered: hovered, timeLabel: "12:00 AM"
             ).environmentObject(appearance)
             return NSHostingController(rootView: row).sizeThatFits(in: CGSize(width: width, height: 10_000)).height
         }

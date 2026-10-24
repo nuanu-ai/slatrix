@@ -22,13 +22,22 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Restore Matrix SDK package
-        uses: actions/cache@v4
+        id: sdk-cache
+        uses: actions/cache/restore@v4
         with:
           path: .build/native-sdk-package
           key: matrix-sdk-${{ runner.arch }}-${{ hashFiles('scripts/build-sdk.sh', 'Support/MatrixSDK/patches/**') }}
 
       - name: Build Matrix SDK
         run: scripts/build-sdk.sh
+
+      # Saved right away, so a later failing step doesn't throw away a ten-minute Rust build.
+      - name: Save Matrix SDK package
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .build/native-sdk-package
+          key: ${{ steps.sdk-cache.outputs.cache-primary-key }}
 
       - name: Read version
         run: |

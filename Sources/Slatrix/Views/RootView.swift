@@ -423,7 +423,7 @@ struct RootView: View {
             }
     }
 
-    private var observedContent: some View {
+    private var navigationObservedContent: some View {
         roomObservedContent
             .onChange(of: composerIdentity) { _, _ in
                 logoutRecovery.invalidate()
@@ -455,7 +455,6 @@ struct RootView: View {
             }
             .onChange(of: matrix.timelineSelectionID) { _, _ in cancelStaleThreadOpen() }
             .onChange(of: infoOpen) { _, _ in cancelStaleThreadOpen() }
-            .onChange(of: showPins) { _, _ in cancelStaleThreadOpen() }
             .onChange(of: matrix.messageActionContext) { _, _ in
                 if let editActionTarget, !matrix.isCurrentMessageAction(editActionTarget) { cancelCurrentEdit() }
                 cancelStaleForward()
@@ -470,6 +469,7 @@ struct RootView: View {
                 }
             }
             .onChange(of: showPins) { _, shown in
+                cancelStaleThreadOpen()
                 if shown {
                     cancelCurrentEdit()
                     cancelReply()
@@ -477,6 +477,11 @@ struct RootView: View {
                     cancelStaleCaption()
                 }
             }
+    }
+
+    // A single long modifier chain exceeds the type checker's time limit in some Swift releases.
+    private var observedContent: some View {
+        navigationObservedContent
             .onChange(of: systemScheme) { _, scheme in appearance.systemIsDark = scheme == .dark }
             .onReceive(NotificationCenter.default.publisher(for: .menuAction)) { notification in
                 handleMenu(notification.userInfo?["action"] as? String ?? "")

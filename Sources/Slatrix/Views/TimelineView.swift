@@ -274,9 +274,9 @@ struct MessageRow: View {
         HStack(alignment: .top, spacing: m.sp12) {
             if !compact {
                 if grouped || !appearance.showAvatars {
-                    Text(hovered ? time : "").font(
-                        m.font(.caption)
-                    ).foregroundStyle(colors.muted).frame(width: m.avatar, alignment: .trailing).padding(.top, m.sp4)
+                    // One line: "12:00 AM" is wider than the gutter, and a wrap would grow the row on hover.
+                    Text(hovered ? time : "").font(m.font(.caption)).lineLimit(1).fixedSize()
+                        .foregroundStyle(colors.muted).frame(width: m.avatar, alignment: .trailing).padding(.top, m.sp4)
                 } else {
                     Button(action: openProfile) {
                         AvatarView(name: message.senderName, size: m.avatar, matrix: matrix, source: message.avatarURL)

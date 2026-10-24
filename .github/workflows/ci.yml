@@ -18,7 +18,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Restore Matrix SDK package
-        uses: actions/cache@v4
+        id: sdk-cache
+        uses: actions/cache/restore@v4
         with:
           path: .build/native-sdk-package
           key: matrix-sdk-${{ runner.arch }}-${{ hashFiles('scripts/build-sdk.sh', 'Support/MatrixSDK/patches/**') }}
@@ -26,11 +27,27 @@ jobs:
       - name: Build Matrix SDK
         run: scripts/build-sdk.sh
 
+      # Saved right away, so a later failing step doesn't throw away a ten-minute Rust build.
+      - name: Save Matrix SDK package
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .build/native-sdk-package
+          key: ${{ steps.sdk-cache.outputs.cache-primary-key }}
+
       - name: Lint
         run: scripts/lint.sh
 
       - name: Test
-        run: scripts/test.sh
+        run: scripts/test.sh --quiet
+
+      - name: Upload crash reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-reports
+          path: ~/Library/Logs/DiagnosticReports/
+          if-no-files-found: ignore
 
       - name: Build app
         run: scripts/build-app.sh
