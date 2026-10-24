@@ -39,7 +39,15 @@ jobs:
         run: scripts/lint.sh
 
       - name: Test
-        run: scripts/test.sh
+        run: |
+          source scripts/swift-env.sh
+          set +e
+          swift test "${swift_test_args[@]}" --no-parallel > test.log 2>&1
+          status=$?
+          grep -v ' started\.$' test.log | tail -n 60
+          echo "last started:"; grep ' started\.$' test.log | tail -n 3
+          echo "swift test exit: $status"
+          exit $status
 
       - name: Upload crash reports
         if: failure()
