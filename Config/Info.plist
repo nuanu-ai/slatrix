@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleExecutable</key><string>Slatrix</string>
+    <key>CFBundleIdentifier</key><string>ai.nuanu.slatrix</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>Slatrix</string>
+    <key>CFBundleDisplayName</key><string>Slatrix</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>0.1.0</string>
+    <key>CFBundleIconFile</key><string>Slatrix</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.social-networking</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSHumanReadableCopyright</key><string>© 2026 Slatrix contributors</string>
+    <key>SUFeedURL</key><string>https://github.com/nuanu-ai/slatrix/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key><string>x39A6G7/iOI8F/kjZSDRXA/pXIpTQZvNw7JD/8RPBq8=</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUAutomaticallyUpdate</key><true/>
+</dict>
+</plist>

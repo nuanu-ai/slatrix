@@ -1,0 +1,108 @@
+import Foundation
+
+enum ConnectionStatus: String { case signedOut, connecting, syncing, ready, error }
+
+struct Workspace: Identifiable, Hashable {
+    var id: String
+    var name: String
+    var topic: String? = nil
+    var canInvite: Bool? = nil
+    var canManageRooms: Bool? = nil
+    var avatarURL: String? = nil
+    /// No joined space lists it as a child, so it gets its own icon in the rail.
+    var isTopLevel = true
+}
+
+struct ChatRoom: Identifiable, Hashable {
+    var id: String
+    var name: String
+    var topic: String = ""
+    var isDirect = false
+    var isEncrypted = false
+    var unread = 0
+    var unreadMessages = 0
+    var isMarkedUnread = false
+    var hasUnread: Bool { isMarkedUnread || unreadMessages > 0 || unread > 0 }
+    var mentions = 0
+    var favorite = false
+    var muted = false
+    var memberCount = 0
+    var spaceIDs: [String] = []
+    var membership = "join"
+    var avatarURL: String? = nil
+    var pinnedEventIDs: [String] = []
+    var canPinMessages: Bool? = nil
+    var fullyReadEventID: String? = nil
+    var isSpace = false
+    var directParentSpaceIDs: [String] = []
+    var canInvite: Bool? = nil
+}
+
+struct ChatUser: Identifiable, Hashable {
+    var id: String
+    var name: String
+    var avatarURL: String? = nil
+}
+
+struct ChatMessage: Identifiable, Hashable {
+    /// Stable identity in an open timeline: the SDK item's unique ID, which a local echo keeps when its remote event
+    /// arrives. Messages from anywhere else are identified by their event ID.
+    var id: String
+    var roomID: String
+    var senderID: String
+    var senderName: String
+    var body: String
+    var formattedBody: String? = nil
+    var timestamp: Date
+    var kind: String = "m.text"
+    var reactions: [MessageReaction] = []
+    var replyCount = 0
+    var threadRootID: String? = nil
+    var isEdited = false
+    var isRedacted = false
+    var sendState = "sent"
+    var attachment: MessageAttachment? = nil
+    var replyToID: String? = nil
+    var avatarURL: String? = nil
+    var replyPreview: ChatReplyPreview? = nil
+    var mediaCaption: String? = nil
+    /// Set when `id` is a timeline item ID rather than the event ID.
+    var timelineEventID: String? = nil
+    /// The remote event ID, or the transaction ID of a local echo.
+    var eventID: String { timelineEventID ?? id }
+    var supportsCaptionEditing: Bool { ["m.image", "m.file"].contains(kind) && attachment != nil }
+    var showsMessageBody: Bool {
+        if supportsCaptionEditing { return mediaCaption.map { !$0.isEmpty } ?? false }
+        return !body.isEmpty && (attachment == nil || body != attachment?.name)
+    }
+    // The current edit composer submits Markdown as m.text. Other message
+    // kinds need their own type-preserving edit/caption payload first.
+    var supportsTextEditing: Bool { kind == "m.text" && attachment == nil }
+}
+
+struct ChatReplyPreview: Hashable {
+    enum State: String, Hashable { case unavailable, pending, ready, failed }
+    var state: State
+    var eventID: String
+    var senderID: String = ""
+    var senderName: String = ""
+    var body: String = ""
+    var kind: String = "m.text"
+    var isRedacted = false
+}
+
+struct MessageReaction: Hashable {
+    var key: String
+    var count: Int
+    var mine: Bool
+}
+
+struct MessageAttachment: Hashable {
+    var name: String
+    var url: String
+    var mimeType: String? = nil
+    var size: UInt64? = nil
+    /// Pixel dimensions from the event, so the image's box is reserved before its thumbnail loads.
+    var width: UInt64? = nil
+    var height: UInt64? = nil
+}
