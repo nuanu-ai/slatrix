@@ -1,8 +1,11 @@
 #!/bin/bash
-# Builds the patched Matrix Rust SDK for macOS into .build/native-sdk-package.
-# Official matrix-rust-components-swift releases ship iOS slices only.
+# Puts the patched Matrix Rust SDK for macOS into .build/native-sdk-package: downloads the prebuilt package that
+# .github/workflows/sdk.yml publishes for this pin and these patches, or builds it from source when there is none
+# (or SLATRIX_SDK_FROM_SOURCE=1). Official matrix-rust-components-swift releases ship iOS slices only.
 set -euo pipefail
 
+# Bump when a change here alters the built package, so it gets a new key.
+SDK_PACKAGE_FORMAT=1
 RUSTUP_VERSION=1.29.2
 RUSTUP_SHA256=f7c7e11eb2e07f006e532a8aaac77b32f4527d305ac386c0c633ca6133d35ca9
 RUST_TOOLCHAIN=1.99.1
@@ -15,9 +18,39 @@ build=$root/.build
 src=$build/native-sdk-src
 package=$build/native-sdk-package
 
-stamp=$(cat "$root/scripts/build-sdk.sh" "$patches"/*.patch | shasum -a 256 | cut -d' ' -f1)
+stamp=$({ printf '%s\n' "$SDK_REV" "$RUST_TOOLCHAIN" "$SDK_PACKAGE_FORMAT"; cat "$patches"/*.patch; } |
+    shasum -a 256 | cut -c1-16)
+if [[ ${1:-} == --key ]]; then
+    echo "$stamp"
+    exit 0
+fi
 if [[ -f $package/.stamp && $(<"$package/.stamp") == "$stamp" ]]; then
     echo "Matrix SDK package is up to date."
+    exit 0
+fi
+
+install() { # moves a complete package from $1 into place
+    rm -rf "$package.old"
+    if [[ -d $package ]]; then mv "$package" "$package.old"; fi
+    mv "$1" "$package"
+    rm -rf "$package.old"
+}
+
+prebuilt=https://github.com/nuanu-ai/slatrix/releases/download/sdk-$stamp/MatrixRustSDK.tar.gz
+if [[ -z ${SLATRIX_SDK_FROM_SOURCE:-} ]] && curl -fsIL -o /dev/null "$prebuilt" 2>/dev/null; then
+    echo "Downloading the prebuilt Matrix SDK $stamp"
+    mkdir -p "$build"
+    download=$build/native-sdk-download
+    rm -rf "$download"
+    mkdir "$download"
+    curl -fL --proto '=https' --progress-bar "$prebuilt" | tar -xz -C "$download"
+    if [[ $(<"$download/native-sdk-package/.stamp") != "$stamp" ]]; then
+        echo "error: the prebuilt package doesn't match $stamp" >&2
+        exit 1
+    fi
+    install "$download/native-sdk-package"
+    rm -rf "$download"
+    echo "Installed $package"
     exit 0
 fi
 
@@ -117,8 +150,5 @@ let package = Package(
 EOF
 echo "$stamp" > "$staging/.stamp"
 
-rm -rf "$package.old"
-if [[ -d $package ]]; then mv "$package" "$package.old"; fi
-mv "$staging" "$package"
-rm -rf "$package.old"
+install "$staging"
 echo "Built $package"

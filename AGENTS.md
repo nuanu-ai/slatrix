@@ -59,4 +59,4 @@ scripts/test.sh         # build and run tests
 scripts/build-app.sh    # release app bundle in build/
 ```
 
-Both run `scripts/build-sdk.sh` first, which rebuilds the SDK only when its pin or patches change.
+Both run `scripts/build-sdk.sh` first. It downloads the prebuilt SDK for the current pin and patches, and compiles it only when none is published yet (or with `SLATRIX_SDK_FROM_SOURCE=1`).

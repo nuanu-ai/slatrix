@@ -1,0 +1,47 @@
+name: SDK
+
+# Publishes the package scripts/build-sdk.sh downloads, once per SDK pin and patch set.
+on:
+  push:
+    branches: [main]
+    paths: [scripts/build-sdk.sh, Support/MatrixSDK/**]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sdk
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the package key
+        id: key
+        run: |
+          key=$(scripts/build-sdk.sh --key)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          if gh release view "sdk-$key" > /dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Restore Matrix SDK package
+        if: steps.key.outputs.exists != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .build/native-sdk-package
+          key: matrix-sdk-${{ runner.arch }}-${{ hashFiles('scripts/build-sdk.sh', 'Support/MatrixSDK/patches/**') }}
+
+      - name: Build and publish
+        if: steps.key.outputs.exists != 'true'
+        run: |
+          SLATRIX_SDK_FROM_SOURCE=1 scripts/build-sdk.sh
+          tar -czf MatrixRustSDK.tar.gz -C .build native-sdk-package
+          # A prerelease, so releases/latest keeps pointing at the app and its appcast.
+          gh release create "sdk-${{ steps.key.outputs.key }}" MatrixRustSDK.tar.gz --prerelease --latest=false \
+            --title "Matrix SDK ${{ steps.key.outputs.key }}" --notes "The package scripts/build-sdk.sh downloads."
