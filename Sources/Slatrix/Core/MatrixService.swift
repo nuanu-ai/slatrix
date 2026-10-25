@@ -515,9 +515,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var user: ChatUser?
     var selectedRoomID: String? { didSet { updateSelectedRoom() } }
     /// The open conversation's entry in `rooms`, apart so its readers are not redrawn by changes to other rooms.
+    /// Without its unread state, which changes with every message in it; the sidebar shows that from `rooms`.
     private(set) var selectedRoom: ChatRoom?
     private func updateSelectedRoom() {
-        let room = rooms.first { $0.id == selectedRoomID }
+        var room = rooms.first { $0.id == selectedRoomID }
+        room?.unread = 0
+        room?.unreadMessages = 0
+        room?.isMarkedUnread = false
+        room?.mentions = 0
+        room?.fullyReadEventID = nil
         if room != selectedRoom { selectedRoom = room }
     }
     var typingUsers: [String] = []
