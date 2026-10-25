@@ -783,9 +783,13 @@ final class MatrixService: ObservableObject {
         return (client, delegate)
     }
 
+    /// Restoring reuses the homeserver URL resolved at sign-in, so launch doesn't wait on `.well-known` and
+    /// `/versions`; signing in still discovers it from what the person typed.
     static func clientBuilder(homeserver: String, restoring: Bool) -> ClientBuilder {
-        ClientBuilder().serverNameOrHomeserverUrl(serverNameOrUrl: homeserver).slidingSyncVersionBuilder(
-            versionBuilder: .discoverNative)
+        restoring
+            ? ClientBuilder().homeserverUrl(url: homeserver).slidingSyncVersionBuilder(versionBuilder: .native)
+            : ClientBuilder().serverNameOrHomeserverUrl(serverNameOrUrl: homeserver).slidingSyncVersionBuilder(
+                versionBuilder: .discoverNative)
     }
 
     func login(homeserver: String, username: String, password: String) async throws {
