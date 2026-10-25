@@ -87,6 +87,36 @@ struct MessageBodyRendererTests {
         #expect(MessageBodyRenderer.safeLink(link) != nil)
     }
 
+    @Test(
+        "Addresses typed into a message become links",
+        arguments: [
+            (
+                nil, "See https://example.org/docs?a=1 today", "https://example.org/docs?a=1",
+                "https://example.org/docs?a=1"
+            ),
+            (nil, "Docs at www.example.org.", "www.example.org", "http://www.example.org"),
+            (nil, "Write to hello@example.org", "hello@example.org", "mailto:hello@example.org"),
+            ("<p>Read <b>https://example.org</b> now</p>", "", "https://example.org", "https://example.org"),
+        ] as [(String?, String, String, String)])
+    func typedLinks(html: String?, body: String, text: String, url: String) {
+        let runs = render(html, body: body).runs
+        #expect(runs.contains { $0.text == text && $0.link?.absoluteString == url })
+        #expect(runs.map(\.text).joined() == render(html, body: body).plainText)
+    }
+
+    @Test("Addresses in code, and schemes that aren't safe, stay plain text")
+    func untypedLinks() {
+        #expect(render("<p><code>https://example.org</code></p>").runs.allSatisfy { $0.link == nil })
+        #expect(render("<pre>curl https://example.org</pre>").runs.allSatisfy { $0.link == nil })
+        #expect(render(nil, body: "Open file:///etc/hosts or ftp://example.org").runs.allSatisfy { $0.link == nil })
+    }
+
+    @Test("A typed address inside a link keeps the link's own target")
+    func anchorWins() {
+        let runs = render("<a href='https://example.org/target'>https://example.org/shown</a>").runs
+        #expect(runs.allSatisfy { $0.link == nil || $0.link?.path == "/target" })
+    }
+
     @Test("A plain body is shown literally, not as Markdown")
     func plainIsLiteral() {
         #expect(render(nil, body: "**literal**").plainText == "**literal**")

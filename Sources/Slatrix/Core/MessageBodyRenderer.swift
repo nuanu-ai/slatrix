@@ -61,7 +61,8 @@ final class MessageBodyRenderer: @unchecked Sendable {
     func render(body: String, formattedBody: String?, revealSpoilers: Bool = false) -> RenderedMessageBody {
         let key = Key(body: body, html: formattedBody, revealSpoilers: revealSpoilers)
         if let entry = lock.withLock({ cache[key] }) { return entry.result }
-        let result = Self.parse(body: body, html: formattedBody, revealSpoilers: revealSpoilers)
+        var result = Self.parse(body: body, html: formattedBody, revealSpoilers: revealSpoilers)
+        result.runs = Self.linkified(result.runs)
         let cost =
             body.utf8.count + (formattedBody?.utf8.count ?? 0) + result.runs.reduce(0) { $0 + $1.text.utf8.count + 128 }
         guard cost <= Self.maximumCacheBytes / 4 else { return result }
@@ -93,6 +94,35 @@ final class MessageBodyRenderer: @unchecked Sendable {
             return nil
         }
         return components.url
+    }
+
+    private static let addresses = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    /// Web and mail addresses typed as plain text become links, as in Slack. Code and existing links keep their text.
+    private static func linkified(_ runs: [MessageBodyRun]) -> [MessageBodyRun] {
+        guard let addresses else { return runs }
+        var result: [MessageBodyRun] = []
+        for run in runs {
+            guard run.link == nil, !run.style.contains(.code), run.text.contains(".") else {
+                result.append(run)
+                continue
+            }
+            let text = run.text as NSString
+            var cursor = 0
+            for match in addresses.matches(in: run.text, range: NSRange(location: 0, length: text.length)) {
+                guard let url = match.url, let link = safeLink(url.absoluteString) else { continue }
+                if match.range.location > cursor {
+                    let before = NSRange(location: cursor, length: match.range.location - cursor)
+                    result.append(MessageBodyRun(text: text.substring(with: before), style: run.style))
+                }
+                result.append(MessageBodyRun(text: text.substring(with: match.range), style: run.style, link: link))
+                cursor = NSMaxRange(match.range)
+            }
+            if cursor < text.length {
+                result.append(MessageBodyRun(text: text.substring(from: cursor), style: run.style))
+            }
+        }
+        return result
     }
 
     private enum ParseFailure: Error { case limit, unsupported }

@@ -88,6 +88,22 @@ extension ButtonStyle where Self == RowButtonStyle {
     static var row: RowButtonStyle { RowButtonStyle() }
 }
 
+/// A count in a filled pill that is round for one digit: red for mentions, neutral for other unread messages.
+struct CountBadge: View {
+    let text: String
+    var mention = true
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+
+    var body: some View {
+        let colors = appearance.colors
+        Text(text).font(m.font(.caption, .bold)).monospacedDigit().lineLimit(1)
+            .padding(.horizontal, m.sp4).frame(minWidth: m(18), minHeight: m(18))
+            .background(mention ? colors.mention : colors.muted, in: Capsule())
+            .foregroundStyle(mention ? Color.white : colors.canvas)
+    }
+}
+
 struct IconButton: View {
     @Environment(\.metrics) private var m
     let symbol: String
