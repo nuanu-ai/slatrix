@@ -774,15 +774,18 @@ final class MatrixService: ObservableObject {
             }
         }
         let stores = SqliteStoreBuilder(dataPath: folders.data.path, cachePath: folders.cache.path).key(key: storeKey)
-        let client = try await ClientBuilder().serverNameOrHomeserverUrl(serverNameOrUrl: homeserver).sqliteStore(
+        let client = try await Self.clientBuilder(homeserver: homeserver, restoring: initialSession != nil).sqliteStore(
             config: stores
         ).withSearchIndexStore(path: folders.searchIndex.path, password: storeKey.base64EncodedString())
             .enableAutomaticBackPagination(enableAutomaticBackPagination: true).setSessionDelegate(
                 sessionDelegate: delegate
-            ).threadsEnabled(enabled: true, threadSubscriptions: false).slidingSyncVersionBuilder(
-                versionBuilder: .discoverNative
-            ).build()
+            ).threadsEnabled(enabled: true, threadSubscriptions: false).build()
         return (client, delegate)
+    }
+
+    static func clientBuilder(homeserver: String, restoring: Bool) -> ClientBuilder {
+        ClientBuilder().serverNameOrHomeserverUrl(serverNameOrUrl: homeserver).slidingSyncVersionBuilder(
+            versionBuilder: .discoverNative)
     }
 
     func login(homeserver: String, username: String, password: String) async throws {
