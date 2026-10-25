@@ -89,8 +89,7 @@ struct RootView: View {
     @State private var editTarget: MessageEditTarget?
     @State private var editActionTarget: MessageActionTarget?
     @State private var editText = ""
-    @State private var drafts: [String: String] = [:]
-    @State private var threadDrafts: [String: String] = [:]
+    @State private var drafts = ComposerDrafts()
     @StateObject private var previews = AttachmentPreviewController()
     @StateObject private var attachmentDrafts = AttachmentDraftController()
     @State private var invitationResponseID: String?
@@ -150,15 +149,7 @@ struct RootView: View {
     }
     private var draftAddresses: Set<AttachmentDraftAddress> {
         guard localReady, composerStateIdentity == composerIdentity else { return [] }
-        return Set(drafts.filter { !$0.value.isEmpty }.keys.map { AttachmentDraftAddress(roomID: $0) })
-            .union(
-                threadDrafts.filter { !$0.value.isEmpty }.keys.compactMap {
-                    ThreadDraftAddress(id: $0).map {
-                        AttachmentDraftAddress(roomID: $0.roomID, threadRootID: $0.rootID)
-                    }
-                }
-            )
-            .union(attachmentDrafts.queues.filter { !$0.value.isEmpty }.keys)
+        return drafts.addresses.union(attachmentDrafts.queues.filter { !$0.value.isEmpty }.keys)
             .union(attachmentDrafts.files.filter { !$0.value.isEmpty }.keys)
     }
     private var draftRoomIDs: Set<String> { Set(draftAddresses.map(\.roomID)) }
@@ -649,16 +640,18 @@ struct RootView: View {
                                 } else {
                                     collectionContent
                                 }
-                            }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                                // Transient states float over the conversation instead of pushing it down.
-                                .overlay(alignment: .top) {
-                                    transientBanners.padding(.horizontal, m.sp16)
-                                        .padding(
-                                            .top,
-                                            (route == .home && room != nil ? m.paneHeader + m.sp40 : m.paneHeader) + 1
-                                                + m.sp8)
-                                }
-                                .overlay { if inspectorWidth == nil, let room { inspector(room) } }
+                            }
+                            // A composer that grows or a message that arrives lays out this column, not the window.
+                            .layoutIsolated()
+                            // Transient states float over the conversation instead of pushing it down.
+                            .overlay(alignment: .top) {
+                                transientBanners.padding(.horizontal, m.sp16)
+                                    .padding(
+                                        .top,
+                                        (route == .home && room != nil ? m.paneHeader + m.sp40 : m.paneHeader) + 1
+                                            + m.sp8)
+                            }
+                            .overlay { if inspectorWidth == nil, let room { inspector(room) } }
                             if let width = inspectorWidth, let room {
                                 ResizeHandle(
                                     pane: .trailing, label: threadRoot != nil ? "Thread width" : "Details width",
@@ -667,7 +660,7 @@ struct RootView: View {
                                         resizingPaneWidth = nil
                                         preferredPaneWidth = 0
                                     })
-                                inspector(room).frame(width: m(width))
+                                inspector(room).layoutIsolated().frame(width: m(width))
                             }
                         }.background(colors.canvas).clipShape(
                             UnevenRoundedRectangle(
@@ -961,39 +954,43 @@ struct RootView: View {
                         Button("Jump to recent") { selectRoom(room.id) }.buttonStyle(.link).font(m.font(.meta))
                             .padding(m.sp20)
                     } else {
-                        MessageComposer(
-                            text: draftBinding(room.id),
-                            placeholder: room.isDirect ? "Message \(room.name)" : "Message #\(room.name)",
-                            members: matrix.members,
-                            onSend: { [context = composerContext, reply = scopedReply(roomID: room.id)] body, files in
-                                try await send(body, files: files, room: room, context: context, reply: reply)
-                            },
-                            onTyping: { [context = composerContext] typing in
-                                guard isCurrentComposer(context), !context.identity.isPreview else { return }
-                                Task {
+                        BindingScope({ draftBinding(room.id) }) { text in
+                            MessageComposer(
+                                text: text,
+                                placeholder: room.isDirect ? "Message \(room.name)" : "Message #\(room.name)",
+                                members: matrix.members,
+                                onSend: {
+                                    [context = composerContext, reply = scopedReply(roomID: room.id)] body, files in
+                                    try await send(body, files: files, room: room, context: context, reply: reply)
+                                },
+                                onTyping: { [context = composerContext] typing in
+                                    guard isCurrentComposer(context), !context.identity.isPreview else { return }
+                                    Task {
+                                        guard isCurrentComposer(context) else { return }
+                                        await matrix.setTyping(
+                                            typing, roomID: room.id, sessionID: context.identity.sessionID)
+                                    }
+                                },
+                                onSendText: { [context = composerContext, reply = scopedReply(roomID: room.id)] body in
+                                    try await sendText(body, room: room, context: context, reply: reply)
+                                },
+                                onSendFile: { [context = composerContext] file in
+                                    try await sendFile(file, room: room, context: context)
+                                },
+                                queuedFiles: attachmentBinding(AttachmentDraftAddress(roomID: room.id)),
+                                sendingState: sendingBinding(room.id),
+                                onError: { [context = composerContext] error in
                                     guard isCurrentComposer(context) else { return }
-                                    await matrix.setTyping(
-                                        typing, roomID: room.id, sessionID: context.identity.sessionID)
-                                }
-                            },
-                            onSendText: { [context = composerContext, reply = scopedReply(roomID: room.id)] body in
-                                try await sendText(body, room: room, context: context, reply: reply)
-                            },
-                            onSendFile: { [context = composerContext] file in
-                                try await sendFile(file, room: room, context: context)
-                            },
-                            queuedFiles: attachmentBinding(AttachmentDraftAddress(roomID: room.id)),
-                            sendingState: sendingBinding(room.id),
-                            onError: { [context = composerContext] error in
-                                guard isCurrentComposer(context) else { return }
-                                matrix.errorMessage = error
-                            },
-                            allowsSend: attachmentDrafts.canSend(AttachmentDraftAddress(roomID: room.id))
-                                && replyAllowsSend(roomID: room.id),
-                            onDiscardAttachments: attachmentDrafts.discard,
-                            requiresTextForSend: scopedReply(roomID: room.id) != nil,
-                            onConversationKey: { conversationKey($0, room: room, threadRootID: nil) }, isPrimary: true
-                        )
+                                    matrix.errorMessage = error
+                                },
+                                allowsSend: attachmentDrafts.canSend(AttachmentDraftAddress(roomID: room.id))
+                                    && replyAllowsSend(roomID: room.id),
+                                onDiscardAttachments: attachmentDrafts.discard,
+                                requiresTextForSend: scopedReply(roomID: room.id) != nil,
+                                onConversationKey: { conversationKey($0, room: room, threadRootID: nil) },
+                                isPrimary: true
+                            )
+                        }
                         .popover(item: $lastMessageReaction, arrowEdge: .top) { target in
                             ReactionPicker { key in
                                 lastMessageReaction = nil
@@ -1169,40 +1166,50 @@ struct RootView: View {
                 {
                     editComposer(target, room: room).padding(m.sp12)
                 } else {
-                    MessageComposer(
-                        text: threadDraftBinding(root.eventID, roomID: room.id), placeholder: "Reply…",
-                        members: matrix.members,
-                        onSend: {
-                            [context = composerContext, reply = scopedReply(roomID: room.id, threadID: root.eventID)]
-                            body, files
-                            in
-                            try await send(
-                                body, files: files, room: room, threadID: root.eventID, context: context, reply: reply)
-                        },
-                        onTyping: { _ in },
-                        onSendText: {
-                            [context = composerContext, reply = scopedReply(roomID: room.id, threadID: root.eventID)]
-                            body
-                            in
-                            try await sendText(body, room: room, threadID: root.eventID, context: context, reply: reply)
-                        },
-                        onSendFile: { [context = composerContext] file in
-                            try await sendFile(file, room: room, threadID: root.eventID, context: context)
-                        },
-                        queuedFiles: attachmentBinding(
-                            AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID)),
-                        sendingState: sendingBinding("thread:" + root.eventID),
-                        onError: { [context = composerContext] error in
-                            guard isCurrentComposer(context) else { return }
-                            matrix.errorMessage = error
-                        },
-                        allowsSend: attachmentDrafts.canSend(
-                            AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID))
-                            && replyAllowsSend(roomID: room.id, threadID: root.eventID),
-                        onDiscardAttachments: attachmentDrafts.discard,
-                        requiresTextForSend: scopedReply(roomID: room.id, threadID: root.eventID) != nil,
-                        onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) }
-                    )
+                    BindingScope({ threadDraftBinding(root.eventID, roomID: room.id) }) { text in
+                        MessageComposer(
+                            text: text, placeholder: "Reply…",
+                            members: matrix.members,
+                            onSend: {
+                                [
+                                    context = composerContext,
+                                    reply = scopedReply(roomID: room.id, threadID: root.eventID)
+                                ]
+                                body, files
+                                in
+                                try await send(
+                                    body, files: files, room: room, threadID: root.eventID, context: context,
+                                    reply: reply)
+                            },
+                            onTyping: { _ in },
+                            onSendText: {
+                                [
+                                    context = composerContext,
+                                    reply = scopedReply(roomID: room.id, threadID: root.eventID)
+                                ]
+                                body
+                                in
+                                try await sendText(
+                                    body, room: room, threadID: root.eventID, context: context, reply: reply)
+                            },
+                            onSendFile: { [context = composerContext] file in
+                                try await sendFile(file, room: room, threadID: root.eventID, context: context)
+                            },
+                            queuedFiles: attachmentBinding(
+                                AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID)),
+                            sendingState: sendingBinding("thread:" + root.eventID),
+                            onError: { [context = composerContext] error in
+                                guard isCurrentComposer(context) else { return }
+                                matrix.errorMessage = error
+                            },
+                            allowsSend: attachmentDrafts.canSend(
+                                AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID))
+                                && replyAllowsSend(roomID: room.id, threadID: root.eventID),
+                            onDiscardAttachments: attachmentDrafts.discard,
+                            requiresTextForSend: scopedReply(roomID: room.id, threadID: root.eventID) != nil,
+                            onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) }
+                        )
+                    }
                     .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(m.sp12).disabled(
                         !localReady || !attachmentDrafts.ready || matrix.focusedEventID != nil
                             || threadReadyID != root.eventID
@@ -1287,8 +1294,9 @@ struct RootView: View {
     }
     private func draftSummary(_ address: AttachmentDraftAddress) -> String {
         let text =
-            address.threadRootID.map { threadDrafts[ThreadDraftAddress(roomID: address.roomID, rootID: $0).id] ?? "" }
-            ?? drafts[address.roomID] ?? ""
+            address.threadRootID.map {
+                drafts.threads[ThreadDraftAddress(roomID: address.roomID, rootID: $0).id] ?? ""
+            } ?? drafts.conversations[address.roomID] ?? ""
         let count = max(attachmentDrafts.queues[address]?.count ?? 0, attachmentDrafts.files[address]?.count ?? 0)
         return text + (count == 0 ? "" : (text.isEmpty ? "" : "\n") + "\(count) attachment\(count == 1 ? "" : "s")")
     }
@@ -2019,24 +2027,28 @@ struct RootView: View {
     }
     private func editComposer(_ target: MessageEditTarget, room: ChatRoom) -> some View {
         let context = composerContext
-        return MessageComposer(
-            text: editBinding(target, context: context), placeholder: "Edit message", members: matrix.members,
-            isEditing: true,
-            onSend: { body, files in
-                guard files.isEmpty, isCurrentEdit(target, context: context), let action = editActionTarget else {
-                    throw CancellationError()
-                }
-                try await matrix.editMessage(action, body: body)
-            }, onTyping: { _ in },
-            onCancelEdit: {
-                guard isCurrentEdit(target, context: context) else { return }
-                if target.finish(current: &editTarget, context: editContext, text: &editText) { editActionTarget = nil }
-            },
-            onError: { error in
-                guard isCurrentEdit(target, context: context) else { return }
-                matrix.errorMessage = error
-            }, allowsSend: isCurrentEdit(target, context: context)
-        )
+        return BindingScope({ editBinding(target, context: context) }) { text in
+            MessageComposer(
+                text: text, placeholder: "Edit message", members: matrix.members,
+                isEditing: true,
+                onSend: { body, files in
+                    guard files.isEmpty, isCurrentEdit(target, context: context), let action = editActionTarget else {
+                        throw CancellationError()
+                    }
+                    try await matrix.editMessage(action, body: body)
+                }, onTyping: { _ in },
+                onCancelEdit: {
+                    guard isCurrentEdit(target, context: context) else { return }
+                    if target.finish(current: &editTarget, context: editContext, text: &editText) {
+                        editActionTarget = nil
+                    }
+                },
+                onError: { error in
+                    guard isCurrentEdit(target, context: context) else { return }
+                    matrix.errorMessage = error
+                }, allowsSend: isCurrentEdit(target, context: context)
+            )
+        }
         .id("edit-\(composerGeneration)-\(target.id)").disabled(!isCurrentEdit(target, context: context))
     }
     private func attachmentBinding(_ address: AttachmentDraftAddress) -> Binding<[URL]> {
@@ -2063,11 +2075,13 @@ struct RootView: View {
         return Binding(
             get: {
                 guard isCurrentComposer(context) else { return "" }
-                return target.read(draft: drafts[id], editText: editText, editing: nil)
+                return target.read(draft: drafts.conversations[id], editText: editText, editing: nil)
             },
             set: { value in
                 guard isCurrentComposer(context) else { return }
-                if target.write(value, editing: nil, draft: &drafts[id], editText: &editText) { saveLocalData() }
+                if target.write(value, editing: nil, draft: &drafts.conversations[id], editText: &editText) {
+                    saveLocalData()
+                }
             })
     }
     private func threadDraftBinding(_ rootID: String, roomID: String) -> Binding<String> {
@@ -2077,11 +2091,13 @@ struct RootView: View {
         return Binding(
             get: {
                 guard isCurrentComposer(context) else { return "" }
-                return target.read(draft: threadDrafts[key], editText: editText, editing: nil)
+                return target.read(draft: drafts.threads[key], editText: editText, editing: nil)
             },
             set: { value in
                 guard isCurrentComposer(context) else { return }
-                if target.write(value, editing: nil, draft: &threadDrafts[key], editText: &editText) { saveLocalData() }
+                if target.write(value, editing: nil, draft: &drafts.threads[key], editText: &editText) {
+                    saveLocalData()
+                }
             })
     }
     private func send(
@@ -2250,7 +2266,7 @@ struct RootView: View {
     }
     private var storageKey: String { matrix.isPreview ? "preview" : matrix.user?.id ?? "signed-out" }
     private var localState: ProtectedLocalState {
-        ProtectedLocalState(drafts: drafts, threadDrafts: threadDrafts, saved: saved)
+        ProtectedLocalState(drafts: drafts.conversations, threadDrafts: drafts.threads, saved: saved)
     }
     private func loadLocalData(retry: Bool = false) {
         if composerStateIdentity != composerIdentity { clearComposerState() }
@@ -2282,8 +2298,8 @@ struct RootView: View {
                 guard localGeneration == generation, composerIdentity == identity else { return }
                 localAccess = access
                 localRevision = 0
-                drafts = access.state.drafts
-                threadDrafts = access.state.threadDrafts
+                drafts.conversations = access.state.drafts
+                drafts.threads = access.state.threadDrafts
                 saved = access.state.saved
                 localReady = true
                 localError = nil
@@ -2369,11 +2385,11 @@ struct RootView: View {
         localLoadIdentity = nil
         localReady = false
         localError = nil
-        drafts = [:]
+        drafts.conversations = [:]
         saved = []
         composerGeneration = UUID()
         composerStateIdentity = composerIdentity
-        threadDrafts = [:]
+        drafts.threads = [:]
         sendingComposers = [:]
         invitationResponseID = nil
         navigationNotice = nil
@@ -2734,6 +2750,18 @@ private struct RoomDirectory: View {
             }
         }
     }
+}
+
+/// Makes a binding inside its own body: SwiftUI reads a binding when it compares a view's inputs, and what the
+/// binding reads, such as a draft that changes with every keystroke, then redraws whichever view made it.
+private struct BindingScope<Value, Content: View>: View {
+    let binding: () -> Binding<Value>
+    @ViewBuilder let content: (Binding<Value>) -> Content
+    init(_ binding: @escaping () -> Binding<Value>, @ViewBuilder content: @escaping (Binding<Value>) -> Content) {
+        self.binding = binding
+        self.content = content
+    }
+    var body: some View { content(binding()) }
 }
 
 /// Closes Quick Look once its message leaves what is shown; on its own, so new messages do not redraw the window.
