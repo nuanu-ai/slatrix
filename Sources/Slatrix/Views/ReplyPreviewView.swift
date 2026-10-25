@@ -34,6 +34,7 @@ struct ReplyPreviewView: View {
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
+                .loadingInterval(.replyLoading, while: preview.state == .pending)
         }.padding(.vertical, m.sp4).padding(.bottom, m.sp4).fixedSize(horizontal: false, vertical: true)
             .task(id: origin?.replyPreviewIdentity) { [target = origin] in
                 guard !Task.isCancelled, preview.state == .unavailable, let target else { return }

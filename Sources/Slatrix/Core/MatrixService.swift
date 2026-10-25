@@ -1215,6 +1215,7 @@ final class MatrixService: ObservableObject {
         timelineRevision = kept.revision
         // What arrived while the reader was away.
         showTimeline(kept.observer.snapshot, roomID: id)
+        if !messages.isEmpty { Performance.finish(.roomTimeline, ["messages": messages.count]) }
         updateSubscriptions(id)
         if let room = try? client?.getRoom(roomId: id) { watchTyping(room, token: kept.token) }
         Task { [weak self] in await self?.loadMembers() }
@@ -1326,7 +1327,10 @@ final class MatrixService: ObservableObject {
     private func showTimeline(_ snapshot: (items: [TimelineItem], revision: Int), roomID: String) {
         guard snapshot.revision > timelineRevision else { return }
         timelineRevision = snapshot.revision
-        messages = project(snapshot.items, roomID: roomID)
+        messages = Performance.measure(.timelineProject, ["items": snapshot.items.count]) {
+            project(snapshot.items, roomID: roomID)
+        }
+        if !messages.isEmpty { Performance.finish(.roomTimeline, ["messages": messages.count]) }
     }
 
     private func watchTyping(_ room: Room, token: UUID) {
@@ -1657,7 +1661,9 @@ final class MatrixService: ObservableObject {
                         revision > self.threadRevision
                     else { return }
                     self.threadRevision = revision
-                    var messages = self.project(items, roomID: root.roomID, inThread: true)
+                    var messages = Performance.measure(.timelineProject, ["items": items.count]) {
+                        self.project(items, roomID: root.roomID, inThread: true)
+                    }
                     if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
                         messages[index].id = root.eventID
                     }

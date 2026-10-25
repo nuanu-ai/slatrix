@@ -34,7 +34,7 @@ struct ThreadsFeedView: View {
             }
             if items.isEmpty {
                 if feed.isLoading {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).loadingInterval(.threadsLoading)
                 } else {
                     EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No threads yet") {
                         if feed.canCheckMore { Button("Look further") { Task { await matrix.checkMoreThreads() } } }
@@ -61,7 +61,8 @@ struct ThreadsFeedView: View {
                         }
                         if feed.isLoading {
                             ProgressView().controlSize(.small).padding(m.sp20).accessibilityLabel(
-                                "Checking more threads")
+                                "Checking more threads"
+                            ).loadingInterval(.threadsLoading)
                         }
                     }.padding(.horizontal, m.sp2)
                 }

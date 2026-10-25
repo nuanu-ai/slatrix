@@ -52,7 +52,7 @@ struct MatrixNotificationDefaultsSection: View {
                 Text("Sign in to change these.").font(m.font(.meta)).foregroundStyle(colors.muted)
             } else if loading {
                 HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small)
+                    ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
                     Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.muted)
                 }
             } else if snapshot != nil && current {

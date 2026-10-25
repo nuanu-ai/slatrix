@@ -219,6 +219,22 @@ struct TimelineHostedTests {
         #expect(abs(try #require(after) - before) < 0.5)
     }
 
+    @Test("A row the reader is looking at that the table cannot hold still is logged as a jump")
+    func logsJumps() async throws {
+        let harness = Harness(messages: Self.messages(0..<40))
+        defer { harness.close() }
+        await settle(harness)
+        harness.scroll(toTop: harness.clip.bounds.minY - 120)
+        let since = Date()
+        // The last rows go, taller together than the reader is scrolled up: the view has to move to stay on content.
+        harness.service.messages = Self.messages(0..<36)
+        await settle(harness) { harness.rowCount < 40 }
+        let jump = await Task.detached {
+            await firstPerformanceMessage(since: since) { $0.hasPrefix("event=timeline.jump ") }
+        }.value
+        #expect(jump != nil)
+    }
+
     @Test("Leaving a conversation and coming back returns to where you were reading")
     func restoresPosition() async throws {
         let messages = Self.messages(0..<40)
@@ -234,6 +250,67 @@ struct TimelineHostedTests {
         harness.hosting.rootView = harness.fixture(Self.room)
         await settle(harness) { harness.top(of: reading) != nil }
         #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
+    }
+}
+
+/// Budgets for the table at the scale of a busy room; see `PerformanceBudgetTests`.
+extension TimelineHostedTests {
+    /// Lays out until `body` is on screen and returns how long that took.
+    private func timeUntilShown(_ body: String, in harness: Harness, after change: () -> Void) async -> Duration {
+        let start = ContinuousClock.now
+        change()
+        _ = await eventually(timeout: .seconds(20)) {
+            harness.layout()
+            return harness.top(of: body) != nil
+        }
+        return .now - start
+    }
+
+    @Test(
+        "A room's 1,000 messages arrive and its newest rows are on screen within budget", .tags(.budget),
+        .enabled(if: budgetsEnabled))
+    func openBudget() async {
+        let time = await fastest {
+            let harness = Harness(messages: [])
+            defer { harness.close() }
+            await settle(harness)
+            let messages = busyConversation(1_000, roomID: Self.room.id, tag: UUID().uuidString)
+            return await timeUntilShown(messages[999].body, in: harness) { harness.service.messages = messages }
+        }
+        #expect(time < .milliseconds(200), "\(time)")
+    }
+
+    @Test(
+        "Switching between two 1,000-message rooms shows the other's newest rows within budget", .tags(.budget),
+        .enabled(if: budgetsEnabled))
+    func switchBudget() async {
+        let other = ChatRoom(id: "!other:example.org", name: "Other")
+        let time = await fastest {
+            let harness = Harness(messages: busyConversation(1_000, roomID: Self.room.id, tag: UUID().uuidString))
+            defer { harness.close() }
+            await settle(harness)
+            let messages = busyConversation(1_000, roomID: other.id, tag: UUID().uuidString)
+            return await timeUntilShown(messages[999].body, in: harness) {
+                harness.service.messages = messages
+                harness.hosting.rootView = harness.fixture(other)
+            }
+        }
+        #expect(time < .milliseconds(180), "\(time)")
+    }
+
+    @Test(
+        "50 new messages land on a 1,000-message room's newest rows within budget", .tags(.budget),
+        .enabled(if: budgetsEnabled))
+    func appendBudget() async {
+        let time = await fastest {
+            let tag = UUID().uuidString
+            let messages = busyConversation(1_050, roomID: Self.room.id, tag: tag)
+            let harness = Harness(messages: Array(messages.prefix(1_000)))
+            defer { harness.close() }
+            await settle(harness)
+            return await timeUntilShown(messages[1_049].body, in: harness) { harness.service.messages = messages }
+        }
+        #expect(time < .milliseconds(190), "\(time)")
     }
 }
 

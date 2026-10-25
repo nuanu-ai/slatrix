@@ -59,9 +59,12 @@ struct AvatarView: View {
 struct DelayedProgress: View {
     var active = true
     var hasContent = false
+    /// Logs the whole wait, shown or not.
+    let interval: Performance.Name
     @State private var shown = false
     var body: some View {
         ZStack { if shown { ProgressView().controlSize(.small) } }
+            .loadingInterval(interval, while: active && !hasContent)
             .task(id: active && !hasContent) {
                 shown = false
                 guard active, !hasContent else { return }
@@ -199,4 +202,30 @@ struct WindowDragArea: NSViewRepresentable {
     final class DragView: NSView { override var mouseDownCanMoveWindow: Bool { true } }
     func makeNSView(context: Context) -> NSView { DragView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+extension View {
+    /// Times how long this loading state is on screen, for the performance report.
+    func loadingInterval(_ name: Performance.Name, while shown: Bool = true) -> some View {
+        modifier(LoadingInterval(name: name, shown: shown))
+    }
+}
+
+private struct LoadingInterval: ViewModifier {
+    let name: Performance.Name
+    let shown: Bool
+    @State private var interval: Performance.Interval?
+
+    func body(content: Content) -> some View {
+        content.onAppear { show(shown) }.onDisappear { show(false) }.onChange(of: shown) { _, shown in show(shown) }
+    }
+
+    private func show(_ shown: Bool) {
+        if shown, interval == nil {
+            interval = Performance.begin(name)
+        } else if !shown, let interval {
+            Performance.end(interval)
+            self.interval = nil
+        }
+    }
 }

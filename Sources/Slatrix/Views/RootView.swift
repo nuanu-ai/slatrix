@@ -279,7 +279,8 @@ struct RootView: View {
                 onRecovery: {
                     closeModal()
                     showRecovery = true
-                })
+                }
+            ).onAppear { Performance.finishOnScreen(.preferencesOpen) }
         case .search(let messages, let roomID):
             QuickSwitcherView(
                 matrix: matrix,
@@ -290,7 +291,8 @@ struct RootView: View {
                 onMessageSelect: { message in
                     closeModal()
                     selectRoom(message.roomID, record: true, eventID: message.eventID)
-                }, initiallyMessages: messages, initialRoomID: roomID, onMatrixLink: enqueueMatrixLink)
+                }, initiallyMessages: messages, initialRoomID: roomID, onMatrixLink: enqueueMatrixLink
+            ).onAppear { Performance.finishOnScreen(.searchOpen) }
         case .shortcuts: KeyboardShortcutsView(onClose: closeModal)
         }
     }
@@ -403,6 +405,7 @@ struct RootView: View {
             }
             .onChange(of: matrix.workspaces) { _, _ in settleWorkspace() }
             .onChange(of: workspaceID) { _, id in
+                Performance.finishOnScreen(.workspaceSwitch)
                 cancelStaleThreadOpen()
                 cancelStaleForward()
                 cancelStaleCaption()
@@ -627,9 +630,13 @@ struct RootView: View {
             titleBar
             if bootstrapping {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(colors.canvas)
+                    .loadingInterval(.appLoading)
             } else if matrix.user == nil && !matrix.isPreview {
                 LoginView(matrix: matrix) {
                     matrix.enterPreview()
+                }.onAppear {
+                    Performance.cancel(.launchRooms)
+                    Performance.cancel(.launchConversation)
                 }
             } else {
                 IdentityGate(
@@ -642,6 +649,7 @@ struct RootView: View {
                             workspaceID: Binding(
                                 get: { workspaceID },
                                 set: {
+                                    Performance.start(.workspaceSwitch)
                                     workspaceID = $0
                                     workspaceInitialized = true
                                 }), search: $sidebarSearch, draftRoomIDs: draftRoomIDs,
@@ -724,7 +732,7 @@ struct RootView: View {
                         cancelMatrixLink()
                         openPendingNotification()
                     }.buttonStyle(.link)
-                }.padding(m.sp12).modifier(Toast(colors: colors))
+                }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.linkLoading)
             }
             if previews.isLoading {
                 HStack(spacing: m.sp8) {
@@ -732,7 +740,7 @@ struct RootView: View {
                     Text("Opening preview…").font(m.font(.meta))
                     Spacer()
                     Button("Cancel") { previews.close() }.buttonStyle(.link)
-                }.padding(m.sp12).modifier(Toast(colors: colors))
+                }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.previewLoading)
             }
             if let request = pendingThreadOpen, isCurrentThreadOpen(request) {
                 HStack(spacing: m.sp8) {
@@ -742,7 +750,7 @@ struct RootView: View {
                             if isCurrentThreadOpen(request) { openThread(request.message) }
                         }.buttonStyle(.link)
                     } else {
-                        ProgressView().controlSize(.small)
+                        ProgressView().controlSize(.small).loadingInterval(.threadLoading)
                         Text("Opening thread…").font(m.font(.meta))
                     }
                     Spacer()
@@ -765,7 +773,7 @@ struct RootView: View {
                     Spacer()
                     Button("Cancel") { PlatformIntegration.shared.consumeNotification(target) }
                         .buttonStyle(.link).font(m.font(.meta))
-                }.padding(m.sp12).modifier(Toast(colors: colors))
+                }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.linkLoading)
             }
             if let localError {
                 HStack {
@@ -1241,7 +1249,8 @@ struct RootView: View {
             ).id(root.eventID)
                 .overlay {
                     DelayedProgress(
-                        active: openingThreadID == root.eventID, hasContent: matrix.threadMessages.count > 1)
+                        active: openingThreadID == root.eventID, hasContent: matrix.threadMessages.count > 1,
+                        interval: .threadLoading)
                 }
             VStack(spacing: 0) {
                 if let target = editTarget, target.surface == .thread(rootID: root.eventID),
@@ -1412,6 +1421,7 @@ struct RootView: View {
                 Text("Restoring attachments…")
                 Spacer()
             }.font(m.font(.meta)).foregroundStyle(colors.muted).padding(m.sp12).modifier(Toast(colors: colors))
+                .loadingInterval(.attachmentsLoading)
         }
         if localReady && attachmentDrafts.needsReview(address) {
             HStack(alignment: .top, spacing: m.sp8) {
@@ -1472,7 +1482,9 @@ struct RootView: View {
             }
         }
     }
-    private var syncingView: some View { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+    private var syncingView: some View {
+        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).loadingInterval(.conversationLoading)
+    }
     private var noRoomsView: some View {
         let workspace = matrix.workspaces.first { $0.id == workspaceID }
         return EmptyStateView(
@@ -1589,7 +1601,7 @@ struct RootView: View {
                     cancelReply()
                 }
             }.overlay(alignment: .trailing) {
-                DelayedProgress(active: replyOpening).padding(.trailing, m.iconButton + m.sp8)
+                DelayedProgress(active: replyOpening, interval: .replyLoading).padding(.trailing, m.iconButton + m.sp8)
             }
             if !replyOpening, let replyError {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
@@ -1683,6 +1695,11 @@ struct RootView: View {
                 explicitEventID: eventID, opensThread: thread != nil)
         let destinationEventID = eventID ?? resumeAnchor
         let requiresRoomSelection = !matrix.isLiveTimelineReady(roomID: id) || pendingRoomID != nil
+        // The cases below that open a new timeline.
+        if destinationEventID != nil || thread == nil || requiresRoomSelection {
+            Performance.start(.roomOpen)
+            if !matrix.isPreview { Performance.start(.roomTimeline) }
+        }
         let generation = UUID()
         let identity = composerIdentity
         navigationGeneration = generation
@@ -1765,6 +1782,7 @@ struct RootView: View {
                         else { return }
                         threadReadyID = thread.eventID
                         openingThreadID = nil
+                        Performance.finishOnScreen(.threadOpen, ["messages": matrix.threadMessages.count])
                         if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
                             replyOpening = false
                             replyError = nil
@@ -1821,6 +1839,7 @@ struct RootView: View {
             selectRoom(root.roomID, record: true, thread: root)
             return
         }
+        Performance.start(.threadOpen)
         cancelThreadOpen()
         cancelReply()
         navigationGeneration = UUID()
@@ -2538,10 +2557,12 @@ struct RootView: View {
             return
         }
         if action == "preferences" {
+            Performance.start(.preferencesOpen)
             modals.current = .preferences
             return
         }
         guard matrix.user != nil else { return }
+        if action.hasPrefix("search") { Performance.start(.searchOpen) }
         switch action {
         case "search": modals.current = .search(messages: false, roomID: nil)
         case "search-messages": modals.current = .search(messages: true, roomID: nil)
@@ -2562,6 +2583,7 @@ struct RootView: View {
             guard let index = Int(action.dropFirst("workspace-".count)), rail.indices.contains(index - 1) else {
                 return
             }
+            Performance.start(.workspaceSwitch)
             workspaceID = rail[index - 1]?.id
             workspaceInitialized = true
             route = .home
