@@ -1,6 +1,6 @@
-import Combine
 import Foundation
 import MatrixRustSDK
+import Observation
 
 struct ThreadFeedItem: Identifiable, Hashable {
     enum PreviewState: String, Hashable { case snapshot, loading, ready, failed }
@@ -199,12 +199,12 @@ final class RoomSubscriptionCoordinator {
 }
 
 @MainActor
-final class ThreadFeedService: ObservableObject {
-    @Published private(set) var items: [ThreadFeedItem] = []
-    @Published private(set) var roomStates: [ThreadFeedRoomState] = []
-    @Published private(set) var isLoading = false
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var liveRoomCount = 0
+@Observable final class ThreadFeedService {
+    private(set) var items: [ThreadFeedItem] = []
+    private(set) var roomStates: [ThreadFeedRoomState] = []
+    private(set) var isLoading = false
+    private(set) var errorMessage: String?
+    private(set) var liveRoomCount = 0
     var checkedRoomCount: Int { roomStates.filter { $0.state == .ready || $0.state == .error }.count }
     var totalRoomCount: Int { roomStates.count }
     var canCheckMore: Bool { roomStates.contains { $0.state == .unloaded } }

@@ -3,8 +3,8 @@ import SwiftUI
 struct ActivityFeedView: View {
     private static let filterWidth: CGFloat = 180
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
-    @ObservedObject var activity: ActivityService
+    let matrix: MatrixService
+    let activity: ActivityService
     @Binding var workspaceID: String?
     var onOpenMessage: (ActivityItem) -> Void
     var onOpenRoom: (String) -> Void

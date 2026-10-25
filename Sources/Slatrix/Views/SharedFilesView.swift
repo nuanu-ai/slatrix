@@ -8,8 +8,8 @@ struct SharedFilesView: View {
     private static let typePickerWidth: CGFloat = 280
     private static let filterMaxWidth: CGFloat = 420
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
-    @ObservedObject var service: SharedFilesService
+    let matrix: MatrixService
+    let service: SharedFilesService
     let workspaceID: String?
     let onOpen: (ChatMessage) -> Void
     let onOpenProfile: (String, ChatUser?) -> Void
@@ -171,8 +171,8 @@ struct SharedFilesView: View {
 private struct SharedContentCard: View {
     private static let thumbnail: CGFloat = 60
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
-    @ObservedObject var service: SharedFilesService
+    let matrix: MatrixService
+    let service: SharedFilesService
     let item: SharedContentItem
     let onOpen: () -> Void
     let onOpenProfile: (String, ChatUser?) -> Void

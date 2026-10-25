@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct VerificationPresentation: ViewModifier {
-    @ObservedObject var service: VerificationService
+    let service: VerificationService
     var enabled = true
     func body(content: Content) -> some View {
         content.sheet(
@@ -14,7 +14,7 @@ struct VerificationPresentation: ViewModifier {
 
 struct DeviceVerificationSettings: View {
     @Environment(\.metrics) private var m
-    @ObservedObject var service: VerificationService
+    let service: VerificationService
     var disabled: Bool
     var onRecovery: () -> Void
     @EnvironmentObject private var appearance: AppearanceStore
@@ -47,7 +47,7 @@ struct VerificationView: View {
     private static let comparisonWidth: CGFloat = 648
     private static let emojiHeight: CGFloat = 48
     @Environment(\.metrics) private var m
-    @ObservedObject var service: VerificationService
+    let service: VerificationService
     var onClose: () -> Void
     @EnvironmentObject private var appearance: AppearanceStore
     private var colors: AppColors { appearance.colors }

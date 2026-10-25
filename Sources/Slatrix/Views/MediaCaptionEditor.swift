@@ -4,7 +4,7 @@ struct MediaCaptionEditor: View {
     private static let width: CGFloat = 512
     private static let editorHeight: CGFloat = 128
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     let target: MessageActionTarget
     let onClose: () -> Void
     @EnvironmentObject private var appearance: AppearanceStore

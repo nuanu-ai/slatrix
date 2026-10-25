@@ -5,7 +5,7 @@ import SwiftUI
 struct TimelineView: View {
     @Environment(\.metrics) private var m
     @Environment(\.openURL) private var openURL
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     @EnvironmentObject private var previews: AttachmentPreviewController
     let room: ChatRoom
@@ -756,7 +756,7 @@ struct AttachmentView: View {
     private static let imageMaxHeight: CGFloat = 260
     private static let fileCardWidth: CGFloat = 392
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     let message: ChatMessage
     let attachment: MessageAttachment
     @EnvironmentObject private var previews: AttachmentPreviewController

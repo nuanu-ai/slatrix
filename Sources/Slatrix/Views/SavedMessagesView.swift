@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SavedMessagesView: View {
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     let saved: [SavedMessageReference]
     var onOpen: (SavedMessageReference) -> Void
     var onRemove: (SavedMessageReference) -> Void
@@ -38,7 +38,7 @@ struct SavedMessagesView: View {
 
 private struct SavedMessageCard: View {
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     let reference: SavedMessageReference
     let refresh: UUID
     var onOpen: () -> Void

@@ -1,6 +1,6 @@
-import Combine
 import Foundation
 import MatrixRustSDK
+import Observation
 
 private final class VerificationObserver: SessionVerificationControllerDelegate, @unchecked Sendable {
     enum Event: Sendable {
@@ -27,7 +27,7 @@ private final class DeviceVerificationObserver: VerificationStateListener, @unch
 }
 
 @MainActor
-final class VerificationService: ObservableObject {
+@Observable final class VerificationService {
     enum Phase: Equatable {
         case idle, preparing, incoming, requesting, waitingForOtherDevice, ready, exchanging, comparison,
             awaitingConfirmation, cancelling, finished, cancelled, failed
@@ -55,17 +55,17 @@ final class VerificationService: ObservableObject {
         let firstSeen: Date
     }
 
-    @Published var isPresented = false
-    @Published private(set) var phase = Phase.idle
-    @Published private(set) var deviceStatus = DeviceStatus.unknown
-    @Published private(set) var request: Request?
-    @Published private(set) var emojis: [Emoji] = []
-    @Published private(set) var decimals: [UInt16] = []
-    @Published private(set) var isWorking = false
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var isAvailable = false
-    @Published private(set) var ownDeviceID: String?
-    @Published private(set) var isCleaningUp = false
+    var isPresented = false
+    private(set) var phase = Phase.idle
+    private(set) var deviceStatus = DeviceStatus.unknown
+    private(set) var request: Request?
+    private(set) var emojis: [Emoji] = []
+    private(set) var decimals: [UInt16] = []
+    private(set) var isWorking = false
+    private(set) var errorMessage: String?
+    private(set) var isAvailable = false
+    private(set) var ownDeviceID: String?
+    private(set) var isCleaningUp = false
 
     private var client: Client?
     private var controller: SessionVerificationController?

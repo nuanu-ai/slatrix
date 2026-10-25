@@ -3,8 +3,8 @@ import SwiftUI
 struct ThreadsFeedView: View {
     private static let historyMaxHeight: CGFloat = 144
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
-    @ObservedObject var feed: ThreadFeedService
+    let matrix: MatrixService
+    let feed: ThreadFeedService
     @Binding var workspaceID: String?
     var onOpen: (ChatMessage) -> Void
     @EnvironmentObject private var appearance: AppearanceStore
@@ -200,7 +200,7 @@ struct ThreadsFeedView: View {
 struct FeedWorkspacePicker: View {
     private static let maxWidth: CGFloat = 210
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     @Binding var workspaceID: String?
     var body: some View {
         Picker("Workspace", selection: $workspaceID) {

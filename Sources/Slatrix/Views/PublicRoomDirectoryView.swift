@@ -4,8 +4,8 @@ struct PublicRoomDirectoryView: View {
     private static let size = CGSize(width: 720, height: 620)
     private static let searchHeight: CGFloat = 40
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
-    @ObservedObject var service: PublicRoomDirectoryService
+    let matrix: MatrixService
+    let service: PublicRoomDirectoryService
     /// Lists this workspace's channels; nil browses the server's public directory.
     var workspace: Workspace? = nil
     var onResolve: (MatrixLinkResolution) -> Void

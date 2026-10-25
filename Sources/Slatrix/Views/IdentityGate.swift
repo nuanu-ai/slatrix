@@ -4,7 +4,7 @@ import SwiftUI
 /// cannot read yet, as Element X does. Shown when this device is unverified and the account has or may have an
 /// identity; skipping is remembered per account and device, and Preferences keeps both ways in.
 struct IdentityGate<Content: View>: View {
-    @ObservedObject var verification: VerificationService
+    let verification: VerificationService
     let accountID: String?
     let hasIdentity: () async -> Bool?
     let onRecovery: () -> Void
@@ -52,7 +52,7 @@ struct IdentityGate<Content: View>: View {
 
 private struct ConfirmIdentityView: View {
     private static let width: CGFloat = 360
-    @ObservedObject var verification: VerificationService
+    let verification: VerificationService
     let onRecovery: () -> Void
     let onSkip: () -> Void
     @Environment(\.metrics) private var m

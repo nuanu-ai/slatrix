@@ -6,7 +6,7 @@ struct QuickSwitcherView: View {
     private static let scopeWidth: CGFloat = 256
     private static let matchingWidth: CGFloat = 156
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     var onSelect: (String) -> Void
     var onClose: () -> Void
     var onMessageSelect: ((ChatMessage) -> Void)? = nil
@@ -499,7 +499,7 @@ struct QuickSwitcherView: View {
 /// The search service applies the latest edit and drops deleted messages, so a hit shows as indexed.
 private struct SearchMessageResultRow: View {
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     let hit: ChatMessage
     let selected: Bool
     let terminalSearchFailure: Bool
@@ -579,7 +579,7 @@ enum CreationKind: String, Identifiable {
 struct CreationSheet: View {
     private static let width: CGFloat = 528
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     var kind: CreationKind
     var workspaceID: String? = nil
     var roomID: String? = nil

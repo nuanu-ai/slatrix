@@ -31,7 +31,7 @@ struct TimelineHostedTests {
     private static let user = "@reader:example.org"
 
     private struct Fixture: View {
-        @ObservedObject var service: MatrixService
+        let service: MatrixService
         let room: ChatRoom
         let appearance: AppearanceStore
         let previews: AttachmentPreviewController

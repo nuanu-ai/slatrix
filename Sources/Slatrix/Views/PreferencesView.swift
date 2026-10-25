@@ -9,7 +9,7 @@ struct PreferencesView: View {
     private static let miniatureHeight: CGFloat = 72
     @Environment(\.metrics) private var m
     @EnvironmentObject var appearance: AppearanceStore
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     var onClose: () -> Void
     var onLogout: () -> Void
     var onRecovery: () -> Void

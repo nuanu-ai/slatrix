@@ -3,7 +3,7 @@ import SwiftUI
 struct SidebarView: View {
     private static let dot: CGFloat = 6
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     @Binding var route: AppRoute
     @Binding var workspaceID: String?

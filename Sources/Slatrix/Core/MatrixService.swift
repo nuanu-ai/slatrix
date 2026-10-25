@@ -1,6 +1,6 @@
-import Combine
 import Foundation
 import MatrixRustSDK
+import Observation
 import UniformTypeIdentifiers
 
 enum MatrixServiceError: LocalizedError {
@@ -460,7 +460,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 }
 
 @MainActor
-final class MatrixService: ObservableObject {
+@Observable final class MatrixService {
     let verification = VerificationService()
     let threadFeed = ThreadFeedService()
     let activity = ActivityService()
@@ -470,23 +470,23 @@ final class MatrixService: ObservableObject {
     let avatarImages = AvatarImageCache()
     private let roomSubscriptions = RoomSubscriptionCoordinator()
     private let readDelivery = ReadStateDelivery()
-    @Published private(set) var pendingInvitationRoomIDs = Set<String>()
-    private lazy var invitationActions = InvitationActions { [weak self] pending in
+    private(set) var pendingInvitationRoomIDs = Set<String>()
+    @ObservationIgnored private lazy var invitationActions = InvitationActions { [weak self] pending in
         self?.pendingInvitationRoomIDs = pending
     }
     private var lastAutomaticReceipt: ReadReceiptTarget?
     var timelineSelectionID: UUID { selection }
-    @Published var status: ConnectionStatus = .signedOut
-    @Published var connectionDetail = "Opening your workspace…"
-    @Published private(set) var connectionErrorMessage: String?
-    @Published private(set) var isRetryingConnection = false
-    @Published private(set) var canRetryConnection = false
+    var status: ConnectionStatus = .signedOut
+    var connectionDetail = "Opening your workspace…"
+    private(set) var connectionErrorMessage: String?
+    private(set) var isRetryingConnection = false
+    private(set) var canRetryConnection = false
     private let connectionRecovery = ConnectionRecovery()
     private var profileLoadTask: Task<Void, Never>?
     private var profileRevision: UInt64 = 0
     private var roomDetailsSaves = Set<String>()
     private var connectionStopTask: (id: UUID, task: Task<Void, Never>)?
-    @Published private(set) var sessionCleanupPending = false
+    private(set) var sessionCleanupPending = false
     /// Sign-in and sign-out exclude each other for the whole of their SDK and Keychain work,
     /// so a late credential delete can never erase a newer sign-in.
     private enum AuthOperation { case signingIn, signingOut }
@@ -496,34 +496,34 @@ final class MatrixService: ObservableObject {
     var canChangeAuthentication: Bool {
         authOperation == nil && !sessionCleanupPending && connectionStopTask == nil
     }
-    @Published var errorMessage: String?
-    @Published var rooms: [ChatRoom] = []
-    @Published var workspaces: [Workspace] = []
-    @Published var messages: [ChatMessage] = []
-    @Published private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
-    @Published private(set) var pendingSendActions = Set<SendQueueMessageKey>()
+    var errorMessage: String?
+    var rooms: [ChatRoom] = []
+    var workspaces: [Workspace] = []
+    var messages: [ChatMessage] = []
+    private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
+    private(set) var pendingSendActions = Set<SendQueueMessageKey>()
     private var mainSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private var threadSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
-    @Published var threadMessages: [ChatMessage] = []
-    @Published private(set) var hasMoreHistory = true
-    @Published private(set) var hasMoreForwardHistory = false
-    @Published private(set) var isLoadingForwardHistory = false
-    @Published private(set) var firstUnreadEventID: String?
+    var threadMessages: [ChatMessage] = []
+    private(set) var hasMoreHistory = true
+    private(set) var hasMoreForwardHistory = false
+    private(set) var isLoadingForwardHistory = false
+    private(set) var firstUnreadEventID: String?
     private var forwardLoadID: UUID?
-    @Published private(set) var hasMoreThreadHistory = true
-    @Published var members: [ChatUser] = []
-    @Published var user: ChatUser?
-    @Published var selectedRoomID: String?
-    @Published var typingUsers: [String] = []
-    @Published var isPreview = false
-    @Published var searchResults: [ChatMessage] = []
-    @Published var searchState = "idle"
-    @Published var searchErrorMessage: String?
-    @Published var searchHasMore = false
-    @Published private(set) var searchIndexingState: SearchIndexingState = .idle
+    private(set) var hasMoreThreadHistory = true
+    var members: [ChatUser] = []
+    var user: ChatUser?
+    var selectedRoomID: String?
+    var typingUsers: [String] = []
+    var isPreview = false
+    var searchResults: [ChatMessage] = []
+    var searchState = "idle"
+    var searchErrorMessage: String?
+    var searchHasMore = false
+    private(set) var searchIndexingState: SearchIndexingState = .idle
     let publicDirectory = PublicRoomDirectoryService()
-    @Published var focusedEventID: String?
-    @Published private(set) var homeserverURL: String?
+    var focusedEventID: String?
+    private(set) var homeserverURL: String?
     var notificationHandler: ((DesktopMessageNotification) -> Void)?
     var notificationSessionID: UUID { sessionGeneration }
     let notificationRetries = NotificationSettingsRetryState()
@@ -558,7 +558,7 @@ final class MatrixService: ObservableObject {
             presentationID: messageActionThreadPresentationID)
     }
     private var visibleActionThreadID: String?
-    @Published private(set) var messageActionThreadPresentationID = UUID()
+    private(set) var messageActionThreadPresentationID = UUID()
 
     // Closing a pane invalidates its actions and read acknowledgements without cancelling the SDK's
     // independent read/listener lifetime.
@@ -686,7 +686,7 @@ final class MatrixService: ObservableObject {
     private var replyPreviewLoads = Set<MessageActionTarget.ReplyPreviewIdentity>()
     private var selection = UUID()
     private var sessionGeneration = UUID()
-    private lazy var roomListRefresher: RoomListRefresher = {
+    @ObservationIgnored private lazy var roomListRefresher: RoomListRefresher = {
         let refresher = RoomListRefresher()
         refresher.onChange = { [weak self, weak refresher] in
             guard let self, let refresher else { return }
@@ -1693,8 +1693,6 @@ final class MatrixService: ObservableObject {
         if token == selection, threadToken == threadSelection {
             hasMoreThreadHistory = !endReached
             readyThreadReadSelection = threadToken
-            // The initial pagination may finish without a new projection diff.
-            objectWillChange.send()
         }
     }
 

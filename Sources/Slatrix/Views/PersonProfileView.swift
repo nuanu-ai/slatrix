@@ -4,8 +4,8 @@ import SwiftUI
 struct PersonProfileView: View {
     private static let width: CGFloat = 448
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
-    @ObservedObject var people: PeopleService
+    let matrix: MatrixService
+    let people: PeopleService
     var userID: String
     var fallback: ChatUser? = nil
     var onOpenConversation: (String) -> Void

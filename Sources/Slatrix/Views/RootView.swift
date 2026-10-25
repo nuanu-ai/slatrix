@@ -32,7 +32,7 @@ enum AppRoute: String, CaseIterable {
 }
 
 struct RootView: View {
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     @ObservedObject private var platform = PlatformIntegration.shared
     @ObservedObject private var updater = AppUpdater.shared
     @EnvironmentObject var appearance: AppearanceStore
@@ -72,7 +72,6 @@ struct RootView: View {
     @State private var showPins = false
     @State private var pinPermissionRoomID: String?
     @State private var pinPermission = false
-    @State private var pinUpdating = false
     @State private var threadRoot: ChatMessage?
     @State private var navigationGeneration = UUID()
     @State private var composerGeneration = UUID()
@@ -322,10 +321,7 @@ struct RootView: View {
             }
             .environmentObject(previews)
             .quickLookPreview(Binding(get: { previews.url }, set: previews.presentationChanged))
-            .onReceive(matrix.$messages) { _ in previews.invalidateIfNeeded() }
-            .onReceive(matrix.$threadMessages) { _ in previews.invalidateIfNeeded() }
-            .onReceive(matrix.sharedFiles.$items) { _ in previews.invalidateIfNeeded() }
-            .onReceive(matrix.$rooms) { _ in previews.invalidateIfNeeded() }
+            .background(PreviewInvalidation(matrix: matrix, previews: previews))
             .environment(\.openURL, OpenURLAction(handler: handleOpenURL))
             .background(layoutMeasurement)
     }
@@ -364,7 +360,7 @@ struct RootView: View {
             .onChange(of: hasPresentedSheet) { _, shown in
                 if !shown { Task { @MainActor in openPendingNotification() } }
             }
-            .onReceive(matrix.verification.$isPresented) { shown in
+            .onChange(of: matrix.verification.isPresented, initial: true) { _, shown in
                 if shown { closeModal() }
                 if !shown { Task { @MainActor in openPendingNotification() } }
             }
@@ -375,7 +371,6 @@ struct RootView: View {
 
     private var roomObservedContent: some View {
         presentedContent
-            .onReceive(matrix.pinnedMessages.$isUpdating) { pinUpdating = $0 }
             .onChange(of: matrix.rooms) { _, rooms in
                 settleWorkspace()
                 cancelStaleThreadOpen()
@@ -2276,7 +2271,8 @@ struct RootView: View {
         }
     }
     private func canPin(_ room: ChatRoom) -> Bool {
-        !pinUpdating && !matrix.isPreview && (room.canPinMessages ?? (pinPermissionRoomID == room.id && pinPermission))
+        !matrix.pinnedMessages.isUpdating && !matrix.isPreview
+            && (room.canPinMessages ?? (pinPermissionRoomID == room.id && pinPermission))
     }
     private func loadPinPermission(_ room: ChatRoom) async {
         pinPermissionRoomID = nil
@@ -2619,6 +2615,19 @@ struct RootView: View {
             }
         default: break
         }
+    }
+}
+
+/// Closes Quick Look once its message leaves what is shown; on its own, so new messages do not redraw the window.
+private struct PreviewInvalidation: View {
+    let matrix: MatrixService
+    let previews: AttachmentPreviewController
+    var body: some View {
+        Color.clear
+            .onChange(of: matrix.messages) { previews.invalidateIfNeeded() }
+            .onChange(of: matrix.threadMessages) { previews.invalidateIfNeeded() }
+            .onChange(of: matrix.sharedFiles.items) { previews.invalidateIfNeeded() }
+            .onChange(of: matrix.rooms) { previews.invalidateIfNeeded() }
     }
 }
 
