@@ -178,7 +178,9 @@ struct QuickSwitcherView: View {
                     ForEach(SearchMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }.pickerStyle(.segmented).labelsHidden().frame(width: m(Self.modeWidth))
                 Spacer()
-                if searchBusy { ProgressView().controlSize(.small).accessibilityLabel("Searching") }
+                if searchBusy {
+                    ProgressView().controlSize(.small).accessibilityLabel("Searching").loadingInterval(.searchLoading)
+                }
             }
             if mode == .messages {
                 HStack(spacing: m.sp12) {
@@ -215,7 +217,7 @@ struct QuickSwitcherView: View {
             EmptyStateView(symbol: "text.magnifyingglass", title: "Search your messages")
         } else if count == 0 && searchBusy {
             VStack(spacing: m.sp12) {
-                ProgressView().controlSize(.small)
+                ProgressView().controlSize(.small).loadingInterval(.searchLoading)
                 Text("Searching…").font(m.font(.secondary)).foregroundStyle(colors.muted)
             }
         } else if count == 0 {
@@ -322,7 +324,7 @@ struct QuickSwitcherView: View {
             loadMore()
         } label: {
             HStack(spacing: m.sp8) {
-                if paging { ProgressView().controlSize(.small) }
+                if paging { ProgressView().controlSize(.small).loadingInterval(.searchLoading) }
                 Text(paging ? "Loading…" : "Load more").font(m.font(.meta, .medium))
             }
         }.buttonStyle(.link).disabled(paging || searchBusy)

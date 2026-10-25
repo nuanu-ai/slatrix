@@ -49,13 +49,15 @@ final class RoomListRefresher {
 
     private func refresh() async {
         guard let client else { return }
+        let interval = Performance.begin(.roomlistRefresh)
+        var listed = Set<String>()
+        defer { Performance.end(interval, ["rooms": listed.count]) }
         let generation = generation
         let spaces = await client.spaceService()
         _ = await spaces.topLevelJoinedSpaces()
         var nextRooms: [ChatRoom] = []
         var nextSpaces: [Workspace] = []
         var failure: Error?
-        var listed = Set<String>()
         for room in client.rooms() {
             if Task.isCancelled || generation != self.generation { return }
             do {

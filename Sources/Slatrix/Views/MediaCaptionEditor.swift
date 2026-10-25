@@ -44,7 +44,7 @@ struct MediaCaptionEditor: View {
                     .font(m.font(.secondary, .semibold)).textSelection(.enabled)
                 if loading {
                     HStack {
-                        ProgressView().controlSize(.small)
+                        ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
                         Text("Loading…").font(m.font(.meta))
                     }
                 }

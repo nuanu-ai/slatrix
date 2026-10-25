@@ -112,6 +112,7 @@ struct TimelineTable: NSViewRepresentable {
 
     static func dismantleNSView(_ view: TimelineScrollView, coordinator: TimelineTableCoordinator) {
         coordinator.remember()
+        coordinator.stopLoading()
     }
 }
 
@@ -154,6 +155,8 @@ struct TimelineTable: NSViewRepresentable {
     private var hoveredID: String?
     private var applying = false
     private var reported: (Bool, Bool)?
+    /// While the table waits for its first rows.
+    private var loading: Performance.Interval?
 
     func makeView() -> TimelineScrollView {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("row"))
@@ -187,6 +190,9 @@ struct TimelineTable: NSViewRepresentable {
     func update(_ configuration: TimelineTable) {
         let previous = self.configuration
         self.configuration = configuration
+        if previous == nil, !opened {
+            loading = Performance.begin(configuration.context.isThread ? .threadLoading : .timelineLoading)
+        }
         configuration.context.onHeight = { [weak self] id, height in self?.reported(height, for: id) }
         configuration.scroller.bottom = { [weak self] in self?.scrollToBottom(animated: true) }
         if previous?.focusedEventID != configuration.focusedEventID { pendingFocus = configuration.focusedEventID }
@@ -206,6 +212,8 @@ struct TimelineTable: NSViewRepresentable {
         let settingsChanged = settings != self.settings
         self.settings = settings
         guard next != rows || settingsChanged else { return }
+        let interval = Performance.begin(.timelineApply)
+        defer { Performance.end(interval, ["rows": next.count]) }
         guard opened || !rows.isEmpty else {
             rows = next
             reindex()
@@ -341,7 +349,7 @@ struct TimelineTable: NSViewRepresentable {
             let pending = IndexSet((Range(around) ?? 0..<0).filter { estimated.contains(rows[$0].id) })
             guard !pending.isEmpty else { return }
             let anchor = position ?? self.position(excluding: pending)
-            for row in pending { measure(rows[row]) }
+            Performance.measure(.rowsMeasure, ["rows": pending.count]) { for row in pending { measure(rows[row]) } }
             noteHeights(pending)
             updateSpacer()
             scroll(to: anchor)
@@ -412,13 +420,28 @@ struct TimelineTable: NSViewRepresentable {
     /// Applies a change to rows or heights and puts the viewport back where the policy says, before display.
     private func preservingPosition(_ change: () -> Void) {
         let position = opened ? position() : nil
+        let reading = readingRow()
         applying = true
         change()
         updateSpacer()
         if let position { scroll(to: position) }
         settle(keeping: position)
         applying = false
+        noteJump(from: reading)
         afterScroll()
+    }
+
+    /// The row the reader is looking at and where it sits in the viewport, unless they are at the newest message.
+    private func readingRow() -> (id: String, top: CGFloat)? {
+        guard opened, !viewport.isAtBottom, let row = firstVisibleRow(excluding: []) else { return nil }
+        return (row.id, row.top - scrollView.contentView.bounds.minY)
+    }
+
+    /// The policy holds the reader's row still through every change; this counts each time it did not.
+    private func noteJump(from reading: (id: String, top: CGFloat)?) {
+        guard let reading, let row = frame(reading.id) else { return }
+        let moved = row.top - scrollView.contentView.bounds.minY - reading.top
+        if abs(moved) >= 1 { Performance.event(.timelineJump, ["px": Int(moved.rounded())]) }
     }
 
     private func open() {
@@ -448,6 +471,16 @@ struct TimelineTable: NSViewRepresentable {
             startsAtUnread: configuration.startsAtUnread, remembered: remembered, contains: { index[$0] != nil })
         scroll(to: opening)
         settle(keeping: opening)
+        stopLoading()
+        if !configuration.context.isThread {
+            Performance.finishOnScreen(.roomOpen, ["rows": rows.count])
+            Performance.finishOnScreen(.launchConversation, ["rows": rows.count])
+        }
+    }
+
+    func stopLoading() {
+        if let loading { Performance.end(loading) }
+        loading = nil
     }
 
     private func scroll(to position: Policy.Position) {
@@ -508,9 +541,11 @@ struct TimelineTable: NSViewRepresentable {
         }
         // The reader moved: a linked message that has not loaded yet no longer takes over the view.
         pendingFocus = nil
+        let reading = readingRow()
         applying = true
         settle(keeping: nil)
         applying = false
+        noteJump(from: reading)
         updateHover()
         afterScroll()
     }
@@ -707,7 +742,9 @@ private struct TimelineLoadingRow: View {
     @Environment(\.metrics) private var m
     let loading: Bool
     var body: some View {
-        ZStack { if loading { ProgressView().controlSize(.small) } }.frame(maxWidth: .infinity).frame(height: m.sp40)
+        ZStack { if loading { ProgressView().controlSize(.small).loadingInterval(.historyLoading) } }.frame(
+            maxWidth: .infinity
+        ).frame(height: m.sp40)
     }
 }
 

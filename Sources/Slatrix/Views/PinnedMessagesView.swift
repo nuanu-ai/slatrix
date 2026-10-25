@@ -34,7 +34,7 @@ struct PinnedMessagesView: View {
             if service.messages.isEmpty {
                 if service.state == "loading" {
                     VStack(spacing: m.sp12) {
-                        ProgressView()
+                        ProgressView().loadingInterval(.pinsLoading)
                         Text("Loading…").font(m.font(.secondary)).foregroundStyle(colors.muted)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if service.state != "error" {

@@ -64,7 +64,7 @@ struct RoomNotificationSettingsView: View {
                 VStack(alignment: .leading, spacing: m.sp20) {
                     if loading {
                         HStack(spacing: m.sp8) {
-                            ProgressView().controlSize(.small)
+                            ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
                             Text("Loading…").font(m.font(.secondary)).foregroundStyle(
                                 colors.muted)
                         }.padding(.vertical, m.sp20)

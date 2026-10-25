@@ -87,6 +87,12 @@ struct SidebarView: View {
                     }.buttonStyle(.row).foregroundStyle(colors.muted).padding(.horizontal, m.sp8)
                 }.padding(.bottom, m.sp24)
             }.scrollIndicators(.hidden)
+                .loadingInterval(
+                    .sidebarLoading, while: matrix.rooms.isEmpty && matrix.status != .ready && !matrix.isPreview
+                )
+                .onChange(of: matrix.rooms.isEmpty, initial: true) { _, empty in
+                    if !empty { Performance.finishOnScreen(.launchRooms, ["rooms": matrix.rooms.count]) }
+                }
             // Silent while connected, like Slack; only trouble earns a line.
             if !matrix.isPreview && matrix.status != .ready {
                 HStack(spacing: m.sp8) {

@@ -1208,7 +1208,12 @@ final class MatrixService: ObservableObject {
                     Task { @MainActor [weak self] in
                         guard let self, self.selection == token, revision > self.timelineRevision else { return }
                         self.timelineRevision = revision
-                        self.messages = self.project(items, roomID: id)
+                        self.messages = Performance.measure(.timelineProject, ["items": items.count]) {
+                            self.project(items, roomID: id)
+                        }
+                        if !self.messages.isEmpty {
+                            Performance.finish(.roomTimeline, ["messages": self.messages.count])
+                        }
                     }
                 })
             guard selection == token else {
@@ -1427,7 +1432,9 @@ final class MatrixService: ObservableObject {
                         revision > self.threadRevision
                     else { return }
                     self.threadRevision = revision
-                    var messages = self.project(items, roomID: root.roomID, inThread: true)
+                    var messages = Performance.measure(.timelineProject, ["items": items.count]) {
+                        self.project(items, roomID: root.roomID, inThread: true)
+                    }
                     if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
                         messages[index].id = root.eventID
                     }
