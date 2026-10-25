@@ -5,7 +5,7 @@ struct NativeMessageBody: View {
     private var messageBody: String
     var formattedBody: String?
     private var showsSpoilerControl: Bool
-    private var menuCommands: [MessageMenuCommand]
+    private var menuCommands: () -> [MessageMenuCommand]
     @EnvironmentObject private var appearance: AppearanceStore
     @Environment(\.metrics) private var m
     @Environment(\.openURL) private var openURL
@@ -16,7 +16,8 @@ struct NativeMessageBody: View {
         var html: String?
     }
     init(
-        body: String, formattedBody: String?, showsSpoilerControl: Bool = true, menuCommands: [MessageMenuCommand] = []
+        body: String, formattedBody: String?, showsSpoilerControl: Bool = true,
+        menuCommands: @escaping () -> [MessageMenuCommand] = { [] }
     ) {
         messageBody = body
         self.formattedBody = formattedBody

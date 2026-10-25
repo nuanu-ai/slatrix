@@ -4,8 +4,10 @@ import Testing
 
 @testable import Slatrix
 
-/// Budgets for main-thread work at the scale of a busy account, set near three times a local debug run so a 3×
-/// regression fails while a slower CI machine passes. The timeline table's budgets are in `TimelineHostedTests`.
+/// Budgets for main-thread work at the scale of a busy account. The CI runner takes about 3.5 times as long as an M4 Pro
+/// debug run, so a budget is set near seven times the local time: a required check must not flip on noise, and the
+/// owner's performance log tracks finer drift. The room-list and rich-text budgets predate this and sit near three
+/// times. The timeline table's budgets are in `TimelineHostedTests`.
 @MainActor
 @Suite(.serialized, .tags(.budget), .enabled(if: budgetsEnabled))
 struct PerformanceBudgetTests {
@@ -52,7 +54,7 @@ struct PerformanceBudgetTests {
             return .now - start
         }
         #expect(service.messages.count == 1_050)
-        #expect(time < .milliseconds(12), "\(time)")
+        #expect(time < .milliseconds(25), "\(time)")
     }
 
     @Test("Rendering 1,000 formatted message bodies stays within budget")

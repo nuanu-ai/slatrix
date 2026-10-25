@@ -8,7 +8,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
     var fontSize: Double
     var textColor: NSColor
     var linkColor: NSColor
-    var menuCommands: [MessageMenuCommand]
+    var menuCommands: () -> [MessageMenuCommand]
     var onOpenURL: (URL) -> Void
     @Environment(\.lineLimit) private var lineLimit
 
@@ -134,7 +134,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
 }
 
 final class MessageTextView: NSTextView {
-    var menuCommands: [MessageMenuCommand] = []
+    var menuCommands: () -> [MessageMenuCommand] = { [] }
 
     /// A message never scrolls the timeline: AppKit asks a resized text view to reveal its selection, which would
     /// pull a resizing conversation away from its newest message.
@@ -144,7 +144,7 @@ final class MessageTextView: NSTextView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        var commands = menuCommands
+        var commands = menuCommands()
         let proposedRange = selectedRange()
         let range =
             proposedRange.location != NSNotFound && NSMaxRange(proposedRange) <= (string as NSString).length

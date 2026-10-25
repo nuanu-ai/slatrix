@@ -640,7 +640,8 @@ final class MatrixService: ObservableObject {
         case .conversation: items = messages
         case .thread: items = threadMessages
         }
-        return items.first { $0.eventID == target.message.eventID && $0.roomID == target.message.roomID }
+        // From the newest end, where the rows people act on are.
+        return items.last { $0.eventID == target.message.eventID && $0.roomID == target.message.roomID }
     }
     private func validateMessageAction(_ target: MessageActionTarget) throws {
         try Task.checkCancellation()
@@ -1586,7 +1587,7 @@ final class MatrixService: ObservableObject {
     /// loading; a request then joins the page in flight instead of starting a second one.
     private func paginateBackwards(_ timeline: Timeline) async throws -> Bool {
         if let current = backwardPage, current.timeline === timeline { return try await current.task.value }
-        let task = Task { try await timeline.paginateBackwards(numEvents: 50) }
+        let task = Task { try await timeline.paginateBackwards(numEvents: 100) }
         backwardPage = (timeline, task)
         defer { if backwardPage?.timeline === timeline { backwardPage = nil } }
         return try await task.value

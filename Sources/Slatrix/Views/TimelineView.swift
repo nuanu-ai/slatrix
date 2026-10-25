@@ -28,6 +28,10 @@ struct TimelineView: View {
     var onEditCaption: ((MessageActionTarget) -> Void)? = nil
     @State private var loadingHistory = false
     @State private var deleting: MessageActionTarget?
+    @State private var cancelling: ChatMessage?
+    /// Retries and cancellations started here and not yet finished, by message ID.
+    @State private var sendActions = Set<String>()
+    @State private var linkCopy: LinkCopy?
     @State private var jumpVisible = false
     @State private var layout = TimelineLayoutCache()
     @State private var rowContext = TimelineRowContext()
@@ -78,10 +82,13 @@ struct TimelineView: View {
         .background(colors.canvas)
         .onDisappear {
             deleting = nil
+            cancelling = nil
+            linkCopy = nil
             onBottomVisibilityChange?(false)
         }
         .onChange(of: matrix.messageActionContext) { _, _ in
             if let deleting, !matrix.isCurrentMessageAction(deleting) { self.deleting = nil }
+            if let linkCopy, !matrix.isCurrentMessagePermalink(linkCopy.target) { self.linkCopy = nil }
         }
         .alert(
             "Delete message?",
@@ -104,6 +111,27 @@ struct TimelineView: View {
         } message: {
             Text("This can’t be undone.")
         }
+        .alert(
+            "Cancel sending this message?",
+            isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } })
+        ) {
+            Button("Keep sending", role: .cancel) { cancelling = nil }
+            Button("Cancel sending", role: .destructive) {
+                if let message = cancelling { cancelSend(message) }
+                cancelling = nil
+            }
+        } message: {
+            Text("It may already have been delivered.")
+        }
+        .alert(
+            "Couldn’t copy message link",
+            isPresented: Binding(get: { linkCopy?.error != nil }, set: { if !$0 { linkCopy?.error = nil } })
+        ) {
+            Button("Retry") { [target = linkCopy?.target] in if let target { copyLink(target) } }
+            Button("Cancel", role: .cancel) { linkCopy = nil }
+        } message: {
+            Text(linkCopy?.error ?? "Try again in a moment.")
+        }
     }
 
     /// One row per layout row, plus what the row shows from the session; the layout itself changes only with the
@@ -117,7 +145,8 @@ struct TimelineView: View {
             rows: rows, hasOlder: hasOlder, hasNewer: hasNewer, loadingHistory: loadingHistory, welcome: welcome,
             pinned: room.pinnedEventIDs,
             canPin: canPinMessages, savedIDs: savedIDs, highlighted: thread ? nil : matrix.focusedEventID,
-            sendFailures: matrix.sendFailures, pendingSendActions: matrix.pendingSendActions, context: context)
+            sendFailures: matrix.sendFailures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
+            context: context)
         return layout.entries(for: inputs) { buildEntries(rows, context: context) }
     }
 
@@ -136,23 +165,31 @@ struct TimelineView: View {
                     id: "welcome",
                     kind: .welcome(welcome)))
         }
+        // Read once: each read of a published property costs more than the lookups below.
+        let pinned = Set(room.pinnedEventIDs)
+        let highlighted = thread ? nil : matrix.focusedEventID
+        let failures = matrix.sendFailures
+        let pending = matrix.pendingSendActions
         for row in rows {
             switch row.kind {
             case .day(let label): entries.append(TimelineEntry(id: row.id, kind: .day(label)))
             case .unread: entries.append(TimelineEntry(id: row.id, kind: .unread))
             case .message(let message, let grouped, let time):
+                let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
                 entries.append(
                     TimelineEntry(
                         id: row.id,
                         kind: .message(
                             TimelineMessageEntry(
                                 message: message, grouped: grouped, time: time,
-                                saved: savedIDs.contains(
-                                    SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id),
-                                pinned: room.pinnedEventIDs.contains(message.eventID), canPin: canPinMessages,
-                                highlighted: !thread && matrix.focusedEventID == message.eventID,
-                                sendFailure: matrix.sendFailure(for: message),
-                                sendBusy: matrix.isSendActionPending(for: message), context: context))))
+                                saved: !savedIDs.isEmpty
+                                    && savedIDs.contains(
+                                        SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id),
+                                pinned: pinned.contains(message.eventID), canPin: canPinMessages,
+                                highlighted: highlighted == message.eventID,
+                                sendFailure: failures.isEmpty ? nil : failures[key],
+                                sendBusy: !pending.isEmpty && pending.contains(key) || sendActions.contains(message.id),
+                                context: context))))
             }
         }
         if hasNewer { entries.append(TimelineEntry(id: "newer", kind: .loading(loadingHistory))) }
@@ -173,12 +210,87 @@ struct TimelineView: View {
         context.onEdit = onEdit
         context.onSave = onSave
         context.onDelete = { deleting = $0 }
+        context.onReact = { react($1, target: $0) }
+        context.onRetrySend = { retrySend($0) }
+        context.onCancelSend = { cancelling = $0 }
+        context.onCopyLink = { copyLink($0) }
+        context.isCopyingLink = { [linkCopy] in linkCopy?.attempt != nil && linkCopy?.target.eventID == $0 }
         context.onShowReply = onShowReply
         context.onOpenProfile = onOpenProfile
         context.onTogglePin = onTogglePin
         context.onForward = onForward
         context.onEditCaption = onEditCaption
         return context
+    }
+
+    /// A link being copied, or the error that copying it ended with. Only the latest request writes the pasteboard.
+    private struct LinkCopy {
+        var target: MessagePermalinkTarget
+        var attempt: UUID?
+        var error: String?
+    }
+
+    private func copyLink(_ target: MessagePermalinkTarget) {
+        guard linkCopy?.attempt == nil || linkCopy?.target.eventID != target.eventID,
+            matrix.isCurrentMessagePermalink(target)
+        else { return }
+        let attempt = UUID()
+        linkCopy = LinkCopy(target: target, attempt: attempt)
+        Task {
+            defer { if linkCopy?.attempt == attempt { linkCopy?.attempt = nil } }
+            do {
+                let link = try await matrix.messagePermalink(for: target)
+                guard !Task.isCancelled, linkCopy?.attempt == attempt, matrix.isCurrentMessagePermalink(target)
+                else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(link, forType: .string)
+                linkCopy = nil
+            } catch is CancellationError {} catch {
+                guard linkCopy?.attempt == attempt, matrix.isCurrentMessagePermalink(target) else { return }
+                linkCopy?.error = MatrixService.safeError(error)
+            }
+        }
+    }
+
+    private func react(_ key: String, target: MessageActionTarget) {
+        Task {
+            do { try await matrix.toggleReaction(target, key: key) } catch is CancellationError {} catch {
+                if matrix.isCurrentMessageAction(target) { matrix.errorMessage = MatrixService.safeError(error) }
+            }
+        }
+    }
+
+    private func retrySend(_ message: ChatMessage) {
+        guard sendActions.insert(message.id).inserted else { return }
+        let account = matrix.notificationSessionID
+        Task {
+            defer { sendActions.remove(message.id) }
+            guard matrix.notificationSessionID == account else { return }
+            do { try await matrix.retryMessage(message) } catch {
+                if matrix.notificationSessionID == account, matrix.selectedRoomID == message.roomID {
+                    matrix.errorMessage = MatrixService.safeError(error)
+                }
+            }
+        }
+    }
+
+    private func cancelSend(_ message: ChatMessage) {
+        guard sendActions.insert(message.id).inserted else { return }
+        let account = matrix.notificationSessionID
+        Task {
+            defer { sendActions.remove(message.id) }
+            guard matrix.notificationSessionID == account else { return }
+            do {
+                let cancelled = try await matrix.cancelMessage(message)
+                if !cancelled, matrix.notificationSessionID == account, matrix.selectedRoomID == message.roomID {
+                    matrix.errorMessage = "Too late to cancel; the message may have sent."
+                }
+            } catch {
+                if matrix.notificationSessionID == account, matrix.selectedRoomID == message.roomID {
+                    matrix.errorMessage = MatrixService.safeError(error)
+                }
+            }
+        }
     }
 
     private func loadHistory(forward: Bool = false) {
@@ -228,6 +340,7 @@ struct TimelineView: View {
         var highlighted: String?
         var sendFailures: [SendQueueMessageKey: MessageSendFailure]
         var pendingSendActions: Set<SendQueueMessageKey>
+        var sendActions: Set<String>
         var context: MessageActionTarget.Context
     }
     private var entryInputs: EntryInputs?
@@ -256,56 +369,56 @@ struct TimelineView: View {
     }
 }
 
+/// What a message row does when someone acts on it, bound to that message by the timeline.
+struct MessageRowActions {
+    var openProfile: (() -> Void)?
+    var thread: () -> Void = {}
+    var reply: () -> Void = {}
+    var save: () -> Void = {}
+    /// Nil while the message cannot take a reaction.
+    var react: ((String) -> Void)?
+    var openReactions: (() -> Void)?
+    var retrySend: () -> Void = {}
+    var cancelSend: () -> Void = {}
+    /// Built when a menu opens (a right-click, the toolbar's ellipsis, the text's own menu), never at rest.
+    var menu: () -> [MessageMenuCommand] = { [] }
+}
+
+/// A message as the timeline shows it at rest. Menus, the reaction picker and confirmations live with the timeline
+/// and are made when someone asks for them.
 struct MessageRow: View {
-    /// Not observed: the timeline hands a row new values whenever anything it shows changes.
-    let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     let message: ChatMessage
     var grouped = false
     var isThread = false
-    var actionTarget: MessageActionTarget? = nil
+    var own = false
     var highlighted = false
     var isSaved = false
-    var onThread: () -> Void
-    var onReply: () -> Void
-    var onEdit: () -> Void
-    var onSave: () -> Void
-    var onDelete: () -> Void
-    var onShowReply: ((String) -> Void)? = nil
-    var onOpenProfile: ((String, ChatUser?) -> Void)? = nil
     var isPinned = false
-    var canPin = false
-    var onTogglePin: (() -> Void)? = nil
-    var onForward: ((MessageActionTarget) -> Void)? = nil
-    var onEditCaption: ((MessageActionTarget) -> Void)? = nil
+    var sendFailure: MessageSendFailure? = nil
+    var sendBusy = false
     /// The timeline tracks the pointer for all rows, so hover never resets when a row's values change.
     var hovered = false
     /// Precomputed by the timeline's layout; formatted here only for rows shown elsewhere.
     var timeLabel: String? = nil
-    /// Laid out offscreen for its height: menus, alerts and popovers never change it.
-    var measuring = false
+    var avatar: AvatarView? = nil
+    var replyPreview: ReplyPreviewView? = nil
+    var attachment: AttachmentView? = nil
+    var actions = MessageRowActions()
     @Environment(\.metrics) private var m
-    @State private var emojiOpen = false
-    @State private var reactionTarget: MessageActionTarget?
-    @State private var sendActionInProgress = false
-    @State private var confirmCancelSend = false
-    @State private var permalinkCopyTarget: MessagePermalinkTarget?
-    @State private var permalinkCopyAttempt: UUID?
-    @State private var permalinkCopyError: String?
     private var colors: AppColors { appearance.colors }
-    private var own: Bool { message.senderID == matrix.user?.id }
     private var pendingSend: Bool { own && message.sendState != "sent" }
-    private var sendActionBusy: Bool { sendActionInProgress || matrix.isSendActionPending(for: message) }
     private var compact: Bool { appearance.density == .compact }
     private var time: String { timeLabel ?? message.timestamp.formatted(.dateTime.hour().minute()) }
     var body: some View {
-        if measuring {
-            layout
-        } else {
-            interactive
-        }
+        layout
+            .background(hovered ? colors.hover : highlighted ? colors.accent.opacity(0.12) : .clear)
+            // Over the row's top edge, like Slack's: hovering never changes the row's height.
+            .overlay(alignment: .topTrailing) {
+                if hovered && !message.isRedacted { toolbar.padding(.trailing, m.sp16) }
+            }
+            .contentShape(Rectangle())
     }
-    /// Everything that decides the row's size; a timeline measures rows with this alone.
     private var layout: some View {
         HStack(alignment: .top, spacing: m.sp12) {
             if !compact {
@@ -314,9 +427,12 @@ struct MessageRow: View {
                     Text(hovered ? time : "").font(m.font(.caption)).lineLimit(1).fixedSize()
                         .foregroundStyle(colors.muted).frame(width: m.avatar, alignment: .trailing).padding(.top, m.sp4)
                 } else {
-                    Button(action: openProfile) {
-                        AvatarView(name: message.senderName, size: m.avatar, matrix: matrix, source: message.avatarURL)
-                    }.buttonStyle(.row).disabled(onOpenProfile == nil).help("View \(message.senderName)’s profile")
+                    Button {
+                        actions.openProfile?()
+                    } label: {
+                        avatar ?? AvatarView(name: message.senderName, size: m.avatar)
+                    }.buttonStyle(.row).disabled(actions.openProfile == nil).help(
+                        "View \(message.senderName)’s profile")
                 }
             }
             VStack(alignment: .leading, spacing: m.sp4) {
@@ -330,10 +446,12 @@ struct MessageRow: View {
                             Text(time).font(m.font(.caption))
                                 .foregroundStyle(colors.muted)
                         }
-                        Button(action: openProfile) {
+                        Button {
+                            actions.openProfile?()
+                        } label: {
                             Text(message.senderName).font(m.font(.body, .bold))
                                 .foregroundStyle(colors.primaryText)
-                        }.buttonStyle(.row).disabled(onOpenProfile == nil).help("View profile")
+                        }.buttonStyle(.row).disabled(actions.openProfile == nil).help("View profile")
                         if !compact {
                             Text(time).font(m.font(.caption))
                                 .foregroundStyle(colors.muted)
@@ -349,29 +467,23 @@ struct MessageRow: View {
                         colors.muted
                     )
                 } else {
-                    if let preview = message.replyPreview {
-                        ReplyPreviewView(
-                            matrix: matrix, message: message, preview: preview, origin: actionTarget,
-                            onOpen: onShowReply)
-                    }
+                    if let replyPreview { replyPreview }
                     if message.kind == "m.room.encrypted" {
                         // One quiet line per message; the header offers the recovery key once for all of them.
                         Label(message.body, systemImage: "lock").font(m.font(.secondary)).italic()
                             .foregroundStyle(colors.muted)
                     } else if message.showsMessageBody {
                         NativeMessageBody(
-                            body: message.body, formattedBody: message.formattedBody, menuCommands: menuCommands)
+                            body: message.body, formattedBody: message.formattedBody, menuCommands: actions.menu)
                     }
                     if message.isEdited { Text("(edited)").font(m.font(.caption)).foregroundStyle(colors.muted) }
-                    if let attachment = message.attachment {
-                        AttachmentView(matrix: matrix, message: message, attachment: attachment).padding(
-                            .vertical, m.sp4)
-                    }
+                    // A reused cell shows another message: a download or preview in flight must not carry over.
+                    if let attachment { attachment.padding(.vertical, m.sp4).id(message.id) }
                     if !message.reactions.isEmpty {
                         HStack(spacing: m.sp4) {
                             ForEach(message.reactions, id: \.key) { reaction in
                                 Button {
-                                    react(reaction.key)
+                                    actions.react?(reaction.key)
                                 } label: {
                                     HStack(spacing: m.sp4) {
                                         Text(reaction.key)
@@ -379,19 +491,21 @@ struct MessageRow: View {
                                     }.padding(.horizontal, m.sp8).frame(height: m.sp24).background(
                                         reaction.mine ? colors.selection.opacity(0.6) : colors.raised, in: Capsule()
                                     ).overlay(Capsule().stroke(reaction.mine ? colors.accent : .clear, lineWidth: 1))
-                                }.buttonStyle(.row).disabled(actionTarget == nil).help(
+                                }.buttonStyle(.row).disabled(actions.react == nil).help(
                                     "\(reaction.key) · \(reaction.count) \(reaction.mine ? "including you" : "reactions")"
                                 )
                             }
-                            Button(action: openReactions) {
+                            Button {
+                                actions.openReactions?()
+                            } label: {
                                 Image(systemName: "face.smiling").font(m.font(.meta)).padding(.horizontal, m.sp8).frame(
                                     height: m.sp24
                                 ).background(colors.raised, in: Capsule())
-                            }.buttonStyle(.row).disabled(actionTarget == nil).help("Add reaction")
+                            }.buttonStyle(.row).disabled(actions.openReactions == nil).help("Add reaction")
                         }.padding(.top, m.sp2)
                     }
                     if !isThread && message.replyCount > 0 {
-                        Button(action: onThread) {
+                        Button(action: actions.thread) {
                             HStack(spacing: m.sp8) {
                                 Image(systemName: "bubble.left.and.bubble.right.fill").font(m.font(.meta))
                                 Text("\(message.replyCount) \(message.replyCount == 1 ? "reply" : "replies")").font(
@@ -401,18 +515,19 @@ struct MessageRow: View {
                     }
                     if pendingSend {
                         VStack(alignment: .leading, spacing: m.sp8) {
-                            if let failure = matrix.sendFailure(for: message) {
+                            if let failure = sendFailure {
                                 Label(failure.message, systemImage: "exclamationmark.circle").font(m.font(.caption))
                                     .foregroundStyle(.orange)
                                 HStack(spacing: m.sp12) {
                                     if failure.canRetry {
-                                        Button(failure.kind == .recoverable ? "Resume sending" : "Retry") {
-                                            retrySend()
-                                        }.buttonStyle(.row).foregroundStyle(colors.accent).disabled(sendActionBusy)
+                                        Button(
+                                            failure.kind == .recoverable ? "Resume sending" : "Retry",
+                                            action: actions.retrySend
+                                        ).buttonStyle(.row).foregroundStyle(colors.accent).disabled(sendBusy)
                                     }
-                                    Button("Cancel sending…") { confirmCancelSend = true }.buttonStyle(.row)
-                                        .foregroundStyle(colors.muted).disabled(sendActionBusy)
-                                    if sendActionBusy { ProgressView().controlSize(.mini) }
+                                    Button("Cancel sending…", action: actions.cancelSend).buttonStyle(.row)
+                                        .foregroundStyle(colors.muted).disabled(sendBusy)
+                                    if sendBusy { ProgressView().controlSize(.mini) }
                                 }.font(m.font(.caption))
                             } else {
                                 Label("Sending…", systemImage: "clock").font(m.font(.caption)).foregroundStyle(
@@ -424,91 +539,34 @@ struct MessageRow: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.padding(.horizontal, m.sp20).padding(.top, grouped || compact ? 3 : 12).padding(.bottom, m.sp4)
     }
-    private var interactive: some View {
-        layout
-            .background(hovered ? colors.hover : highlighted ? colors.accent.opacity(0.12) : .clear)
-            // Over the row's top edge, like Slack's: hovering never changes the row's height.
-            .overlay(alignment: .topTrailing) {
-                if hovered && !message.isRedacted { actions.padding(.trailing, m.sp16) }
-            }
-            .contentShape(Rectangle())
-            .contextMenu { NativeMessageMenuCommands(commands: menuCommands) }
-            .accessibilityElement(children: .contain)
-            .accessibilityActions {
-                if pendingSend {
-                    Button("Cancel sending…") { confirmCancelSend = true }
-                } else {
-                    Button("Reply in thread", action: onThread)
-                    Button("Add reaction", action: openReactions).disabled(actionTarget == nil)
-                    Button(isSaved ? "Remove from Later" : "Save for later", action: onSave)
-                }
-            }
-            .popover(isPresented: $emojiOpen, arrowEdge: .top) {
-                ReactionPicker { key in
-                    react(key, target: reactionTarget)
-                    emojiOpen = false
-                    reactionTarget = nil
-                }.padding(m.sp12)
-            }
-            .onChange(of: matrix.messageActionContext) { _, _ in
-                if let reactionTarget, !matrix.isCurrentMessageAction(reactionTarget) {
-                    emojiOpen = false
-                    self.reactionTarget = nil
-                }
-                if let permalinkCopyTarget, !matrix.isCurrentMessagePermalink(permalinkCopyTarget) {
-                    clearPermalinkCopy()
-                }
-            }
-            .onDisappear {
-                emojiOpen = false
-                reactionTarget = nil
-                clearPermalinkCopy()
-            }
-            .alert("Cancel sending this message?", isPresented: $confirmCancelSend) {
-                Button("Keep sending", role: .cancel) {}
-                Button("Cancel sending", role: .destructive) { cancelSend() }
-            } message: {
-                Text("It may already have been delivered.")
-            }
-            .alert(
-                "Couldn’t copy message link",
-                isPresented: Binding(get: { permalinkCopyError != nil }, set: { if !$0 { permalinkCopyError = nil } })
-            ) {
-                Button("Retry") { [target = permalinkCopyTarget] in if let target { copyPermalink(target) } }
-                Button("Cancel", role: .cancel) { clearPermalinkCopy() }
-            } message: {
-                Text(permalinkCopyError ?? "Try again in a moment.")
-            }
-    }
     /// Small enough to sit inside a one-line grouped message, so hovering never changes a row's height.
     static let toolbarButton: CGFloat = 24
-    private var actions: some View {
+    private var toolbar: some View {
         HStack(spacing: 0) {
             if !pendingSend {
                 IconButton(
                     symbol: "face.smiling", label: "Add reaction", role: .body, side: Self.toolbarButton,
-                    action: openReactions
-                ).disabled(
-                    actionTarget == nil)
+                    action: { actions.openReactions?() }
+                ).disabled(actions.openReactions == nil)
                 if !isThread {
                     IconButton(
                         symbol: "bubble.right", label: "Reply in thread", role: .body, side: Self.toolbarButton,
-                        action: onThread)
+                        action: actions.thread)
                 }
                 IconButton(
                     symbol: "arrowshape.turn.up.left",
                     label: "Reply",
                     role: .body, side: Self.toolbarButton,
-                    action: onReply
+                    action: actions.reply
                 )
                 IconButton(
                     symbol: isSaved ? "bookmark.fill" : "bookmark",
                     label: isSaved ? "Remove from Later" : "Save for later", role: .body, side: Self.toolbarButton,
-                    action: onSave
+                    action: actions.save
                 )
             }
             Menu {
-                NativeMessageMenuCommands(commands: menuCommands)
+                NativeMessageMenuCommands(commands: actions.menu())
             } label: {
                 Image(systemName: "ellipsis").font(m.font(.body)).frame(
                     width: m(Self.toolbarButton), height: m(Self.toolbarButton))
@@ -520,92 +578,141 @@ struct MessageRow: View {
             color: .black.opacity(0.12), radius: 3, y: 2
         )
     }
-    private var menuCommands: [MessageMenuCommand] {
+}
+
+extension TimelineRowContext {
+    func actionTarget(for message: ChatMessage) -> MessageActionTarget? {
+        let surface: MessageActionTarget.Surface? = isThread ? threadRootID.map { .thread(rootID: $0) } : .conversation
+        return surface.flatMap { matrix?.captureMessageAction(message: message, surface: $0) }
+    }
+
+    /// `id` is the row's, for placing the reaction picker over it.
+    func actions(for id: String, _ row: TimelineMessageEntry, target: MessageActionTarget?) -> MessageRowActions {
+        let message = row.message
+        var actions = MessageRowActions(
+            openProfile: onOpenProfile.map { open in
+                {
+                    open(
+                        message.senderID,
+                        ChatUser(id: message.senderID, name: message.senderName, avatarURL: message.avatarURL))
+                }
+            },
+            thread: { self.onThread(message) }, reply: { self.onReply(message) }, save: { self.onSave(message) },
+            react: target.map { target in { self.onReact(target, $0) } },
+            openReactions: target.map { target in
+                {
+                    guard self.matrix?.isCurrentMessageAction(target) == true else { return }
+                    self.onPickReaction(id, target) { self.onReact(target, $0) }
+                }
+            },
+            retrySend: { self.onRetrySend(message) }, cancelSend: { self.onCancelSend(message) })
+        actions.menu = { [actions] in self.menu(row, target: target, actions: actions) }
+        return actions
+    }
+
+    /// What VoiceOver offers on a message besides its menu.
+    func accessibilityCommands(for id: String, _ row: TimelineMessageEntry, target: MessageActionTarget?)
+        -> [MessageMenuCommand]
+    {
+        let actions = actions(for: id, row, target: target)
+        if row.message.senderID == matrix?.user?.id && row.message.sendState != "sent" {
+            return [MessageMenuCommand(id: "cancel-send", title: "Cancel sending…", perform: actions.cancelSend)]
+        }
+        return [
+            MessageMenuCommand(id: "thread", title: "Reply in thread", perform: actions.thread),
+            MessageMenuCommand(
+                id: "reaction", title: "Add reaction", isEnabled: actions.openReactions != nil,
+                perform: { actions.openReactions?() }),
+            MessageMenuCommand(
+                id: "save", title: row.saved ? "Remove from Later" : "Save for later", perform: actions.save),
+        ]
+    }
+
+    private func menu(_ row: TimelineMessageEntry, target: MessageActionTarget?, actions: MessageRowActions)
+        -> [MessageMenuCommand]
+    {
+        let message = row.message
+        let own = message.senderID == matrix?.user?.id
+        let body = message.body
+        let copyText = MessageMenuCommand(
+            id: "copy-text", title: "Copy text",
+            perform: {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(body, forType: .string)
+            })
         var commands: [MessageMenuCommand] = []
-        if pendingSend {
-            if let failure = matrix.sendFailure(for: message), failure.canRetry {
+        if own && message.sendState != "sent" {
+            if let failure = row.sendFailure, failure.canRetry {
                 commands.append(
                     MessageMenuCommand(
                         id: "retry-send", title: failure.kind == .recoverable ? "Resume sending" : "Retry sending",
-                        isEnabled: !sendActionBusy, perform: retrySend))
+                        isEnabled: !row.sendBusy, perform: actions.retrySend))
             }
-            let body = message.body
+            commands.append(copyText)
             commands.append(
                 MessageMenuCommand(
-                    id: "copy-text", title: "Copy text",
-                    perform: {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(body, forType: .string)
-                    }))
-            commands.append(
-                MessageMenuCommand(
-                    id: "cancel-send", title: "Cancel sending…", isEnabled: !sendActionBusy, isDestructive: true,
-                    perform: { confirmCancelSend = true }))
+                    id: "cancel-send", title: "Cancel sending…", isEnabled: !row.sendBusy, isDestructive: true,
+                    perform: actions.cancelSend))
             return commands
         }
-        if onOpenProfile != nil {
+        if let openProfile = actions.openProfile {
             commands.append(MessageMenuCommand(id: "profile", title: "View profile", perform: openProfile))
             commands.append(MessageMenuCommand(id: "profile-divider", title: "", isSeparator: true))
         }
         commands += [
             MessageMenuCommand(
-                id: "reaction", title: "Add reaction…", isEnabled: actionTarget != nil, perform: openReactions),
-            MessageMenuCommand(id: "thread", title: "Reply in thread", perform: onThread),
+                id: "reaction", title: "Add reaction…", isEnabled: actions.openReactions != nil,
+                perform: { actions.openReactions?() }),
+            MessageMenuCommand(id: "thread", title: "Reply in thread", perform: actions.thread),
+            MessageMenuCommand(id: "reply", title: "Reply", perform: actions.reply),
             MessageMenuCommand(
-                id: "reply", title: "Reply",
-                perform: onReply),
-            MessageMenuCommand(id: "save", title: isSaved ? "Remove from Later" : "Save for later", perform: onSave),
+                id: "save", title: row.saved ? "Remove from Later" : "Save for later", perform: actions.save),
         ]
         if let onForward, ForwardMessageContent.supports(message) {
-            let target = actionTarget
             commands.append(
                 MessageMenuCommand(
                     id: "forward", title: "Forward…", isEnabled: target != nil,
-                    perform: { [target] in if let target { onForward(target) } }))
+                    perform: { if let target { onForward(target) } }))
         }
         if let onTogglePin {
             commands.append(
                 MessageMenuCommand(
-                    id: "pin", title: isPinned ? "Unpin from conversation" : "Pin to conversation",
-                    isEnabled: canPin && (isPinned || !message.isRedacted) && message.eventID.hasPrefix("$"),
-                    perform: onTogglePin))
+                    id: "pin", title: row.pinned ? "Unpin from conversation" : "Pin to conversation",
+                    isEnabled: row.canPin && (row.pinned || !message.isRedacted) && message.eventID.hasPrefix("$"),
+                    perform: { onTogglePin(message) }))
         }
-        let body = message.body
-        let linkTarget = capturePermalinkTarget()
+        let link = permalinkTarget(for: message)
+        let copying = isCopyingLink(message.eventID)
         commands += [
+            copyText,
             MessageMenuCommand(
-                id: "copy-text", title: "Copy text",
-                perform: {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(body, forType: .string)
-                }),
-            MessageMenuCommand(
-                id: "copy-link", title: permalinkCopyAttempt == nil ? "Copy link" : "Copying link…",
-                isEnabled: linkTarget != nil && permalinkCopyAttempt == nil,
-                perform: { [target = linkTarget] in if let target { copyPermalink(target) } }),
+                id: "copy-link", title: copying ? "Copying link…" : "Copy link", isEnabled: link != nil && !copying,
+                perform: { if let link { self.onCopyLink(link) } }),
         ]
         if own && !message.isRedacted {
             commands.append(MessageMenuCommand(id: "edit-divider", title: "", isSeparator: true))
             if message.supportsCaptionEditing, let onEditCaption {
-                let target = actionTarget
                 commands.append(
                     MessageMenuCommand(
                         id: "edit-caption", title: "Edit caption…", isEnabled: target != nil,
-                        perform: { [target] in if let target { onEditCaption(target) } }))
+                        perform: { if let target { onEditCaption(target) } }))
             }
             if message.supportsTextEditing {
                 commands.append(
                     MessageMenuCommand(
-                        id: "edit", title: "Edit message", isEnabled: actionTarget != nil, perform: onEdit))
+                        id: "edit", title: "Edit message", isEnabled: target != nil,
+                        perform: { if let target { self.onEdit(target) } }))
             }
             commands.append(
                 MessageMenuCommand(
-                    id: "delete", title: "Delete message…", isEnabled: actionTarget != nil, isDestructive: true,
-                    perform: onDelete))
+                    id: "delete", title: "Delete message…", isEnabled: target != nil, isDestructive: true,
+                    perform: { if let target { self.onDelete(target) } }))
         }
         return commands
     }
-    private func capturePermalinkTarget() -> MessagePermalinkTarget? {
+
+    private func permalinkTarget(for message: ChatMessage) -> MessagePermalinkTarget? {
+        guard let matrix else { return nil }
         let surface: MessageActionTarget.Surface
         if isThread {
             guard let rootID = matrix.messageActionContext.readyThreadID else { return nil }
@@ -614,83 +721,6 @@ struct MessageRow: View {
             surface = .conversation
         }
         return matrix.captureMessagePermalink(message: message, surface: surface)
-    }
-    private func clearPermalinkCopy() {
-        permalinkCopyAttempt = nil
-        permalinkCopyTarget = nil
-        permalinkCopyError = nil
-    }
-    private func copyPermalink(_ target: MessagePermalinkTarget) {
-        guard permalinkCopyAttempt == nil, matrix.isCurrentMessagePermalink(target) else { return }
-        let attempt = UUID()
-        permalinkCopyTarget = target
-        permalinkCopyAttempt = attempt
-        permalinkCopyError = nil
-        Task {
-            defer { if permalinkCopyAttempt == attempt { permalinkCopyAttempt = nil } }
-            do {
-                let link = try await matrix.messagePermalink(for: target)
-                guard !Task.isCancelled, permalinkCopyAttempt == attempt, matrix.isCurrentMessagePermalink(target)
-                else { return }
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(link, forType: .string)
-                permalinkCopyTarget = nil
-            } catch is CancellationError {} catch {
-                guard permalinkCopyAttempt == attempt, matrix.isCurrentMessagePermalink(target) else { return }
-                permalinkCopyError = MatrixService.safeError(error)
-            }
-        }
-    }
-    private func retrySend() {
-        guard !sendActionInProgress else { return }
-        sendActionInProgress = true
-        let account = matrix.notificationSessionID
-        Task {
-            defer { sendActionInProgress = false }
-            guard matrix.notificationSessionID == account else { return }
-            do { try await matrix.retryMessage(message) } catch {
-                if matrix.notificationSessionID == account, matrix.selectedRoomID == message.roomID {
-                    matrix.errorMessage = MatrixService.safeError(error)
-                }
-            }
-        }
-    }
-    private func cancelSend() {
-        guard !sendActionInProgress else { return }
-        sendActionInProgress = true
-        let account = matrix.notificationSessionID
-        Task {
-            defer { sendActionInProgress = false }
-            guard matrix.notificationSessionID == account else { return }
-            do {
-                let cancelled = try await matrix.cancelMessage(message)
-                if !cancelled, matrix.notificationSessionID == account, matrix.selectedRoomID == message.roomID {
-                    matrix.errorMessage = "Too late to cancel; the message may have sent."
-                }
-            } catch {
-                if matrix.notificationSessionID == account, matrix.selectedRoomID == message.roomID {
-                    matrix.errorMessage = MatrixService.safeError(error)
-                }
-            }
-        }
-    }
-    private func openProfile() {
-        onOpenProfile?(
-            message.senderID, ChatUser(id: message.senderID, name: message.senderName, avatarURL: message.avatarURL))
-    }
-    private func openReactions() {
-        guard let actionTarget, matrix.isCurrentMessageAction(actionTarget) else { return }
-        reactionTarget = actionTarget
-        emojiOpen = true
-    }
-    private func react(_ key: String) { react(key, target: actionTarget) }
-    private func react(_ key: String, target: MessageActionTarget?) {
-        guard let target else { return }
-        Task {
-            do { try await matrix.toggleReaction(target, key: key) } catch is CancellationError {} catch {
-                if matrix.isCurrentMessageAction(target) { matrix.errorMessage = MatrixService.safeError(error) }
-            }
-        }
     }
 }
 

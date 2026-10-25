@@ -73,9 +73,14 @@ enum TimelineScrollPolicy {
         live ? viewport.distanceFromBottom > viewport.height / 2 : !viewport.isAtBottom
     }
 
+    /// History starts loading this many screens before the reader reaches an end, so a page lands before they do.
+    static let historyLead: CGFloat = 3
+
     /// Older history loads before the reader reaches the top, so scrolling up never stops at a button.
-    static func needsOlder(_ viewport: Viewport) -> Bool { viewport.top < viewport.height }
+    static func needsOlder(_ viewport: Viewport) -> Bool { viewport.top < viewport.height * historyLead }
 
     /// Newer history of a timeline opened at an older message loads before the reader reaches its end.
-    static func needsNewer(_ viewport: Viewport) -> Bool { viewport.distanceFromBottom < viewport.height }
+    static func needsNewer(_ viewport: Viewport) -> Bool {
+        viewport.distanceFromBottom < viewport.height * historyLead
+    }
 }
