@@ -41,6 +41,25 @@ final class RoomListRefresher {
         run()
     }
 
+    /// Reads the rooms the room list adds. A listed room's own info updates already report its changes; a reset
+    /// rereads every room.
+    func request(_ updates: [RoomListEntriesUpdate]) {
+        for update in updates {
+            switch update {
+            case .reset: return request()
+            case .append(let values): for room in values { added(room) }
+            case .pushFront(let value), .pushBack(let value), .insert(_, let value), .set(_, let value): added(value)
+            case .clear, .popFront, .popBack, .remove, .truncate: continue
+            }
+        }
+        run()
+    }
+
+    private func added(_ room: Room) {
+        let id = room.id()
+        if state.handles[id] == nil { changed[id] = room }
+    }
+
     private func roomChanged(_ room: Room, id: String, generation: UUID) {
         guard generation == self.generation else { return }
         changed[id] = room

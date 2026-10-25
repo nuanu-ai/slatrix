@@ -358,9 +358,9 @@ private final class TimelineObserver: TimelineListener, @unchecked Sendable {
 }
 
 private final class RoomsObserver: RoomListEntriesListener, @unchecked Sendable {
-    let callback: @Sendable () -> Void
-    init(_ callback: @escaping @Sendable () -> Void) { self.callback = callback }
-    func onUpdate(roomEntriesUpdate: [RoomListEntriesUpdate]) { callback() }
+    let callback: @Sendable ([RoomListEntriesUpdate]) -> Void
+    init(_ callback: @escaping @Sendable ([RoomListEntriesUpdate]) -> Void) { self.callback = callback }
+    func onUpdate(roomEntriesUpdate: [RoomListEntriesUpdate]) { callback(roomEntriesUpdate) }
 }
 
 private final class TypingObserver: TypingNotificationsListener, @unchecked Sendable {
@@ -937,7 +937,13 @@ final class MatrixService: ObservableObject {
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         roomList = allRooms.entriesWithDynamicAdapters(
             pageSize: 100,
-            listener: RoomsObserver { [weak self] in Task { @MainActor [weak self] in self?.requestRefresh() } })
+            listener: RoomsObserver { [weak self] updates in
+                Task { @MainActor [weak self] in
+                    // The updates carry this account's rooms; a late batch must not list them under another.
+                    guard let self, self.sessionGeneration == generation else { return }
+                    self.roomListRefresher.request(updates)
+                }
+            })
         // The dynamic list emits nothing until a filter is set; false means the list is already gone.
         guard roomList?.controller().setFilter(kind: .all(filters: [])) == true else {
             throw MatrixServiceError.request("Couldn’t load your conversations. Sign in again.")
