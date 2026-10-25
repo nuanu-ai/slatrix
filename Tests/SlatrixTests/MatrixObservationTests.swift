@@ -46,4 +46,25 @@ struct MatrixObservationTests {
         service.rooms[0].name = "Renamed"
         #expect(service.selectedRoom?.name == "Renamed")
     }
+
+    @Test("A message arriving leaves the conversation header alone until one can't be read")
+    func lockedMessages() {
+        let service = MatrixService()
+        let changes = Recorder<Void>()
+        withObservationTracking {
+            _ = service.hasLockedMessages
+        } onChange: {
+            changes.append(())
+        }
+        let message = ChatMessage(
+            id: "$1", roomID: "!open:example.org", senderID: "@ana:example.org", senderName: "Ana", body: "Hi",
+            timestamp: .now)
+        service.messages.append(message)
+        #expect(changes.all.isEmpty)
+        var locked = message
+        locked.id = "$2"
+        locked.kind = "m.room.encrypted"
+        service.messages.append(locked)
+        #expect(service.hasLockedMessages)
+    }
 }
