@@ -15,7 +15,9 @@ struct PerformanceLogTests {
         Performance.watchMainThread()
         let since = Date()
         DispatchQueue.main.async {
-            MainActor.assumeIsolated { Performance.measure(.timelineProject) { usleep(150_000) } }
+            MainActor.assumeIsolated {
+                Performance.measure(.timelineProject) { () -> Void in _ = usleep(150_000) }
+            }
         }
         let hang = await Task.detached {
             await firstPerformanceMessage(since: since) { $0.hasPrefix("hang ") && $0.contains("timeline.project") }
