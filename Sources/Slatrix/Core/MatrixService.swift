@@ -1169,17 +1169,29 @@ final class MatrixService: ObservableObject {
         await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil)
     }
 
+    /// Opens a conversation with unread messages at its unread line: live from the cache when the cache reaches the
+    /// line, else at the line from the server.
+    func resumeRoom(_ id: String, at anchor: String) async {
+        if showRecentRoom(id, containing: anchor) { return }
+        if await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil, containing: anchor) { return }
+        await jumpToMessage(roomID: id, eventID: anchor)
+    }
+
     /// Shows a conversation whose live timeline is still open, rows and all, in the frame of the click. False when
-    /// none is open.
-    func showRecentRoom(_ id: String) -> Bool {
+    /// none is open, or when it does not hold `anchor`.
+    func showRecentRoom(_ id: String, containing anchor: String? = nil) -> Bool {
         guard connectionStopTask == nil, client != nil, !isPreview else { return false }
-        if let live = liveTimeline, live.roomID == id {
+        func holds(_ kept: KeptTimeline) -> Bool {
+            anchor.map { Self.contains(kept.observer.snapshot.items, $0) } ?? true
+        }
+        if let live = liveTimeline, live.roomID == id, holds(live) {
             // Already on screen; this drops any other conversation that was still opening.
             selection = live.token
             showTimeline(live.observer.snapshot, roomID: id)
             return true
         }
-        guard let kept = recentTimelines.take(id) else { return false }
+        guard let kept = recentTimelines.entry(id), holds(kept) else { return false }
+        _ = recentTimelines.take(id)
         selection = kept.token
         showConversation(id, eventID: nil, token: kept.token)
         liveTimeline = kept
@@ -1224,7 +1236,15 @@ final class MatrixService: ObservableObject {
             eventID: eventID)
     }
 
-    private func setupRoom(_ id: String, focus: TimelineFocus, eventID: String?) async {
+    private static func contains(_ items: [TimelineItem], _ eventID: String) -> Bool {
+        items.contains { $0.asEvent().map { MatrixMapping.identifier($0.eventOrTransactionId) } == eventID }
+    }
+
+    /// False, without showing the room, when its live timeline does not hold `anchor`.
+    @discardableResult
+    private func setupRoom(_ id: String, focus: TimelineFocus, eventID: String?, containing anchor: String? = nil)
+        async -> Bool
+    {
         let token = UUID()
         selection = token
         updateSubscriptions(id)
@@ -1235,24 +1255,25 @@ final class MatrixService: ObservableObject {
             guard !Task.isCancelled else { return }
             self?.showConversation(id, eventID: eventID, token: token)
         }
+        var missedAnchor = false
         defer {
             handoff.cancel()
-            showConversation(id, eventID: eventID, token: token)
+            if !missedAnchor { showConversation(id, eventID: eventID, token: token) }
         }
         do {
             let client = try requireClient()
             var pendingRoom = try client.getRoom(roomId: id)
             for _ in 0..<50 where pendingRoom == nil {
                 try await Task.sleep(nanoseconds: 200_000_000)
-                guard selection == token else { return }
+                guard selection == token else { return true }
                 pendingRoom = try client.getRoom(roomId: id)
             }
             guard let room = pendingRoom else {
                 throw MatrixServiceError.request("This conversation is still loading. Try again in a moment.")
             }
-            if room.membership() == .invited { return }
+            if room.membership() == .invited { return true }
             let next = try await room.timelineWithConfiguration(configuration: Self.timelineConfiguration(focus))
-            guard selection == token else { return }
+            guard selection == token else { return true }
             let observer = TimelineObserver { [weak self] items, revision in
                 Task { @MainActor [weak self] in
                     guard let self, self.selection == token else { return }
@@ -1262,7 +1283,12 @@ final class MatrixService: ObservableObject {
             let listenerHandle = await next.addListener(listener: observer)
             guard selection == token else {
                 listenerHandle.cancel()
-                return
+                return true
+            }
+            if let anchor, !Self.contains(observer.snapshot.items, anchor) {
+                listenerHandle.cancel()
+                missedAnchor = true
+                return false
             }
             showConversation(id, eventID: eventID, token: token)
             timeline = next
@@ -1280,16 +1306,17 @@ final class MatrixService: ObservableObject {
             }
             if eventID == nil {
                 let endReached = try await paginateBackwards(next)
-                guard selection == token else { return }
+                guard selection == token else { return true }
                 hasMoreHistory = !endReached
                 // Loading or restoring a timeline does not mean the user has seen it.
                 // The visible live viewport submits an exact-event receipt separately.
             }
         } catch {
-            guard selection == token else { return }
+            guard selection == token else { return true }
             showConversation(id, eventID: eventID, token: token)
             errorMessage = Self.safeError(error)
         }
+        return true
     }
 
     private func showTimeline(_ snapshot: (items: [TimelineItem], revision: Int), roomID: String) {

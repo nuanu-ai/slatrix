@@ -6,6 +6,8 @@ struct RecentTimelines<Entry> {
     private var entries: [(roomID: String, entry: Entry)] = []
     var roomIDs: [String] { entries.map(\.roomID) }
 
+    func entry(_ roomID: String) -> Entry? { entries.first { $0.roomID == roomID }?.entry }
+
     mutating func take(_ roomID: String) -> Entry? {
         guard let index = entries.firstIndex(where: { $0.roomID == roomID }) else { return nil }
         return entries.remove(at: index).entry

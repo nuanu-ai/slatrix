@@ -38,6 +38,7 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     private let identifier: String
     private let cached: [TimelineItem]
     let timelines = Recorder<FakeLiveTimeline>()
+    let focuses = Recorder<TimelineFocus>()
     /// Holds reading the event cache, as a slow disk would.
     let buildGate = Gate()
     let membersGate = Gate()
@@ -51,6 +52,7 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     override func id() -> String { identifier }
     override func membership() -> Membership { .joined }
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
+        focuses.append(configuration.focus)
         await buildGate.wait()
         let timeline = FakeLiveTimeline(cached)
         timelines.append(timeline)

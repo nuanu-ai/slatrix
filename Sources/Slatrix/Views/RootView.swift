@@ -149,7 +149,10 @@ struct RootView: View {
             $0.id == matrix.selectedRoomID && ($0.isDirect || workspaceID == nil || $0.spaceIDs.contains(workspaceID!))
         }
     }
-    private var isResumingUnread: Bool { unreadResumeEventID != nil && unreadResumeEventID == matrix.focusedEventID }
+    /// Opened at its unread line, from the cache or at the line from the server.
+    private var isResumingUnread: Bool {
+        unreadResumeEventID != nil && (matrix.focusedEventID == nil || unreadResumeEventID == matrix.focusedEventID)
+    }
     private var draftAddresses: Set<AttachmentDraftAddress> {
         guard localReady, composerStateIdentity == composerIdentity else { return [] }
         return Set(drafts.filter { !$0.value.isEmpty }.keys.map { AttachmentDraftAddress(roomID: $0) })
@@ -1720,7 +1723,7 @@ struct RootView: View {
             }
         } else {
             // A conversation still open from earlier goes up with this click; the task below then finds it shown.
-            if destinationEventID == nil, restoringReply == nil { _ = matrix.showRecentRoom(id) }
+            if restoringReply == nil, eventID == nil { _ = matrix.showRecentRoom(id, containing: resumeAnchor) }
             Task { @MainActor in
                 guard navigationGeneration == generation, composerIdentity == identity else { return }
                 if let restoringReply {
@@ -1731,7 +1734,9 @@ struct RootView: View {
                         return
                     }
                 }
-                if let destinationEventID {
+                if let resumeAnchor, eventID == nil {
+                    await matrix.resumeRoom(id, at: resumeAnchor)
+                } else if let destinationEventID {
                     await matrix.jumpToMessage(roomID: id, eventID: destinationEventID)
                 } else if thread == nil || requiresRoomSelection {
                     await matrix.selectRoom(id)
