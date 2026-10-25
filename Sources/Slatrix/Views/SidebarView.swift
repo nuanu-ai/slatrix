@@ -218,9 +218,7 @@ struct SidebarView: View {
             .overlay(alignment: .topTrailing) {
                 switch badge {
                 case .mentions(let count):
-                    Text("\(count)").font(m.font(.caption, .bold)).padding(.horizontal, m.sp4).padding(
-                        .vertical, m.sp2
-                    ).background(Color(hex: 0xbc4b62), in: Capsule()).foregroundStyle(.white)
+                    CountBadge(text: count > 99 ? "99+" : "\(count)")
                 case .unread:
                     Circle().fill(colors.primaryText).frame(width: m(Self.dot) * 1.5, height: m(Self.dot) * 1.5)
                         .overlay(Circle().stroke(colors.frame, lineWidth: m.sp2))
@@ -309,16 +307,13 @@ struct SidebarView: View {
                 if draftRoomIDs.contains(room.id) {
                     Image(systemName: "pencil").font(m.font(.caption)).foregroundStyle(colors.muted)
                 }
-                if room.mentions > 0 {
-                    Text("\(room.mentions)").font(m.font(.caption, .bold)).padding(.horizontal, m.sp4).padding(
-                        .vertical, m.sp2
-                    ).background(Color(hex: 0xbc4b62), in: Capsule()).foregroundStyle(.white)
-                } else if room.unreadMessages > 0 || room.unread > 0 {
-                    Text("\(max(room.unreadMessages, room.unread))").font(m.font(.caption, .bold))
-                        .foregroundStyle(colors.primaryText)
-                } else if room.isMarkedUnread {
+                switch UnreadBadge(room) {
+                case .mentions(let count): CountBadge(text: count)
+                case .messages(let count): CountBadge(text: count, mention: false)
+                case .marked:
                     Circle().fill(colors.primaryText).frame(width: m(Self.dot), height: m(Self.dot)).accessibilityLabel(
                         "Marked unread")
+                case .none: EmptyView()
                 }
             }.padding(.leading, m.sp32).padding(.trailing, m.sp12).frame(height: m.row)
                 .background(

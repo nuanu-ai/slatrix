@@ -46,6 +46,7 @@ struct AppColors {
         }
     }
     var success: Color { Color(hex: 0x208768) }
+    var mention: Color { Color(hex: 0xbc4b62) }
 }
 
 extension Color {
