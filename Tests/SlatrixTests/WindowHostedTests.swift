@@ -20,6 +20,11 @@ struct WindowHostedTests {
             matrix.enterPreview()
             messages = busyConversation(1_000, roomID: matrix.selectedRoomID!, tag: UUID().uuidString)
             matrix.messages = messages
+            // A busy account: the open workspace lists nearly 300 conversations.
+            matrix.rooms += (0..<280).map {
+                ChatRoom(
+                    id: "!busy\($0):example.org", name: "Busy \($0)", unread: $0 % 3, spaceIDs: ["preview.workspace"])
+            }
             hosting = NSHostingView(rootView: AnyView(RootView(matrix: matrix).environmentObject(AppearanceStore())))
             window = NSWindow(
                 contentRect: NSRect(x: -20_000, y: -20_000, width: 1_440, height: 900), styleMask: .borderless,
