@@ -384,6 +384,30 @@ extension TimelineHostedTests {
         Issue.record("Never reached the oldest message")
     }
 
+    @Test(
+        "Scrolling a 1,000-message room up to its first message keeps its slowest step within budget", .tags(.budget),
+        .enabled(if: budgetsEnabled))
+    func scrollBudget() async {
+        var steps = 0
+        let worst = await fastest {
+            let harness = Harness(messages: busyConversation(1_000, roomID: Self.room.id, tag: UUID().uuidString))
+            defer { harness.close() }
+            harness.timeline.onPage = { true }
+            harness.window.setContentSize(NSSize(width: 760, height: 900))
+            harness.window.orderFrontRegardless()
+            await settle(harness)
+            var worst = Duration.zero
+            steps = 0
+            await scrollToTop(harness) {
+                worst = max(worst, $0)
+                steps += 1
+            }
+            return worst
+        }
+        #expect(steps > 1_000)
+        #expect(worst < .milliseconds(300), "\(worst)")
+    }
+
     @Test("Scrolling up through history at a reading pace never reaches the loading row")
     func historyArrivesAhead() async throws {
         let all = busyConversation(400, roomID: Self.room.id, tag: UUID().uuidString)
