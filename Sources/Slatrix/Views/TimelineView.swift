@@ -470,7 +470,8 @@ struct MessageRow: View {
                             body: message.body, formattedBody: message.formattedBody, menuCommands: actions.menu)
                     }
                     if message.isEdited { Text("(edited)").font(m.font(.caption)).foregroundStyle(colors.muted) }
-                    if let attachment { attachment.padding(.vertical, m.sp4) }
+                    // A reused cell shows another message: a download or preview in flight must not carry over.
+                    if let attachment { attachment.padding(.vertical, m.sp4).id(message.id) }
                     if !message.reactions.isEmpty {
                         HStack(spacing: m.sp4) {
                             ForEach(message.reactions, id: \.key) { reaction in

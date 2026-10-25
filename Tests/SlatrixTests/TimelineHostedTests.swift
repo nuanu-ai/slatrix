@@ -292,7 +292,7 @@ struct TimelineHostedTests {
         let text = try #require(
             Harness.views(in: harness.hosting).compactMap { $0 as? MessageTextView }.first { $0.string == "Message 4" })
         var row: NSView? = text
-        while let view = row, !(view is NSHostingView<TimelineRow?>) { row = view.superview }
+        while let view = row, !(view is TimelineCell) { row = view.superview }
         let host = try #require(row)
         let frame = host.convert(host.bounds, to: nil)
         let event = try #require(

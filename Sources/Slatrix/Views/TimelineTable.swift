@@ -118,10 +118,15 @@ struct TimelineTable: NSViewRepresentable {
         context.coordinator.update(self)
     }
 
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: TimelineScrollView, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
     static func dismantleNSView(_ view: TimelineScrollView, coordinator: TimelineTableCoordinator) {
         coordinator.closePicker()
         coordinator.remember()
         coordinator.stopLoading()
+        coordinator.recycleCells()
     }
 }
 
@@ -145,6 +150,12 @@ struct TimelineTable: NSViewRepresentable {
         var showAvatars: Bool
     }
     private static var heights: [HeightKey: CGFloat] = [:]
+    /// How far ahead of the reader rows are measured, in screens, and how long one pass between frames may take.
+    private static let ahead: CGFloat = 2
+    private static let prefetchSlice = Duration.milliseconds(4)
+    private static let spareCells = 20
+    private static let recycledCells = 40
+    private static var recycled: [TimelineCell] = []
 
     private var configuration: TimelineTable?
     private var rows: [TimelineEntry] = []
@@ -152,17 +163,24 @@ struct TimelineTable: NSViewRepresentable {
     private var index: [String: Int] = [:]
     private let scrollView = TimelineScrollView()
     private let table = TimelineTableView()
-    private var sizer: NSHostingController<TimelineRow>?
+    /// Cells built and measured ahead of the reader, by row ID, and cells to build the next ones in.
+    private var prepared: [String: TimelineCell] = [:]
+    private var spares: [TimelineCell] = []
     private var width: CGFloat = 0
     private var viewportHeight: CGFloat = 0
     private var settings: Settings?
     private var spacerHeight: CGFloat = 0
-    /// Rows whose height in the table is an estimate. Only rows within a screen of the viewport are measured, so
-    /// opening a room or loading a page lays out a screenful, not the whole history.
+    /// Rows whose height in the table is an estimate. Only rows on screen are measured at once, and those near it
+    /// between frames, so opening a room or loading a page lays out a screenful, not the whole history.
     private var estimated = Set<String>()
     private var opened = false
     private var pendingFocus: String?
     private var hoveredID: String?
+    /// Heights of this table's rows the table has been given, by row ID; the rest are estimates.
+    private var known: [String: CGFloat] = [:]
+    private var prefetching = false
+    private var scrollingUp = true
+    private var lastTop: CGFloat = 0
     private var applying = false
     private var reported: (Bool, Bool)?
     /// While the table waits for its first rows.
@@ -259,8 +277,10 @@ struct TimelineTable: NSViewRepresentable {
                 reindex()
             }
             var changed = IndexSet()
+            if settingsChanged { known = [:] }
             for row in rows.indices where rows[row] != next[row] || settingsChanged {
                 rows[row] = next[row]
+                known[rows[row].id] = nil
                 changed.insert(row)
             }
             if !changed.isEmpty {
@@ -281,7 +301,11 @@ struct TimelineTable: NSViewRepresentable {
         show(rows[row], in: cell)
     }
 
+    /// Updates the cell's row in place unless it already shows exactly this.
     private func show(_ entry: TimelineEntry, in cell: TimelineCell) {
+        let hovered = entry.id == hoveredID
+        let row = TimelineRow(entry: entry, hovered: hovered, context: configuration?.context ?? TimelineRowContext())
+        guard row != cell.row else { return }
         let commands: ((Bool) -> [MessageMenuCommand])? =
             if case .message(let row) = entry.kind, let context = configuration?.context {
                 { [id = entry.id] accessibility in
@@ -291,13 +315,27 @@ struct TimelineTable: NSViewRepresentable {
                         : context.actions(for: id, row, target: target).menu()
                 }
             } else { nil }
-        cell.show(view(for: entry, measuring: false), commands: commands)
+        cell.show(row, commands: commands)
     }
 
-    private func view(for entry: TimelineEntry, measuring: Bool) -> TimelineRow {
-        TimelineRow(
-            entry: entry, hovered: !measuring && entry.id == hoveredID, measuring: measuring,
-            context: configuration?.context ?? TimelineRowContext())
+    private func dequeue() -> TimelineCell {
+        table.makeView(withIdentifier: Self.cellID, owner: nil) as? TimelineCell ?? spares.popLast()
+            ?? Self.recycled.popLast() ?? TimelineCell(identifier: Self.cellID)
+    }
+
+    /// The next timeline, usually another room, shows its rows in these cells: updating a row's views in place costs
+    /// a fraction of building them.
+    func recycleCells() {
+        var cells = Array(prepared.values) + spares
+        table.enumerateAvailableRowViews { rowView, _ in
+            if let cell = rowView.view(atColumn: 0) as? TimelineCell { cells.append(cell) }
+        }
+        prepared = [:]
+        spares = []
+        for cell in cells where Self.recycled.count < Self.recycledCells {
+            cell.removeFromSuperview()
+            Self.recycled.append(cell)
+        }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -310,7 +348,7 @@ struct TimelineTable: NSViewRepresentable {
         case .end: return configuration?.context.metrics.sp8 ?? 8
         default: break
         }
-        if let height = measured(entry) {
+        if let height = known[entry.id] {
             estimated.remove(entry.id)
             return height
         }
@@ -319,9 +357,7 @@ struct TimelineTable: NSViewRepresentable {
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let cell =
-            tableView.makeView(withIdentifier: Self.cellID, owner: nil) as? TimelineCell
-            ?? TimelineCell(identifier: Self.cellID)
+        let cell = prepared.removeValue(forKey: rows[row].id) ?? dequeue()
         show(rows[row], in: cell)
         return cell
     }
@@ -363,23 +399,37 @@ struct TimelineTable: NSViewRepresentable {
         settings.map { HeightKey(entry: entry.layoutKey, width: width, settings: $0) }
     }
 
-    private func measured(_ entry: TimelineEntry) -> CGFloat? { key(entry).flatMap { Self.heights[$0] } }
-
-    private func measure(_ entry: TimelineEntry) {
-        guard let key = key(entry), Self.heights[key] == nil else { return }
-        let row = view(for: entry, measuring: true)
-        let sizer = sizer ?? NSHostingController(rootView: row)
-        self.sizer = sizer
-        sizer.rootView = row
+    /// Builds the row's cell off screen and measures it there, so showing it later costs no SwiftUI work. Returns
+    /// whether the table had only an estimate for it.
+    @discardableResult private func prepare(_ row: Int) -> Bool {
+        let entry = rows[row]
+        guard let key = key(entry) else { return false }
+        let shown = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell
+        let cell = shown ?? prepared[entry.id] ?? dequeue()
+        if shown == nil { prepared[entry.id] = cell }
+        show(entry, in: cell)
+        let wasKnown = known[entry.id] != nil
+        let measured = Self.heights[key]
         // shortcut: the cache is dropped whole when it grows past a few busy rooms at a few widths; an LRU if that
         // shows up in profiles.
         if Self.heights.count > 50_000 { Self.heights.removeAll() }
         // Whole points keep every row, and the text in it, on the pixel grid.
-        Self.heights[key] = max(
-            1, ceil(sizer.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height))
+        let height = measured ?? max(1, ceil(cell.height(width: width)))
+        Self.heights[key] = height
+        known[entry.id] = height
+        if shown == nil { cell.frame = NSRect(x: 0, y: 0, width: width, height: height) }
+        return !wasKnown
     }
 
-    /// Rough, cheap and never shown: a row is measured before it comes within a screen of the viewport.
+    /// Rows the reader left behind give their cells back for the next ones.
+    private func releasePrepared(outside near: NSRange) {
+        for (id, cell) in prepared where index[id].map({ !NSLocationInRange($0, near) }) ?? true {
+            prepared[id] = nil
+            if spares.count < Self.spareCells { spares.append(cell) }
+        }
+    }
+
+    /// Rough, cheap and never shown: a row is measured before it is drawn.
     private func estimate(_ entry: TimelineEntry) -> CGFloat {
         let m = configuration?.context.metrics ?? Metrics()
         switch entry.kind {
@@ -390,9 +440,19 @@ struct TimelineTable: NSViewRepresentable {
         case .message(let row):
             let line = m.size(.body) * 1.4
             let perLine = max(20, (width - m(100)) / (m.size(.body) * 0.5))
-            let lines = row.message.body.split(separator: "\n", omittingEmptySubsequences: false).reduce(0) {
-                $0 + max(1, ceil(CGFloat($1.count) / perLine))
+            // Characters counted as UTF-8 lead bytes: a whole room is estimated at once, and grapheme breaking costs
+            // more than this guess is worth.
+            var lines: CGFloat = 0
+            var characters: CGFloat = 0
+            for byte in row.message.body.utf8 {
+                if byte == 10 {
+                    lines += max(1, ceil(characters / perLine))
+                    characters = 0
+                } else if byte & 0xC0 != 0x80 {
+                    characters += 1
+                }
             }
+            lines += max(1, ceil(characters / perLine))
             var height = (row.grouped ? m.sp8 : m(40)) + lines * line
             if !row.message.reactions.isEmpty { height += m(30) }
             if row.message.attachment != nil { height += m(300) }
@@ -402,28 +462,77 @@ struct TimelineTable: NSViewRepresentable {
         }
     }
 
-    /// Measures the estimated rows in and around the viewport, keeping `position` (or the first measured row on
-    /// screen) where it is.
+    /// Measures the estimated rows on screen, keeping `position` (or the first measured row on screen) where it is.
+    /// Rows near the screen are measured ahead, between frames.
     private func settle(keeping position: Policy.Position?) {
+        defer { prefetchSoon() }
         for _ in 0..<4 {
-            let around = table.rows(in: scrollView.contentView.bounds.insetBy(dx: 0, dy: -viewportHeight))
-            let pending = IndexSet((Range(around) ?? 0..<0).filter { estimated.contains(rows[$0].id) })
+            let shown = table.rows(in: scrollView.contentView.bounds)
+            let pending = IndexSet((Range(shown) ?? 0..<0).filter { estimated.contains(rows[$0].id) })
             guard !pending.isEmpty else { return }
             let anchor = position ?? self.position(excluding: pending)
-            Performance.measure(.rowsMeasure, ["rows": pending.count]) { for row in pending { measure(rows[row]) } }
+            Performance.measure(.rowsMeasure, ["rows": pending.count]) { for row in pending { prepare(row) } }
             noteHeights(pending)
             updateSpacer()
             scroll(to: anchor)
         }
     }
 
+    private func prefetchSoon() {
+        guard !prefetching else { return }
+        prefetching = true
+        DispatchQueue.main.async { [weak self] in self?.prefetch() }
+    }
+
+    /// Prepares the cells of rows within `Self.ahead` screens of the viewport, nearest first, for a few milliseconds
+    /// a pass, so scrolling finds them built and measured and no frame waits on many at once.
+    private func prefetch() {
+        prefetching = false
+        guard opened, viewportHeight > 0 else { return }
+        let bounds = scrollView.contentView.bounds
+        // Ahead of the reader, and a little behind in case they turn back.
+        let ahead = viewportHeight * Self.ahead
+        let behind = viewportHeight / 2
+        let near = table.rows(
+            in: NSRect(
+                x: 0, y: bounds.minY - (scrollingUp ? ahead : behind), width: bounds.width,
+                height: bounds.height + ahead + behind))
+        releasePrepared(outside: near)
+        let shown = table.rows(in: bounds)
+        let pending = (Range(near) ?? 0..<0).filter {
+            // A loading row logs how long it is on screen; it is cheap to build when it gets there.
+            switch rows[$0].kind {
+            case .spacer, .end, .loading: return false
+            default: break
+            }
+            return prepared[rows[$0].id]?.entry != rows[$0]
+                && table.view(atColumn: 0, row: $0, makeIfNecessary: false) == nil
+        }.sorted { abs($0 - shown.location) < abs($1 - shown.location) }
+        guard !pending.isEmpty else { return }
+        let deadline = ContinuousClock.now + Self.prefetchSlice
+        var done = 0
+        var measured = IndexSet()
+        Performance.measure(.rowsMeasure, ["rows": pending.count]) {
+            for row in pending where done == 0 || ContinuousClock.now < deadline {
+                if prepare(row) { measured.insert(row) }
+                done += 1
+            }
+        }
+        if measured.isEmpty { prefetchSoon() } else { preservingPosition { noteHeights(measured) } }
+    }
+
     /// A row's own state (a revealed spoiler, an error under an attachment) changed its height.
     private func reported(_ reported: CGFloat, for id: String) {
         let height = ceil(reported)
+        // Only a row laid out at its measured height says something about its content: a reused cell reports its
+        // old row's height first.
         guard let row = index[id], let key = key(rows[row]), let measured = Self.heights[key],
-            abs(height - measured) > 0.5
+            abs(height - measured) > 0.5,
+            let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell,
+            cell.entry?.id == id, abs(cell.frame.height - measured) < 0.5
         else { return }
         Self.heights[key] = height
+        known[id] = height
         // Not inside the SwiftUI update that reported it.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.index[id] == row else { return }
@@ -433,6 +542,7 @@ struct TimelineTable: NSViewRepresentable {
 
     /// Every row is re-estimated at a new width; the settle that follows measures the ones near the viewport.
     private func remeasure() {
+        known = [:]
         guard !rows.isEmpty else { return }
         preservingPosition { noteHeights(IndexSet(integersIn: 0..<rows.count)) }
     }
@@ -602,6 +712,9 @@ struct TimelineTable: NSViewRepresentable {
         }
         // The reader moved: a linked message that has not loaded yet no longer takes over the view.
         pendingFocus = nil
+        let top = scrollView.contentView.bounds.minY
+        if top != lastTop { scrollingUp = top < lastTop }
+        lastTop = top
         let reading = readingRow()
         applying = true
         settle(keeping: nil)
@@ -727,31 +840,39 @@ final class TimelineTableView: NSTableView {
     override var acceptsFirstResponder: Bool { false }
 }
 
+/// A row's cell. It answers for the row's context menu and VoiceOver actions, as SwiftUI's own modifiers would, without
+/// every row at rest carrying them.
 final class TimelineCell: NSView {
-    private let host = TimelineHost(rootView: nil)
+    private let host = NSHostingController(rootView: TimelineRow?.none)
+    /// What the cell shows, so showing the same row again is free.
+    var row: TimelineRow? { host.rootView }
+    var entry: TimelineEntry? { host.rootView?.entry }
+    /// A message's menu, or with `true` its VoiceOver actions; nil for other rows.
+    private var commands: ((Bool) -> [MessageMenuCommand])?
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
         self.identifier = identifier
         host.sizingOptions = []
-        host.frame = bounds
-        host.autoresizingMask = [.width, .height]
-        addSubview(host)
+        // A row never sits under the toolbar, and following the safe area would update every row on every scroll.
+        host.safeAreaRegions = []
+        host.view.frame = bounds
+        host.view.autoresizingMask = [.width, .height]
+        // Every text view in the app hears every frame change posted; rows move on every scroll step.
+        postsFrameChangedNotifications = false
+        host.view.postsFrameChangedNotifications = false
+        addSubview(host.view)
     }
 
     required init?(coder: NSCoder) { nil }
 
-    /// `commands` gives a message's menu, or with `true` its VoiceOver actions, when one is asked for.
     func show(_ row: TimelineRow, commands: ((Bool) -> [MessageMenuCommand])?) {
         host.rootView = row
-        host.commands = commands
+        self.commands = commands
     }
-}
 
-/// A row's hosting view, which also answers for the row's context menu and VoiceOver actions, as SwiftUI's own
-/// modifiers would from here, without every row at rest carrying them.
-final class TimelineHost: NSHostingView<TimelineRow?> {
-    var commands: ((Bool) -> [MessageMenuCommand])?
+    /// The row's height at `width`, from the same views it is drawn with.
+    func height(width: CGFloat) -> CGFloat { host.sizeThatFits(in: CGSize(width: width, height: 0)).height }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         guard let commands else { return super.menu(for: event) }
@@ -760,6 +881,9 @@ final class TimelineHost: NSHostingView<TimelineRow?> {
         for item in menu.items { item.attributedTitle = nil }
         return menu
     }
+
+    override func isAccessibilityElement() -> Bool { commands != nil }
+    override func accessibilityRole() -> NSAccessibility.Role? { commands != nil ? .group : super.accessibilityRole() }
 
     override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
         guard let commands else { return super.accessibilityCustomActions() }
@@ -772,38 +896,36 @@ final class TimelineHost: NSHostingView<TimelineRow?> {
     }
 }
 
-/// A timeline row's SwiftUI content. Measured once offscreen for its height, then shown in a cell of that height.
-struct TimelineRow: View {
+/// A timeline row's SwiftUI content, measured and shown in the same cell. Equal rows draw the same.
+struct TimelineRow: View, Equatable {
     let entry: TimelineEntry
     let hovered: Bool
-    let measuring: Bool
     /// Zoom, held here rather than read from the shared context, so a change to it redraws the row.
     let metrics: Metrics
     let context: TimelineRowContext
 
-    init(entry: TimelineEntry, hovered: Bool, measuring: Bool, context: TimelineRowContext) {
+    init(entry: TimelineEntry, hovered: Bool, context: TimelineRowContext) {
         self.entry = entry
         self.hovered = hovered
-        self.measuring = measuring
         metrics = context.metrics
         self.context = context
+    }
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.entry == b.entry && a.hovered == b.hovered && a.metrics == b.metrics && a.context === b.context
     }
 
     var body: some View {
         if let appearance = context.appearance, let previews = context.previews {
             content.frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-                .frame(maxHeight: measuring ? nil : .infinity, alignment: .top)
+                .frame(maxHeight: .infinity, alignment: .top)
                 .background {
-                    if !measuring {
-                        GeometryReader { geometry in
-                            Color.clear.onChange(of: geometry.size.height) { _, height in
-                                context.onHeight(entry.id, height)
-                            }
+                    GeometryReader { geometry in
+                        Color.clear.onChange(of: geometry.size.height) { _, height in
+                            context.onHeight(entry.id, height)
                         }
                     }
                 }
-                // A reused cell shows another row: its row state must not carry over.
-                .id(measuring ? "" : entry.id)
                 .environment(\.metrics, metrics).environmentObject(appearance).environmentObject(previews)
                 .environment(\.openURL, context.openURL)
         }
