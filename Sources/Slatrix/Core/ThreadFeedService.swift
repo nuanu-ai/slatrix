@@ -116,6 +116,7 @@ final class RoomSubscriptionCoordinator {
     private var service: RoomListService?
     private var activeRoomID: String?
     private var feedRoomIDs = Set<String>()
+    private var recentRoomIDs = Set<String>()
     private var mutationRooms: [UUID: String] = [:]
     private var generation = UUID()
     private var pending: Task<Void, Error>?
@@ -127,11 +128,14 @@ final class RoomSubscriptionCoordinator {
         self.service = service
         activeRoomID = nil
         feedRoomIDs = []
+        recentRoomIDs = []
         mutationRooms = [:]
     }
 
-    func setActiveRoom(_ roomID: String?) async throws {
+    /// `recent` are the conversations kept open for coming back to.
+    func setActiveRoom(_ roomID: String?, recent: [String] = []) async throws {
         activeRoomID = roomID
+        recentRoomIDs = Set(recent)
         try await enqueue()
     }
     func setFeedRooms(_ roomIDs: Set<String>) async throws {
@@ -179,7 +183,8 @@ final class RoomSubscriptionCoordinator {
     private func enqueue() async throws {
         guard let service else { throw MatrixServiceError.signedOut }
         let target = Self.combined(
-            activeRoomID: activeRoomID, feedRoomIDs: feedRoomIDs, mutationRoomIDs: Set(mutationRooms.values))
+            activeRoomID: activeRoomID, feedRoomIDs: feedRoomIDs.union(recentRoomIDs),
+            mutationRoomIDs: Set(mutationRooms.values))
         let previous = pending
         let token = generation
         let next = Task { @MainActor [weak self] in

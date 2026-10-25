@@ -1719,6 +1719,8 @@ struct RootView: View {
                 threadReadyID = thread.eventID
             }
         } else {
+            // A conversation still open from earlier goes up with this click; the task below then finds it shown.
+            if destinationEventID == nil, restoringReply == nil { _ = matrix.showRecentRoom(id) }
             Task { @MainActor in
                 guard navigationGeneration == generation, composerIdentity == identity else { return }
                 if let restoringReply {

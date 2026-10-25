@@ -342,6 +342,7 @@ private final class TimelineObserver: TimelineListener, @unchecked Sendable {
     private var revision = 0
     let callback: @Sendable ([TimelineItem], Int) -> Void
     init(_ callback: @escaping @Sendable ([TimelineItem], Int) -> Void) { self.callback = callback }
+    var snapshot: (items: [TimelineItem], revision: Int) { lock.withLock { (items, revision) } }
     func onUpdate(diff: [TimelineDiff]) {
         let changes = diff.map(\.change)
         lock.lock()
@@ -531,6 +532,11 @@ final class MatrixService: ObservableObject {
     private var handles: [TaskHandle] = []
     private var timeline: Timeline?
     private var timelineHandle: TaskHandle?
+    /// The open conversation's live timeline; nil while it shows one opened at an older message.
+    private var liveTimeline: KeptTimeline?
+    private var recentTimelines = RecentTimelines<KeptTimeline>()
+    /// The open whose conversation is on screen, which can trail `selection` while the next one reads its cache.
+    private var shownSelection: UUID?
     private var typingHandle: TaskHandle?
     private var threadTimeline: Timeline?
     private var threadHandle: TaskHandle?
@@ -668,6 +674,11 @@ final class MatrixService: ObservableObject {
         threadSelection = threadID
         setMessageActionThread(rootID: rootID)
     }
+    func configureRoomOpenForChecks(client: Client, roomList: RoomListService, user: ChatUser) {
+        self.client = client
+        self.user = user
+        roomSubscriptions.attach(roomList)
+    }
     #endif
     private var captionSaves = Set<UUID>()
     private var forwardingReviews = Set<UUID>()
@@ -702,6 +713,32 @@ final class MatrixService: ObservableObject {
         let identity: String
     }
     private var mainMedia: [String: ShownMedia] = [:]
+    /// A live timeline with what its conversation last showed, so coming back to it rebuilds nothing.
+    @MainActor private final class KeptTimeline {
+        let roomID: String
+        let token: UUID
+        let timeline: Timeline
+        let observer: TimelineObserver
+        let listener: TaskHandle
+        var revision = 0
+        var messages: [ChatMessage] = []
+        var members: [ChatUser] = []
+        var hasMoreHistory = true
+        var firstUnreadEventID: String?
+        var eventIDs: [String: EventOrTransactionId] = [:]
+        var mediaSources: [String: MediaSource] = [:]
+        var thumbnailSources: [String: ThumbnailSource] = [:]
+        var media: [String: ShownMedia] = [:]
+        var forwardMedia: [String: ForwardMediaRevision] = [:]
+        var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
+        init(roomID: String, token: UUID, timeline: Timeline, observer: TimelineObserver, listener: TaskHandle) {
+            self.roomID = roomID
+            self.token = token
+            self.timeline = timeline
+            self.observer = observer
+            self.listener = listener
+        }
+    }
     private var threadMedia: [String: ShownMedia] = [:]
     private let mediaFiles = MediaFileCache()
     private let savedPreviewLimit = ConcurrencyLimit(slots: 2)
@@ -1003,6 +1040,8 @@ final class MatrixService: ObservableObject {
         timelineHandle?.cancel()
         typingHandle?.cancel()
         threadHandle?.cancel()
+        for kept in recentTimelines.removeAll() { kept.listener.cancel() }
+        liveTimeline = nil
         timelineHandle = nil
         typingHandle = nil
         threadHandle = nil
@@ -1125,7 +1164,46 @@ final class MatrixService: ObservableObject {
 
     private func requestRefresh() { roomListRefresher.request() }
 
-    func selectRoom(_ id: String) async { await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil) }
+    func selectRoom(_ id: String) async {
+        if showRecentRoom(id) { return }
+        await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil)
+    }
+
+    /// Shows a conversation whose live timeline is still open, rows and all, in the frame of the click. False when
+    /// none is open.
+    func showRecentRoom(_ id: String) -> Bool {
+        guard connectionStopTask == nil, client != nil, !isPreview else { return false }
+        if let live = liveTimeline, live.roomID == id {
+            // Already on screen; this drops any other conversation that was still opening.
+            selection = live.token
+            showTimeline(live.observer.snapshot, roomID: id)
+            return true
+        }
+        guard let kept = recentTimelines.take(id) else { return false }
+        selection = kept.token
+        showConversation(id, eventID: nil, token: kept.token)
+        liveTimeline = kept
+        timeline = kept.timeline
+        timelineHandle = kept.listener
+        messages = kept.messages
+        members = kept.members
+        hasMoreHistory = kept.hasMoreHistory
+        firstUnreadEventID = kept.firstUnreadEventID
+        eventIDs = kept.eventIDs
+        mediaSources = kept.mediaSources
+        thumbnailSources = kept.thumbnailSources
+        mainMedia = kept.media
+        mainForwardMedia = kept.forwardMedia
+        mainSendFailures = kept.sendFailures
+        sendFailures = kept.sendFailures
+        timelineRevision = kept.revision
+        // What arrived while the reader was away.
+        showTimeline(kept.observer.snapshot, roomID: id)
+        updateSubscriptions(id)
+        if let room = try? client?.getRoom(roomId: id) { watchTyping(room, token: kept.token) }
+        Task { [weak self] in await self?.loadMembers() }
+        return true
+    }
 
     func isLiveTimelineReady(roomID: String) -> Bool {
         guard connectionStopTask == nil, let client, selectedRoomID == roomID,
@@ -1147,6 +1225,126 @@ final class MatrixService: ObservableObject {
     }
 
     private func setupRoom(_ id: String, focus: TimelineFocus, eventID: String?) async {
+        let token = UUID()
+        selection = token
+        updateSubscriptions(id)
+        // The previous conversation stays up while this one reads its cache, so its rows replace the old ones in
+        // one frame; only a slow open shows the room before its rows.
+        let handoff = Task { [weak self] in
+            try? await Task.sleep(for: LoadingPresentation.handoff)
+            guard !Task.isCancelled else { return }
+            self?.showConversation(id, eventID: eventID, token: token)
+        }
+        defer {
+            handoff.cancel()
+            showConversation(id, eventID: eventID, token: token)
+        }
+        do {
+            let client = try requireClient()
+            var pendingRoom = try client.getRoom(roomId: id)
+            for _ in 0..<50 where pendingRoom == nil {
+                try await Task.sleep(nanoseconds: 200_000_000)
+                guard selection == token else { return }
+                pendingRoom = try client.getRoom(roomId: id)
+            }
+            guard let room = pendingRoom else {
+                throw MatrixServiceError.request("This conversation is still loading. Try again in a moment.")
+            }
+            if room.membership() == .invited { return }
+            let next = try await room.timelineWithConfiguration(configuration: Self.timelineConfiguration(focus))
+            guard selection == token else { return }
+            let observer = TimelineObserver { [weak self] items, revision in
+                Task { @MainActor [weak self] in
+                    guard let self, self.selection == token else { return }
+                    self.showTimeline((items, revision), roomID: id)
+                }
+            }
+            let listenerHandle = await next.addListener(listener: observer)
+            guard selection == token else {
+                listenerHandle.cancel()
+                return
+            }
+            showConversation(id, eventID: eventID, token: token)
+            timeline = next
+            timelineHandle = listenerHandle
+            if eventID == nil {
+                liveTimeline = KeptTimeline(
+                    roomID: id, token: token, timeline: next, observer: observer, listener: listenerHandle)
+            }
+            // The cached rows arrived with the listener; they go up in this same turn.
+            showTimeline(observer.snapshot, roomID: id)
+            watchTyping(room, token: token)
+            Task { [weak self] in
+                guard let self, self.selection == token else { return }
+                await self.loadMembers()
+            }
+            if eventID == nil {
+                let endReached = try await paginateBackwards(next)
+                guard selection == token else { return }
+                hasMoreHistory = !endReached
+                // Loading or restoring a timeline does not mean the user has seen it.
+                // The visible live viewport submits an exact-event receipt separately.
+            }
+        } catch {
+            guard selection == token else { return }
+            showConversation(id, eventID: eventID, token: token)
+            errorMessage = Self.safeError(error)
+        }
+    }
+
+    private func showTimeline(_ snapshot: (items: [TimelineItem], revision: Int), roomID: String) {
+        guard snapshot.revision > timelineRevision else { return }
+        timelineRevision = snapshot.revision
+        messages = project(snapshot.items, roomID: roomID)
+    }
+
+    private func watchTyping(_ room: Room, token: UUID) {
+        typingHandle?.cancel()
+        typingHandle = room.subscribeToTypingNotifications(
+            listener: TypingObserver { [weak self] ids in
+                Task { @MainActor [weak self] in
+                    guard let self, self.selection == token else { return }
+                    self.typingUsers = ids.filter { $0 != self.user?.id }.map { id in
+                        self.members.first { $0.id == id }?.name ?? id
+                    }
+                }
+            })
+    }
+
+    /// Recent conversations stay subscribed: sync keeps their timelines whole, and their member lists stay loaded.
+    private func updateSubscriptions(_ id: String) {
+        let recent = recentTimelines.roomIDs + (liveTimeline.map { [$0.roomID] } ?? [])
+        Task { [weak self] in
+            do { try await self?.roomSubscriptions.setActiveRoom(id, recent: recent) } catch is CancellationError {
+            } catch {
+                guard let self, self.selectedRoomID == id else { return }
+                self.errorMessage = Self.safeError(error)
+            }
+        }
+    }
+
+    /// Puts `id` on screen in place of the previous conversation, once per open. A live timeline being left stays
+    /// open among the recent ones.
+    private func showConversation(_ id: String, eventID: String?, token: UUID) {
+        guard selection == token, shownSelection != token else { return }
+        shownSelection = token
+        if let live = liveTimeline {
+            live.revision = timelineRevision
+            live.messages = messages
+            live.members = members
+            live.hasMoreHistory = hasMoreHistory
+            live.firstUnreadEventID = firstUnreadEventID
+            live.eventIDs = eventIDs
+            live.mediaSources = mediaSources
+            live.thumbnailSources = thumbnailSources
+            live.media = mainMedia
+            live.forwardMedia = mainForwardMedia
+            live.sendFailures = mainSendFailures
+            for closed in recentTimelines.keep(live, for: live.roomID) { closed.listener.cancel() }
+        } else {
+            timelineHandle?.cancel()
+        }
+        liveTimeline = nil
         mediaFiles.removeAll()
         mainMedia = [:]
         threadMedia = [:]
@@ -1176,67 +1374,14 @@ final class MatrixService: ObservableObject {
         hasMoreForwardHistory = eventID != nil
         isLoadingForwardHistory = false
         forwardLoadID = nil
-        let token = UUID()
-        selection = token
         timelineRevision = 0
         threadRevision = 0
-        timelineHandle?.cancel()
+        timelineHandle = nil
         typingHandle?.cancel()
         threadHandle?.cancel()
         timeline = nil
         threadTimeline = nil
         loadedThreadRootID = nil
-        do {
-            let client = try requireClient()
-            var pendingRoom = try client.getRoom(roomId: id)
-            for _ in 0..<50 where pendingRoom == nil {
-                try await Task.sleep(nanoseconds: 200_000_000)
-                guard selection == token else { return }
-                pendingRoom = try client.getRoom(roomId: id)
-            }
-            guard let room = pendingRoom else {
-                throw MatrixServiceError.request("This conversation is still loading. Try again in a moment.")
-            }
-            if room.membership() == .invited { return }
-            try await roomSubscriptions.setActiveRoom(id)
-            guard selection == token else { return }
-            let next = try await room.timelineWithConfiguration(configuration: Self.timelineConfiguration(focus))
-            guard selection == token else { return }
-            timeline = next
-            let listenerHandle = await next.addListener(
-                listener: TimelineObserver { [weak self] items, revision in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.selection == token, revision > self.timelineRevision else { return }
-                        self.timelineRevision = revision
-                        self.messages = self.project(items, roomID: id)
-                    }
-                })
-            guard selection == token else {
-                listenerHandle.cancel()
-                return
-            }
-            timelineHandle = listenerHandle
-            typingHandle = room.subscribeToTypingNotifications(
-                listener: TypingObserver { [weak self] ids in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.selection == token else { return }
-                        self.typingUsers = ids.filter { $0 != self.user?.id }.map { id in
-                            self.members.first { $0.id == id }?.name ?? id
-                        }
-                    }
-                })
-            Task { [weak self] in
-                guard let self, self.selection == token else { return }
-                await self.loadMembers()
-            }
-            if eventID == nil {
-                let endReached = try await paginateBackwards(next)
-                guard selection == token else { return }
-                hasMoreHistory = !endReached
-                // Loading or restoring a timeline does not mean the user has seen it.
-                // The visible live viewport submits an exact-event receipt separately.
-            }
-        } catch { if selection == token { errorMessage = Self.safeError(error) } }
     }
 
     private static func timelineConfiguration(_ focus: TimelineFocus) -> TimelineConfiguration {
