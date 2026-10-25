@@ -138,6 +138,7 @@ struct TimelineTable: NSViewRepresentable {
 
     private var configuration: TimelineTable?
     private var rows: [TimelineEntry] = []
+    private var applied: [TimelineEntry]?
     private var index: [String: Int] = [:]
     private let scrollView = TimelineScrollView()
     private let table = TimelineTableView()
@@ -197,14 +198,17 @@ struct TimelineTable: NSViewRepresentable {
 
     private func apply(_ entries: [TimelineEntry]) {
         guard width > 0, let configuration else { return }
-        let next =
-            [TimelineEntry(id: "spacer", kind: .spacer)] + entries + [TimelineEntry(id: "end", kind: .end)]
         let settings = Settings(
             zoom: configuration.context.metrics.zoom,
             density: configuration.context.appearance?.density ?? .comfortable,
             showAvatars: configuration.context.appearance?.showAvatars ?? true)
         let settingsChanged = settings != self.settings
         self.settings = settings
+        // The timeline hands back the same array while nothing in it changed, which makes this check instant.
+        guard entries != applied || settingsChanged else { return }
+        applied = entries
+        let next =
+            [TimelineEntry(id: "spacer", kind: .spacer)] + entries + [TimelineEntry(id: "end", kind: .end)]
         guard next != rows || settingsChanged else { return }
         guard opened || !rows.isEmpty else {
             rows = next
@@ -229,13 +233,13 @@ struct TimelineTable: NSViewRepresentable {
                 }
                 table.endUpdates()
                 NSAnimationContext.endGrouping()
+                reindex()
             }
             var changed = IndexSet()
             for row in rows.indices where rows[row] != next[row] || settingsChanged {
                 rows[row] = next[row]
                 changed.insert(row)
             }
-            reindex()
             if !changed.isEmpty {
                 noteHeights(changed)
                 for row in changed { refresh(row) }
