@@ -777,7 +777,17 @@ struct TimelineRow: View {
     let entry: TimelineEntry
     let hovered: Bool
     let measuring: Bool
+    /// Zoom, held here rather than read from the shared context, so a change to it redraws the row.
+    let metrics: Metrics
     let context: TimelineRowContext
+
+    init(entry: TimelineEntry, hovered: Bool, measuring: Bool, context: TimelineRowContext) {
+        self.entry = entry
+        self.hovered = hovered
+        self.measuring = measuring
+        metrics = context.metrics
+        self.context = context
+    }
 
     var body: some View {
         if let appearance = context.appearance, let previews = context.previews {
@@ -794,7 +804,7 @@ struct TimelineRow: View {
                 }
                 // A reused cell shows another row: its row state must not carry over.
                 .id(measuring ? "" : entry.id)
-                .environment(\.metrics, context.metrics).environmentObject(appearance).environmentObject(previews)
+                .environment(\.metrics, metrics).environmentObject(appearance).environmentObject(previews)
                 .environment(\.openURL, context.openURL)
         }
     }
@@ -816,7 +826,7 @@ struct TimelineRow: View {
                     isPinned: row.pinned, sendFailure: row.sendFailure, sendBusy: row.sendBusy, hovered: hovered,
                     timeLabel: row.time,
                     avatar: AvatarView(
-                        name: message.senderName, size: context.metrics.avatar, matrix: matrix,
+                        name: message.senderName, size: metrics.avatar, matrix: matrix,
                         source: message.avatarURL),
                     replyPreview: message.replyPreview.map {
                         ReplyPreviewView(
