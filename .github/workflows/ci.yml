@@ -41,6 +41,10 @@ jobs:
       - name: Test
         run: scripts/test.sh --quiet
 
+      # Alone and one at a time, so other tests do not skew the clock.
+      - name: Speed budgets
+        run: SLATRIX_BUDGETS=1 scripts/test.sh --quiet --filter Budget --no-parallel
+
       - name: Upload crash reports
         if: failure()
         uses: actions/upload-artifact@v4
