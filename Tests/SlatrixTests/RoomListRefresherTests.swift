@@ -156,3 +156,22 @@ extension RoomListRefresherTests {
         #expect(await eventually { refresher.rooms.first?.spaceIDs == ["!lab:example.org"] })
     }
 }
+
+extension RoomListRefresherTests {
+    @Test("A room the room list adds appears without rereading the others")
+    func addedRoomReadsOnlyThatRoom() async {
+        let quiet = FakeRoom(roomInfo(id: "!quiet:example.org"))
+        let client = FakeClient(rooms: [quiet])
+        let refresher = RoomListRefresher()
+        refresher.attach(client)
+        refresher.request()
+        #expect(await eventually { refresher.rooms.count == 1 })
+        let quietReads = quiet.infoReads
+        let fresh = FakeRoom(roomInfo(id: "!fresh:example.org"))
+        client.roomList = [quiet, fresh]
+        // A listed room's own info updates already report what moved it.
+        refresher.request([.set(index: 0, value: quiet), .append(values: [fresh])])
+        #expect(await eventually { refresher.rooms.map(\.id) == ["!quiet:example.org", "!fresh:example.org"] })
+        #expect(quiet.infoReads == quietReads)
+    }
+}
