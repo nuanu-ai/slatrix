@@ -58,6 +58,7 @@ The README and anything else a visitor reads should sound like a person wrote it
 ```sh
 scripts/test.sh         # build and run tests
 scripts/build-app.sh    # release app bundle in build/
+scripts/perf-report.sh  # flow timings, loading states, moved rows and hangs from the last day of use (or e.g. 7d)
 ```
 
 Both run `scripts/build-sdk.sh` first. It downloads the prebuilt SDK for the current pin and patches, and compiles it only when none is published yet (or with `SLATRIX_SDK_FROM_SOURCE=1`).
