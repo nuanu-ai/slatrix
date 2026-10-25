@@ -1,6 +1,6 @@
-import Combine
 import Foundation
 import MatrixRustSDK
+import Observation
 
 struct SharedContentItem: Identifiable, Hashable {
     var id: String
@@ -73,16 +73,16 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
 }
 
 @MainActor
-final class SharedFilesService: ObservableObject {
-    @Published private(set) var roomID: String?
-    @Published private(set) var items: [SharedContentItem] = []
-    @Published private(set) var state = "idle"
-    @Published private(set) var isLoadingMore = false
-    @Published private(set) var hasMore = false
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var historyLoads = 0
-    @Published private(set) var unavailableEncryptedCount = 0
-    @Published private(set) var savingItemIDs = Set<String>()
+@Observable final class SharedFilesService {
+    private(set) var roomID: String?
+    private(set) var items: [SharedContentItem] = []
+    private(set) var state = "idle"
+    private(set) var isLoadingMore = false
+    private(set) var hasMore = false
+    private(set) var errorMessage: String?
+    private(set) var historyLoads = 0
+    private(set) var unavailableEncryptedCount = 0
+    private(set) var savingItemIDs = Set<String>()
 
     private struct Media {
         let message: ChatMessage

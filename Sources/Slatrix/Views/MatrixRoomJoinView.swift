@@ -3,7 +3,7 @@ import SwiftUI
 struct MatrixRoomJoinView: View {
     private static let size = CGSize(width: 560, height: 592)
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     let request: MatrixRoomJoinRequest
     var onJoined: (MatrixRoomJoinDestination) -> Void
     var onClose: () -> Void

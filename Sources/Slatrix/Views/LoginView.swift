@@ -7,7 +7,7 @@ struct LoginView: View {
     private static let fieldHeight: CGFloat = 40
     private static let buttonHeight: CGFloat = 44
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     @State private var homeserver = "matrix.org"
     @State private var username = ""

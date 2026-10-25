@@ -8,8 +8,8 @@ struct PeopleAccountIdentity: Hashable {
 struct PeopleDirectoryView: View {
     private static let searchHeight: CGFloat = 40
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
-    @ObservedObject var people: PeopleService
+    let matrix: MatrixService
+    let people: PeopleService
     var onOpenProfile: (String, ChatUser?) -> Void
     @EnvironmentObject private var appearance: AppearanceStore
     @State private var query = ""
@@ -153,7 +153,7 @@ struct PeopleDirectoryView: View {
 
 private struct PersonDirectoryRow: View {
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     var person: PersonProfile
     var selected = false
     @EnvironmentObject private var appearance: AppearanceStore
@@ -182,8 +182,8 @@ private struct PersonDirectoryRow: View {
 struct PersonRecipientPicker: View {
     private static let resultsMaxHeight: CGFloat = 176
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
-    @ObservedObject var people: PeopleService
+    let matrix: MatrixService
+    let people: PeopleService
     @Binding var recipientID: String
     @EnvironmentObject private var appearance: AppearanceStore
     @State private var query = ""

@@ -1,6 +1,6 @@
-import Combine
 import Foundation
 import MatrixRustSDK
+import Observation
 
 // The pinned-events focus fetches validated related events itself. This SDK caps it at
 // the 128 most recently pinned IDs; backwards/forwards pagination is unsupported.
@@ -54,18 +54,18 @@ private final class PinnedRoomObserver: RoomInfoListener, @unchecked Sendable {
 }
 
 @MainActor
-final class PinnedMessagesService: ObservableObject {
-    @Published private(set) var roomID: String?
-    @Published private(set) var messages: [ChatMessage] = []
-    @Published private(set) var state = "idle"
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var canPinUnpin = false
-    @Published private(set) var isUpdating = false
-    @Published private(set) var totalLoaded = 0
-    @Published private(set) var totalPinned = 0
-    @Published private(set) var hasMore = false
-    @Published private(set) var coverageMessage: String?
-    @Published private(set) var pinnedEventIDs = Set<String>()
+@Observable final class PinnedMessagesService {
+    private(set) var roomID: String?
+    private(set) var messages: [ChatMessage] = []
+    private(set) var state = "idle"
+    private(set) var errorMessage: String?
+    private(set) var canPinUnpin = false
+    private(set) var isUpdating = false
+    private(set) var totalLoaded = 0
+    private(set) var totalPinned = 0
+    private(set) var hasMore = false
+    private(set) var coverageMessage: String?
+    private(set) var pinnedEventIDs = Set<String>()
 
     private var client: Client?
     private var session = UUID()

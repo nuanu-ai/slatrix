@@ -12,7 +12,7 @@ import SwiftUI
 
 struct SlatrixApp: App {
     @NSApplicationDelegateAdaptor(SlatrixAppDelegate.self) private var appDelegate
-    @StateObject private var matrix = MatrixService()
+    @State private var matrix = MatrixService()
     @StateObject private var appearance = AppearanceStore()
     var body: some Scene {
         Window("Slatrix", id: "main") {

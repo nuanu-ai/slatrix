@@ -1,8 +1,8 @@
-import Combine
 import Foundation
+import Observation
 
 @MainActor
-final class NotificationSettingsRetryState: ObservableObject {
+@Observable final class NotificationSettingsRetryState {
     enum Target: Equatable {
         case room(id: String, choice: RoomNotificationChoice)
         case account(category: AccountNotificationCategory, mode: AccountNotificationMode)
@@ -13,10 +13,10 @@ final class NotificationSettingsRetryState: ObservableObject {
         fileprivate let target: Target
     }
 
-    @Published private(set) var roomChoices: [String: RoomNotificationChoice] = [:]
-    @Published private(set) var defaultModes: [AccountNotificationCategory: AccountNotificationMode] = [:]
-    @Published private(set) var isWriting = false
-    @Published private(set) var revision = 0
+    private(set) var roomChoices: [String: RoomNotificationChoice] = [:]
+    private(set) var defaultModes: [AccountNotificationCategory: AccountNotificationMode] = [:]
+    private(set) var isWriting = false
+    private(set) var revision = 0
     private var generation = UUID()
     private var active: Ticket?
 

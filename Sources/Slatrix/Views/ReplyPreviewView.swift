@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ReplyPreviewView: View {
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     let message: ChatMessage
     let preview: ChatReplyPreview
     let origin: MessageActionTarget?

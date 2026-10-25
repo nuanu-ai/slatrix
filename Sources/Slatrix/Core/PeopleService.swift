@@ -1,6 +1,6 @@
-import Combine
 import Foundation
 import MatrixRustSDK
+import Observation
 
 struct PersonProfile: Identifiable, Hashable {
     var id: String
@@ -39,15 +39,15 @@ enum PeopleMapping {
 }
 
 @MainActor
-final class PeopleService: ObservableObject {
-    @Published private(set) var results: [PersonProfile] = []
-    @Published private(set) var searchState = "idle"
-    @Published private(set) var searchErrorMessage: String?
-    @Published private(set) var limited = false
-    @Published private(set) var profile: PersonProfile?
-    @Published private(set) var profileState = "idle"
-    @Published private(set) var profileErrorMessage: String?
-    @Published private(set) var statusSupported = false
+@Observable final class PeopleService {
+    private(set) var results: [PersonProfile] = []
+    private(set) var searchState = "idle"
+    private(set) var searchErrorMessage: String?
+    private(set) var limited = false
+    private(set) var profile: PersonProfile?
+    private(set) var profileState = "idle"
+    private(set) var profileErrorMessage: String?
+    private(set) var statusSupported = false
     private var client: Client?
     private var generation = UUID()
     private var searchGeneration = UUID()

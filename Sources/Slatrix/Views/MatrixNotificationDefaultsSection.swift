@@ -4,8 +4,8 @@ struct MatrixNotificationDefaultsSection: View {
     private static let pickerWidth: CGFloat = 180
     private static let buttonWidth: CGFloat = 64
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
-    @ObservedObject private var retries: NotificationSettingsRetryState
+    let matrix: MatrixService
+    private var retries: NotificationSettingsRetryState { matrix.notificationRetries }
     @EnvironmentObject private var appearance: AppearanceStore
     @State private var owner: Context?
     @State private var snapshot: AccountNotificationDefaultsSnapshot?
@@ -23,7 +23,6 @@ struct MatrixNotificationDefaultsSection: View {
 
     init(matrix: MatrixService) {
         self.matrix = matrix
-        _retries = ObservedObject(wrappedValue: matrix.notificationRetries)
     }
 
     private struct Context: Hashable {

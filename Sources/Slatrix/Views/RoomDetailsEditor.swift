@@ -5,7 +5,7 @@ struct RoomDetailsEditor: View {
     private static let topicMinHeight: CGFloat = 112
     private static let topicMaxHeight: CGFloat = 180
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     let roomID: String
     var onClose: () -> Void
     @EnvironmentObject private var appearance: AppearanceStore

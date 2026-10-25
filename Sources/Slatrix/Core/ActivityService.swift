@@ -1,6 +1,6 @@
-import Combine
 import Foundation
 import MatrixRustSDK
+import Observation
 
 struct ActivityItem: Identifiable, Hashable {
     enum Kind: String, Hashable { case message, invite }
@@ -20,8 +20,8 @@ struct ActivityItem: Identifiable, Hashable {
 }
 
 @MainActor
-final class ActivityService: ObservableObject {
-    @Published private(set) var items: [ActivityItem] = []
+@Observable final class ActivityService {
+    private(set) var items: [ActivityItem] = []
     var mentions: [ActivityItem] { items.filter(\.hasMention) }
     private var seen: [String] = []
     private var seenIDs = Set<String>()

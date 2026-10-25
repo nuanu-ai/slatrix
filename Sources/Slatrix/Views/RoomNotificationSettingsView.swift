@@ -3,8 +3,8 @@ import SwiftUI
 struct RoomNotificationSettingsView: View {
     private static let size = CGSize(width: 532, height: 492)
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
-    @ObservedObject private var retries: NotificationSettingsRetryState
+    let matrix: MatrixService
+    private var retries: NotificationSettingsRetryState { matrix.notificationRetries }
     let roomID: String
     var onClose: () -> Void
     @EnvironmentObject private var appearance: AppearanceStore
@@ -25,7 +25,6 @@ struct RoomNotificationSettingsView: View {
         self.matrix = matrix
         self.roomID = roomID
         self.onClose = onClose
-        _retries = ObservedObject(wrappedValue: matrix.notificationRetries)
     }
 
     private struct Context: Hashable {

@@ -5,11 +5,10 @@ import SwiftUI
 struct TimelineView: View {
     @Environment(\.metrics) private var m
     @Environment(\.openURL) private var openURL
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     @EnvironmentObject private var previews: AttachmentPreviewController
     let room: ChatRoom
-    var messages: [ChatMessage]
     var thread = false
     var threadRootID: String? = nil
     var savedIDs: Set<String>
@@ -37,6 +36,7 @@ struct TimelineView: View {
     @State private var rowContext = TimelineRowContext()
     @State private var scroller = TimelineScroller()
     private var colors: AppColors { appearance.colors }
+    private var messages: [ChatMessage] { thread ? matrix.threadMessages : matrix.messages }
     /// A conversation opened at an older message is not live: it neither follows new messages nor is remembered.
     private var live: Bool { thread || matrix.focusedEventID == nil }
     private var hasOlder: Bool {
@@ -80,6 +80,8 @@ struct TimelineView: View {
         }
         .animation(.easeOut(duration: 0.12), value: jumpVisible)
         .background(colors.canvas)
+        // Every message redraws the timeline; it fills what it is given, so that never lays out the window.
+        .layoutIsolated()
         .onDisappear {
             deleting = nil
             cancelling = nil
@@ -756,7 +758,7 @@ struct AttachmentView: View {
     private static let imageMaxHeight: CGFloat = 260
     private static let fileCardWidth: CGFloat = 392
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     let message: ChatMessage
     let attachment: MessageAttachment
     @EnvironmentObject private var previews: AttachmentPreviewController

@@ -4,7 +4,7 @@ import SwiftUI
 struct RoomInfoView: View {
     /// Matches the thread pane header so both panes line up.
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     var room: ChatRoom
     var onClose: () -> Void
     var onInvite: () -> Void
@@ -322,7 +322,7 @@ struct RoomInfoView: View {
 struct EncryptionRecoveryView: View {
     private static let width: CGFloat = 480
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     var onClose: () -> Void
     @EnvironmentObject private var appearance: AppearanceStore
     @State private var recoveryKey = ""

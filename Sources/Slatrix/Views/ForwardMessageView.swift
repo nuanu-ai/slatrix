@@ -10,7 +10,7 @@ struct ForwardMessageView: View {
     private static let imageMaxSize = CGSize(width: 460, height: 160)
     private static let fileTile: CGFloat = 48
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     let target: MessageActionTarget
     let onClose: () -> Void
     @EnvironmentObject private var appearance: AppearanceStore

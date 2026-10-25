@@ -3,7 +3,7 @@ import SwiftUI
 struct SidebarView: View {
     private static let dot: CGFloat = 6
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
+    let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     @Binding var route: AppRoute
     @Binding var workspaceID: String?
@@ -46,7 +46,8 @@ struct SidebarView: View {
         }.foregroundStyle(colors.text)
     }
     private var list: some View {
-        VStack(spacing: 0) {
+        let visibleRooms = visibleRooms
+        return VStack(spacing: 0) {
             header
             HStack(spacing: m.sp8) {
                 Image(systemName: "line.3.horizontal.decrease").font(m.font(.body))
@@ -283,11 +284,41 @@ struct SidebarView: View {
             }.foregroundStyle(colors.muted).padding(.leading, m.sp12).padding(.trailing, m.sp8).frame(height: m.control)
                 .padding(.top, m.sp8)
             if !collapsed.contains(title) {
-                ForEach(rooms) { room in roomRow(room) }
+                ForEach(rooms) { room in
+                    SidebarRoomRow(
+                        room: room, selected: matrix.selectedRoomID == room.id && route == .home,
+                        hasDraft: draftRoomIDs.contains(room.id), isPreview: matrix.isPreview, matrix: matrix,
+                        onSelect: onSelect, onMarkUnread: onMarkUnread, onMarkRead: onMarkRead,
+                        onNotifications: onNotifications
+                    ).equatable()
+                }
             }
         }
     }
-    private func roomRow(_ room: ChatRoom) -> some View {
+}
+
+/// One conversation in the sidebar. Equal while what it shows is, so a change to one room redraws one row.
+private struct SidebarRoomRow: View, Equatable {
+    private static let dot: CGFloat = 6
+    let room: ChatRoom
+    let selected: Bool
+    let hasDraft: Bool
+    let isPreview: Bool
+    let matrix: MatrixService
+    let onSelect: (String) -> Void
+    let onMarkUnread: (ChatRoom) -> Void
+    let onMarkRead: (ChatRoom) -> Void
+    let onNotifications: (String) -> Void
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+    private var colors: AppColors { appearance.colors }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.room == rhs.room && lhs.selected == rhs.selected && lhs.hasDraft == rhs.hasDraft
+            && lhs.isPreview == rhs.isPreview
+    }
+
+    var body: some View {
         Button {
             onSelect(room.id)
         } label: {
@@ -304,7 +335,7 @@ struct SidebarView: View {
                     .truncationMode(.tail)
                 if room.muted { Image(systemName: "bell.slash").font(m.font(.caption)).foregroundStyle(colors.muted) }
                 Spacer(minLength: m.sp2)
-                if draftRoomIDs.contains(room.id) {
+                if hasDraft {
                     Image(systemName: "pencil").font(m.font(.caption)).foregroundStyle(colors.muted)
                 }
                 switch UnreadBadge(room) {
@@ -317,14 +348,14 @@ struct SidebarView: View {
                 }
             }.padding(.leading, m.sp32).padding(.trailing, m.sp12).frame(height: m.row)
                 .background(
-                    matrix.selectedRoomID == room.id && route == .home ? colors.selection : .clear,
+                    selected ? colors.selection : .clear,
                     in: RoundedRectangle(cornerRadius: m.radius)
                 )
                 .contentShape(Rectangle())
         }.buttonStyle(.row).padding(.horizontal, m.sp8).help(room.name)
             .contextMenu {
-                Button("Mark unread") { onMarkUnread(room) }.disabled(matrix.isPreview || room.membership != "join")
-                Button("Mark read") { onMarkRead(room) }.disabled(matrix.isPreview || room.membership != "join")
+                Button("Mark unread") { onMarkUnread(room) }.disabled(isPreview || room.membership != "join")
+                Button("Mark read") { onMarkRead(room) }.disabled(isPreview || room.membership != "join")
                 Divider()
                 Button(room.favorite ? "Remove from Starred" : "Move to Starred") {
                     Task {
@@ -334,7 +365,7 @@ struct SidebarView: View {
                     }
                 }
                 Button("Notifications…") { onNotifications(room.id) }.disabled(
-                    matrix.isPreview || room.membership != "join")
+                    isPreview || room.membership != "join")
             }
     }
 }

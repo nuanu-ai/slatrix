@@ -221,6 +221,12 @@ struct WindowDragArea: NSViewRepresentable {
 }
 
 extension View {
+    /// Takes the space offered without asking this view its size, so a change inside it lays out only itself, not
+    /// the whole window. For content that fills whatever it is given.
+    func layoutIsolated(alignment: Alignment = .center) -> some View {
+        Color.clear.overlay(alignment: alignment) { self }
+    }
+
     /// Times how long this loading state is on screen, for the performance report.
     func loadingInterval(_ name: Performance.Name, while shown: Bool = true) -> some View {
         modifier(LoadingInterval(name: name, shown: shown))

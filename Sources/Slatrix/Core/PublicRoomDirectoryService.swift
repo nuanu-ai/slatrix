@@ -1,6 +1,6 @@
-import Combine
 import Foundation
 import MatrixRustSDK
+import Observation
 
 enum PublicDirectoryJoinRule: String, Hashable {
     case publicRoom, knock, restricted, knockRestricted, invite, unknown
@@ -98,12 +98,12 @@ private final class PublicDirectoryObserver: RoomDirectorySearchEntriesListener,
 }
 
 @MainActor
-final class PublicRoomDirectoryService: ObservableObject {
-    @Published private(set) var entries: [PublicDirectoryRoom] = []
-    @Published private(set) var isLoading = false
-    @Published private(set) var hasMore = false
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var scopeID = UUID()
+@Observable final class PublicRoomDirectoryService {
+    private(set) var entries: [PublicDirectoryRoom] = []
+    private(set) var isLoading = false
+    private(set) var hasMore = false
+    private(set) var errorMessage: String?
+    private(set) var scopeID = UUID()
     private var client: Client?
     /// Set while browsing one workspace's channels rather than the server's public directory.
     private(set) var spaceID: String?

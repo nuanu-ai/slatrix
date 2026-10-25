@@ -2,8 +2,8 @@ import SwiftUI
 
 struct PinnedMessagesView: View {
     @Environment(\.metrics) private var m
-    @ObservedObject var matrix: MatrixService
-    @ObservedObject var service: PinnedMessagesService
+    let matrix: MatrixService
+    let service: PinnedMessagesService
     let room: ChatRoom
     var onOpen: (ChatMessage) -> Void
     var onOpenProfile: (String, ChatUser?) -> Void
