@@ -38,6 +38,7 @@ Agreed seams, where tests belong:
 - **Local storage**: encrypted drafts, saved messages, attachment staging, credentials. Catches format, permission and corruption handling.
 - **Pure policies**: read state, navigation order, sidebar layout, link parsing, search query grammar, timeline grouping and scroll anchoring. Catches rule regressions directly.
 - **Hosted timeline**: the real timeline in an offscreen window, opt-in with `SLATRIX_HOSTED_UI_CHECKS=1` because it needs an awake display. Catches scroll jumps and row geometry; misses real pointer input and WindowServer timing.
+- **Performance log**: what the app writes to unified logging, read back through `OSLogStore`. Catches lost hang reports and names the report cannot parse; misses real WindowServer timing.
 - **Release scripts**: run as a process with real arguments. Catches a tag that would ship a version Sparkle cannot order; misses signing, notarization and the appcast.
 
 ## Docs
