@@ -105,11 +105,11 @@ struct TimelineScrollPolicyTests {
         #expect(Policy.showsJumpToLatest(viewport, live: live) == shows)
     }
 
-    @Test("History loads within a screen of either end")
+    @Test("History loads within three screens of either end")
     func loadsAhead() {
-        #expect(Policy.needsOlder(Viewport(top: 599, height: 600, contentHeight: 5_000)))
-        #expect(!Policy.needsOlder(Viewport(top: 600, height: 600, contentHeight: 5_000)))
-        #expect(Policy.needsNewer(Viewport(top: 3_801, height: 600, contentHeight: 5_000)))
-        #expect(!Policy.needsNewer(Viewport(top: 3_800, height: 600, contentHeight: 5_000)))
+        #expect(Policy.needsOlder(Viewport(top: 1_799, height: 600, contentHeight: 9_000)))
+        #expect(!Policy.needsOlder(Viewport(top: 1_800, height: 600, contentHeight: 9_000)))
+        #expect(Policy.needsNewer(Viewport(top: 6_601, height: 600, contentHeight: 9_000)))
+        #expect(!Policy.needsNewer(Viewport(top: 6_600, height: 600, contentHeight: 9_000)))
     }
 }
