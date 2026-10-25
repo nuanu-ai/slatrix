@@ -39,7 +39,7 @@ struct TimelineHostedTests {
         var zoom: CGFloat = 1
         var body: some View {
             TimelineView(
-                matrix: service, room: room, messages: service.messages, savedIDs: [], onThread: { _ in },
+                matrix: service, room: room, savedIDs: [], onThread: { _ in },
                 onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onBottomVisibilityChange: atBottom
             )
             .id(room.id)

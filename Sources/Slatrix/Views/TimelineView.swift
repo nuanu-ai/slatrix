@@ -9,7 +9,6 @@ struct TimelineView: View {
     @EnvironmentObject var appearance: AppearanceStore
     @EnvironmentObject private var previews: AttachmentPreviewController
     let room: ChatRoom
-    var messages: [ChatMessage]
     var thread = false
     var threadRootID: String? = nil
     var savedIDs: Set<String>
@@ -37,6 +36,7 @@ struct TimelineView: View {
     @State private var rowContext = TimelineRowContext()
     @State private var scroller = TimelineScroller()
     private var colors: AppColors { appearance.colors }
+    private var messages: [ChatMessage] { thread ? matrix.threadMessages : matrix.messages }
     /// A conversation opened at an older message is not live: it neither follows new messages nor is remembered.
     private var live: Bool { thread || matrix.focusedEventID == nil }
     private var hasOlder: Bool {

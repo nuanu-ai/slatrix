@@ -143,11 +143,7 @@ struct RootView: View {
         }
     }
 
-    private var room: ChatRoom? {
-        matrix.selectedRoom.flatMap {
-            $0.isDirect || workspaceID == nil || $0.spaceIDs.contains(workspaceID!) ? $0 : nil
-        }
-    }
+    private var room: ChatRoom? { shownRoom(matrix, workspaceID: workspaceID) }
     /// Opened at its unread line, from the cache or at the line from the server.
     private var isResumingUnread: Bool {
         unreadResumeEventID != nil && (matrix.focusedEventID == nil || unreadResumeEventID == matrix.focusedEventID)
@@ -249,10 +245,7 @@ struct RootView: View {
             || mediaCaption != nil || matrixJoin != nil || previews.url != nil || logoutConfirmation
             || logoutRecovery.request != nil || logoutRecovery.isBusy
     }
-    private var hasNativeModal: Bool {
-        NSApp.modalWindow != nil
-            || NSApp.windows.contains { $0.frameAutosaveName == "SlatrixMainWindow" && $0.attachedSheet != nil }
-    }
+    private var hasNativeModal: Bool { ReadInputs.hasNativeModal }
 
     /// Every modal, for actions that must wait for all of them; read outside the body only.
     private var hasModal: Bool { hasPresentedSheet || modals.current != nil }
@@ -346,10 +339,11 @@ struct RootView: View {
                     }
                 }
             }
-            .onChange(of: readContext) { _, context in readHold.observe(context) }
-            .task(id: automaticReadTarget) { await acknowledgeVisibleTimeline() }
-            .onChange(of: matrix.threadReadIdentity) { _, identity in threadReadViewport.observe(identity) }
-            .task(id: automaticThreadReadTarget) { await acknowledgeVisibleThread() }
+            .background(
+                ReadTracking(
+                    matrix: matrix, inputs: readInputs, onReadContext: { readHold.observe($0) },
+                    onThreadIdentity: { threadReadViewport.observe($0) },
+                    acknowledgeTimeline: acknowledgeVisibleTimeline, acknowledgeThread: acknowledgeVisibleThread))
     }
 
     private var notificationAwareContent: some View {
@@ -371,34 +365,7 @@ struct RootView: View {
 
     private var roomObservedContent: some View {
         presentedContent
-            .onChange(of: matrix.rooms) { _, rooms in
-                settleWorkspace()
-                cancelStaleThreadOpen()
-                cancelStaleForward()
-                cancelStaleCaption()
-                PlatformIntegration.shared.setBadge(rooms.reduce(0) { $0 + $1.unread })
-                if let target = editTarget, room?.id != target.message.roomID || room?.membership != "join" {
-                    cancelCurrentEdit()
-                }
-                if let target = replyTarget, room?.id != target.message.roomID || room?.membership != "join" {
-                    cancelReply()
-                }
-                openPendingNotification()
-                if route == .home && pendingRoomID == nil && invitationResponseID == nil && room == nil {
-                    let preferred = rooms.first {
-                        $0.id == preferredRoomID
-                            && ($0.isDirect || workspaceID == nil || $0.spaceIDs.contains(workspaceID!))
-                    }
-                    if let first = preferred
-                        ?? rooms.first(where: {
-                            !$0.isDirect && (workspaceID == nil || $0.spaceIDs.contains(workspaceID!))
-                        })
-                    {
-                        selectRoom(first.id, record: true, keepPendingNotification: true)
-                    }
-                }
-            }
-            .onChange(of: matrix.workspaces) { _, _ in settleWorkspace() }
+            .background(RoomListWatcher(matrix: matrix, onRooms: roomsChanged, onWorkspaces: settleWorkspace))
             .onChange(of: workspaceID) { _, id in
                 Performance.finishOnScreen(.workspaceSwitch)
                 cancelStaleThreadOpen()
@@ -659,7 +626,8 @@ struct RootView: View {
                             }, onEditWorkspace: { roomDetails = DetailsSelection(id: $0) },
                             onNotifications: { roomNotifications = DetailsSelection(id: $0) },
                             listWidth: sidebarListWidth,
-                            listHidden: sidebarHidden, onBrowseChannels: presentPublicDirectory)
+                            listHidden: sidebarHidden, onBrowseChannels: presentPublicDirectory
+                        ).layoutIsolated().frame(width: m.rail + (sidebarHidden ? 0 : sidebarListWidth))
                         if !sidebarHidden {
                             ResizeHandle(
                                 currentWidth: sidebarListWidth, onChange: resizeSidebar, onCommit: commitSidebarWidth,
@@ -717,7 +685,7 @@ struct RootView: View {
     /// Connection, loading and error states, as toasts over the conversation.
     private var transientBanners: some View {
         VStack(spacing: m.sp8) {
-            if let message = matrix.connectionErrorMessage { connectionBanner(message) }
+            ConnectionBanner(matrix: matrix, onRetry: retryConnection)
             if pendingMatrixLink != nil {
                 HStack(spacing: m.sp8) {
                     ProgressView().controlSize(.small)
@@ -754,9 +722,7 @@ struct RootView: View {
                     }.buttonStyle(.link)
                 }.padding(m.sp12).modifier(Toast(colors: colors))
             }
-            if let error = matrix.errorMessage {
-                InlineErrorView(message: error, dismiss: { matrix.errorMessage = nil }).modifier(Toast(colors: colors))
-            }
+            ErrorToast(matrix: matrix)
             if let navigationNotice {
                 InlineErrorView(message: navigationNotice, dismiss: { self.navigationNotice = nil }).modifier(
                     Toast(colors: colors))
@@ -839,20 +805,7 @@ struct RootView: View {
         }
     }
 
-    private var threadReadContext: ThreadReadContext {
-        let identity = matrix.threadReadIdentity
-        let latest = matrix.threadMessages.last(where: { $0.eventID.hasPrefix("$") })
-        let visible = windowCanRead && platform.conversationWindowIsVisible
-        return ThreadReadContext(
-            identity: identity, eventID: latest?.kind == "m.room.encrypted" ? nil : latest?.eventID,
-            isPresented: route == .home && threadRoot?.eventID == identity?.rootID && room?.id == identity?.roomID,
-            isReady: identity != nil && localReady && matrix.status == .ready && threadReadyID == identity?.rootID
-                && openingThreadID == nil && threadLoadError == nil,
-            isAtBottom: threadReadViewport.isAtBottom(identity), isWindowActive: visible, isWindowVisible: visible,
-            isWindowUnoccluded: visible,
-            hasModal: hasPresentedSheet || hasNativeModal || matrix.verification.isPresented,
-            manualUnreadHeld: readHold.blocks(readContext))
-    }
+    private var threadReadContext: ThreadReadContext { readInputs.threadReadContext(matrix) }
     private var automaticThreadReadTarget: ThreadReadReceiptTarget? { ThreadReadPolicy.target(threadReadContext) }
     private func acknowledgeVisibleThread() async {
         guard let target = automaticThreadReadTarget else { return }
@@ -871,21 +824,6 @@ struct RootView: View {
         }
     }
 
-    private func connectionBanner(_ message: String) -> some View {
-        HStack(spacing: m.sp12) {
-            Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
-            Text(message).font(m.font(.meta)).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: m.sp8)
-            if matrix.canRetryConnection || matrix.isRetryingConnection {
-                Button(action: retryConnection) {
-                    HStack(spacing: m.sp8) {
-                        if matrix.isRetryingConnection { ProgressView().controlSize(.mini) }
-                        Text(matrix.isRetryingConnection ? "Reconnecting…" : "Retry")
-                    }
-                }.buttonStyle(.bordered).controlSize(.small).disabled(matrix.isRetryingConnection)
-            }
-        }.padding(m.sp12).modifier(Toast(colors: colors))
-    }
     private func retryConnection() {
         let account = matrix.notificationSessionID
         Task {
@@ -905,22 +843,14 @@ struct RootView: View {
                 NSWindow.willBeginSheetNotification, NSWindow.didEndSheetNotification, NSWindow.willCloseNotification,
             ].map { NotificationCenter.default.publisher(for: $0) })
     }
-    private var readContext: ReadStateContext {
-        let latest = matrix.messages.last(where: { $0.eventID.hasPrefix("$") })
-        let visible = windowCanRead && platform.conversationWindowIsVisible
-        return ReadStateContext(
-            accountID: matrix.user?.id, sessionGeneration: matrix.notificationSessionID,
-            timelineGeneration: matrix.timelineSelectionID, roomID: matrix.selectedRoomID ?? "",
-            selectedRoomID: matrix.selectedRoomID,
-            latestVisibleEventID: latest?.kind == "m.room.encrypted" ? nil : latest?.eventID,
-            isPreview: matrix.isPreview, isJoined: room?.membership == "join",
-            isMainTimeline: route == .home && !showPins,
-            isLiveTimeline: matrix.focusedEventID == nil && matrix.status == .ready,
-            isAtBottom: visibleBottomRoomID == matrix.selectedRoomID && visibleBottomRoomID != nil,
-            isWindowActive: visible, isWindowVisible: visible, isWindowUnoccluded: visible,
-            hasModal: hasPresentedSheet || hasNativeModal || matrix.verification.isPresented
-        )
+    private var readInputs: ReadInputs {
+        ReadInputs(
+            route: route, showPins: showPins, workspaceID: workspaceID, visibleBottomRoomID: visibleBottomRoomID,
+            windowCanRead: windowCanRead, hasPresentedSheet: hasPresentedSheet, threadRootID: threadRoot?.eventID,
+            threadReadyID: threadReadyID, openingThreadID: openingThreadID, threadLoadFailed: threadLoadError != nil,
+            localReady: localReady, threadReadViewport: threadReadViewport, readHold: readHold)
     }
+    private var readContext: ReadStateContext { readInputs.readContext(matrix) }
     private var automaticReadTarget: ReadReceiptTarget? { ReadStatePolicy.automaticTarget(readContext, hold: readHold) }
     private func markReadState(_ targetRoom: ChatRoom, unread: Bool) {
         guard !matrix.isPreview, targetRoom.membership == "join" else { return }
@@ -947,16 +877,10 @@ struct RootView: View {
                     historyIndex <= 0)
                 IconButton(symbol: "arrow.right", label: "Forward", role: .title) { navigateHistory(1) }.disabled(
                     historyIndex >= history.count - 1)
-                Menu {
-                    ForEach(Array(history.enumerated()).reversed(), id: \.offset) { index, id in
-                        Button(matrix.rooms.first { $0.id == id }?.name ?? "Conversation") {
-                            historyIndex = index
-                            selectRoom(id, record: false)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "clock").font(m.font(.title)).frame(width: m.iconButton, height: m.iconButton)
-                }.menuStyle(.borderlessButton).frame(width: m.iconButton + m.sp4).help("Recent conversations")
+                HistoryMenu(matrix: matrix, history: history) { index in
+                    historyIndex = index
+                    selectRoom(history[index], record: false)
+                }
             }
             Button {
                 if matrix.user != nil { handleMenu("search") }
@@ -1014,7 +938,7 @@ struct RootView: View {
                         colors.raised)
                 }
                 TimelineView(
-                    matrix: matrix, room: room, messages: matrix.messages, savedIDs: savedIDs,
+                    matrix: matrix, room: room, savedIDs: savedIDs,
                     onThread: openThreadAction,
                     onReply: { [session = matrix.notificationSessionID, timeline = matrix.timelineSelectionID] in
                         startReply($0, surface: .conversation, session: session, timeline: timeline)
@@ -1093,11 +1017,7 @@ struct RootView: View {
                             ? AttachmentDraftAddress(roomID: room.id) : nil
                     ).padding(.horizontal, m.sp20).alignmentGuide(.top) { $0[.bottom] }
                 }
-                HStack {
-                    if !matrix.typingUsers.isEmpty { Text(typingLabel) }
-                    Spacer()
-                }.font(m.font(.caption)).foregroundStyle(colors.muted).padding(.horizontal, m.sp24).frame(
-                    height: m.sp24)
+                TypingLine(matrix: matrix)
             }
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
     }
@@ -1200,16 +1120,7 @@ struct RootView: View {
                 }.buttonStyle(.row).foregroundStyle(colors.muted)
                 Spacer()
                 // In the tab row's reserved height, so it never covers or moves a message.
-                if matrix.messages.contains(where: { $0.kind == "m.room.encrypted" }) {
-                    Button {
-                        showRecovery = true
-                    } label: {
-                        Label("Unlock messages", systemImage: "key").font(m.font(.meta, .medium))
-                    }.buttonStyle(.row).foregroundStyle(colors.accent).disabled(matrix.isPreview)
-                } else if room.isEncrypted {
-                    Image(systemName: "lock.shield").font(m.font(.meta)).foregroundStyle(colors.muted).help(
-                        "End-to-end encrypted")
-                }
+                EncryptionStatus(matrix: matrix, isEncrypted: room.isEncrypted) { showRecovery = true }
             }.padding(.horizontal, m.sp24).frame(height: m.sp40)
         }
     }
@@ -1231,7 +1142,7 @@ struct RootView: View {
                 }
             }
             TimelineView(
-                matrix: matrix, room: room, messages: matrix.threadMessages, thread: true, threadRootID: root.eventID,
+                matrix: matrix, room: room, thread: true, threadRootID: root.eventID,
                 savedIDs: savedIDs, onThread: { _ in },
                 onReply: { [session = matrix.notificationSessionID, timeline = matrix.timelineSelectionID] in
                     startReply($0, surface: .thread(rootID: root.eventID), session: session, timeline: timeline)
@@ -1242,11 +1153,7 @@ struct RootView: View {
                     threadReadViewport.record(visible, from: identity, current: matrix.threadReadIdentity)
                 }, onForward: startForward, onEditCaption: startCaption
             ).id(root.eventID)
-                .overlay {
-                    DelayedProgress(
-                        active: openingThreadID == root.eventID, hasContent: matrix.threadMessages.count > 1,
-                        interval: .threadLoading)
-                }
+                .overlay { ThreadProgress(matrix: matrix, active: openingThreadID == root.eventID) }
             VStack(spacing: 0) {
                 if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
@@ -1313,7 +1220,7 @@ struct RootView: View {
             }.padding(.horizontal, m.sp24).frame(height: m.paneHeader)
             Divider().overlay(colors.border)
             switch route {
-            case .directMessages: roomDirectory
+            case .directMessages: RoomDirectory(matrix: matrix, onSelect: selectRoom)
             case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
             case .threads:
                 ThreadsFeedView(
@@ -1331,39 +1238,6 @@ struct RootView: View {
             case .home: EmptyView()
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-    private var roomDirectory: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(matrix.rooms.filter { route != .directMessages || $0.isDirect }) { room in
-                    Button {
-                        selectRoom(room.id)
-                    } label: {
-                        HStack(spacing: m.sp12) {
-                            AvatarView(name: room.name, size: m.avatar, matrix: matrix, source: room.avatarURL)
-                            VStack(alignment: .leading, spacing: m.sp4) {
-                                Text(room.name).font(m.font(.body, .semibold))
-                                Text(
-                                    room.topic.isEmpty
-                                        ? room.isDirect ? "Direct message" : "\(room.memberCount) members" : room.topic
-                                ).font(m.font(.meta)).foregroundStyle(colors.muted).lineLimit(1)
-                            }
-                            Spacer()
-                            if room.hasUnread {
-                                Text(
-                                    room.unreadMessages > 0 || room.unread > 0
-                                        ? "\(max(room.unreadMessages, room.unread))" : "•"
-                                ).font(m.font(.caption, .semibold)).padding(m.sp4).background(
-                                    colors.selection, in: Circle()
-                                ).accessibilityLabel("Unread conversation")
-                            }
-                            Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.muted)
-                        }.padding(m.sp20).contentShape(Rectangle())
-                    }.buttonStyle(.row)
-                    Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)
-                }
-            }
-        }
     }
     private var savedCollection: some View {
         SavedMessagesView(
@@ -1392,8 +1266,8 @@ struct RootView: View {
                                 }
                             } label: {
                                 draftRow(
-                                    title: matrix.rooms.first { $0.id == address.roomID }?.name ?? "Conversation",
-                                    body: draftSummary(address), thread: address.threadRootID != nil)
+                                    roomID: address.roomID, body: draftSummary(address),
+                                    thread: address.threadRootID != nil)
                             }.buttonStyle(.row)
                             Divider().overlay(colors.border).padding(.leading, m.sp24)
                         }
@@ -1449,12 +1323,12 @@ struct RootView: View {
             }
         }
     }
-    private func draftRow(title: String, body: String, thread: Bool) -> some View {
+    private func draftRow(roomID: String, body: String, thread: Bool) -> some View {
         VStack(alignment: .leading, spacing: m.sp8) {
             HStack(spacing: m.sp8) {
                 Image(systemName: thread ? "bubble.left.and.bubble.right" : "square.and.pencil").foregroundStyle(
                     colors.muted)
-                Text(title).font(m.font(.body, .semibold))
+                RoomName(matrix: matrix, roomID: roomID).font(m.font(.body, .semibold))
                 if thread { Text("Thread reply").font(m.font(.caption)).foregroundStyle(colors.muted) }
                 Spacer()
                 Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.muted)
@@ -2174,12 +2048,6 @@ struct RootView: View {
                 sendingComposers[key] = value
             })
     }
-    private var typingLabel: String {
-        let names = matrix.typingUsers
-        if names.count == 1 { return names[0] + " is typing…" }
-        if names.count == 2 { return names.joined(separator: " and ") + " are typing…" }
-        return "Several people are typing…"
-    }
     private func draftBinding(_ id: String) -> Binding<String> {
         let context = composerContext
         let target = ComposerDraftTarget(roomID: id, editing: nil)
@@ -2331,6 +2199,30 @@ struct RootView: View {
             guard matrix.notificationSessionID == session else { return }
             do { try await action() } catch is CancellationError {} catch {
                 if matrix.notificationSessionID == session { matrix.errorMessage = MatrixService.safeError(error) }
+            }
+        }
+    }
+    private func roomsChanged(_ rooms: [ChatRoom]) {
+        settleWorkspace()
+        cancelStaleThreadOpen()
+        cancelStaleForward()
+        cancelStaleCaption()
+        PlatformIntegration.shared.setBadge(rooms.reduce(0) { $0 + $1.unread })
+        if let target = editTarget, room?.id != target.message.roomID || room?.membership != "join" {
+            cancelCurrentEdit()
+        }
+        if let target = replyTarget, room?.id != target.message.roomID || room?.membership != "join" {
+            cancelReply()
+        }
+        openPendingNotification()
+        if route == .home && pendingRoomID == nil && invitationResponseID == nil && room == nil {
+            let preferred = rooms.first {
+                $0.id == preferredRoomID && ($0.isDirect || workspaceID == nil || $0.spaceIDs.contains(workspaceID!))
+            }
+            if let first = preferred
+                ?? rooms.first(where: { !$0.isDirect && (workspaceID == nil || $0.spaceIDs.contains(workspaceID!)) })
+            {
+                selectRoom(first.id, record: true, keepPendingNotification: true)
             }
         }
     }
@@ -2614,6 +2506,242 @@ struct RootView: View {
                 selectRoom(id)
             }
         default: break
+        }
+    }
+}
+
+/// The open conversation as the window shows it: hidden while another workspace is on screen.
+@MainActor private func shownRoom(_ matrix: MatrixService, workspaceID: String?) -> ChatRoom? {
+    matrix.selectedRoom.flatMap { $0.isDirect || workspaceID == nil || $0.spaceIDs.contains(workspaceID!) ? $0 : nil }
+}
+
+/// What the read policies need from the window's own state.
+private struct ReadInputs {
+    var route: AppRoute
+    var showPins: Bool
+    var workspaceID: String?
+    var visibleBottomRoomID: String?
+    var windowCanRead: Bool
+    var hasPresentedSheet: Bool
+    var threadRootID: String?
+    var threadReadyID: String?
+    var openingThreadID: String?
+    var threadLoadFailed: Bool
+    var localReady: Bool
+    var threadReadViewport: ThreadReadViewport
+    var readHold: ReadStateHold
+
+    @MainActor static var hasNativeModal: Bool {
+        NSApp.modalWindow != nil
+            || NSApp.windows.contains { $0.frameAutosaveName == "SlatrixMainWindow" && $0.attachedSheet != nil }
+    }
+
+    @MainActor func readContext(_ matrix: MatrixService) -> ReadStateContext {
+        let latest = matrix.messages.last(where: { $0.eventID.hasPrefix("$") })
+        let visible = windowCanRead && PlatformIntegration.shared.conversationWindowIsVisible
+        return ReadStateContext(
+            accountID: matrix.user?.id, sessionGeneration: matrix.notificationSessionID,
+            timelineGeneration: matrix.timelineSelectionID, roomID: matrix.selectedRoomID ?? "",
+            selectedRoomID: matrix.selectedRoomID,
+            latestVisibleEventID: latest?.kind == "m.room.encrypted" ? nil : latest?.eventID,
+            isPreview: matrix.isPreview, isJoined: shownRoom(matrix, workspaceID: workspaceID)?.membership == "join",
+            isMainTimeline: route == .home && !showPins,
+            isLiveTimeline: matrix.focusedEventID == nil && matrix.status == .ready,
+            isAtBottom: visibleBottomRoomID == matrix.selectedRoomID && visibleBottomRoomID != nil,
+            isWindowActive: visible, isWindowVisible: visible, isWindowUnoccluded: visible,
+            hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented
+        )
+    }
+
+    @MainActor func threadReadContext(_ matrix: MatrixService) -> ThreadReadContext {
+        let identity = matrix.threadReadIdentity
+        let latest = matrix.threadMessages.last(where: { $0.eventID.hasPrefix("$") })
+        let visible = windowCanRead && PlatformIntegration.shared.conversationWindowIsVisible
+        return ThreadReadContext(
+            identity: identity, eventID: latest?.kind == "m.room.encrypted" ? nil : latest?.eventID,
+            isPresented: route == .home && threadRootID == identity?.rootID
+                && shownRoom(matrix, workspaceID: workspaceID)?.id == identity?.roomID,
+            isReady: identity != nil && localReady && matrix.status == .ready && threadReadyID == identity?.rootID
+                && openingThreadID == nil && !threadLoadFailed,
+            isAtBottom: threadReadViewport.isAtBottom(identity), isWindowActive: visible, isWindowVisible: visible,
+            isWindowUnoccluded: visible,
+            hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented,
+            manualUnreadHeld: readHold.blocks(readContext(matrix)))
+    }
+}
+
+/// Marks what the reader can see as read. Apart from the window, so a new message reruns only these checks.
+private struct ReadTracking: View {
+    let matrix: MatrixService
+    let inputs: ReadInputs
+    let onReadContext: (ReadStateContext) -> Void
+    let onThreadIdentity: (ThreadReadIdentity?) -> Void
+    let acknowledgeTimeline: () async -> Void
+    let acknowledgeThread: () async -> Void
+    var body: some View {
+        let context = inputs.readContext(matrix)
+        Color.clear
+            .onChange(of: context) { _, context in onReadContext(context) }
+            .task(id: ReadStatePolicy.automaticTarget(context, hold: inputs.readHold)) { await acknowledgeTimeline() }
+            .onChange(of: matrix.threadReadIdentity) { _, identity in onThreadIdentity(identity) }
+            .task(id: ThreadReadPolicy.target(inputs.threadReadContext(matrix))) { await acknowledgeThread() }
+    }
+}
+
+/// Follows the room list for the window, so a change to a room reruns these checks, not the window's body.
+private struct RoomListWatcher: View {
+    let matrix: MatrixService
+    let onRooms: ([ChatRoom]) -> Void
+    let onWorkspaces: () -> Void
+    var body: some View {
+        Color.clear
+            .onChange(of: matrix.rooms) { _, rooms in onRooms(rooms) }
+            .onChange(of: matrix.workspaces) { _, _ in onWorkspaces() }
+    }
+}
+
+private struct HistoryMenu: View {
+    let matrix: MatrixService
+    let history: [String]
+    let onSelect: (Int) -> Void
+    @Environment(\.metrics) private var m
+    var body: some View {
+        Menu {
+            ForEach(Array(history.enumerated()).reversed(), id: \.offset) { index, id in
+                Button(matrix.rooms.first { $0.id == id }?.name ?? "Conversation") { onSelect(index) }
+            }
+        } label: {
+            Image(systemName: "clock").font(m.font(.title)).frame(width: m.iconButton, height: m.iconButton)
+        }.menuStyle(.borderlessButton).frame(width: m.iconButton + m.sp4).help("Recent conversations")
+    }
+}
+
+private struct ConnectionBanner: View {
+    let matrix: MatrixService
+    let onRetry: () -> Void
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+    var body: some View {
+        if let message = matrix.connectionErrorMessage {
+            HStack(spacing: m.sp12) {
+                Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
+                Text(message).font(m.font(.meta)).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: m.sp8)
+                if matrix.canRetryConnection || matrix.isRetryingConnection {
+                    Button(action: onRetry) {
+                        HStack(spacing: m.sp8) {
+                            if matrix.isRetryingConnection { ProgressView().controlSize(.mini) }
+                            Text(matrix.isRetryingConnection ? "Reconnecting…" : "Retry")
+                        }
+                    }.buttonStyle(.bordered).controlSize(.small).disabled(matrix.isRetryingConnection)
+                }
+            }.padding(m.sp12).modifier(Toast(colors: appearance.colors))
+        }
+    }
+}
+
+private struct ErrorToast: View {
+    let matrix: MatrixService
+    @EnvironmentObject private var appearance: AppearanceStore
+    var body: some View {
+        if let error = matrix.errorMessage {
+            InlineErrorView(message: error, dismiss: { matrix.errorMessage = nil })
+                .modifier(Toast(colors: appearance.colors))
+        }
+    }
+}
+
+/// Offers the recovery key while messages can't be read; otherwise marks an encrypted conversation.
+private struct EncryptionStatus: View {
+    let matrix: MatrixService
+    let isEncrypted: Bool
+    let onUnlock: () -> Void
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+    var body: some View {
+        if matrix.messages.contains(where: { $0.kind == "m.room.encrypted" }) {
+            Button(action: onUnlock) {
+                Label("Unlock messages", systemImage: "key").font(m.font(.meta, .medium))
+            }.buttonStyle(.row).foregroundStyle(appearance.colors.accent).disabled(matrix.isPreview)
+        } else if isEncrypted {
+            Image(systemName: "lock.shield").font(m.font(.meta)).foregroundStyle(appearance.colors.muted).help(
+                "End-to-end encrypted")
+        }
+    }
+}
+
+/// Who is typing in the open conversation, on a line of its own so typing redraws nothing else.
+private struct TypingLine: View {
+    let matrix: MatrixService
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+    private var label: String {
+        let names = matrix.typingUsers
+        if names.count == 1 { return names[0] + " is typing…" }
+        if names.count == 2 { return names.joined(separator: " and ") + " are typing…" }
+        return "Several people are typing…"
+    }
+    var body: some View {
+        HStack {
+            if !matrix.typingUsers.isEmpty { Text(label) }
+            Spacer()
+        }.font(m.font(.caption)).foregroundStyle(appearance.colors.muted).padding(.horizontal, m.sp24)
+            .layoutIsolated().frame(height: m.sp24)
+    }
+}
+
+private struct ThreadProgress: View {
+    let matrix: MatrixService
+    let active: Bool
+    var body: some View {
+        DelayedProgress(active: active, hasContent: matrix.threadMessages.count > 1, interval: .threadLoading)
+    }
+}
+
+private struct RoomName: View {
+    let matrix: MatrixService
+    let roomID: String
+    var body: some View { Text(matrix.rooms.first { $0.id == roomID }?.name ?? "Conversation") }
+}
+
+/// Every direct message, for the DMs page.
+private struct RoomDirectory: View {
+    let matrix: MatrixService
+    let onSelect: (String) -> Void
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+    private var colors: AppColors { appearance.colors }
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(matrix.rooms.filter(\.isDirect)) { room in
+                    Button {
+                        onSelect(room.id)
+                    } label: {
+                        HStack(spacing: m.sp12) {
+                            AvatarView(name: room.name, size: m.avatar, matrix: matrix, source: room.avatarURL)
+                            VStack(alignment: .leading, spacing: m.sp4) {
+                                Text(room.name).font(m.font(.body, .semibold))
+                                Text(
+                                    room.topic.isEmpty
+                                        ? room.isDirect ? "Direct message" : "\(room.memberCount) members" : room.topic
+                                ).font(m.font(.meta)).foregroundStyle(colors.muted).lineLimit(1)
+                            }
+                            Spacer()
+                            if room.hasUnread {
+                                Text(
+                                    room.unreadMessages > 0 || room.unread > 0
+                                        ? "\(max(room.unreadMessages, room.unread))" : "•"
+                                ).font(m.font(.caption, .semibold)).padding(m.sp4).background(
+                                    colors.selection, in: Circle()
+                                ).accessibilityLabel("Unread conversation")
+                            }
+                            Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.muted)
+                        }.padding(m.sp20).contentShape(Rectangle())
+                    }.buttonStyle(.row)
+                    Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)
+                }
+            }
         }
     }
 }
