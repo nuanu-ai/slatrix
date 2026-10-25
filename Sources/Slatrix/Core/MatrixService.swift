@@ -731,6 +731,7 @@ final class MatrixService: ObservableObject {
         var media: [String: ShownMedia] = [:]
         var forwardMedia: [String: ForwardMediaRevision] = [:]
         var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
+        var projections: Projections = [:]
         init(roomID: String, token: UUID, timeline: Timeline, observer: TimelineObserver, listener: TaskHandle) {
             self.roomID = roomID
             self.token = token
@@ -1042,6 +1043,8 @@ final class MatrixService: ObservableObject {
         threadHandle?.cancel()
         for kept in recentTimelines.removeAll() { kept.listener.cancel() }
         liveTimeline = nil
+        mainProjections = [:]
+        threadProjections = [:]
         timelineHandle = nil
         typingHandle = nil
         threadHandle = nil
@@ -1208,6 +1211,7 @@ final class MatrixService: ObservableObject {
         mainForwardMedia = kept.forwardMedia
         mainSendFailures = kept.sendFailures
         sendFailures = kept.sendFailures
+        mainProjections = kept.projections
         timelineRevision = kept.revision
         // What arrived while the reader was away.
         showTimeline(kept.observer.snapshot, roomID: id)
@@ -1367,11 +1371,14 @@ final class MatrixService: ObservableObject {
             live.media = mainMedia
             live.forwardMedia = mainForwardMedia
             live.sendFailures = mainSendFailures
+            live.projections = mainProjections
             for closed in recentTimelines.keep(live, for: live.roomID) { closed.listener.cancel() }
         } else {
             timelineHandle?.cancel()
         }
         liveTimeline = nil
+        mainProjections = [:]
+        threadProjections = [:]
         mediaFiles.removeAll()
         mainMedia = [:]
         threadMedia = [:]
@@ -1417,60 +1424,110 @@ final class MatrixService: ObservableObject {
             reportUtds: false)
     }
 
+    /// What one timeline item contributes to its timeline's rows and lookups, worked out once: the SDK hands an
+    /// unchanged item back as the same object, so an update maps only the items it changed.
+    private struct ItemProjection {
+        /// Held so its identity, the cache key, stays unique.
+        let item: TimelineItem
+        var unread = UnreadMapping.Mark()
+        var id: String?
+        var eventOrTransactionId: EventOrTransactionId?
+        var isRemote = false
+        var failure: MessageSendFailure?
+        var forwardMedia: ForwardMediaRevision?
+        var media: MediaSource?
+        /// Images, files and videos say whether they have a thumbnail; other kinds leave the lookup alone.
+        var thumbnail: ThumbnailSource??
+        var message: ChatMessage?
+    }
+    private typealias Projections = [ObjectIdentifier: ItemProjection]
+    private var mainProjections: Projections = [:]
+    private var threadProjections: Projections = [:]
+
+    private func projection(of item: TimelineItem, roomID: String) -> ItemProjection {
+        var result = ItemProjection(item: item)
+        let event = item.asEvent()
+        guard let event else {
+            result.unread = UnreadMapping.mark(virtual: item.asVirtual(), event: nil, shown: false)
+            return result
+        }
+        let id = MatrixMapping.identifier(event.eventOrTransactionId)
+        result.id = id
+        result.eventOrTransactionId = event.eventOrTransactionId
+        result.isRemote = event.isRemote
+        result.failure = MessageSendFailure.failure(event.localSendState)
+        if case .msgLike(let content) = event.content, case .message(let message) = content.kind {
+            result.forwardMedia = (try? ForwardMessageContent(message))?.mediaRevision
+            switch message.msgType {
+            case .image(let value):
+                result.media = value.source
+                result.thumbnail = .some(
+                    value.info?.thumbnailSource.map {
+                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
+                    })
+            case .file(let value):
+                result.media = value.source
+                result.thumbnail = .some(
+                    value.info?.thumbnailSource.map {
+                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
+                    })
+            case .video(let value):
+                result.media = value.source
+                result.thumbnail = .some(
+                    value.info?.thumbnailSource.map {
+                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
+                    })
+            case .audio(let value): result.media = value.source
+            default: break
+            }
+        }
+        result.message = MatrixMapping.message(event, roomID: roomID, ownUserID: user?.id, uniqueID: item.uniqueId().id)
+        result.unread = UnreadMapping.mark(virtual: nil, event: event, shown: result.message != nil)
+        return result
+    }
+
     private func project(_ items: [TimelineItem], roomID: String, inThread: Bool = false) -> [ChatMessage] {
         var failures: [SendQueueMessageKey: MessageSendFailure] = [:]
         var shownMedia: [String: ShownMedia] = [:]
         var forwardMedia: [String: ForwardMediaRevision] = [:]
-        let projected: [ChatMessage] = items.compactMap { item in
-            guard let event = item.asEvent() else { return nil }
-            let id = MatrixMapping.identifier(event.eventOrTransactionId)
-            eventIDs[id] = event.eventOrTransactionId
-            if let failure = MessageSendFailure.failure(event.localSendState) {
+        let cached = inThread ? threadProjections : mainProjections
+        var projections = Projections(minimumCapacity: items.count)
+        var marks: [UnreadMapping.Mark] = []
+        marks.reserveCapacity(items.count)
+        var projected: [ChatMessage] = []
+        projected.reserveCapacity(items.count)
+        for item in items {
+            let key = ObjectIdentifier(item)
+            let projection = cached[key] ?? projection(of: item, roomID: roomID)
+            projections[key] = projection
+            marks.append(projection.unread)
+            guard let id = projection.id, let eventOrTransactionId = projection.eventOrTransactionId else { continue }
+            eventIDs[id] = eventOrTransactionId
+            if let failure = projection.failure {
                 failures[SendQueueMessageKey(roomID: roomID, messageID: id)] = failure
             }
-            if case .msgLike(let content) = event.content, case .message(let message) = content.kind {
-                forwardMedia[id] = (try? ForwardMessageContent(message))?.mediaRevision
-                switch message.msgType {
-                case .image(let value):
-                    mediaSources[id] = value.source
-                    thumbnailSources[id] = value.info?.thumbnailSource.map {
-                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
-                    }
-                case .file(let value):
-                    mediaSources[id] = value.source
-                    thumbnailSources[id] = value.info?.thumbnailSource.map {
-                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
-                    }
-                case .video(let value):
-                    mediaSources[id] = value.source
-                    thumbnailSources[id] = value.info?.thumbnailSource.map {
-                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
-                    }
-                case .audio(let value): mediaSources[id] = value.source
-                default: break
-                }
-            }
-            let mapped = MatrixMapping.message(
-                event, roomID: roomID, ownUserID: user?.id, uniqueID: item.uniqueId().id)
-            if event.isRemote, id.hasPrefix("$"), let mapped, !mapped.isRedacted, let attachment = mapped.attachment,
+            forwardMedia[id] = projection.forwardMedia
+            if let media = projection.media { mediaSources[id] = media }
+            if let thumbnail = projection.thumbnail { thumbnailSources[id] = thumbnail }
+            guard let mapped = projection.message else { continue }
+            if projection.isRemote, id.hasPrefix("$"), !mapped.isRedacted, let attachment = mapped.attachment,
                 let source = mediaSources[id]
             {
                 shownMedia[id] = ShownMedia(source: source, attachment: attachment, identity: source.toJson())
             }
-            return mapped
+            projected.append(mapped)
         }
         if inThread {
+            threadProjections = projections
             threadMedia = shownMedia
             threadForwardMedia = forwardMedia
-        } else {
-            mainMedia = shownMedia
-            mainForwardMedia = forwardMedia
-        }
-        if inThread {
             threadSendFailures = failures
         } else {
+            mainProjections = projections
+            mainMedia = shownMedia
+            mainForwardMedia = forwardMedia
             mainSendFailures = failures
-            firstUnreadEventID = UnreadMapping.firstUnreadEventID(in: items, roomID: roomID, ownUserID: user?.id)
+            firstUnreadEventID = UnreadMapping.firstUnreadEventID(in: marks)
         }
         sendFailures = mainSendFailures.merging(threadSendFailures) { _, latest in latest }
         return projected
@@ -1569,6 +1626,7 @@ final class MatrixService: ObservableObject {
     }
     func loadThread(_ root: ChatMessage) async throws {
         try assertDestination(root.roomID)
+        threadProjections = [:]
         threadMedia = [:]
         threadForwardMedia = [:]
         readyThreadReadSelection = nil
