@@ -26,7 +26,8 @@ Use the `ponytail` skill on every change: the smallest change that fully solves 
 
 Tests use Swift Testing in `Tests/SlatrixTests`. Shared fakes and fixtures live in `Tests/SlatrixTests/Support`.
 
-- Work red-green with the `tdd` skill: one failing test, the minimal fix, repeat. A bug fix starts with a test that fails for the reported reason.
+- Every behavior change starts red. Work with the `tdd` skill: one failing test, the minimal change, repeat; a bug fix starts with a test that fails for the reported reason. Commit the failing test first, with a message that says how it fails, then the change that makes it pass, so the pull request shows red before green.
+- CI checks it: when a pull request changes both `Sources` and `Tests`, `scripts/red-check.sh` runs its tests on the base branch's sources and requires them to fail. A behavior-preserving refactor carries the `refactor` label instead.
 - Every new or changed test passes the `test-audit` authoring gate. No tests of code written inside the test, no exact internal call counts, no restated constants, no assertion counting.
 - Wait on conditions (`Gate`, `eventually`), never on `Task.sleep` or a fixed number of yields. `drainMainActor()` proves SDK callbacks already queued for the main actor have run.
 - Check that a test can fail: mutate the production line it protects and watch it go red. `scripts/mutate.sh <file> --filter <Suite>` tries every operator mutation in a file and lists the survivors.
@@ -49,7 +50,7 @@ The README and anything else a visitor reads should sound like a person wrote it
 
 ## Workflow
 
-- Branch per change, small commits with imperative subjects, a pull request, green CI before merge.
+- Branch per change, small commits with imperative subjects, a pull request, green CI before merge. Pull requests merge as one squashed commit, so `main` stays green and bisectable while the pull request keeps the red-then-green record.
 - Review your own diff with `code-review` and `ponytail-review` before asking for a merge. Hard bugs go through `diagnosing-bugs`.
 - Subagents run on Opus. Give open-ended work high effort: architecture, cross-cutting refactors, hard bugs, UI that needs judgment. Narrow tasks with a known shape get medium: a bug with a known cause, a mechanical sweep, a port.
 - Debug builds keep their data and credentials in `~/Library/Application Support/Slatrix Dev`, so they never touch the daily-driver app's session.
