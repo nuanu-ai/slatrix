@@ -1120,7 +1120,16 @@ struct RootView: View {
                 }.buttonStyle(.row).foregroundStyle(colors.muted)
                 Spacer()
                 // In the tab row's reserved height, so it never covers or moves a message.
-                EncryptionStatus(matrix: matrix, isEncrypted: room.isEncrypted) { showRecovery = true }
+                if matrix.hasLockedMessages {
+                    Button {
+                        showRecovery = true
+                    } label: {
+                        Label("Unlock messages", systemImage: "key").font(m.font(.meta, .medium))
+                    }.buttonStyle(.row).foregroundStyle(colors.accent).disabled(matrix.isPreview)
+                } else if room.isEncrypted {
+                    Image(systemName: "lock.shield").font(m.font(.meta)).foregroundStyle(colors.muted).help(
+                        "End-to-end encrypted")
+                }
             }.padding(.horizontal, m.sp24).frame(height: m.sp40)
         }
     }
@@ -2647,25 +2656,6 @@ private struct ErrorToast: View {
         if let error = matrix.errorMessage {
             InlineErrorView(message: error, dismiss: { matrix.errorMessage = nil })
                 .modifier(Toast(colors: appearance.colors))
-        }
-    }
-}
-
-/// Offers the recovery key while messages can't be read; otherwise marks an encrypted conversation.
-private struct EncryptionStatus: View {
-    let matrix: MatrixService
-    let isEncrypted: Bool
-    let onUnlock: () -> Void
-    @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
-    var body: some View {
-        if matrix.messages.contains(where: { $0.kind == "m.room.encrypted" }) {
-            Button(action: onUnlock) {
-                Label("Unlock messages", systemImage: "key").font(m.font(.meta, .medium))
-            }.buttonStyle(.row).foregroundStyle(appearance.colors.accent).disabled(matrix.isPreview)
-        } else if isEncrypted {
-            Image(systemName: "lock.shield").font(m.font(.meta)).foregroundStyle(appearance.colors.muted).help(
-                "End-to-end encrypted")
         }
     }
 }

@@ -80,6 +80,8 @@ struct TimelineView: View {
         }
         .animation(.easeOut(duration: 0.12), value: jumpVisible)
         .background(colors.canvas)
+        // Every message redraws the timeline; it fills what it is given, so that never lays out the window.
+        .layoutIsolated()
         .onDisappear {
             deleting = nil
             cancelling = nil

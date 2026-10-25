@@ -499,7 +499,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var errorMessage: String?
     var rooms: [ChatRoom] = [] { didSet { updateSelectedRoom() } }
     var workspaces: [Workspace] = []
-    var messages: [ChatMessage] = []
+    var messages: [ChatMessage] = [] {
+        didSet {
+            let locked = messages.contains { $0.kind == "m.room.encrypted" }
+            if locked != hasLockedMessages { hasLockedMessages = locked }
+        }
+    }
+    /// Whether the open conversation shows messages this device can't decrypt yet; apart from `messages`, so its
+    /// readers aren't redrawn by every message.
+    private(set) var hasLockedMessages = false
     private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private(set) var pendingSendActions = Set<SendQueueMessageKey>()
     private var mainSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
