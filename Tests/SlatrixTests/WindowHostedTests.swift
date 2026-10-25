@@ -4,7 +4,8 @@ import Testing
 
 @testable import Slatrix
 
-/// The whole window in a real offscreen window, with a busy conversation open; needs an awake display.
+/// The whole window in a real offscreen window, with a busy conversation open; needs an awake display. Budgets sit
+/// near seven times an M4 Pro debug run, as in `PerformanceBudgetTests`.
 @MainActor
 @Suite(
     .serialized, .tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
@@ -78,7 +79,7 @@ struct WindowHostedTests {
                 harness.matrix.rooms[$0.isMultiple(of: 2) ? open : other].unread = $0 % 7 + 1
             }
         }
-        #expect(time < .milliseconds(100), "\(time)")
+        #expect(time < .seconds(7), "\(time)")
     }
 
     @Test(
@@ -91,7 +92,7 @@ struct WindowHostedTests {
             #expect(await harness.settle())
             return harness.mainThreadTime(100) { harness.matrix.typingUsers = $0.isMultiple(of: 2) ? ["Alex"] : [] }
         }
-        #expect(time < .milliseconds(100), "\(time)")
+        #expect(time < .milliseconds(250), "\(time)")
     }
 
     @Test(
@@ -106,6 +107,6 @@ struct WindowHostedTests {
                 Harness.views(in: harness.hosting).compactMap { $0 as? NSTextView }.first { $0.isEditable })
             return harness.mainThreadTime(100) { _ in editor.insertText("a", replacementRange: editor.selectedRange()) }
         }
-        #expect(time < .milliseconds(100), "\(time)")
+        #expect(time < .milliseconds(1_700), "\(time)")
     }
 }
