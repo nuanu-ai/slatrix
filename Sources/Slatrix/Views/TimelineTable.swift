@@ -707,7 +707,7 @@ private struct TimelineLoadingRow: View {
     @Environment(\.metrics) private var m
     let loading: Bool
     var body: some View {
-        ZStack { if loading { ProgressView().controlSize(.small) } }.frame(maxWidth: .infinity).frame(height: m.sp40)
+        DelayedProgress(active: loading).frame(maxWidth: .infinity).frame(height: m.sp40)
     }
 }
 

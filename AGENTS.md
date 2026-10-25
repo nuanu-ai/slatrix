@@ -6,6 +6,7 @@ Slatrix is a native macOS Matrix client that should feel like Slack to someone w
 
 - Slack parity first. When unsure how something should look, behave or be named, do what Slack desktop does: layout, shortcuts, wording, keyboard flow. Diverge only where Matrix forces it.
 - Fast and still. Nothing flickers, jumps or reflows after it appears. Reserve space for content that loads later, keep view identity stable, and put transient UI (errors, menus, suggestions) in overlays instead of pushing content around.
+- No visible kitchen. Show what's cached at once and reconcile quietly; late pieces (members, pins, reply previews, avatars) land without changing a row's height. A loading indicator waits ~400 ms (`LoadingPresentation`), never covers content already on screen, and never comes with "Loading…" text.
 - Every string earns its place. No explanations of how things work under the hood, no "SDK", no apologies, no disclaimers. If a label needs a sentence of justification, the design is wrong.
 - Deliberate type and grid. Sizes, spacing and radii come from the design tokens. The whole UI scales with zoom (⌘= / ⌘- / ⌘0). A hard-coded font size is a bug.
 - Motion is quiet. Panes and overlays ease in over 120–150 ms. Everything else is instant.

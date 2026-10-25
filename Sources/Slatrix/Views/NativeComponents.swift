@@ -54,6 +54,25 @@ struct AvatarView: View {
     }
 }
 
+/// A spinner for a wait long enough to notice. It draws nothing before then, so callers place it in space that is
+/// already reserved or in an overlay.
+struct DelayedProgress: View {
+    var active = true
+    var hasContent = false
+    @State private var shown = false
+    var body: some View {
+        ZStack { if shown { ProgressView().controlSize(.small) } }
+            .task(id: active && !hasContent) {
+                shown = false
+                guard active, !hasContent else { return }
+                let start = ContinuousClock.now
+                try? await Task.sleep(for: LoadingPresentation.indicatorDelay)
+                guard !Task.isCancelled else { return }
+                shown = LoadingPresentation.showsIndicator(waited: .now - start, hasContent: hasContent)
+            }
+    }
+}
+
 /// The house style for borderless buttons: the whole frame takes clicks, including the gaps between an icon,
 /// its label and a trailing spacer, which `.plain` leaves dead.
 struct RowButtonStyle: ButtonStyle {

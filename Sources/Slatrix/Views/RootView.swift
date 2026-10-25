@@ -1216,13 +1216,6 @@ struct RootView: View {
                 IconButton(symbol: "xmark", label: "Close thread", role: .body, action: closeThread)
             }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
             Divider().overlay(colors.border)
-            if openingThreadID == root.eventID {
-                HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small)
-                    Text("Opening thread…").font(m.font(.meta)).foregroundStyle(colors.muted)
-                    Spacer()
-                }.padding(m.sp12)
-            }
             if let threadLoadError {
                 HStack {
                     InlineErrorView(message: threadLoadError)
@@ -1243,6 +1236,10 @@ struct RootView: View {
                     threadReadViewport.record(visible, from: identity, current: matrix.threadReadIdentity)
                 }, onForward: startForward, onEditCaption: startCaption
             ).id(root.eventID)
+                .overlay {
+                    DelayedProgress(
+                        active: openingThreadID == root.eventID, hasContent: matrix.threadMessages.count > 1)
+                }
             VStack(spacing: 0) {
                 if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
@@ -1588,13 +1585,10 @@ struct RootView: View {
                     guard target.isCurrent(replyTarget, owner: replyOwner) else { return }
                     cancelReply()
                 }
+            }.overlay(alignment: .trailing) {
+                DelayedProgress(active: replyOpening).padding(.trailing, m.iconButton + m.sp8)
             }
-            if replyOpening {
-                HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.mini)
-                    Text("Loading…")
-                }.font(m.font(.caption)).foregroundStyle(colors.muted)
-            } else if let replyError {
+            if !replyOpening, let replyError {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                     Text(replyError).foregroundStyle(colors.muted)
                     Button("Retry") { prepareReply(target) }.buttonStyle(.link)
