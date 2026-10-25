@@ -29,6 +29,7 @@ Tests use Swift Testing in `Tests/SlatrixTests`. Shared fakes and fixtures live 
 - Every new or changed test passes the `test-audit` authoring gate. No tests of code written inside the test, no exact internal call counts, no restated constants, no assertion counting.
 - Wait on conditions (`Gate`, `eventually`), never on `Task.sleep` or a fixed number of yields. `drainMainActor()` proves SDK callbacks already queued for the main actor have run.
 - Check that a test can fail: mutate the production line it protects and watch it go red. `scripts/mutate.sh <file> --filter <Suite>` tries every operator mutation in a file and lists the survivors.
+- Speed budgets carry the `budget` tag and `Budget` in their names. They time real work at the scale of a busy account against about three times a local debug run. Parallel tests skew the clock, so they run only alone: `SLATRIX_BUDGETS=1 scripts/test.sh --filter Budget --no-parallel`, which CI does in a step of its own. Raise one only with a measurement that explains why.
 - Synthetic events from `window.sendEvent` skip the window server, so window dragging, cursor rects and scroll momentum never show up in them. Check those through the contract AppKit reads, such as `mouseDownCanMoveWindow`.
 
 Agreed seams, where tests belong:
@@ -38,6 +39,7 @@ Agreed seams, where tests belong:
 - **Local storage**: encrypted drafts, saved messages, attachment staging, credentials. Catches format, permission and corruption handling.
 - **Pure policies**: read state, navigation order, sidebar layout, link parsing, search query grammar, timeline grouping and scroll anchoring. Catches rule regressions directly.
 - **Hosted timeline**: the real timeline in an offscreen window, opt-in with `SLATRIX_HOSTED_UI_CHECKS=1` because it needs an awake display. Catches scroll jumps and row geometry; misses real pointer input and WindowServer timing.
+- **Performance log**: what the app writes to unified logging, read back through `OSLogStore`. Catches lost hang reports and names the report cannot parse; misses real WindowServer timing.
 - **Release scripts**: run as a process with real arguments. Catches a tag that would ship a version Sparkle cannot order; misses signing, notarization and the appcast.
 
 ## Docs
@@ -57,6 +59,7 @@ The README and anything else a visitor reads should sound like a person wrote it
 ```sh
 scripts/test.sh         # build and run tests
 scripts/build-app.sh    # release app bundle in build/
+scripts/perf-report.sh  # flow timings, loading states, moved rows and hangs from the last day of use (or e.g. 7d)
 ```
 
 Both run `scripts/build-sdk.sh` first. It downloads the prebuilt SDK for the current pin and patches, and compiles it only when none is published yet (or with `SLATRIX_SDK_FROM_SOURCE=1`).

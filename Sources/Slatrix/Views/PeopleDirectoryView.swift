@@ -44,7 +44,8 @@ struct PeopleDirectoryView: View {
                         .onKeyPress(.downArrow) { move(1) }
                         .accessibilityLabel("Search people")
                     if people.searchState == "loading" {
-                        ProgressView().controlSize(.small).accessibilityLabel("Searching people")
+                        ProgressView().controlSize(.small).accessibilityLabel("Searching people").loadingInterval(
+                            .peopleLoading)
                     }
                     if !query.isEmpty {
                         IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body) {
@@ -79,7 +80,7 @@ struct PeopleDirectoryView: View {
             EmptyStateView(symbol: "person.2", title: matrix.isPreview ? "Sign in to find people" : "Search for people")
         } else if (people.searchState == "loading" || activeRequest != request) && results.isEmpty {
             VStack(spacing: m.sp12) {
-                ProgressView()
+                ProgressView().loadingInterval(.peopleLoading)
                 Text("Searching people…").font(m.font(.secondary)).foregroundStyle(colors.muted)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if people.searchState == "error" && results.isEmpty {
@@ -239,7 +240,9 @@ struct PersonRecipientPicker: View {
                             return .handled
                         }
                         .accessibilityLabel("Search and select a recipient")
-                    if people.searchState == "loading" { ProgressView().controlSize(.small) }
+                    if people.searchState == "loading" {
+                        ProgressView().controlSize(.small).loadingInterval(.peopleLoading)
+                    }
                 }.padding(m.sp12).background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius)).overlay(
                     RoundedRectangle(cornerRadius: m.radius).stroke(colors.muted.opacity(0.5)))
                 if !query.isEmpty {

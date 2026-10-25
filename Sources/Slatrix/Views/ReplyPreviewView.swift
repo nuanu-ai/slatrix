@@ -22,7 +22,7 @@ struct ReplyPreviewView: View {
                     }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.row).disabled(onOpen == nil).help("Show original message")
             } else {
-                if preview.state == .pending { ProgressView().controlSize(.mini) }
+                if preview.state == .pending { ProgressView().controlSize(.mini).loadingInterval(.replyLoading) }
                 Text(preview.state == .failed ? "Original message unavailable" : "Loading…").font(
                     m.font(.meta)
                 ).foregroundStyle(appearance.colors.muted)

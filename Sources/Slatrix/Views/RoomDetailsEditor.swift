@@ -71,7 +71,7 @@ struct RoomDetailsEditor: View {
                 VStack(alignment: .leading, spacing: m.sp24) {
                     if loading {
                         HStack(spacing: m.sp12) {
-                            ProgressView().controlSize(.small)
+                            ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
                             Text("Loading…").font(m.font(.secondary)).foregroundStyle(
                                 colors.muted)
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, m.sp20)

@@ -67,7 +67,7 @@ struct ForwardMessageView: View {
             } else {
                 if loading {
                     HStack(spacing: m.sp8) {
-                        ProgressView().controlSize(.small)
+                        ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
                         Text("Loading…").font(m.font(.meta))
                     }
                 }

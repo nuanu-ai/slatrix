@@ -3,6 +3,8 @@ import SwiftUI
 
 @main enum SlatrixEntry {
     @MainActor static func main() {
+        Performance.startLaunch()
+        Performance.watchMainThread()
         SDKLogging.start()
         SlatrixApp.main()
     }

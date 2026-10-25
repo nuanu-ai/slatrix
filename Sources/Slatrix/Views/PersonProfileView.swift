@@ -66,7 +66,7 @@ struct PersonProfileView: View {
             }
             if people.profileState == "loading" {
                 HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small)
+                    ProgressView().controlSize(.small).loadingInterval(.profileLoading)
                     Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.muted)
                 }
             } else if people.profileState == "error" || profile?.profileAvailable == false {
