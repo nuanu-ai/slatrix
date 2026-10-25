@@ -1579,7 +1579,7 @@ final class MatrixService: ObservableObject {
     /// loading; a request then joins the page in flight instead of starting a second one.
     private func paginateBackwards(_ timeline: Timeline) async throws -> Bool {
         if let current = backwardPage, current.timeline === timeline { return try await current.task.value }
-        let task = Task { try await timeline.paginateBackwards(numEvents: 50) }
+        let task = Task { try await timeline.paginateBackwards(numEvents: 100) }
         backwardPage = (timeline, task)
         defer { if backwardPage?.timeline === timeline { backwardPage = nil } }
         return try await task.value
