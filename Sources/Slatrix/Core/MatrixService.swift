@@ -497,7 +497,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         authOperation == nil && !sessionCleanupPending && connectionStopTask == nil
     }
     var errorMessage: String?
-    var rooms: [ChatRoom] = []
+    var rooms: [ChatRoom] = [] { didSet { updateSelectedRoom() } }
     var workspaces: [Workspace] = []
     var messages: [ChatMessage] = []
     private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
@@ -513,7 +513,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var hasMoreThreadHistory = true
     var members: [ChatUser] = []
     var user: ChatUser?
-    var selectedRoomID: String?
+    var selectedRoomID: String? { didSet { updateSelectedRoom() } }
+    /// The open conversation's entry in `rooms`, apart so its readers are not redrawn by changes to other rooms.
+    private(set) var selectedRoom: ChatRoom?
+    private func updateSelectedRoom() {
+        let room = rooms.first { $0.id == selectedRoomID }
+        if room != selectedRoom { selectedRoom = room }
+    }
     var typingUsers: [String] = []
     var isPreview = false
     var searchResults: [ChatMessage] = []
@@ -548,7 +554,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var lastThreadReceipt: ThreadReadReceiptTarget?
     var threadReadIdentity: ThreadReadIdentity? {
         guard connectionStopTask == nil, !isPreview, client != nil, let account = user?.id,
-            let roomID = selectedRoomID, rooms.contains(where: { $0.id == roomID && $0.membership == "join" }),
+            let roomID = selectedRoomID, selectedRoom?.membership == "join",
             let root = loadedThreadRootID, visibleActionThreadID == root, threadTimeline != nil,
             readyThreadReadSelection == threadSelection
         else { return nil }
@@ -575,7 +581,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             readyThreadID: threadTimeline != nil && visibleActionThreadID == loadedThreadRootID
                 ? loadedThreadRootID : nil,
             authenticated: client != nil && connectionStopTask == nil,
-            joined: rooms.contains { $0.id == selectedRoomID && $0.membership == "join" }, preview: isPreview)
+            joined: selectedRoom?.membership == "join", preview: isPreview)
     }
     func captureMessageAction(message: ChatMessage, surface: MessageActionTarget.Surface) -> MessageActionTarget? {
         guard let target = MessageActionTarget(message: message, surface: surface, context: messageActionContext),
@@ -690,8 +696,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let refresher = RoomListRefresher()
         refresher.onChange = { [weak self, weak refresher] in
             guard let self, let refresher else { return }
-            self.rooms = refresher.rooms
-            self.workspaces = refresher.workspaces
+            if self.rooms != refresher.rooms { self.rooms = refresher.rooms }
+            if self.workspaces != refresher.workspaces { self.workspaces = refresher.workspaces }
             self.threadFeed.updateRooms(refresher.rooms)
         }
         refresher.onError = { [weak self] error in self?.errorMessage = Self.safeError(error) }
@@ -1353,9 +1359,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             listener: TypingObserver { [weak self] ids in
                 Task { @MainActor [weak self] in
                     guard let self, self.selection == token else { return }
-                    self.typingUsers = ids.filter { $0 != self.user?.id }.map { id in
+                    let typing = ids.filter { $0 != self.user?.id }.map { id in
                         self.members.first { $0.id == id }?.name ?? id
                     }
+                    if typing != self.typingUsers { self.typingUsers = typing }
                 }
             })
     }

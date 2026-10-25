@@ -144,8 +144,8 @@ struct RootView: View {
     }
 
     private var room: ChatRoom? {
-        matrix.rooms.first {
-            $0.id == matrix.selectedRoomID && ($0.isDirect || workspaceID == nil || $0.spaceIDs.contains(workspaceID!))
+        matrix.selectedRoom.flatMap {
+            $0.isDirect || workspaceID == nil || $0.spaceIDs.contains(workspaceID!) ? $0 : nil
         }
     }
     /// Opened at its unread line, from the cache or at the line from the server.
