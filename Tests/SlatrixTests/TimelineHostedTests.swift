@@ -9,14 +9,14 @@ extension Tag {
     @Tag static var hosted: Tag
 }
 
-/// A history page that waits for the test, then lands older messages above the current ones.
+/// A history page that waits for the test, then lands older messages above the current ones. `onPage` returns
+/// whether that was the oldest page.
 private final class HistoryTimeline: Timeline, @unchecked Sendable {
     let gate = Gate()
-    var onPage: (@MainActor () -> Void)?
+    var onPage: (@MainActor () -> Bool)?
     override func paginateBackwards(numEvents: UInt16) async throws -> Bool {
         await gate.wait()
-        await onPage?()
-        return false
+        return await onPage?() ?? false
     }
 }
 
@@ -87,7 +87,12 @@ struct TimelineHostedTests {
             window.close()
         }
 
-        var scrollView: TimelineScrollView? { Self.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first }
+        var scrollView: TimelineScrollView? {
+            if let found, found.window != nil { return found }
+            found = Self.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first
+            return found
+        }
+        private var found: TimelineScrollView?
         var clip: NSClipView { scrollView!.contentView }
         var distanceFromBottom: CGFloat {
             let document = scrollView!.documentView!
@@ -202,7 +207,10 @@ struct TimelineHostedTests {
         let harness = Harness(messages: current)
         defer { harness.close() }
         harness.timeline.gate.arm()
-        harness.timeline.onPage = { harness.service.messages = older + current }
+        harness.timeline.onPage = {
+            harness.service.messages = older + current
+            return false
+        }
         await settle(harness)
         // Near the top, the timeline asks for the page before the reader gets there.
         harness.scroll(toTop: 120)
@@ -356,6 +364,56 @@ extension TimelineHostedTests {
             }
         }
         #expect(time < .milliseconds(180), "\(time)")
+    }
+
+    /// Scrolls up `step` points at a time from the newest message, laying out and drawing each step as a frame
+    /// would, until the oldest message is on screen; `each` runs after every step.
+    private func scrollToTop(
+        _ harness: Harness, step: CGFloat = 40, each: (Duration) async -> Void = { _ in }
+    ) async {
+        for _ in 0..<20_000 {
+            let top = harness.clip.bounds.minY
+            if top <= 0 && !harness.service.hasMoreHistory { return }
+            let start = ContinuousClock.now
+            harness.scroll(toTop: max(0, top - step))
+            harness.hosting.displayIfNeeded()
+            // Work the step queued for after the frame, like a history request, runs before the next one.
+            await Task.yield()
+            await each(.now - start)
+        }
+        Issue.record("Never reached the oldest message")
+    }
+
+    @Test("Scrolling up through history at a reading pace never reaches the loading row")
+    func historyArrivesAhead() async throws {
+        let all = busyConversation(400, roomID: Self.room.id, tag: UUID().uuidString)
+        let harness = Harness(messages: Array(all.suffix(100)))
+        defer { harness.close() }
+        harness.timeline.gate.arm()
+        harness.timeline.onPage = {
+            let loaded = harness.service.messages.count + 100
+            harness.service.messages = Array(all.suffix(loaded))
+            return loaded >= all.count
+        }
+        await settle(harness)
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        var waited = 0
+        var stalls = 0
+        // While older history exists, the row under the top spacer is its loading row.
+        // 40 points a frame; each page takes 20 frames, a third of a second at 60 Hz, to arrive.
+        await scrollToTop(harness) { _ in
+            if harness.timeline.gate.isWaiting {
+                waited += 1
+                if waited == 20 {
+                    waited = 0
+                    harness.timeline.gate.release()
+                    harness.timeline.gate.arm()
+                }
+            }
+            if harness.service.hasMoreHistory && harness.clip.bounds.minY < table.rect(ofRow: 1).maxY { stalls += 1 }
+        }
+        #expect(harness.service.messages.count == all.count)
+        #expect(stalls == 0)
     }
 
     @Test(
