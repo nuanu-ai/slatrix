@@ -88,4 +88,19 @@ struct WindowHostedTests {
         }
         #expect(time < .milliseconds(100), "\(time)")
     }
+
+    @Test(
+        "100 keystrokes in the composer with a 1,000-message conversation open hold the main thread within budget",
+        .tags(.budget), .enabled(if: budgetsEnabled))
+    func keystrokeBudget() async throws {
+        let time = try await fastest {
+            let harness = Harness()
+            defer { harness.close() }
+            #expect(await harness.settle())
+            let editor = try #require(
+                Harness.views(in: harness.hosting).compactMap { $0 as? NSTextView }.first { $0.isEditable })
+            return harness.mainThreadTime(100) { _ in editor.insertText("a", replacementRange: editor.selectedRange()) }
+        }
+        #expect(time < .milliseconds(100), "\(time)")
+    }
 }
