@@ -36,13 +36,14 @@ struct TimelineHostedTests {
         let appearance: AppearanceStore
         let previews: AttachmentPreviewController
         let atBottom: (Bool) -> Void
+        var zoom: CGFloat = 1
         var body: some View {
             TimelineView(
                 matrix: service, room: room, messages: service.messages, savedIDs: [], onThread: { _ in },
                 onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onBottomVisibilityChange: atBottom
             )
             .id(room.id)
-            .environmentObject(appearance).environmentObject(previews)
+            .environmentObject(appearance).environmentObject(previews).environment(\.metrics, Metrics(zoom: zoom))
         }
     }
 
@@ -233,6 +234,24 @@ struct TimelineHostedTests {
             await firstPerformanceMessage(since: since) { $0.hasPrefix("event=timeline.jump ") }
         }.value
         #expect(jump != nil)
+    }
+
+    @Test("Zooming in redraws the rows already on screen at the new size")
+    func zoomRedrawsRows() async throws {
+        let harness = Harness(messages: Self.messages(0..<40))
+        defer { harness.close() }
+        await settle(harness) { harness.top(of: "Message 39") != nil }
+        func lineHeight() -> CGFloat? {
+            Harness.views(in: harness.hosting).compactMap { $0 as? MessageTextView }
+                .first { $0.string == "Message 39" && $0.window != nil }?.frame.height
+        }
+        let before = try #require(lineHeight())
+        var zoomed = harness.fixture(Self.room)
+        zoomed.zoom = 1.5
+        harness.hosting.rootView = zoomed
+        await settle(harness) { (lineHeight() ?? 0) > before * 1.3 }
+        #expect(try #require(lineHeight()) > before * 1.3)
+        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
     }
 
     @Test("Leaving a conversation and coming back returns to where you were reading")
