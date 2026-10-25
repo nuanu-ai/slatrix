@@ -13,17 +13,8 @@ struct PerformanceBudgetTests {
     func roomListBudget() async {
         var rooms: [ChatRoom] = []
         let time = await fastest(of: 5) {
-            let spaces = (0..<20).map { FakeRoom(roomInfo(id: "!space\($0):example.org", isSpace: true)) }
-            let client = FakeClient(
-                rooms: spaces
-                    + (0..<280).map {
-                        FakeRoom(roomInfo(id: "!room\($0):example.org", name: "Room \($0)", unread: UInt64($0 % 3)))
-                    })
-            for index in 0..<280 {
-                client.spaces.parents["!room\(index):example.org"] = ["!space\(index % 20):example.org"]
-            }
             let refresher = RoomListRefresher()
-            refresher.attach(client)
+            refresher.attach(busyAccount())
             let start = ContinuousClock.now
             await withCheckedContinuation { published in
                 refresher.onChange = { published.resume() }
@@ -34,6 +25,34 @@ struct PerformanceBudgetTests {
         }
         #expect(rooms.count == 280 && rooms.allSatisfy { $0.spaceIDs.count == 1 })
         #expect(time < .milliseconds(35), "\(time)")
+    }
+
+    @Test("A room-list pass over 300 rooms holds the main thread within budget")
+    func roomListMainThreadBudget() async {
+        let time = await fastest(of: 5) {
+            let refresher = RoomListRefresher()
+            refresher.attach(busyAccount())
+            let start = threadCPUTime()
+            await withCheckedContinuation { published in
+                refresher.onChange = { published.resume() }
+                refresher.request()
+            }
+            return threadCPUTime() - start
+        }
+        #expect(time < .milliseconds(1), "\(time)")
+    }
+
+    private func busyAccount() -> FakeClient {
+        let spaces = (0..<20).map { FakeRoom(roomInfo(id: "!space\($0):example.org", isSpace: true)) }
+        let client = FakeClient(
+            rooms: spaces
+                + (0..<280).map {
+                    FakeRoom(roomInfo(id: "!room\($0):example.org", name: "Room \($0)", unread: UInt64($0 % 3)))
+                })
+        for index in 0..<280 {
+            client.spaces.parents["!room\(index):example.org"] = ["!space\(index % 20):example.org"]
+        }
+        return client
     }
 
     @Test("A 50-message diff on a 1,000-message timeline is applied and projected within budget")

@@ -79,11 +79,16 @@ final class FakeRoom: Room, @unchecked Sendable {
 
 final class FakeSpaceService: SpaceService, @unchecked Sendable {
     var parents: [String: [String]] = [:]
+    /// Every room whose parents were asked for.
+    let lookups = Recorder<String>()
     var roomLists: [String: SpaceRoomList] = [:]
     init() { super.init(noHandle: .init()) }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
     override func topLevelJoinedSpaces() async -> [SpaceRoom] { [] }
-    override func joinedParentIdsOfChild(childId: String) async throws -> [String] { parents[childId] ?? [] }
+    override func joinedParentIdsOfChild(childId: String) async throws -> [String] {
+        lookups.append(childId)
+        return parents[childId] ?? []
+    }
     override func spaceRoomList(spaceId: String) async throws -> SpaceRoomList {
         guard let list = roomLists[spaceId] else { throw ClientError.Generic(msg: "unknown space", details: nil) }
         return list
@@ -94,6 +99,7 @@ final class FakeClient: Client, @unchecked Sendable {
     private let lock = NSLock()
     private var list: [Room] = []
     let spaces = FakeSpaceService()
+    let roomsGate = BlockingGate()
     init(rooms: [Room] = []) {
         list = rooms
         super.init(noHandle: .init())
@@ -103,7 +109,10 @@ final class FakeClient: Client, @unchecked Sendable {
         get { lock.withLock { list } }
         set { lock.withLock { list = newValue } }
     }
-    override func rooms() -> [Room] { roomList }
+    override func rooms() -> [Room] {
+        roomsGate.wait()
+        return roomList
+    }
     override func getRoom(roomId: String) throws -> Room? { roomList.first { $0.id() == roomId } }
     override func spaceService() async -> SpaceService { spaces }
 

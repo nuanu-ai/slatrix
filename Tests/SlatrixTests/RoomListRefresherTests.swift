@@ -89,3 +89,70 @@ extension RoomListRefresherTests {
         #expect(refresher.workspaces.filter(\.isTopLevel).map(\.id) == ["!lab:example.org"])
     }
 }
+
+extension RoomListRefresherTests {
+    @Test("A slow SDK call never holds the main actor")
+    func slowCallLeavesMainActorFree() async {
+        let client = FakeClient(rooms: [FakeRoom(roomInfo(id: "!room:example.org"))])
+        client.roomsGate.arm()
+        let refresher = RoomListRefresher()
+        refresher.attach(client)
+        refresher.request()
+        // A main actor stuck in the call only gets here after the call gives up waiting.
+        #expect(await eventually { client.roomsGate.isWaiting })
+        client.roomsGate.release()
+        #expect(await eventually { refresher.rooms.count == 1 })
+    }
+}
+
+extension RoomListRefresherTests {
+    @Test("A slow room does not hold up loading the others")
+    func roomsLoadConcurrently() async {
+        let slow = FakeRoom(roomInfo(id: "!slow:example.org"))
+        let other = FakeRoom(roomInfo(id: "!other:example.org"))
+        slow.infoGate.arm()
+        let refresher = RoomListRefresher()
+        refresher.attach(FakeClient(rooms: [slow, other]))
+        refresher.request()
+        #expect(await eventually { slow.infoGate.isWaiting && other.infoReads > 0 })
+        slow.infoGate.release()
+        #expect(await eventually { refresher.rooms.count == 2 })
+    }
+}
+
+extension RoomListRefresherTests {
+    @Test("A change to one room reads only that room")
+    func roomChangeReadsOnlyThatRoom() async {
+        let busy = FakeRoom(roomInfo(id: "!busy:example.org"))
+        let quiet = FakeRoom(roomInfo(id: "!quiet:example.org"))
+        let client = FakeClient(rooms: [busy, quiet, FakeRoom(roomInfo(id: "!lab:example.org", isSpace: true))])
+        client.spaces.parents = ["!busy:example.org": ["!lab:example.org"], "!quiet:example.org": ["!lab:example.org"]]
+        let refresher = RoomListRefresher()
+        refresher.attach(client)
+        refresher.request()
+        #expect(await eventually { refresher.rooms.count == 2 })
+        let quietReads = quiet.infoReads
+        let lookups = client.spaces.lookups.all.count
+        busy.info = roomInfo(id: "!busy:example.org", unread: 4)
+        busy.notifyInfoChanged()
+        #expect(await eventually { refresher.rooms.first?.unread == 4 })
+        #expect(refresher.rooms.first?.spaceIDs == ["!lab:example.org"])
+        #expect(quiet.infoReads == quietReads)
+        #expect(client.spaces.lookups.all.count == lookups)
+    }
+}
+
+extension RoomListRefresherTests {
+    @Test("A room added to a workspace elsewhere moves under it")
+    func spaceChangeMovesRooms() async {
+        let lab = FakeRoom(roomInfo(id: "!lab:example.org", isSpace: true))
+        let client = FakeClient(rooms: [lab, FakeRoom(roomInfo(id: "!room:example.org"))])
+        let refresher = RoomListRefresher()
+        refresher.attach(client)
+        refresher.request()
+        #expect(await eventually { refresher.rooms.count == 1 && refresher.workspaces.count == 1 })
+        client.spaces.parents["!room:example.org"] = ["!lab:example.org"]
+        lab.notifyInfoChanged()
+        #expect(await eventually { refresher.rooms.first?.spaceIDs == ["!lab:example.org"] })
+    }
+}
