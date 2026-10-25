@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
 
 concurrency:
@@ -16,6 +17,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Restore Matrix SDK package
         id: sdk-cache
@@ -55,3 +58,7 @@ jobs:
 
       - name: Build app
         run: scripts/build-app.sh
+
+      - name: Red-green
+        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'refactor')
+        run: scripts/red-check.sh origin/${{ github.base_ref }}
