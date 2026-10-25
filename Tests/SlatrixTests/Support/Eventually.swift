@@ -42,6 +42,30 @@ final class Gate: @unchecked Sendable {
     }
 }
 
+/// Holds a synchronous call, like a blocking SDK function, until the test releases it or `limit` passes.
+final class BlockingGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var armed = false
+    private var waiting = 0
+    var isWaiting: Bool { condition.withLock { waiting > 0 } }
+
+    func arm() { condition.withLock { armed = true } }
+    func wait(limit: TimeInterval = 2) {
+        condition.lock()
+        defer { condition.unlock() }
+        let deadline = Date(timeIntervalSinceNow: limit)
+        waiting += 1
+        while armed, condition.wait(until: deadline) {}
+        waiting -= 1
+    }
+    func release() {
+        condition.withLock {
+            armed = false
+            condition.broadcast()
+        }
+    }
+}
+
 /// A lock-protected log for fakes that SDK callbacks write to from any thread.
 final class Recorder<Value>: @unchecked Sendable {
     private let lock = NSLock()

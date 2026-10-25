@@ -19,6 +19,24 @@ func fastest(of runs: Int = 3, _ run: () async throws -> Duration) async rethrow
     return best
 }
 
+/// CPU time the calling thread has used. Read on the main actor, it counts only work that held the main thread, not
+/// time spent waiting on other threads.
+func threadCPUTime() -> Duration {
+    var info = thread_basic_info()
+    var count = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
+    let thread = mach_thread_self()
+    defer { mach_port_deallocate(mach_task_self_, thread) }
+    _ = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+            thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &count)
+        }
+    }
+    func duration(_ value: time_value_t) -> Duration {
+        .seconds(Int64(value.seconds)) + .microseconds(Int64(value.microseconds))
+    }
+    return duration(info.user_time) + duration(info.system_time)
+}
+
 extension Duration {
     var milliseconds: Double { Double(components.seconds) * 1_000 + Double(components.attoseconds) / 1e15 }
 }
