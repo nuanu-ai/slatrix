@@ -56,17 +56,13 @@ enum TimelineScrollPolicy {
     }
 
     /// Where a timeline opens: at a linked message, else where the reader left this conversation, else the end.
-    /// `startsAtUnread` puts the unread line at the top instead of centring the linked message.
+    /// `startsAtUnread` puts the unread line at the top instead, when it is loaded.
     static func opening(
         focusedRowID: String?, unreadRowID: String?, startsAtUnread: Bool, remembered: Position?,
         contains: (String) -> Bool
     ) -> Position {
-        if let focusedRowID {
-            if startsAtUnread, let unreadRowID, contains(unreadRowID) {
-                return .anchored(rowID: unreadRowID, offset: 0)
-            }
-            return .centered(rowID: focusedRowID)
-        }
+        if startsAtUnread, let unreadRowID, contains(unreadRowID) { return .anchored(rowID: unreadRowID, offset: 0) }
+        if let focusedRowID { return .centered(rowID: focusedRowID) }
         if let remembered, case .anchored(let id, _) = remembered, contains(id) { return remembered }
         return .bottom
     }

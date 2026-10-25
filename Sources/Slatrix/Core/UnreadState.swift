@@ -20,22 +20,35 @@ enum UnreadNavigation {
 }
 
 enum UnreadMapping {
-    static func firstUnreadEventID(in items: [TimelineItem], roomID: String, ownUserID: String?) -> String? {
-        var afterMarker = false
-        for item in items {
-            if item.asVirtual() == .readMarker {
-                afterMarker = true
-                continue
-            }
-            guard afterMarker, let event = item.asEvent(), event.isRemote,
-                case .eventId(let id) = event.eventOrTransactionId, UnreadNavigation.isRemoteEventID(id),
-                MatrixMapping.message(event, roomID: roomID, ownUserID: ownUserID) != nil
-            else { continue }
-            return id
-        }
-        return nil
+    /// What the unread line needs from one timeline item.
+    struct Mark {
+        var isReadMarker = false
+        /// The remote event a reader would see, if the item is one.
+        var shownEventID: String?
     }
 
+    static func mark(virtual: VirtualTimelineItem?, event: EventTimelineItem?, shown: Bool) -> Mark {
+        guard virtual != .readMarker else { return Mark(isReadMarker: true) }
+        guard shown, let event, event.isRemote, case .eventId(let id) = event.eventOrTransactionId,
+            UnreadNavigation.isRemoteEventID(id)
+        else { return Mark() }
+        return Mark(shownEventID: id)
+    }
+
+    static func firstUnreadEventID(in items: [TimelineItem], roomID: String, ownUserID: String?) -> String? {
+        firstUnreadEventID(
+            in: items.map { item in
+                let event = item.asEvent()
+                return mark(
+                    virtual: item.asVirtual(), event: event,
+                    shown: event.flatMap { MatrixMapping.message($0, roomID: roomID, ownUserID: ownUserID) } != nil)
+            })
+    }
+
+    static func firstUnreadEventID(in marks: [Mark]) -> String? {
+        guard let marker = marks.firstIndex(where: \.isReadMarker) else { return nil }
+        return marks[(marker + 1)...].lazy.compactMap(\.shownEventID).first
+    }
 }
 
 @MainActor

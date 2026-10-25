@@ -113,6 +113,19 @@ struct TimelineView: View {
             messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
             groups: appearance.density != .compact)
         let context = matrix.messageActionContext
+        let inputs = TimelineLayoutCache.EntryInputs(
+            rows: rows, hasOlder: hasOlder, hasNewer: hasNewer, loadingHistory: loadingHistory, welcome: welcome,
+            pinned: room.pinnedEventIDs,
+            canPin: canPinMessages, savedIDs: savedIDs, highlighted: thread ? nil : matrix.focusedEventID,
+            sendFailures: matrix.sendFailures, pendingSendActions: matrix.pendingSendActions, context: context)
+        return layout.entries(for: inputs) { buildEntries(rows, context: context) }
+    }
+
+    private var welcome: TimelineWelcome {
+        TimelineWelcome(name: room.name, topic: room.topic, isDirect: room.isDirect, isEncrypted: room.isEncrypted)
+    }
+
+    private func buildEntries(_ rows: [TimelineLayout.Row], context: MessageActionTarget.Context) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
         entries.reserveCapacity(rows.count + 2)
         if hasOlder {
@@ -121,10 +134,7 @@ struct TimelineView: View {
             entries.append(
                 TimelineEntry(
                     id: "welcome",
-                    kind: .welcome(
-                        TimelineWelcome(
-                            name: room.name, topic: room.topic, isDirect: room.isDirect,
-                            isEncrypted: room.isEncrypted))))
+                    kind: .welcome(welcome)))
         }
         for row in rows {
             switch row.kind {
@@ -205,6 +215,32 @@ struct TimelineView: View {
     private var input: (messages: [ChatMessage], unread: String?, groups: Bool)?
     private var rows: [TimelineLayout.Row] = []
     private var unreadBoundary: String?
+    /// Everything a timeline's entries show besides the rows; the timeline redraws for many changes that touch none.
+    struct EntryInputs: Equatable {
+        var rows: [TimelineLayout.Row]
+        var hasOlder: Bool
+        var hasNewer: Bool
+        var loadingHistory: Bool
+        var welcome: TimelineWelcome
+        var pinned: [String]
+        var canPin: Bool
+        var savedIDs: Set<String>
+        var highlighted: String?
+        var sendFailures: [SendQueueMessageKey: MessageSendFailure]
+        var pendingSendActions: Set<SendQueueMessageKey>
+        var context: MessageActionTarget.Context
+    }
+    private var entryInputs: EntryInputs?
+    private var entries: [TimelineEntry] = []
+
+    /// The same array, and so a cheap comparison for the table, until an input changes.
+    func entries(for inputs: EntryInputs, build: () -> [TimelineEntry]) -> [TimelineEntry] {
+        if inputs != entryInputs {
+            entries = build()
+            entryInputs = inputs
+        }
+        return entries
+    }
 
     func rows(_ messages: [ChatMessage], firstUnreadEventID: String?, groups: Bool) -> [TimelineLayout.Row] {
         if unreadBoundary == nil, let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID })

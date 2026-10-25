@@ -342,6 +342,7 @@ private final class TimelineObserver: TimelineListener, @unchecked Sendable {
     private var revision = 0
     let callback: @Sendable ([TimelineItem], Int) -> Void
     init(_ callback: @escaping @Sendable ([TimelineItem], Int) -> Void) { self.callback = callback }
+    var snapshot: (items: [TimelineItem], revision: Int) { lock.withLock { (items, revision) } }
     func onUpdate(diff: [TimelineDiff]) {
         let changes = diff.map(\.change)
         lock.lock()
@@ -531,6 +532,11 @@ final class MatrixService: ObservableObject {
     private var handles: [TaskHandle] = []
     private var timeline: Timeline?
     private var timelineHandle: TaskHandle?
+    /// The open conversation's live timeline; nil while it shows one opened at an older message.
+    private var liveTimeline: KeptTimeline?
+    private var recentTimelines = RecentTimelines<KeptTimeline>()
+    /// The open whose conversation is on screen, which can trail `selection` while the next one reads its cache.
+    private var shownSelection: UUID?
     private var typingHandle: TaskHandle?
     private var threadTimeline: Timeline?
     private var threadHandle: TaskHandle?
@@ -668,6 +674,11 @@ final class MatrixService: ObservableObject {
         threadSelection = threadID
         setMessageActionThread(rootID: rootID)
     }
+    func configureRoomOpenForChecks(client: Client, roomList: RoomListService, user: ChatUser) {
+        self.client = client
+        self.user = user
+        roomSubscriptions.attach(roomList)
+    }
     #endif
     private var captionSaves = Set<UUID>()
     private var forwardingReviews = Set<UUID>()
@@ -702,6 +713,33 @@ final class MatrixService: ObservableObject {
         let identity: String
     }
     private var mainMedia: [String: ShownMedia] = [:]
+    /// A live timeline with what its conversation last showed, so coming back to it rebuilds nothing.
+    @MainActor private final class KeptTimeline {
+        let roomID: String
+        let token: UUID
+        let timeline: Timeline
+        let observer: TimelineObserver
+        let listener: TaskHandle
+        var revision = 0
+        var messages: [ChatMessage] = []
+        var members: [ChatUser] = []
+        var hasMoreHistory = true
+        var firstUnreadEventID: String?
+        var eventIDs: [String: EventOrTransactionId] = [:]
+        var mediaSources: [String: MediaSource] = [:]
+        var thumbnailSources: [String: ThumbnailSource] = [:]
+        var media: [String: ShownMedia] = [:]
+        var forwardMedia: [String: ForwardMediaRevision] = [:]
+        var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
+        var projections: Projections = [:]
+        init(roomID: String, token: UUID, timeline: Timeline, observer: TimelineObserver, listener: TaskHandle) {
+            self.roomID = roomID
+            self.token = token
+            self.timeline = timeline
+            self.observer = observer
+            self.listener = listener
+        }
+    }
     private var threadMedia: [String: ShownMedia] = [:]
     private let mediaFiles = MediaFileCache()
     private let savedPreviewLimit = ConcurrencyLimit(slots: 2)
@@ -1003,6 +1041,10 @@ final class MatrixService: ObservableObject {
         timelineHandle?.cancel()
         typingHandle?.cancel()
         threadHandle?.cancel()
+        for kept in recentTimelines.removeAll() { kept.listener.cancel() }
+        liveTimeline = nil
+        mainProjections = [:]
+        threadProjections = [:]
         timelineHandle = nil
         typingHandle = nil
         threadHandle = nil
@@ -1125,7 +1167,60 @@ final class MatrixService: ObservableObject {
 
     private func requestRefresh() { roomListRefresher.request() }
 
-    func selectRoom(_ id: String) async { await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil) }
+    func selectRoom(_ id: String) async {
+        if showRecentRoom(id) { return }
+        await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil)
+    }
+
+    /// Opens a conversation with unread messages at its unread line: live from the cache when the cache reaches the
+    /// line, else at the line from the server.
+    func resumeRoom(_ id: String, at anchor: String) async {
+        if showRecentRoom(id, containing: anchor) { return }
+        if await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil, containing: anchor) { return }
+        await jumpToMessage(roomID: id, eventID: anchor)
+    }
+
+    /// Shows a conversation whose live timeline is still open, rows and all, in the frame of the click. False when
+    /// none is open, or when it does not hold `anchor`.
+    func showRecentRoom(_ id: String, containing anchor: String? = nil) -> Bool {
+        guard connectionStopTask == nil, client != nil, !isPreview else { return false }
+        func holds(_ kept: KeptTimeline) -> Bool {
+            anchor.map { Self.contains(kept.observer.snapshot.items, $0) } ?? true
+        }
+        if let live = liveTimeline, live.roomID == id, holds(live) {
+            // Already on screen; this drops any other conversation that was still opening.
+            selection = live.token
+            showTimeline(live.observer.snapshot, roomID: id)
+            return true
+        }
+        guard let kept = recentTimelines.entry(id), holds(kept) else { return false }
+        _ = recentTimelines.take(id)
+        selection = kept.token
+        showConversation(id, eventID: nil, token: kept.token)
+        liveTimeline = kept
+        timeline = kept.timeline
+        timelineHandle = kept.listener
+        messages = kept.messages
+        members = kept.members
+        hasMoreHistory = kept.hasMoreHistory
+        firstUnreadEventID = kept.firstUnreadEventID
+        eventIDs = kept.eventIDs
+        mediaSources = kept.mediaSources
+        thumbnailSources = kept.thumbnailSources
+        mainMedia = kept.media
+        mainForwardMedia = kept.forwardMedia
+        mainSendFailures = kept.sendFailures
+        sendFailures = kept.sendFailures
+        mainProjections = kept.projections
+        timelineRevision = kept.revision
+        // What arrived while the reader was away.
+        showTimeline(kept.observer.snapshot, roomID: id)
+        if !messages.isEmpty { Performance.finish(.roomTimeline, ["messages": messages.count]) }
+        updateSubscriptions(id)
+        if let room = try? client?.getRoom(roomId: id) { watchTyping(room, token: kept.token) }
+        Task { [weak self] in await self?.loadMembers() }
+        return true
+    }
 
     func isLiveTimelineReady(roomID: String) -> Bool {
         guard connectionStopTask == nil, let client, selectedRoomID == roomID,
@@ -1146,7 +1241,148 @@ final class MatrixService: ObservableObject {
             eventID: eventID)
     }
 
-    private func setupRoom(_ id: String, focus: TimelineFocus, eventID: String?) async {
+    private static func contains(_ items: [TimelineItem], _ eventID: String) -> Bool {
+        items.contains { $0.asEvent().map { MatrixMapping.identifier($0.eventOrTransactionId) } == eventID }
+    }
+
+    /// False, without showing the room, when its live timeline does not hold `anchor`.
+    @discardableResult
+    private func setupRoom(_ id: String, focus: TimelineFocus, eventID: String?, containing anchor: String? = nil)
+        async -> Bool
+    {
+        let token = UUID()
+        selection = token
+        updateSubscriptions(id)
+        // The previous conversation stays up while this one reads its cache, so its rows replace the old ones in
+        // one frame; only a slow open shows the room before its rows.
+        let handoff = Task { [weak self] in
+            try? await Task.sleep(for: LoadingPresentation.handoff)
+            guard !Task.isCancelled else { return }
+            self?.showConversation(id, eventID: eventID, token: token)
+        }
+        var missedAnchor = false
+        defer {
+            handoff.cancel()
+            if !missedAnchor { showConversation(id, eventID: eventID, token: token) }
+        }
+        do {
+            let client = try requireClient()
+            var pendingRoom = try client.getRoom(roomId: id)
+            for _ in 0..<50 where pendingRoom == nil {
+                try await Task.sleep(nanoseconds: 200_000_000)
+                guard selection == token else { return true }
+                pendingRoom = try client.getRoom(roomId: id)
+            }
+            guard let room = pendingRoom else {
+                throw MatrixServiceError.request("This conversation is still loading. Try again in a moment.")
+            }
+            if room.membership() == .invited { return true }
+            let next = try await room.timelineWithConfiguration(configuration: Self.timelineConfiguration(focus))
+            guard selection == token else { return true }
+            let observer = TimelineObserver { [weak self] items, revision in
+                Task { @MainActor [weak self] in
+                    guard let self, self.selection == token else { return }
+                    self.showTimeline((items, revision), roomID: id)
+                }
+            }
+            let listenerHandle = await next.addListener(listener: observer)
+            guard selection == token else {
+                listenerHandle.cancel()
+                return true
+            }
+            if let anchor, !Self.contains(observer.snapshot.items, anchor) {
+                listenerHandle.cancel()
+                missedAnchor = true
+                return false
+            }
+            showConversation(id, eventID: eventID, token: token)
+            timeline = next
+            timelineHandle = listenerHandle
+            if eventID == nil {
+                liveTimeline = KeptTimeline(
+                    roomID: id, token: token, timeline: next, observer: observer, listener: listenerHandle)
+            }
+            // The cached rows arrived with the listener; they go up in this same turn.
+            showTimeline(observer.snapshot, roomID: id)
+            watchTyping(room, token: token)
+            Task { [weak self] in
+                guard let self, self.selection == token else { return }
+                await self.loadMembers()
+            }
+            if eventID == nil {
+                let endReached = try await paginateBackwards(next)
+                guard selection == token else { return true }
+                hasMoreHistory = !endReached
+                // Loading or restoring a timeline does not mean the user has seen it.
+                // The visible live viewport submits an exact-event receipt separately.
+            }
+        } catch {
+            guard selection == token else { return true }
+            showConversation(id, eventID: eventID, token: token)
+            errorMessage = Self.safeError(error)
+        }
+        return true
+    }
+
+    private func showTimeline(_ snapshot: (items: [TimelineItem], revision: Int), roomID: String) {
+        guard snapshot.revision > timelineRevision else { return }
+        timelineRevision = snapshot.revision
+        messages = Performance.measure(.timelineProject, ["items": snapshot.items.count]) {
+            project(snapshot.items, roomID: roomID)
+        }
+        if !messages.isEmpty { Performance.finish(.roomTimeline, ["messages": messages.count]) }
+    }
+
+    private func watchTyping(_ room: Room, token: UUID) {
+        typingHandle?.cancel()
+        typingHandle = room.subscribeToTypingNotifications(
+            listener: TypingObserver { [weak self] ids in
+                Task { @MainActor [weak self] in
+                    guard let self, self.selection == token else { return }
+                    self.typingUsers = ids.filter { $0 != self.user?.id }.map { id in
+                        self.members.first { $0.id == id }?.name ?? id
+                    }
+                }
+            })
+    }
+
+    /// Recent conversations stay subscribed: sync keeps their timelines whole, and their member lists stay loaded.
+    private func updateSubscriptions(_ id: String) {
+        let recent = recentTimelines.roomIDs + (liveTimeline.map { [$0.roomID] } ?? [])
+        Task { [weak self] in
+            do { try await self?.roomSubscriptions.setActiveRoom(id, recent: recent) } catch is CancellationError {
+            } catch {
+                guard let self, self.selectedRoomID == id else { return }
+                self.errorMessage = Self.safeError(error)
+            }
+        }
+    }
+
+    /// Puts `id` on screen in place of the previous conversation, once per open. A live timeline being left stays
+    /// open among the recent ones.
+    private func showConversation(_ id: String, eventID: String?, token: UUID) {
+        guard selection == token, shownSelection != token else { return }
+        shownSelection = token
+        if let live = liveTimeline {
+            live.revision = timelineRevision
+            live.messages = messages
+            live.members = members
+            live.hasMoreHistory = hasMoreHistory
+            live.firstUnreadEventID = firstUnreadEventID
+            live.eventIDs = eventIDs
+            live.mediaSources = mediaSources
+            live.thumbnailSources = thumbnailSources
+            live.media = mainMedia
+            live.forwardMedia = mainForwardMedia
+            live.sendFailures = mainSendFailures
+            live.projections = mainProjections
+            for closed in recentTimelines.keep(live, for: live.roomID) { closed.listener.cancel() }
+        } else {
+            timelineHandle?.cancel()
+        }
+        liveTimeline = nil
+        mainProjections = [:]
+        threadProjections = [:]
         mediaFiles.removeAll()
         mainMedia = [:]
         threadMedia = [:]
@@ -1176,72 +1412,14 @@ final class MatrixService: ObservableObject {
         hasMoreForwardHistory = eventID != nil
         isLoadingForwardHistory = false
         forwardLoadID = nil
-        let token = UUID()
-        selection = token
         timelineRevision = 0
         threadRevision = 0
-        timelineHandle?.cancel()
+        timelineHandle = nil
         typingHandle?.cancel()
         threadHandle?.cancel()
         timeline = nil
         threadTimeline = nil
         loadedThreadRootID = nil
-        do {
-            let client = try requireClient()
-            var pendingRoom = try client.getRoom(roomId: id)
-            for _ in 0..<50 where pendingRoom == nil {
-                try await Task.sleep(nanoseconds: 200_000_000)
-                guard selection == token else { return }
-                pendingRoom = try client.getRoom(roomId: id)
-            }
-            guard let room = pendingRoom else {
-                throw MatrixServiceError.request("This conversation is still loading. Try again in a moment.")
-            }
-            if room.membership() == .invited { return }
-            try await roomSubscriptions.setActiveRoom(id)
-            guard selection == token else { return }
-            let next = try await room.timelineWithConfiguration(configuration: Self.timelineConfiguration(focus))
-            guard selection == token else { return }
-            timeline = next
-            let listenerHandle = await next.addListener(
-                listener: TimelineObserver { [weak self] items, revision in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.selection == token, revision > self.timelineRevision else { return }
-                        self.timelineRevision = revision
-                        self.messages = Performance.measure(.timelineProject, ["items": items.count]) {
-                            self.project(items, roomID: id)
-                        }
-                        if !self.messages.isEmpty {
-                            Performance.finish(.roomTimeline, ["messages": self.messages.count])
-                        }
-                    }
-                })
-            guard selection == token else {
-                listenerHandle.cancel()
-                return
-            }
-            timelineHandle = listenerHandle
-            typingHandle = room.subscribeToTypingNotifications(
-                listener: TypingObserver { [weak self] ids in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.selection == token else { return }
-                        self.typingUsers = ids.filter { $0 != self.user?.id }.map { id in
-                            self.members.first { $0.id == id }?.name ?? id
-                        }
-                    }
-                })
-            Task { [weak self] in
-                guard let self, self.selection == token else { return }
-                await self.loadMembers()
-            }
-            if eventID == nil {
-                let endReached = try await paginateBackwards(next)
-                guard selection == token else { return }
-                hasMoreHistory = !endReached
-                // Loading or restoring a timeline does not mean the user has seen it.
-                // The visible live viewport submits an exact-event receipt separately.
-            }
-        } catch { if selection == token { errorMessage = Self.safeError(error) } }
     }
 
     private static func timelineConfiguration(_ focus: TimelineFocus) -> TimelineConfiguration {
@@ -1250,60 +1428,110 @@ final class MatrixService: ObservableObject {
             reportUtds: false)
     }
 
+    /// What one timeline item contributes to its timeline's rows and lookups, worked out once: the SDK hands an
+    /// unchanged item back as the same object, so an update maps only the items it changed.
+    private struct ItemProjection {
+        /// Held so its identity, the cache key, stays unique.
+        let item: TimelineItem
+        var unread = UnreadMapping.Mark()
+        var id: String?
+        var eventOrTransactionId: EventOrTransactionId?
+        var isRemote = false
+        var failure: MessageSendFailure?
+        var forwardMedia: ForwardMediaRevision?
+        var media: MediaSource?
+        /// Images, files and videos say whether they have a thumbnail; other kinds leave the lookup alone.
+        var thumbnail: ThumbnailSource??
+        var message: ChatMessage?
+    }
+    private typealias Projections = [ObjectIdentifier: ItemProjection]
+    private var mainProjections: Projections = [:]
+    private var threadProjections: Projections = [:]
+
+    private func projection(of item: TimelineItem, roomID: String) -> ItemProjection {
+        var result = ItemProjection(item: item)
+        let event = item.asEvent()
+        guard let event else {
+            result.unread = UnreadMapping.mark(virtual: item.asVirtual(), event: nil, shown: false)
+            return result
+        }
+        let id = MatrixMapping.identifier(event.eventOrTransactionId)
+        result.id = id
+        result.eventOrTransactionId = event.eventOrTransactionId
+        result.isRemote = event.isRemote
+        result.failure = MessageSendFailure.failure(event.localSendState)
+        if case .msgLike(let content) = event.content, case .message(let message) = content.kind {
+            result.forwardMedia = (try? ForwardMessageContent(message))?.mediaRevision
+            switch message.msgType {
+            case .image(let value):
+                result.media = value.source
+                result.thumbnail = .some(
+                    value.info?.thumbnailSource.map {
+                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
+                    })
+            case .file(let value):
+                result.media = value.source
+                result.thumbnail = .some(
+                    value.info?.thumbnailSource.map {
+                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
+                    })
+            case .video(let value):
+                result.media = value.source
+                result.thumbnail = .some(
+                    value.info?.thumbnailSource.map {
+                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
+                    })
+            case .audio(let value): result.media = value.source
+            default: break
+            }
+        }
+        result.message = MatrixMapping.message(event, roomID: roomID, ownUserID: user?.id, uniqueID: item.uniqueId().id)
+        result.unread = UnreadMapping.mark(virtual: nil, event: event, shown: result.message != nil)
+        return result
+    }
+
     private func project(_ items: [TimelineItem], roomID: String, inThread: Bool = false) -> [ChatMessage] {
         var failures: [SendQueueMessageKey: MessageSendFailure] = [:]
         var shownMedia: [String: ShownMedia] = [:]
         var forwardMedia: [String: ForwardMediaRevision] = [:]
-        let projected: [ChatMessage] = items.compactMap { item in
-            guard let event = item.asEvent() else { return nil }
-            let id = MatrixMapping.identifier(event.eventOrTransactionId)
-            eventIDs[id] = event.eventOrTransactionId
-            if let failure = MessageSendFailure.failure(event.localSendState) {
+        let cached = inThread ? threadProjections : mainProjections
+        var projections = Projections(minimumCapacity: items.count)
+        var marks: [UnreadMapping.Mark] = []
+        marks.reserveCapacity(items.count)
+        var projected: [ChatMessage] = []
+        projected.reserveCapacity(items.count)
+        for item in items {
+            let key = ObjectIdentifier(item)
+            let projection = cached[key] ?? projection(of: item, roomID: roomID)
+            projections[key] = projection
+            marks.append(projection.unread)
+            guard let id = projection.id, let eventOrTransactionId = projection.eventOrTransactionId else { continue }
+            eventIDs[id] = eventOrTransactionId
+            if let failure = projection.failure {
                 failures[SendQueueMessageKey(roomID: roomID, messageID: id)] = failure
             }
-            if case .msgLike(let content) = event.content, case .message(let message) = content.kind {
-                forwardMedia[id] = (try? ForwardMessageContent(message))?.mediaRevision
-                switch message.msgType {
-                case .image(let value):
-                    mediaSources[id] = value.source
-                    thumbnailSources[id] = value.info?.thumbnailSource.map {
-                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
-                    }
-                case .file(let value):
-                    mediaSources[id] = value.source
-                    thumbnailSources[id] = value.info?.thumbnailSource.map {
-                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
-                    }
-                case .video(let value):
-                    mediaSources[id] = value.source
-                    thumbnailSources[id] = value.info?.thumbnailSource.map {
-                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
-                    }
-                case .audio(let value): mediaSources[id] = value.source
-                default: break
-                }
-            }
-            let mapped = MatrixMapping.message(
-                event, roomID: roomID, ownUserID: user?.id, uniqueID: item.uniqueId().id)
-            if event.isRemote, id.hasPrefix("$"), let mapped, !mapped.isRedacted, let attachment = mapped.attachment,
+            forwardMedia[id] = projection.forwardMedia
+            if let media = projection.media { mediaSources[id] = media }
+            if let thumbnail = projection.thumbnail { thumbnailSources[id] = thumbnail }
+            guard let mapped = projection.message else { continue }
+            if projection.isRemote, id.hasPrefix("$"), !mapped.isRedacted, let attachment = mapped.attachment,
                 let source = mediaSources[id]
             {
                 shownMedia[id] = ShownMedia(source: source, attachment: attachment, identity: source.toJson())
             }
-            return mapped
+            projected.append(mapped)
         }
         if inThread {
+            threadProjections = projections
             threadMedia = shownMedia
             threadForwardMedia = forwardMedia
-        } else {
-            mainMedia = shownMedia
-            mainForwardMedia = forwardMedia
-        }
-        if inThread {
             threadSendFailures = failures
         } else {
+            mainProjections = projections
+            mainMedia = shownMedia
+            mainForwardMedia = forwardMedia
             mainSendFailures = failures
-            firstUnreadEventID = UnreadMapping.firstUnreadEventID(in: items, roomID: roomID, ownUserID: user?.id)
+            firstUnreadEventID = UnreadMapping.firstUnreadEventID(in: marks)
         }
         sendFailures = mainSendFailures.merging(threadSendFailures) { _, latest in latest }
         return projected
@@ -1402,6 +1630,7 @@ final class MatrixService: ObservableObject {
     }
     func loadThread(_ root: ChatMessage) async throws {
         try assertDestination(root.roomID)
+        threadProjections = [:]
         threadMedia = [:]
         threadForwardMedia = [:]
         readyThreadReadSelection = nil

@@ -149,7 +149,10 @@ struct RootView: View {
             $0.id == matrix.selectedRoomID && ($0.isDirect || workspaceID == nil || $0.spaceIDs.contains(workspaceID!))
         }
     }
-    private var isResumingUnread: Bool { unreadResumeEventID != nil && unreadResumeEventID == matrix.focusedEventID }
+    /// Opened at its unread line, from the cache or at the line from the server.
+    private var isResumingUnread: Bool {
+        unreadResumeEventID != nil && (matrix.focusedEventID == nil || unreadResumeEventID == matrix.focusedEventID)
+    }
     private var draftAddresses: Set<AttachmentDraftAddress> {
         guard localReady, composerStateIdentity == composerIdentity else { return [] }
         return Set(drafts.filter { !$0.value.isEmpty }.keys.map { AttachmentDraftAddress(roomID: $0) })
@@ -1224,13 +1227,6 @@ struct RootView: View {
                 IconButton(symbol: "xmark", label: "Close thread", role: .body, action: closeThread)
             }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
             Divider().overlay(colors.border)
-            if openingThreadID == root.eventID {
-                HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small)
-                    Text("Opening thread…").font(m.font(.meta)).foregroundStyle(colors.muted)
-                    Spacer()
-                }.padding(m.sp12).loadingInterval(.threadLoading)
-            }
             if let threadLoadError {
                 HStack {
                     InlineErrorView(message: threadLoadError)
@@ -1251,6 +1247,11 @@ struct RootView: View {
                     threadReadViewport.record(visible, from: identity, current: matrix.threadReadIdentity)
                 }, onForward: startForward, onEditCaption: startCaption
             ).id(root.eventID)
+                .overlay {
+                    DelayedProgress(
+                        active: openingThreadID == root.eventID, hasContent: matrix.threadMessages.count > 1,
+                        interval: .threadLoading)
+                }
             VStack(spacing: 0) {
                 if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
@@ -1599,13 +1600,10 @@ struct RootView: View {
                     guard target.isCurrent(replyTarget, owner: replyOwner) else { return }
                     cancelReply()
                 }
+            }.overlay(alignment: .trailing) {
+                DelayedProgress(active: replyOpening, interval: .replyLoading).padding(.trailing, m.iconButton + m.sp8)
             }
-            if replyOpening {
-                HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.mini)
-                    Text("Loading…")
-                }.font(m.font(.caption)).foregroundStyle(colors.muted).loadingInterval(.replyLoading)
-            } else if let replyError {
+            if !replyOpening, let replyError {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                     Text(replyError).foregroundStyle(colors.muted)
                     Button("Retry") { prepareReply(target) }.buttonStyle(.link)
@@ -1741,6 +1739,8 @@ struct RootView: View {
                 threadReadyID = thread.eventID
             }
         } else {
+            // A conversation still open from earlier goes up with this click; the task below then finds it shown.
+            if restoringReply == nil, eventID == nil { _ = matrix.showRecentRoom(id, containing: resumeAnchor) }
             Task { @MainActor in
                 guard navigationGeneration == generation, composerIdentity == identity else { return }
                 if let restoringReply {
@@ -1751,7 +1751,9 @@ struct RootView: View {
                         return
                     }
                 }
-                if let destinationEventID {
+                if let resumeAnchor, eventID == nil {
+                    await matrix.resumeRoom(id, at: resumeAnchor)
+                } else if let destinationEventID {
                     await matrix.jumpToMessage(roomID: id, eventID: destinationEventID)
                 } else if thread == nil || requiresRoomSelection {
                     await matrix.selectRoom(id)

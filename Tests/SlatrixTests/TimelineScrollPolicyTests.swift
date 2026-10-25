@@ -56,6 +56,16 @@ struct TimelineScrollPolicyTests {
             ) == nil)
     }
 
+    @Test("A conversation resumed from its cache opens at its unread line, wherever the reader left off")
+    func liveOpensAtUnread() {
+        let loaded: Set = ["unread", "left"]
+        #expect(
+            Policy.opening(
+                focusedRowID: nil, unreadRowID: "unread", startsAtUnread: true,
+                remembered: .anchored(rowID: "left", offset: -12), contains: loaded.contains)
+                == .anchored(rowID: "unread", offset: 0))
+    }
+
     @Test("A linked message opens centred, below the unread line when resuming, else where the reader left off")
     func opening() {
         let loaded: Set = ["unread", "linked", "left"]

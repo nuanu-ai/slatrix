@@ -344,3 +344,29 @@ struct MessageRowLayoutTests {
         if density == .comfortable { #expect(resting < 36) }
     }
 }
+
+@MainActor
+struct ReplyPreviewLayoutTests {
+    @Test(
+        "A reply keeps its height while its original loads, arrives or fails",
+        arguments: [CGFloat(320), 800])
+    func heightHolds(width: CGFloat) {
+        let matrix = MatrixService()
+        let appearance = AppearanceStore()
+        let message = ChatMessage(
+            id: "$reply", roomID: "!room:example.org", senderID: "@reader:example.org", senderName: "Reader",
+            body: "Agreed", timestamp: Date(timeIntervalSince1970: 0))
+        func height(_ preview: ChatReplyPreview) -> CGFloat {
+            let view = ReplyPreviewView(matrix: matrix, message: message, preview: preview, origin: nil)
+                .environmentObject(appearance)
+            return NSHostingController(rootView: view).sizeThatFits(in: CGSize(width: width, height: 10_000)).height
+        }
+        let loading = height(ChatReplyPreview(state: .pending, eventID: "$original"))
+        let original = String(repeating: "The original message runs long enough to wrap at any width. ", count: 4)
+        let loaded = ChatReplyPreview(
+            state: .ready, eventID: "$original", senderID: "@alice:example.org", senderName: "Alice", body: original)
+        #expect(height(loaded) == loading)
+        #expect(height(ChatReplyPreview(state: .failed, eventID: "$original")) == loading)
+        #expect(height(ChatReplyPreview(state: .unavailable, eventID: "$original")) == loading)
+    }
+}
