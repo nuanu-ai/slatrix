@@ -640,7 +640,8 @@ final class MatrixService: ObservableObject {
         case .conversation: items = messages
         case .thread: items = threadMessages
         }
-        return items.first { $0.eventID == target.message.eventID && $0.roomID == target.message.roomID }
+        // From the newest end, where the rows people act on are.
+        return items.last { $0.eventID == target.message.eventID && $0.roomID == target.message.roomID }
     }
     private func validateMessageAction(_ target: MessageActionTarget) throws {
         try Task.checkCancellation()

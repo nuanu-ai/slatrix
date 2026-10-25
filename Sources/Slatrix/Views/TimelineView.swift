@@ -165,23 +165,30 @@ struct TimelineView: View {
                     id: "welcome",
                     kind: .welcome(welcome)))
         }
+        // Read once: each read of a published property costs more than the lookups below.
+        let pinned = Set(room.pinnedEventIDs)
+        let highlighted = thread ? nil : matrix.focusedEventID
+        let failures = matrix.sendFailures
+        let pending = matrix.pendingSendActions
         for row in rows {
             switch row.kind {
             case .day(let label): entries.append(TimelineEntry(id: row.id, kind: .day(label)))
             case .unread: entries.append(TimelineEntry(id: row.id, kind: .unread))
             case .message(let message, let grouped, let time):
+                let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
                 entries.append(
                     TimelineEntry(
                         id: row.id,
                         kind: .message(
                             TimelineMessageEntry(
                                 message: message, grouped: grouped, time: time,
-                                saved: savedIDs.contains(
-                                    SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id),
-                                pinned: room.pinnedEventIDs.contains(message.eventID), canPin: canPinMessages,
-                                highlighted: !thread && matrix.focusedEventID == message.eventID,
-                                sendFailure: matrix.sendFailure(for: message),
-                                sendBusy: matrix.isSendActionPending(for: message) || sendActions.contains(message.id),
+                                saved: !savedIDs.isEmpty
+                                    && savedIDs.contains(
+                                        SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id),
+                                pinned: pinned.contains(message.eventID), canPin: canPinMessages,
+                                highlighted: highlighted == message.eventID,
+                                sendFailure: failures.isEmpty ? nil : failures[key],
+                                sendBusy: !pending.isEmpty && pending.contains(key) || sendActions.contains(message.id),
                                 context: context))))
             }
         }

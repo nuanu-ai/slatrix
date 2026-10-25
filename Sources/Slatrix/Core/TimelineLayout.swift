@@ -28,9 +28,12 @@ enum TimelineLayout {
         var rows: [Row] = []
         rows.reserveCapacity(messages.count + 4)
         var previous: ChatMessage?
+        // The previous message's day; one calendar lookup per day rather than per message.
+        var currentDay: DateInterval?
         for message in messages {
-            let newDay = previous.map { !calendar.isDate($0.timestamp, inSameDayAs: message.timestamp) } ?? true
+            let newDay = currentDay.map { !($0.start <= message.timestamp && message.timestamp < $0.end) } ?? true
             if newDay {
+                currentDay = calendar.dateInterval(of: .day, for: message.timestamp)
                 let components = calendar.dateComponents([.year, .month, .day], from: message.timestamp)
                 let label =
                     calendar.isDate(message.timestamp, inSameDayAs: now)
