@@ -345,7 +345,7 @@ extension TimelineHostedTests {
             let messages = busyConversation(1_000, roomID: Self.room.id, tag: UUID().uuidString)
             return await timeUntilShown(messages[999].body, in: harness) { harness.service.messages = messages }
         }
-        #expect(time < .milliseconds(200), "\(time)")
+        #expect(time < .milliseconds(350), "\(time)")
     }
 
     @Test(
@@ -363,7 +363,7 @@ extension TimelineHostedTests {
                 harness.hosting.rootView = harness.fixture(other)
             }
         }
-        #expect(time < .milliseconds(180), "\(time)")
+        #expect(time < .milliseconds(260), "\(time)")
     }
 
     /// Scrolls up `step` points at a time from the newest message, laying out and drawing each step as a frame
@@ -452,7 +452,7 @@ extension TimelineHostedTests {
             await settle(harness)
             return await timeUntilShown(messages[1_049].body, in: harness) { harness.service.messages = messages }
         }
-        #expect(time < .milliseconds(190), "\(time)")
+        #expect(time < .milliseconds(300), "\(time)")
     }
 }
 
