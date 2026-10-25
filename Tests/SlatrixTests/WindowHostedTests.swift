@@ -66,8 +66,12 @@ struct WindowHostedTests {
             let harness = Harness()
             defer { harness.close() }
             #expect(await harness.settle())
+            // The open conversation's unread count changes with every message that arrives in it, too.
+            let open = harness.matrix.rooms.firstIndex { $0.id == harness.matrix.selectedRoomID }!
             let other = harness.matrix.rooms.firstIndex { $0.id != harness.matrix.selectedRoomID }!
-            return harness.mainThreadTime(100) { harness.matrix.rooms[other].unread = $0 % 7 + 1 }
+            return harness.mainThreadTime(100) {
+                harness.matrix.rooms[$0.isMultiple(of: 2) ? open : other].unread = $0 % 7 + 1
+            }
         }
         #expect(time < .milliseconds(100), "\(time)")
     }

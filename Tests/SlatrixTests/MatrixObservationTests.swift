@@ -27,4 +27,23 @@ struct MatrixObservationTests {
         service.rooms[0].membership = "leave"
         #expect(!changes.all.isEmpty)
     }
+
+    @Test("The open room's unread count, which changes with every message in it, leaves the window alone")
+    func openRoomUnread() {
+        let service = MatrixService()
+        service.rooms = [ChatRoom(id: "!open:example.org", name: "Open")]
+        service.selectedRoomID = "!open:example.org"
+        let changes = Recorder<Void>()
+        withObservationTracking {
+            _ = service.selectedRoom
+        } onChange: {
+            changes.append(())
+        }
+        service.rooms[0].unread = 2
+        service.rooms[0].unreadMessages = 2
+        service.rooms[0].mentions = 1
+        #expect(changes.all.isEmpty)
+        service.rooms[0].name = "Renamed"
+        #expect(service.selectedRoom?.name == "Renamed")
+    }
 }
