@@ -70,6 +70,14 @@ struct TimelineMessageEntry: Hashable {
     var onTogglePin: ((ChatMessage) -> Void)?
     var onForward: ((MessageActionTarget) -> Void)?
     var onEditCaption: ((MessageActionTarget) -> Void)?
+    var onReact: (MessageActionTarget, String) -> Void = { _, _ in }
+    var onRetrySend: (ChatMessage) -> Void = { _ in }
+    var onCancelSend: (ChatMessage) -> Void = { _ in }
+    var onCopyLink: (MessagePermalinkTarget) -> Void = { _ in }
+    /// Whether a link to this event is being copied.
+    var isCopyingLink: (String) -> Bool = { _ in false }
+    /// Shows the one reaction picker over a row, by row ID; the table owns it.
+    var onPickReaction: (String, MessageActionTarget, @escaping (String) -> Void) -> Void = { _, _, _ in }
     /// A displayed row whose height no longer matches its measurement, after state of its own changed.
     var onHeight: (String, CGFloat) -> Void = { _, _ in }
 }
@@ -111,6 +119,7 @@ struct TimelineTable: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ view: TimelineScrollView, coordinator: TimelineTableCoordinator) {
+        coordinator.closePicker()
         coordinator.remember()
         coordinator.stopLoading()
     }
@@ -158,6 +167,8 @@ struct TimelineTable: NSViewRepresentable {
     private var reported: (Bool, Bool)?
     /// While the table waits for its first rows.
     private var loading: Performance.Interval?
+    /// The reaction picker, over the row it was opened for.
+    private var picker: (popover: NSPopover, rowID: String, target: MessageActionTarget)?
 
     func makeView() -> TimelineScrollView {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("row"))
@@ -195,6 +206,10 @@ struct TimelineTable: NSViewRepresentable {
             loading = Performance.begin(configuration.context.isThread ? .threadLoading : .timelineLoading)
         }
         configuration.context.onHeight = { [weak self] id, height in self?.reported(height, for: id) }
+        configuration.context.onPickReaction = { [weak self] id, target, pick in
+            self?.showPicker(over: id, target: target, onPick: pick)
+        }
+        if let picker, configuration.context.matrix?.isCurrentMessageAction(picker.target) != true { closePicker() }
         configuration.scroller.bottom = { [weak self] in self?.scrollToBottom(animated: true) }
         if previous?.focusedEventID != configuration.focusedEventID { pendingFocus = configuration.focusedEventID }
         apply(configuration.entries)
@@ -263,7 +278,20 @@ struct TimelineTable: NSViewRepresentable {
     private func refresh(_ row: Int) {
         guard row < rows.count, let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell
         else { return }
-        cell.show(view(for: rows[row], measuring: false))
+        show(rows[row], in: cell)
+    }
+
+    private func show(_ entry: TimelineEntry, in cell: TimelineCell) {
+        let commands: ((Bool) -> [MessageMenuCommand])? =
+            if case .message(let row) = entry.kind, let context = configuration?.context {
+                { [id = entry.id] accessibility in
+                    let target = context.actionTarget(for: row.message)
+                    return accessibility
+                        ? context.accessibilityCommands(for: id, row, target: target)
+                        : context.actions(for: id, row, target: target).menu()
+                }
+            } else { nil }
+        cell.show(view(for: entry, measuring: false), commands: commands)
     }
 
     private func view(for entry: TimelineEntry, measuring: Bool) -> TimelineRow {
@@ -294,11 +322,40 @@ struct TimelineTable: NSViewRepresentable {
         let cell =
             tableView.makeView(withIdentifier: Self.cellID, owner: nil) as? TimelineCell
             ?? TimelineCell(identifier: Self.cellID)
-        cell.show(view(for: rows[row], measuring: false))
+        show(rows[row], in: cell)
         return cell
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
+
+    /// The picker follows its row off screen, as a popover attached to the row itself would.
+    func tableView(_ tableView: NSTableView, didRemove rowView: NSTableRowView, forRow row: Int) {
+        if let picker, row < 0 || index[picker.rowID] == row || index[picker.rowID] == nil { closePicker() }
+    }
+
+    // MARK: Reaction picker
+
+    private func showPicker(over id: String, target: MessageActionTarget, onPick: @escaping (String) -> Void) {
+        closePicker()
+        guard let row = index[id], let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false),
+            let configuration
+        else { return }
+        let m = configuration.context.metrics
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(
+            rootView: ReactionPicker { [weak self] key in
+                onPick(key)
+                self?.closePicker()
+            }.padding(m.sp12).environment(\.metrics, m))
+        picker = (popover, id, target)
+        popover.show(relativeTo: cell.bounds, of: cell, preferredEdge: .maxY)
+    }
+
+    func closePicker() {
+        picker?.popover.close()
+        picker = nil
+    }
 
     // MARK: Heights
 
@@ -671,7 +728,7 @@ final class TimelineTableView: NSTableView {
 }
 
 final class TimelineCell: NSView {
-    private let host = NSHostingView(rootView: TimelineRow?.none)
+    private let host = TimelineHost(rootView: nil)
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
@@ -684,7 +741,35 @@ final class TimelineCell: NSView {
 
     required init?(coder: NSCoder) { nil }
 
-    func show(_ row: TimelineRow) { host.rootView = row }
+    /// `commands` gives a message's menu, or with `true` its VoiceOver actions, when one is asked for.
+    func show(_ row: TimelineRow, commands: ((Bool) -> [MessageMenuCommand])?) {
+        host.rootView = row
+        host.commands = commands
+    }
+}
+
+/// A row's hosting view, which also answers for the row's context menu and VoiceOver actions, as SwiftUI's own
+/// modifiers would from here, without every row at rest carrying them.
+final class TimelineHost: NSHostingView<TimelineRow?> {
+    var commands: ((Bool) -> [MessageMenuCommand])?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let commands else { return super.menu(for: event) }
+        let menu = NativeMessageMenu.make(commands: commands(false))
+        // As SwiftUI's context menu drew them: a destructive item is not red here.
+        for item in menu.items { item.attributedTitle = nil }
+        return menu
+    }
+
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        guard let commands else { return super.accessibilityCustomActions() }
+        return commands(true).filter { $0.isEnabled && !$0.isSeparator }.map { command in
+            NSAccessibilityCustomAction(name: command.title) {
+                command.perform()
+                return true
+            }
+        }
+    }
 }
 
 /// A timeline row's SwiftUI content. Measured once offscreen for its height, then shown in a cell of that height.
@@ -723,20 +808,24 @@ struct TimelineRow: View {
         case .unread: TimelineUnreadDivider()
         case .message(let row):
             if let matrix = context.matrix {
-                let surface: MessageActionTarget.Surface? =
-                    context.isThread ? context.threadRootID.map { .thread(rootID: $0) } : .conversation
-                let target = surface.flatMap { matrix.captureMessageAction(message: row.message, surface: $0) }
                 let message = row.message
+                let target = context.actionTarget(for: message)
                 MessageRow(
-                    matrix: matrix, message: message, grouped: row.grouped, isThread: context.isThread,
-                    actionTarget: target, highlighted: row.highlighted, isSaved: row.saved,
-                    onThread: { context.onThread(message) }, onReply: { context.onReply(message) },
-                    onEdit: { if let target { context.onEdit(target) } }, onSave: { context.onSave(message) },
-                    onDelete: { if let target { context.onDelete(target) } }, onShowReply: context.onShowReply,
-                    onOpenProfile: context.onOpenProfile, isPinned: row.pinned, canPin: row.canPin,
-                    onTogglePin: context.onTogglePin.map { callback in { callback(message) } },
-                    onForward: context.onForward, onEditCaption: context.onEditCaption, hovered: hovered,
-                    timeLabel: row.time, measuring: measuring)
+                    message: message, grouped: row.grouped, isThread: context.isThread,
+                    own: message.senderID == matrix.user?.id, highlighted: row.highlighted, isSaved: row.saved,
+                    isPinned: row.pinned, sendFailure: row.sendFailure, sendBusy: row.sendBusy, hovered: hovered,
+                    timeLabel: row.time,
+                    avatar: AvatarView(
+                        name: message.senderName, size: context.metrics.avatar, matrix: matrix,
+                        source: message.avatarURL),
+                    replyPreview: message.replyPreview.map {
+                        ReplyPreviewView(
+                            matrix: matrix, message: message, preview: $0, origin: target, onOpen: context.onShowReply)
+                    },
+                    attachment: message.attachment.map {
+                        AttachmentView(matrix: matrix, message: message, attachment: $0)
+                    },
+                    actions: context.actions(for: entry.id, row, target: target))
             }
         }
     }

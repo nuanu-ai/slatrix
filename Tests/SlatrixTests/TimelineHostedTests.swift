@@ -251,6 +251,47 @@ struct TimelineHostedTests {
         await settle(harness) { harness.top(of: reading) != nil }
         #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
     }
+
+    @Test("A message at rest offers its whole menu, its VoiceOver actions and the reaction picker")
+    func restingRowActions() async throws {
+        let harness = Harness(
+            messages: Self.messages(0..<5).map {
+                var message = $0
+                message.id = "$" + message.id
+                return message
+            })
+        defer { harness.close() }
+        await settle(harness) { harness.top(of: "Message 4") != nil }
+        let text = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? MessageTextView }.first { $0.string == "Message 4" })
+        var row: NSView? = text
+        while let view = row, !(view is NSHostingView<TimelineRow?>) { row = view.superview }
+        let host = try #require(row)
+        let frame = host.convert(host.bounds, to: nil)
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: NSPoint(x: frame.maxX - 40, y: frame.midY), modifierFlags: [],
+                timestamp: 0,
+                windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let menu = try #require(host.menu(for: event))
+        #expect(
+            menu.items.map(\.title).filter { !$0.isEmpty } == [
+                "Add reaction…", "Reply in thread", "Reply", "Save for later", "Copy text", "Copy link",
+            ])
+        #expect(
+            host.accessibilityCustomActions()?.map(\.name) == ["Reply in thread", "Add reaction", "Save for later"])
+        // The text's own menu carries the same commands under its copy item.
+        #expect(text.menu(for: event)?.items.map(\.title).contains("Reply in thread") == true)
+        // A popover shows only from a window on screen.
+        harness.window.orderFrontRegardless()
+        let windows = Set(NSApp.windows.map(ObjectIdentifier.init))
+        let reaction = try #require(menu.items.first { $0.title == "Add reaction…" })
+        _ = reaction.target?.perform(reaction.action, with: reaction)
+        #expect(
+            await eventually {
+                NSApp.windows.contains { !windows.contains(ObjectIdentifier($0)) && $0.isVisible }
+            })
+    }
 }
 
 /// Budgets for the table at the scale of a busy room; see `PerformanceBudgetTests`.
@@ -325,16 +366,12 @@ struct MessageRowLayoutTests {
         let saved = appearance.density
         defer { appearance.density = saved }
         appearance.density = density
-        let matrix = MatrixService()
-        matrix.user = ChatUser(id: "@reader:example.org", name: "Reader")
         let message = ChatMessage(
             id: "$one", roomID: "!timeline:example.org", senderID: "@reader:example.org", senderName: "Reader",
             body: "One line", timestamp: Date(timeIntervalSince1970: 0))
         func height(hovered: Bool) -> CGFloat {
-            let row = MessageRow(
-                matrix: matrix, message: message, grouped: true, onThread: {}, onReply: {}, onEdit: {}, onSave: {},
-                onDelete: {}, hovered: hovered, timeLabel: "12:00 AM"
-            ).environmentObject(appearance)
+            let row = MessageRow(message: message, grouped: true, own: true, hovered: hovered, timeLabel: "12:00 AM")
+                .environmentObject(appearance)
             return NSHostingController(rootView: row).sizeThatFits(in: CGSize(width: width, height: 10_000)).height
         }
         let resting = height(hovered: false)
