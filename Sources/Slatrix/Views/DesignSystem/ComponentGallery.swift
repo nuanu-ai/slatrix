@@ -38,6 +38,7 @@ struct ComponentGallery: View {
             }
             section("Profile") { profile }
             section("Files") { files }
+            section("Modals, tabs and people") { modals }
         }
         .padding(m.sp40).frame(width: m(Self.width), alignment: .leading)
         .background(colors.canvas).foregroundStyle(colors.textBody)
@@ -237,6 +238,27 @@ struct ComponentGallery: View {
         SkeletonRows(count: 2).frame(width: m(420), height: m(132))
             .background(appearance.colors.canvas, in: RoundedRectangle(cornerRadius: m.radiusLarge))
             .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(appearance.colors.border))
+    }
+
+    private var modals: some View {
+        HStack(alignment: .top, spacing: m.sp40) {
+            ConfirmModal(
+                title: "Delete message?", message: "This can’t be undone.", action: "Delete", onConfirm: {},
+                onCancel: {}
+            )
+            .padding(-m.sp40)
+            VStack(alignment: .leading, spacing: m.sp24) {
+                TabBar(
+                    tabs: [
+                        .init(value: 0, title: "About"), .init(value: 1, title: "Members", count: 12),
+                        .init(value: 2, title: "Settings"),
+                    ], selection: .constant(1))
+                VStack(spacing: 0) {
+                    PersonRow(name: "Julia Park", userID: "@julia:harbor.example", presence: .active) {}
+                    PersonRow(name: "Sam Ortiz", userID: "@sam:harbor.example", isYou: true, presence: .away) {}
+                }.frame(width: m(400))
+            }
+        }
     }
 
     private var profile: some View {

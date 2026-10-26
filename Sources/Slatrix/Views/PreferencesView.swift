@@ -3,9 +3,7 @@ import SwiftUI
 
 struct PreferencesView: View {
     private static let size = CGSize(width: 848, height: 600)
-    private static let headerHeight: CGFloat = 64
     private static let navWidth: CGFloat = 188
-    private static let pickerWidth: CGFloat = 280
     private static let miniatureHeight: CGFloat = 72
     @Environment(\.metrics) private var m
     @EnvironmentObject var appearance: AppearanceStore
@@ -50,14 +48,10 @@ struct PreferencesView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Preferences").font(m.font(.title, .bold))
-                Spacer()
-                IconButton(symbol: "xmark", label: "Close", role: .body, action: onClose)
-                    .keyboardShortcut(.cancelAction)
-            }.padding(.horizontal, m.sp24).frame(height: m(Self.headerHeight))
-            Divider().overlay(colors.border)
+        Modal(
+            title: "Preferences", size: .custom(Self.size.width), height: Self.size.height, padded: false,
+            onClose: onClose
+        ) {
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: m.sp4) {
                     ForEach(PreferenceTab.allCases) { item in
@@ -94,10 +88,8 @@ struct PreferencesView: View {
                         }
                     }.padding(m.sp32).frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }
-        }.sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.textBody
-        )
+            }.overlay(alignment: .top) { Divider().overlay(colors.border) }
+        }
         .preferredColorScheme(appearance.preferredColorScheme)
         .onAppear {
             isPresented = true
@@ -160,7 +152,7 @@ struct PreferencesView: View {
                 Picker("Message density", selection: $appearance.density) {
                     Text("Comfortable").tag(MessageDensity.comfortable)
                     Text("Compact").tag(MessageDensity.compact)
-                }.pickerStyle(.segmented).labelsHidden().frame(width: m(Self.pickerWidth))
+                }.pickerStyle(.radioGroup).horizontalRadioGroupLayout().labelsHidden().font(m.font(.secondary))
             }
             Toggle("Show profile photos in conversations", isOn: $appearance.showAvatars).toggleStyle(.switch).font(
                 m.font(.secondary))

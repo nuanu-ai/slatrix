@@ -1,21 +1,14 @@
 import SwiftUI
 
 struct KeyboardShortcutsView: View {
-    private static let width: CGFloat = 700
     private static let keyCapWidth: CGFloat = 44
     @Environment(\.metrics) private var m
     let onClose: () -> Void
     @EnvironmentObject private var appearance: AppearanceStore
-    @FocusState private var closeFocused: Bool
     private var colors: AppColors { appearance.colors }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: m.sp12) {
-                Text("Keyboard shortcuts").font(m.font(.title, .semibold)).foregroundStyle(colors.textPrimary)
-                Spacer()
-            }.padding(m.sp24)
-            Divider().overlay(colors.border)
+        Modal(title: "Keyboard shortcuts", size: .large, onClose: onClose) {
             HStack(alignment: .top, spacing: m.sp32) {
                 VStack(alignment: .leading, spacing: m.sp20) {
                     section("Navigate") {
@@ -61,17 +54,8 @@ struct KeyboardShortcutsView: View {
                         shortcut("Keyboard shortcuts", keys: "⌘/", spoken: "Command slash")
                     }
                 }
-            }.fixedSize(horizontal: false, vertical: true).padding(m.sp24)
-            Divider().overlay(colors.border)
-            HStack {
-                Spacer()
-                Button("Close", action: onClose).keyboardShortcut(.cancelAction).focused($closeFocused)
-                    .buttonStyle(.secondary).controlSize(.regular)
-            }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
+            }.fixedSize(horizontal: false, vertical: true)
         }
-        .sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)
-        .onAppear { closeFocused = true }
-        .onExitCommand(perform: onClose)
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

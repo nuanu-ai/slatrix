@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct MatrixRoomJoinView: View {
-    private static let size = CGSize(width: 560, height: 592)
     @Environment(\.metrics) private var m
     let matrix: MatrixService
     let request: MatrixRoomJoinRequest
@@ -37,87 +36,56 @@ struct MatrixRoomJoinView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: m.sp16) {
-                VStack(alignment: .leading, spacing: m.sp12) {
-                    Image(systemName: accepted == nil ? "bubble.left.and.bubble.right" : "checkmark.circle")
-                        .font(m.font(.display)).foregroundStyle(
-                            accepted == nil ? colors.accent : colors.success)
-                    Text(title)
-                        .font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
+        Modal(
+            title: title, busy: joining, onClose: onClose,
+            secondary: accepted == nil ? ModalAction("Cancel", action: onClose) : nil,
+            primary: accepted == nil
+                // No Return shortcut: presenting a link must never consume the key as consent to join.
+                ? ModalAction(error == nil ? "Join" : "Try again", disabled: !current, shortcut: nil, action: join)
+                : ModalAction("Done", action: onClose)
+        ) {
+            VStack(alignment: .leading, spacing: m.sp20) {
+                detail("Address", value: request.address)
+                if resolvedRoomIsDifferent {
+                    detail("Room ID", value: request.roomID)
                 }
-                Spacer(minLength: 0)
-                IconButton(symbol: "xmark", label: "Close", role: .secondary, action: onClose)
-                    .disabled(
-                        joining)
-            }.padding(m.sp24)
-            Divider().overlay(colors.border)
-            ScrollView {
-                VStack(alignment: .leading, spacing: m.sp20) {
-                    detail("Address", value: request.address)
-                    if resolvedRoomIsDifferent {
-                        detail("Room ID", value: request.roomID)
-                    }
-                    if !request.via.isEmpty {
-                        VStack(alignment: .leading, spacing: m.sp8) {
-                            Text("Via").font(m.font(.meta, .semibold)).foregroundStyle(
-                                colors.textPrimary)
-                            ForEach(Array(request.via.enumerated()), id: \.offset) { _, server in
-                                Text(server).font(m.font(.meta, design: .monospaced)).textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+                if !request.via.isEmpty {
+                    VStack(alignment: .leading, spacing: m.sp8) {
+                        Text("Via").font(m.font(.meta, .semibold)).foregroundStyle(
+                            colors.textPrimary)
+                        ForEach(Array(request.via.enumerated()), id: \.offset) { _, server in
+                            Text(server).font(m.font(.meta, design: .monospaced)).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    if let eventID = request.eventID {
-                        detail("Message", value: eventID)
-                    }
-                    VStack(alignment: .leading, spacing: m.sp8) {
-                        Label("Joining as", systemImage: "person.crop.circle").font(
-                            m.font(.meta, .semibold)
-                        ).foregroundStyle(colors.textPrimary)
-                        Text(request.accountID).font(m.font(.meta, design: .monospaced)).textSelection(.enabled)
-                    }.padding(m.sp12).frame(maxWidth: .infinity, alignment: .leading).background(
-                        colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
-                    if let accepted,
-                        let warning = accepted.warning
-                            ?? (accepted.isSpace == nil
-                                ? "It’ll appear in your sidebar in a moment."
-                                : nil)
-                    {
-                        Label(warning, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(
-                            colors.textSecondary
-                        )
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let error {
-                        Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive)
-                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    }
-                }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Divider().overlay(colors.border)
-            HStack(spacing: m.sp12) {
-                if joining {
-                    DelayedProgress()
-                    Text("Joining…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
-                Spacer()
-                Button(accepted == nil ? "Cancel" : "Done", action: onClose).keyboardShortcut(.cancelAction).disabled(
-                    joining)
-                if accepted == nil {
-                    // No default Return shortcut: presenting a link must never consume the key as consent to join.
-                    Button(
-                        error == nil ? "Join" : "Try again",
-                        action: join
+                if let eventID = request.eventID {
+                    detail("Message", value: eventID)
+                }
+                VStack(alignment: .leading, spacing: m.sp8) {
+                    Label("Joining as", systemImage: "person.crop.circle").font(
+                        m.font(.meta, .semibold)
+                    ).foregroundStyle(colors.textPrimary)
+                    Text(request.accountID).font(m.font(.meta, design: .monospaced)).textSelection(.enabled)
+                }.padding(m.sp12).frame(maxWidth: .infinity, alignment: .leading).background(
+                    colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+                if let accepted,
+                    let warning = accepted.warning
+                        ?? (accepted.isSpace == nil
+                            ? "It’ll appear in your sidebar in a moment."
+                            : nil)
+                {
+                    Label(warning, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(
+                        colors.textSecondary
                     )
-                    .buttonStyle(.primary).disabled(!current || joining)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
-            }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
+                if let error {
+                    Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive)
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
-        .sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.textBody
-        )
-        .interactiveDismissDisabled(joining)
         .task(id: context) {
             if ownerID == nil { ownerID = request.id }
             guard current else {

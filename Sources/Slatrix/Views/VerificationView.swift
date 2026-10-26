@@ -4,7 +4,7 @@ struct VerificationPresentation: ViewModifier {
     let service: VerificationService
     var enabled = true
     func body(content: Content) -> some View {
-        content.sheet(
+        content.modal(
             isPresented: Binding(get: { enabled && service.isPresented }, set: { if !$0 { service.dismiss() } })
         ) {
             VerificationView(service: service, onClose: { service.dismiss() })
@@ -43,8 +43,6 @@ struct DeviceVerificationSettings: View {
 }
 
 struct VerificationView: View {
-    private static let width: CGFloat = 512
-    private static let comparisonWidth: CGFloat = 648
     private static let emojiHeight: CGFloat = 48
     @Environment(\.metrics) private var m
     let service: VerificationService
@@ -53,19 +51,14 @@ struct VerificationView: View {
     private var colors: AppColors { appearance.colors }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: m.sp24) {
-            HStack {
-                Image(systemName: "checkmark.shield").font(m.font(.display)).foregroundStyle(
-                    service.phase == .finished ? colors.success : colors.accent)
-                Spacer()
-                IconButton(symbol: "xmark", label: "Close", role: .body) { close() }
-            }
-            VStack(alignment: .leading, spacing: m.sp8) {
-                Text(title).font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
-                if !detail.isEmpty {
-                    Text(detail).font(m.font(.body)).foregroundStyle(colors.textSecondary).fixedSize(
-                        horizontal: false, vertical: true)
-                }
+        let actions = actions
+        Modal(
+            title: title, size: service.phase == .comparison && !service.emojis.isEmpty ? .large : .medium,
+            onClose: close, secondary: actions.secondary, primary: actions.primary
+        ) {
+            if !detail.isEmpty {
+                Text(detail).font(m.font(.body)).foregroundStyle(colors.textSecondary).fixedSize(
+                    horizontal: false, vertical: true)
             }
             if let request = service.request { requestDetails(request) }
             if service.phase == .comparison { comparison }
@@ -85,13 +78,7 @@ struct VerificationView: View {
                     Text("This device: \(id)").textSelection(.enabled)
                 }.font(m.font(.caption, design: .monospaced)).foregroundStyle(colors.textSecondary)
             }
-            actions
-        }.padding(m.sp32).sheetSize(
-            width: service.phase == .comparison && !service.emojis.isEmpty ? Self.comparisonWidth : Self.width
-        )
-        .background(colors.canvas).foregroundStyle(colors.textBody)
-        .interactiveDismissDisabled(service.phase.isActive || service.isWorking)
-        .onExitCommand { close() }
+        }
     }
 
     private var title: String {
@@ -176,38 +163,29 @@ struct VerificationView: View {
             colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
     }
 
-    private var actions: some View {
-        HStack(spacing: m.sp12) {
-            if service.phase == .comparison {
-                Button("They don’t match", role: .destructive) { Task { await service.rejectMismatch() } }.buttonStyle(
-                    .destructive)
-                Spacer()
-                // Deliberately no default/Return shortcut for a trust decision.
-                Button("They match") { Task { await service.confirmMatch() } }.buttonStyle(.primary).disabled(
-                    service.isWorking)
-            } else if service.phase == .incoming {
-                Button("Decline") { Task { await service.cancel() } }.buttonStyle(.secondary)
-                Spacer()
-                Button("Accept request") { Task { await service.accept() } }.buttonStyle(.primary).disabled(
-                    service.isWorking)
-            } else if service.phase == .ready {
-                Button("Cancel") { Task { await service.cancel() } }.buttonStyle(.secondary)
-                Spacer()
-                Button("Compare codes") { Task { await service.startComparison() } }.buttonStyle(.primary)
-                    .disabled(service.isWorking)
-            } else if service.phase == .cancelling {
-                Spacer()
-                Button("Close") { close() }.buttonStyle(.secondary)
-            } else if service.phase.isActive || service.phase == .preparing {
-                Spacer()
-                Button("Cancel verification") { Task { await service.cancel() } }.buttonStyle(.secondary)
-            } else {
-                Spacer()
-                Button(service.phase == .finished ? "Done" : "Close") {
-                    service.dismiss()
-                    onClose()
-                }.buttonStyle(.primary)
-            }
+    /// Trust decisions take no Return shortcut, so a stray key never accepts or confirms.
+    private var actions: (secondary: ModalAction?, primary: ModalAction?) {
+        let working = service.isWorking
+        switch service.phase {
+        case .comparison:
+            return (
+                ModalAction("They don’t match") { Task { await service.rejectMismatch() } },
+                ModalAction("They match", disabled: working, shortcut: nil) { Task { await service.confirmMatch() } }
+            )
+        case .incoming:
+            return (
+                ModalAction("Decline") { Task { await service.cancel() } },
+                ModalAction("Accept request", disabled: working, shortcut: nil) { Task { await service.accept() } }
+            )
+        case .ready:
+            return (
+                ModalAction("Cancel") { Task { await service.cancel() } },
+                ModalAction("Compare codes", disabled: working) { Task { await service.startComparison() } }
+            )
+        case .cancelling: return (ModalAction("Close", action: close), nil)
+        case _ where service.phase.isActive || service.phase == .preparing:
+            return (ModalAction("Cancel verification") { Task { await service.cancel() } }, nil)
+        default: return (nil, ModalAction(service.phase == .finished ? "Done" : "Close", action: close))
         }
     }
 
