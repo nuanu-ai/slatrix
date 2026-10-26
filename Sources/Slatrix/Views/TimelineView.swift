@@ -143,20 +143,25 @@ struct TimelineView: View {
             messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
             groups: appearance.density != .compact)
         let context = matrix.messageActionContext
+        let offline = matrix.connectionState == .offline
+        let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
         let inputs = TimelineLayoutCache.EntryInputs(
             rows: rows, hasOlder: hasOlder, hasNewer: hasNewer, loadingHistory: loadingHistory, welcome: welcome,
             pinned: room.pinnedEventIDs,
             canPin: canPinMessages, savedIDs: savedIDs, highlighted: thread ? nil : matrix.focusedEventID,
-            sendFailures: matrix.sendFailures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
+            sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
             context: context)
-        return layout.entries(for: inputs) { buildEntries(rows, context: context) }
+        return layout.entries(for: inputs) { buildEntries(rows, context: context, failures: failures) }
     }
 
     private var welcome: TimelineWelcome {
         TimelineWelcome(name: room.name, topic: room.topic, isDirect: room.isDirect, isEncrypted: room.isEncrypted)
     }
 
-    private func buildEntries(_ rows: [TimelineLayout.Row], context: MessageActionTarget.Context) -> [TimelineEntry] {
+    private func buildEntries(
+        _ rows: [TimelineLayout.Row], context: MessageActionTarget.Context,
+        failures: [SendQueueMessageKey: MessageSendFailure]
+    ) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
         entries.reserveCapacity(rows.count + 2)
         if hasOlder {
@@ -170,7 +175,6 @@ struct TimelineView: View {
         // Read once: each read of a published property costs more than the lookups below.
         let pinned = Set(room.pinnedEventIDs)
         let highlighted = thread ? nil : matrix.focusedEventID
-        let failures = matrix.sendFailures
         let pending = matrix.pendingSendActions
         for row in rows {
             switch row.kind {

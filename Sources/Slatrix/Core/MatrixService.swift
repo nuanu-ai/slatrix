@@ -38,6 +38,8 @@ struct MessageSendFailure: Hashable {
     let kind: Kind
     let message: String
     var canRetry: Bool { kind == .recoverable || kind == .verification || kind == .rejected }
+    /// Offline, a network failure is only a wait: the message goes out by itself when the connection returns.
+    func shown(offline: Bool) -> MessageSendFailure? { offline && kind == .recoverable ? nil : self }
 
     static func failure(_ state: EventSendState?) -> MessageSendFailure? {
         guard case .sendingFailed(let error, let recoverable) = state else { return nil }
