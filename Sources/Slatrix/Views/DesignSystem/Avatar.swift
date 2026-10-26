@@ -45,8 +45,10 @@ struct AvatarView: View {
             RoundedRectangle(cornerRadius: radius).fill(avatarColor(name))
                 .overlay(
                     // Initials scale with the tile, not with a text role.
-                    Text(initials(name)).font(Font(NSFont.systemFont(ofSize: size * 0.35, weight: .semibold) as CTFont))
-                        .foregroundStyle(.white)
+                    Text(initials(name)).font(
+                        Font(NSFont.systemFont(ofSize: size * (large ? 0.25 : 0.35), weight: .semibold) as CTFont)
+                    )
+                    .foregroundStyle(.white)
                 )
                 .overlay {
                     if let image {

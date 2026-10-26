@@ -27,13 +27,14 @@ struct HouseButtonStyle: ButtonStyle {
         let kind: ButtonKind
         let configuration: Configuration
         @Environment(\.isEnabled) private var enabled
-        @Environment(\.isFocused) private var focused
+        @Environment(\.isFocused) private var focusedWithin
         @State private var hovering = false
         var body: some View {
             ButtonChrome(
                 kind: kind,
                 state: InteractionState(
-                    enabled: enabled, pressed: configuration.isPressed, focused: focused, hovering: hovering)
+                    enabled: enabled, pressed: configuration.isPressed, focused: keyboardFocused(focusedWithin),
+                    hovering: hovering)
             ) { configuration.label }
             .onHover { hovering = $0 }
         }
@@ -127,12 +128,13 @@ struct IconButtonStyle: ButtonStyle {
     private struct StyledIcon: View {
         let configuration: Configuration
         @Environment(\.isEnabled) private var enabled
-        @Environment(\.isFocused) private var focused
+        @Environment(\.isFocused) private var focusedWithin
         @State private var hovering = false
         var body: some View {
             IconChrome(
                 state: InteractionState(
-                    enabled: enabled, pressed: configuration.isPressed, focused: focused, hovering: hovering)
+                    enabled: enabled, pressed: configuration.isPressed, focused: keyboardFocused(focusedWithin),
+                    hovering: hovering)
             ) { configuration.label }
             .onHover { hovering = $0 }
         }
@@ -169,16 +171,23 @@ struct RowButtonStyle: ButtonStyle {
 
     private struct Row: View {
         let label: Configuration.Label
-        @Environment(\.isFocused) private var focused
+        @Environment(\.isFocused) private var focusedWithin
         @Environment(\.metrics) private var m
         var body: some View {
-            label.contentShape(Rectangle()).focusRing(focused, cornerRadius: m.radius)
+            label.contentShape(Rectangle())
+                .focusRing(keyboardFocused(focusedWithin), cornerRadius: m.radius)
         }
     }
 }
 
 extension ButtonStyle where Self == RowButtonStyle {
     static var row: RowButtonStyle { RowButtonStyle() }
+}
+
+/// Whether a button has keyboard focus, given `isFocused` read inside it. Without the Mac's keyboard navigation
+/// buttons can't take focus, and `isFocused` then reports a focused container around them instead.
+@MainActor private func keyboardFocused(_ focusedWithin: Bool) -> Bool {
+    focusedWithin && NSApplication.shared.isFullKeyboardAccessEnabled
 }
 
 extension View {
