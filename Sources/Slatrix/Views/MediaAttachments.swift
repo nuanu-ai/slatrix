@@ -264,7 +264,7 @@ private struct MediaActionsToolbar: View {
 
     var body: some View {
         let colors = appearance.colors
-        let side = MessageRow.toolbarButton
+        let side = MessageToolbar.button
         HStack(spacing: 0) {
             if downloading {
                 DelayedProgress().frame(width: m(side), height: m(side))

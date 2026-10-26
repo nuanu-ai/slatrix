@@ -6,6 +6,7 @@ struct TimelineView: View {
     @Environment(\.openURL) private var openURL
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
+    @Environment(Popovers.self) private var popovers: Popovers?
     let room: ChatRoom
     var thread = false
     var threadRootID: String? = nil
@@ -227,6 +228,7 @@ struct TimelineView: View {
         context.onForward = onForward
         context.onEditCaption = onEditCaption
         context.onOpenMedia = { onOpenMedia?($0) }
+        context.onPickEmoji = { [popovers] in popovers?.show(.emoji($0)) }
         return context
     }
 
@@ -386,6 +388,8 @@ struct MessageRowActions {
     /// Nil while the message cannot take a reaction.
     var react: ((String) -> Void)?
     var openReactions: (() -> Void)?
+    /// Nil when the message can't be forwarded.
+    var forward: (() -> Void)?
     var retrySend: () -> Void = {}
     var cancelSend: () -> Void = {}
     /// Built when a menu opens (a right-click, the toolbar's ellipsis, the text's own menu), never at rest.
@@ -410,10 +414,13 @@ struct MessageRow: View {
     /// Precomputed by the timeline's layout; formatted here only for rows shown elsewhere.
     var timeLabel: String? = nil
     var avatar: AvatarView? = nil
+    /// The thread's last replier, in the replies bar.
+    var replierAvatar: AvatarView? = nil
     var replyPreview: ReplyPreviewView? = nil
     var attachment: AttachmentView? = nil
     var actions = MessageRowActions()
     @Environment(\.metrics) private var m
+    @Environment(\.mentions) private var mentions
     private var colors: AppColors { appearance.colors }
     private var pendingSend: Bool { own && message.sendState != "sent" }
     private var compact: Bool { appearance.density == .compact }
@@ -421,10 +428,6 @@ struct MessageRow: View {
     var body: some View {
         layout
             .background(hovered ? colors.hover : highlighted ? colors.accent.opacity(0.12) : .clear)
-            // Over the row's top edge, like Slack's: hovering never changes the row's height.
-            .overlay(alignment: .topTrailing) {
-                if hovered && !message.isRedacted { toolbar.padding(.trailing, m.sp16) }
-            }
             .contentShape(Rectangle())
     }
     private var layout: some View {
@@ -483,46 +486,19 @@ struct MessageRow: View {
                             .foregroundStyle(colors.textSecondary)
                     } else if message.showsMessageBody {
                         NativeMessageBody(
-                            body: message.body, formattedBody: message.formattedBody, menuCommands: actions.menu)
+                            body: message.body, formattedBody: message.formattedBody, edited: message.isEdited,
+                            menuCommands: actions.menu)
                     }
-                    if message.isEdited {
+                    if message.isEdited && (!message.showsMessageBody || message.kind == "m.room.encrypted") {
                         Text("(edited)").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                     }
                     // A reused cell shows another message: a download or preview in flight must not carry over.
                     if let attachment { attachment.padding(.vertical, m.sp4).id(message.id) }
-                    if !message.reactions.isEmpty {
-                        HStack(spacing: m.sp4) {
-                            ForEach(message.reactions, id: \.key) { reaction in
-                                Button {
-                                    actions.react?(reaction.key)
-                                } label: {
-                                    HStack(spacing: m.sp4) {
-                                        Text(reaction.key)
-                                        Text("\(reaction.count)").font(m.font(.caption, .medium))
-                                    }.padding(.horizontal, m.sp8).frame(height: m.sp24).background(
-                                        reaction.mine ? colors.selection.opacity(0.6) : colors.raised, in: Capsule()
-                                    ).overlay(Capsule().stroke(reaction.mine ? colors.accent : .clear, lineWidth: 1))
-                                }.buttonStyle(.row).disabled(actions.react == nil).help(
-                                    "\(reaction.key) · \(reaction.count) \(reaction.mine ? "including you" : "reactions")"
-                                )
-                            }
-                            Button {
-                                actions.openReactions?()
-                            } label: {
-                                Image(systemName: "face.smiling").font(m.font(.meta)).padding(.horizontal, m.sp8).frame(
-                                    height: m.sp24
-                                ).background(colors.raised, in: Capsule())
-                            }.buttonStyle(.row).disabled(actions.openReactions == nil).help("Add reaction")
-                        }.padding(.top, m.sp2)
-                    }
+                    if !message.reactions.isEmpty { reactions.padding(.top, m.sp2) }
                     if !isThread && message.replyCount > 0 {
-                        Button(action: actions.thread) {
-                            HStack(spacing: m.sp8) {
-                                Image(systemName: "bubble.left.and.bubble.right.fill").font(m.font(.meta))
-                                Text("\(message.replyCount) \(message.replyCount == 1 ? "reply" : "replies")").font(
-                                    m.font(.meta, .semibold))
-                            }.foregroundStyle(colors.accent).padding(.vertical, m.sp4)
-                        }.buttonStyle(.row)
+                        ThreadRepliesBar(
+                            count: message.replyCount, lastReply: message.lastReply, avatar: replierAvatar,
+                            action: actions.thread)
                     }
                     if pendingSend {
                         VStack(alignment: .leading, spacing: m.sp8) {
@@ -550,42 +526,151 @@ struct MessageRow: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.padding(.horizontal, m.sp20).padding(.top, grouped || compact ? 3 : 12).padding(.bottom, m.sp4)
     }
-    /// Small enough to sit inside a one-line grouped message, so hovering never changes a row's height.
-    static let toolbarButton: CGFloat = 24
-    private var toolbar: some View {
-        HStack(spacing: 0) {
-            if !pendingSend {
-                IconButton(
-                    symbol: "face.smiling", label: "Add reaction", role: .body, side: Self.toolbarButton,
-                    action: { actions.openReactions?() }
-                ).disabled(actions.openReactions == nil)
-                if !isThread {
-                    IconButton(
-                        symbol: "bubble.right", label: "Reply in thread", role: .body, side: Self.toolbarButton,
-                        action: actions.thread)
+    private var reactions: some View {
+        HStack(spacing: m.sp4) {
+            ForEach(message.reactions, id: \.key) { reaction in
+                Button {
+                    actions.react?(reaction.key)
+                } label: {
+                    ReactionChip(mine: reaction.mine) {
+                        Text(reaction.key).font(m.font(.secondary))
+                        Text("\(reaction.count)").font(m.font(.caption, .semibold))
+                            .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
+                    }
+                }.buttonStyle(.row).disabled(actions.react == nil).help(
+                    reaction.tooltip(me: mentions.me) { id in mentions.members.first { $0.id == id }?.name })
+            }
+            // Shown on hover only, in space it always has, as Slack does.
+            Button {
+                actions.openReactions?()
+            } label: {
+                ReactionChip(mine: false) {
+                    Image(systemName: "face.smiling").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
                 }
-                IconButton(
-                    symbol: "arrowshape.turn.up.left",
-                    label: "Reply",
-                    role: .body, side: Self.toolbarButton,
-                    action: actions.reply
-                )
-                IconButton(
-                    symbol: isSaved ? "bookmark.fill" : "bookmark",
-                    label: isSaved ? "Remove from Later" : "Save for later", role: .body, side: Self.toolbarButton,
-                    action: actions.save
-                )
+            }.buttonStyle(.row).disabled(actions.openReactions == nil).help("Add reaction")
+                .opacity(hovered ? 1 : 0).allowsHitTesting(hovered).accessibilityHidden(!hovered)
+        }
+    }
+}
+
+/// A reaction's pill: 24 pt, gray at rest; yours are tinted, with an accent edge.
+private struct ReactionChip<Content: View>: View {
+    let mine: Bool
+    @ViewBuilder let content: Content
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+    var body: some View {
+        let colors = appearance.colors
+        HStack(spacing: m.sp4) { content }.padding(.horizontal, m.sp8).frame(height: m.sp24)
+            .background(mine ? colors.accentTint : colors.sunken, in: Capsule())
+            .overlay(Capsule().strokeBorder(mine ? colors.accent : .clear))
+    }
+}
+
+/// Slack's replies bar: who replied last, how many replies and when. Hovering outlines it and offers the thread,
+/// at the same height.
+private struct ThreadRepliesBar: View {
+    private static let maxWidth: CGFloat = 600
+    let count: Int
+    let lastReply: ThreadReply?
+    let avatar: AvatarView?
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+    var body: some View {
+        let colors = appearance.colors
+        let shape = RoundedRectangle(cornerRadius: m.radius)
+        Button(action: action) {
+            HStack(spacing: m.sp8) {
+                if let avatar { avatar }
+                Text("\(count) \(count == 1 ? "reply" : "replies")").font(m.font(.meta, .semibold))
+                    .foregroundStyle(colors.accent)
+                if hovering {
+                    Text("View thread").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                    Spacer(minLength: m.sp8)
+                    Image(systemName: "chevron.right").font(m.font(.caption, .semibold))
+                        .foregroundStyle(colors.textSecondary)
+                } else if let lastReply {
+                    Text(ThreadReply.lastReplyText(lastReply.timestamp, now: Date())).font(m.font(.meta))
+                        .foregroundStyle(colors.textSecondary)
+                }
+            }.lineLimit(1).padding(m.sp4).frame(maxWidth: m(Self.maxWidth), minHeight: m.sp32, alignment: .leading)
+                .background(hovering ? colors.canvas : .clear, in: shape)
+                .overlay(shape.strokeBorder(hovering ? colors.border : .clear))
+        }.buttonStyle(.row).onHover { hovering = $0 }.accessibilityLabel("\(count) replies, view thread")
+            // The face lines up with the text above; the hover box reaches past it.
+            .padding(.leading, -m.sp4)
+    }
+}
+
+/// Slack's hover toolbar: three one-click reactions, then add reaction, reply in thread, forward, save and more.
+/// The timeline floats one over the hovered row's top edge, so no row draws it or changes height for it.
+struct MessageToolbar: View {
+    static let button: CGFloat = 28
+    let quick: [String]
+    let isThread: Bool
+    let isSaved: Bool
+    /// A message still sending offers only its menu.
+    let pending: Bool
+    let actions: MessageRowActions
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+
+    var body: some View {
+        let colors = appearance.colors
+        let shape = RoundedRectangle(cornerRadius: m.radiusLarge)
+        HStack(spacing: 0) {
+            if !pending {
+                ForEach(quick, id: \.self) { emoji in
+                    Button {
+                        actions.react?(emoji)
+                    } label: {
+                        Text(emoji).font(m.font(.body)).frame(width: m(Self.button), height: m(Self.button))
+                    }.buttonStyle(.icon).disabled(actions.react == nil)
+                        .help("React with \(EmojiCatalog.shortcode(for: emoji))")
+                }
+                button("face.smiling", "Find another reaction") { actions.openReactions?() }
+                    .disabled(actions.openReactions == nil)
+                if !isThread { button("text.bubble", "Reply in thread", action: actions.thread) }
+                if let forward = actions.forward {
+                    button("arrowshape.turn.up.right", "Forward message", action: forward)
+                }
+                button(
+                    isSaved ? "bookmark.fill" : "bookmark", isSaved ? "Remove from Later" : "Save for later",
+                    action: actions.save)
             }
             Menu {
                 NativeMessageMenuCommands(commands: actions.menu())
             } label: {
-                Image(systemName: "ellipsis").font(m.font(.body)).frame(
-                    width: m(Self.toolbarButton), height: m(Self.toolbarButton))
-            }.menuStyle(.borderlessButton).frame(width: m(Self.toolbarButton))
-        }.padding(.horizontal, m.sp2).frame(height: m(Self.toolbarButton)).background(
-            colors.overlay, in: RoundedRectangle(cornerRadius: m.radius)
-        )
-        .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border)).elevation(.e1, cornerRadius: m.radius)
+                Image(systemName: "ellipsis").rotationEffect(.degrees(90)).font(m.font(.body))
+                    .frame(width: m(Self.button), height: m(Self.button))
+            }.menuStyle(.button).buttonStyle(.icon).menuIndicator(.hidden).help("More actions")
+                .accessibilityLabel("More actions")
+        }
+        .foregroundStyle(colors.textSecondary).padding(m.sp2)
+        .background(colors.overlay, in: shape).overlay(shape.strokeBorder(colors.border))
+        .elevation(.e1, cornerRadius: m.radiusLarge)
+    }
+
+    private func button(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
+        IconButton(symbol: symbol, label: label, role: .body, side: Self.button, action: action)
+    }
+}
+
+/// The toolbar for the hovered row, with the account's recent emoji; it redraws when they change.
+struct HoveredMessageToolbar: View {
+    let entry: TimelineMessageEntry
+    let context: TimelineRowContext
+    var body: some View {
+        if let matrix = context.matrix, let appearance = context.appearance {
+            let message = entry.message
+            MessageToolbar(
+                quick: EmojiRecents.quick(matrix.recentEmoji), isThread: context.isThread, isSaved: entry.saved,
+                pending: message.senderID == matrix.user?.id && message.sendState != "sent",
+                actions: context.actions(for: entry, target: context.actionTarget(for: message))
+            ).environment(\.metrics, context.metrics).environmentObject(appearance)
+        }
     }
 }
 
@@ -595,8 +680,7 @@ extension TimelineRowContext {
         return surface.flatMap { matrix?.captureMessageAction(message: message, surface: $0) }
     }
 
-    /// `id` is the row's, for placing the reaction picker over it.
-    func actions(for id: String, _ row: TimelineMessageEntry, target: MessageActionTarget?) -> MessageRowActions {
+    func actions(for row: TimelineMessageEntry, target: MessageActionTarget?) -> MessageRowActions {
         let message = row.message
         var actions = MessageRowActions(
             openProfile: onOpenProfile.map { open in
@@ -611,8 +695,12 @@ extension TimelineRowContext {
             openReactions: target.map { target in
                 {
                     guard self.matrix?.isCurrentMessageAction(target) == true else { return }
-                    self.onPickReaction(id, target) { self.onReact(target, $0) }
+                    self.onPickEmoji(EmojiPick { self.onReact(target, $0) })
                 }
+            },
+            forward: onForward.flatMap { forward in
+                guard let target, ForwardMessageContent.supports(message) else { return nil }
+                return { forward(target) }
             },
             retrySend: { self.onRetrySend(message) }, cancelSend: { self.onCancelSend(message) })
         actions.menu = { [actions] in self.menu(row, target: target, actions: actions) }
@@ -620,10 +708,8 @@ extension TimelineRowContext {
     }
 
     /// What VoiceOver offers on a message besides its menu.
-    func accessibilityCommands(for id: String, _ row: TimelineMessageEntry, target: MessageActionTarget?)
-        -> [MessageMenuCommand]
-    {
-        let actions = actions(for: id, row, target: target)
+    func accessibilityCommands(for row: TimelineMessageEntry, target: MessageActionTarget?) -> [MessageMenuCommand] {
+        let actions = actions(for: row, target: target)
         if row.message.senderID == matrix?.user?.id && row.message.sendState != "sent" {
             return [MessageMenuCommand(id: "cancel-send", title: "Cancel sending…", perform: actions.cancelSend)]
         }
@@ -680,11 +766,11 @@ extension TimelineRowContext {
             MessageMenuCommand(
                 id: "save", title: row.saved ? "Remove from Later" : "Save for later", perform: actions.save),
         ]
-        if let onForward, ForwardMessageContent.supports(message) {
+        if onForward != nil, ForwardMessageContent.supports(message) {
             commands.append(
                 MessageMenuCommand(
-                    id: "forward", title: "Forward…", isEnabled: target != nil,
-                    perform: { if let target { onForward(target) } }))
+                    id: "forward", title: "Forward…", isEnabled: actions.forward != nil,
+                    perform: { actions.forward?() }))
         }
         if let onTogglePin {
             commands.append(
@@ -741,32 +827,5 @@ extension TimelineRowContext {
             surface = .conversation
         }
         return matrix.captureMessagePermalink(message: message, surface: surface)
-    }
-}
-
-struct ReactionPicker: View {
-    private static let cell: CGFloat = 32
-    private static let columns = 6
-    @Environment(\.metrics) private var m
-    let onSelect: (String) -> Void
-    private let emojis = [
-        "👍", "👎", "❤️", "😂", "🎉", "🙌", "👀", "✅", "🔥", "🚀", "🤔", "🙏", "👏", "✨", "💯", "👋", "💡", "🤝", "😅", "💪", "🌱", "🫡",
-        "😎", "🫶",
-    ]
-    var body: some View {
-        VStack(alignment: .leading, spacing: m.sp12) {
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.fixed(m(Self.cell)), spacing: m.sp4), count: Self.columns),
-                spacing: m.sp4
-            ) {
-                ForEach(emojis, id: \.self) { emoji in
-                    Button {
-                        onSelect(emoji)
-                    } label: {
-                        Text(emoji).font(m.font(.header)).frame(width: m(Self.cell), height: m(Self.cell))
-                    }.buttonStyle(.row).help(emoji)
-                }
-            }
-        }.fixedSize()
     }
 }

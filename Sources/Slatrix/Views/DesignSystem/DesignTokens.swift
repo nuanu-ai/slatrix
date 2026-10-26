@@ -138,6 +138,8 @@ private struct ElevationModifier: ViewModifier {
                     RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(Color.white.opacity(0.1))
                 }
             }
+            // One shadow for the surface, not one under every glyph on it.
+            .compositingGroup()
             .shadow(
                 color: .black.opacity(scheme == .dark ? shadow.opacity * 2 : shadow.opacity), radius: m(shadow.radius),
                 y: m(shadow.y))

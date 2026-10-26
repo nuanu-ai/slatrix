@@ -56,7 +56,6 @@ struct RootView: View {
     /// one re-renders only the modal host, not the whole window.
     @State private var modals = InWindowModal()
     @State private var publicDirectory: PublicDirectorySelection?
-    @State private var lastMessageReaction: MessageActionTarget?
     @State private var showRecovery = false
     @State private var creation: CreationKind?
     @State private var inviteTargetRoomID: String?
@@ -248,7 +247,7 @@ struct RootView: View {
     var body: some View {
         ModalHost(modals: modals, onClose: closeModal) {
             PopoverHost(popovers: popovers) {
-                windowContent
+                windowContent.environment(popovers)
             } card: { kind in
                 popoverCard(kind)
             }
@@ -304,6 +303,11 @@ struct RootView: View {
                     popovers.close()
                     profilePane = ProfileSelection(id: userID, fallback: fallback)
                 })
+        case .emoji(let pick):
+            EmojiPicker(recent: matrix.recentEmoji) { emoji in
+                popovers.close()
+                pick.action(emoji)
+            }
         }
     }
 
@@ -1031,12 +1035,6 @@ struct RootView: View {
                                 isPrimary: true
                             )
                         }
-                        .popover(item: $lastMessageReaction, arrowEdge: .top) { target in
-                            ReactionPicker { key in
-                                lastMessageReaction = nil
-                                run { try await matrix.toggleReaction(target, key: key) }
-                            }.padding(m.sp12)
-                        }
                         .disabled(!localReady || !attachmentDrafts.ready).id(
                             "composer-\(composerGeneration)-\(room.id)"
                         )
@@ -1124,7 +1122,7 @@ struct RootView: View {
                 } label: {
                     Image(systemName: "ellipsis").rotationEffect(.degrees(90)).frame(
                         width: m.iconButton, height: m.iconButton)
-                }.menuStyle(.borderlessButton).frame(width: m.iconButton)
+                }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m.iconButton)
             }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
             HStack(spacing: m.sp24) {
                 Button {
@@ -2578,9 +2576,10 @@ struct RootView: View {
             }
         case "react-last":
             guard route == .home, !showPins, editTarget == nil,
-                let last = matrix.messages.last(where: { $0.sendState == "sent" && !$0.isRedacted })
+                let last = matrix.messages.last(where: { $0.sendState == "sent" && !$0.isRedacted }),
+                let target = matrix.captureMessageAction(message: last, surface: .conversation)
             else { return }
-            lastMessageReaction = matrix.captureMessageAction(message: last, surface: .conversation)
+            popovers.show(.emoji(EmojiPick { key in run { try await matrix.toggleReaction(target, key: key) } }))
         case "previous-conversation", "next-conversation", "previous-unread", "next-unread":
             let direction = action.hasPrefix("previous") ? -1 : 1
             let rooms = matrix.rooms.filter {
@@ -2699,7 +2698,8 @@ private struct HistoryMenu: View {
             }
         } label: {
             Image(systemName: "clock").font(m.font(.title)).frame(width: m.iconButton, height: m.iconButton)
-        }.menuStyle(.borderlessButton).frame(width: m.iconButton + m.sp4).help("Recent conversations")
+        }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m.iconButton + m.sp4)
+            .help("Recent conversations")
     }
 }
 

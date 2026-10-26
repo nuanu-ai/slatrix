@@ -38,6 +38,7 @@ struct ComponentGallery: View {
             }
             section("Profile") { profile }
             section("Files") { files }
+            section("Emoji") { emoji }
         }
         .padding(m.sp40).frame(width: m(Self.width), alignment: .leading)
         .background(colors.canvas).foregroundStyle(colors.textBody)
@@ -237,6 +238,21 @@ struct ComponentGallery: View {
         SkeletonRows(count: 2).frame(width: m(420), height: m(132))
             .background(appearance.colors.canvas, in: RoundedRectangle(cornerRadius: m.radiusLarge))
             .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(appearance.colors.border))
+    }
+
+    private var emoji: some View {
+        HStack(alignment: .top, spacing: m.sp40) {
+            VStack(alignment: .leading, spacing: m.sp8) {
+                caption("Picker, for reactions and the composer")
+                PopoverSurface { EmojiPicker(recent: ["👍", "🎉", "✅", "👀"]) { _ in } }
+            }
+            VStack(alignment: .leading, spacing: m.sp8) {
+                caption("Hover toolbar, over a message's top edge")
+                MessageToolbar(
+                    quick: EmojiRecents.quick([]), isThread: false, isSaved: false, pending: false,
+                    actions: MessageRowActions(forward: {}))
+            }
+        }
     }
 
     private var profile: some View {
