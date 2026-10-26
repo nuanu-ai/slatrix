@@ -118,9 +118,8 @@ struct QuickSwitcherView: View {
             }.font(m.font(.caption)).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24).padding(
                 .vertical, m.sp12)
         }
-        .sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.textBody
-        )
+        .frame(maxWidth: m(Self.size.width), maxHeight: m(Self.size.height)).background(colors.canvas)
+        .foregroundStyle(colors.textBody)
         .onAppear {
             searchPresented = true
             presentationSession = matrix.notificationSessionID
@@ -579,7 +578,6 @@ enum CreationKind: String, Identifiable {
 }
 
 struct CreationSheet: View {
-    private static let width: CGFloat = 528
     @Environment(\.metrics) private var m
     let matrix: MatrixService
     var kind: CreationKind
@@ -595,7 +593,6 @@ struct CreationSheet: View {
     @State private var busy = false
     @State private var error: String?
     @State private var submission = UUID()
-    @FocusState private var firstFieldFocused: Bool
 
     private var colors: AppColors { appearance.colors }
     private var trimmedIdentifier: String { identifier.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -635,12 +632,13 @@ struct CreationSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                Text(kind.title).font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
-                Spacer(minLength: m.sp12)
-                IconButton(symbol: "xmark", label: "Close", role: .secondary) { if !busy { onClose() } }.disabled(busy)
-            }.padding(.bottom, m.sp24)
+        Modal(
+            title: kind.title, busy: busy, onClose: onClose, secondary: ModalAction("Cancel", action: onClose),
+            primary: ModalAction(
+                kind.action, disabled: !valid,
+                // Return picks a suggested person in these, so it never sends the form.
+                shortcut: kind == .directMessage || kind == .invite ? nil : .defaultAction, action: submit)
+        ) {
             VStack(alignment: .leading, spacing: m.sp20) {
                 switch kind {
                 case .directMessage, .invite:
@@ -670,8 +668,7 @@ struct CreationSheet: View {
                     field(
                         kind == .channel ? "Name" : "Workspace name"
                     ) {
-                        TextField(kind == .channel ? "e.g. design-team" : "e.g. Harbor", text: $name).focused(
-                            $firstFieldFocused)
+                        TextField(kind == .channel ? "e.g. design-team" : "e.g. Harbor", text: $name)
                     }
                     field("Description", optional: true) {
                         TextField(
@@ -698,34 +695,13 @@ struct CreationSheet: View {
                     }
                 case .join:
                     field("Address") {
-                        TextField("#channel:server.org", text: $identifier).focused($firstFieldFocused)
+                        TextField("#channel:server.org", text: $identifier)
                     }
                 }
             }.disabled(busy)
-            if let error {
-                InlineErrorView(message: error).clipShape(RoundedRectangle(cornerRadius: m.radius)).padding(
-                    .top, m.sp16)
-            }
-            HStack(spacing: m.sp12) {
-                if busy {
-                    DelayedProgress()
-                }
-                Spacer()
-                Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(busy)
-                Button(action: submit) {
-                    Text(kind.action).font(m.font(.secondary, .semibold)).padding(.horizontal, m.sp12).padding(
-                        .vertical, m.sp4)
-                }.buttonStyle(.primary)
-                    .keyboardShortcut(kind == .directMessage || kind == .invite ? nil : KeyboardShortcut.defaultAction)
-                    .disabled(!valid)
-            }.padding(.top, m.sp24)
+            if let error { InlineErrorView(message: error).clipShape(RoundedRectangle(cornerRadius: m.radius)) }
         }
-        .padding(m.sp32).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)
-        .interactiveDismissDisabled(busy)
-        .onAppear {
-            selectedWorkspaceID = workspaceID ?? ""
-            firstFieldFocused = true
-        }
+        .onAppear { selectedWorkspaceID = workspaceID ?? "" }
         .onChange(of: formIdentity) { _, _ in
             submission = UUID()
             busy = false
@@ -739,7 +715,6 @@ struct CreationSheet: View {
             }
         }
         .onDisappear { submission = UUID() }
-        .onExitCommand { if !busy { onClose() } }
     }
 
     private func field<Content: View>(
@@ -750,10 +725,7 @@ struct CreationSheet: View {
                 Text(title).font(m.font(.secondary, .semibold))
                 if optional { Text("(optional)").font(m.font(.meta)).foregroundStyle(colors.textSecondary) }
             }
-            content().textFieldStyle(.plain).font(m.font(.body)).padding(m.sp12)
-                .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius))
-                .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.textSecondary.opacity(0.5)))
-                .accessibilityLabel(title)
+            content().textFieldStyle(.field).accessibilityLabel(title)
         }
     }
 

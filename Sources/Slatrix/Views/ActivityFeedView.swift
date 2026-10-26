@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct ActivityFeedView: View {
-    private static let filterWidth: CGFloat = 180
     @Environment(\.metrics) private var m
     let matrix: MatrixService
     let activity: ActivityService
@@ -42,12 +41,10 @@ struct ActivityFeedView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: m.sp12) {
-                Picker("Activity type", selection: $filter) {
-                    ForEach(ActivityFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented).frame(width: m(Self.filterWidth))
+                TabBar(tabs: ActivityFilter.allCases.map { .init(value: $0, title: $0.rawValue) }, selection: $filter)
                 Spacer()
                 FeedWorkspacePicker(matrix: matrix, workspaceID: $workspaceID)
-            }.padding(.horizontal, m.sp24).frame(height: m.control + m.sp16)
+            }.padding(.horizontal, m.sp24).frame(height: m.tabBar)
             Divider().overlay(colors.border)
             if items.isEmpty && summaryRooms.isEmpty {
                 EmptyStateView(

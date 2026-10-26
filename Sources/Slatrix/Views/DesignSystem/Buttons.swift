@@ -186,7 +186,7 @@ extension ButtonStyle where Self == RowButtonStyle {
 
 /// Whether a button has keyboard focus, given `isFocused` read inside it. Without the Mac's keyboard navigation
 /// buttons can't take focus, and `isFocused` then reports a focused container around them instead.
-@MainActor private func keyboardFocused(_ focusedWithin: Bool) -> Bool {
+@MainActor func keyboardFocused(_ focusedWithin: Bool) -> Bool {
     focusedWithin && NSApplication.shared.isFullKeyboardAccessEnabled
 }
 

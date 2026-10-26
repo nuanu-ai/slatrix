@@ -85,6 +85,13 @@ struct Metrics: Equatable {
     var controlLarge: CGFloat { 36 * zoom }
     /// Anchored cards such as the profile card.
     var popoverWidth: CGFloat { 320 * zoom }
+    /// Modal widths: confirmations, forms, and tabbed or two-column modals.
+    var modalSmall: CGFloat { 440 * zoom }
+    var modalMedium: CGFloat { 560 * zoom }
+    var modalLarge: CGFloat { 680 * zoom }
+    var tabBar: CGFloat { 40 * zoom }
+    /// A person in a list: a 36 pt photo beside two lines.
+    var personRow: CGFloat { 48 * zoom }
     var rail: CGFloat { 68 * zoom }
     /// Sidebar, channel and side-pane headers share one height so their dividers line up.
     var paneHeader: CGFloat { 56 * zoom }
@@ -150,22 +157,5 @@ extension EnvironmentValues {
     var metrics: Metrics {
         get { self[MetricsKey.self] }
         set { self[MetricsKey.self] = newValue }
-    }
-}
-
-extension View {
-    /// Sizes a sheet for the current zoom, kept inside the screen so 200% still fits a laptop.
-    func sheetSize(width: CGFloat, height: CGFloat? = nil) -> some View {
-        modifier(SheetSize(width: width, height: height))
-    }
-}
-
-private struct SheetSize: ViewModifier {
-    let width: CGFloat
-    let height: CGFloat?
-    @Environment(\.metrics) private var m
-    func body(content: Content) -> some View {
-        let screen = NSScreen.main?.visibleFrame.insetBy(dx: 40, dy: 40).size ?? CGSize(width: 1e6, height: 1e6)
-        content.frame(width: min(m(width), screen.width), height: height.map { min(m($0), screen.height) })
     }
 }

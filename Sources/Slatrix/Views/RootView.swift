@@ -55,6 +55,8 @@ struct RootView: View {
     /// Preferences, ⌘K and the shortcuts list, shown in the window like Slack's. Not read by this body, so opening
     /// one re-renders only the modal host, not the whole window.
     @State private var modals = InWindowModal()
+    /// Any modal at all, such as a confirmation the timeline opened; read outside the body only.
+    @State private var modalShown = false
     @State private var publicDirectory: PublicDirectorySelection?
     @State private var lastMessageReaction: MessageActionTarget?
     @State private var showRecovery = false
@@ -71,7 +73,7 @@ struct RootView: View {
     @State private var matrixJoin: MatrixJoinSelection?
     @State private var pendingMatrixLink: PendingMatrixLink?
     @State private var matrixLinkTask: Task<Void, Never>?
-    @State private var infoOpen = false
+    @State private var channelDetails: ChannelDetailsSelection?
     @State private var showPins = false
     @State private var pinPermissionRoomID: String?
     @State private var pinPermission = false
@@ -125,7 +127,7 @@ struct RootView: View {
     private static let infoPaneWidth: CGFloat = 336
     /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
     private var inspectorWidth: CGFloat? {
-        guard profilePane != nil || (room != nil && (threadRoot != nil || infoOpen)) else { return nil }
+        guard profilePane != nil || (room != nil && threadRoot != nil) else { return nil }
         return SidebarLayout.paneWidth(
             preferred: resizingPaneWidth ?? CGFloat(preferredPaneWidth),
             ideal: threadRoot != nil && profilePane == nil ? Self.threadPaneWidth : Self.infoPaneWidth,
@@ -175,7 +177,6 @@ struct RootView: View {
         let selection: UUID
         let navigation: UUID
         let workspace: String?
-        let informationVisible: Bool
         let sourceRoute: AppRoute
         let selectedRoomID: String?
         let pinsVisible: Bool
@@ -185,6 +186,11 @@ struct RootView: View {
         var fallback: ChatUser?
     }
     private struct DetailsSelection: Identifiable { var id: String }
+    private struct ChannelDetailsSelection: Identifiable {
+        let room: ChatRoom
+        let tab: RoomInfoView.Tab
+        var id: String { room.id }
+    }
     private struct ForwardSelection: Identifiable {
         let target: MessageActionTarget
         let navigation: UUID
@@ -235,7 +241,7 @@ struct RootView: View {
             timelineID: matrix.timelineSelectionID, threadID: threadRoot?.eventID, readyThreadID: threadReadyID)
     }
     private var hasPresentedSheet: Bool {
-        publicDirectory != nil || showRecovery || creation != nil
+        publicDirectory != nil || showRecovery || creation != nil || channelDetails != nil
             || roomDetails != nil || roomNotifications != nil || forwarding != nil
             || mediaCaption != nil || matrixJoin != nil || previews.url != nil || logoutConfirmation
             || logoutRecovery.request != nil || logoutRecovery.isBusy
@@ -243,21 +249,30 @@ struct RootView: View {
     private var hasNativeModal: Bool { ReadInputs.hasNativeModal }
 
     /// Every modal, for actions that must wait for all of them; read outside the body only.
-    private var hasModal: Bool { hasPresentedSheet || modals.current != nil }
+    private var hasModal: Bool { hasPresentedSheet || modals.current != nil || modalShown }
 
     var body: some View {
-        ModalHost(modals: modals, onClose: closeModal) {
+        ModalHost(onCovered: { shown in
+            modalShown = shown
+            // A notification that arrived while a modal was open opens once it closes.
+            if !shown { openPendingNotification() }
+        }) {
             PopoverHost(popovers: popovers) {
                 windowContent
             } card: { kind in
                 popoverCard(kind)
             }
-        } modal: { kind in
-            modal(kind).environmentObject(appearance)
+            .modal(
+                item: Binding(get: { modals.current }, set: { if $0 == nil { closeModal() } }),
+                closesOnClickOutside: true, content: modal)
         }
         .overlay {
             MediaViewer(matrix: matrix, viewer: viewer, onForward: startForward)
         }
+        // Outside the modal host, so modals open links, show mentions and preview files as the window does.
+        .environmentObject(previews)
+        .environment(\.openURL, OpenURLAction(handler: handleOpenURL))
+        .environment(\.mentions, MentionContext(me: matrix.user?.id))
     }
 
     @ViewBuilder private func modal(_ kind: InWindowModal.Kind) -> some View {
@@ -269,7 +284,7 @@ struct RootView: View {
                     closeModal()
                     logoutConfirmation = true
                 },
-                // A sheet over a modal would inherit its disabled window, so the modal steps aside first.
+                // Preferences sits above every other modal, so it steps aside for the one it opens.
                 onRecovery: {
                     closeModal()
                     showRecovery = true
@@ -287,6 +302,8 @@ struct RootView: View {
                     selectRoom(message.roomID, record: true, eventID: message.eventID)
                 }, initiallyMessages: messages, initialRoomID: roomID, onMatrixLink: enqueueMatrixLink
             ).onAppear { Performance.finishOnScreen(.searchOpen) }
+                // Slack's switcher hangs below the title bar, not centered.
+                .modalSurface().frame(maxHeight: .infinity, alignment: .top).padding(.top, m.paneHeader + m.sp24)
         case .shortcuts: KeyboardShortcutsView(onClose: closeModal)
         }
     }
@@ -330,11 +347,8 @@ struct RootView: View {
                     .padding(m.sp24).background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
                 }
             }
-            .environmentObject(previews)
             .quickLookPreview(Binding(get: { previews.url }, set: previews.presentationChanged))
             .background(PreviewInvalidation(matrix: matrix, previews: previews, viewer: viewer))
-            .environment(\.openURL, OpenURLAction(handler: handleOpenURL))
-            .environment(\.mentions, MentionContext(me: matrix.user?.id))
             .background(layoutMeasurement)
     }
 
@@ -399,7 +413,6 @@ struct RootView: View {
                 if route == .home && pendingRoomID == nil && invitationResponseID == nil && room == nil {
                     matrix.setMessageActionThread(rootID: nil)
                     threadRoot = nil
-                    infoOpen = false
                     route = .home
                     if let first = matrix.rooms.first(where: {
                         !$0.isDirect && (id == nil || $0.spaceIDs.contains(id!))
@@ -424,7 +437,6 @@ struct RootView: View {
                     cancelCurrentEdit()
                     cancelReply()
                     showPins = false
-                    infoOpen = false
                     navigationGeneration = UUID()
                     pendingRoomID = nil
                     matrix.setMessageActionThread(rootID: nil)
@@ -445,10 +457,6 @@ struct RootView: View {
                 cancelStaleCaption()
             }
             .onChange(of: matrix.timelineSelectionID) { _, _ in cancelStaleThreadOpen() }
-            .onChange(of: infoOpen) { _, open in
-                cancelStaleThreadOpen()
-                if open { profilePane = nil }
-            }
             .onChange(of: matrix.messageActionContext) { _, _ in
                 if let editActionTarget, !matrix.isCurrentMessageAction(editActionTarget) { cancelCurrentEdit() }
                 cancelStaleForward()
@@ -488,24 +496,33 @@ struct RootView: View {
 
     private var linkPresentedContent: some View {
         mainContent
-            .sheet(item: $matrixJoin) { selection in
+            .modal(item: $matrixJoin) { selection in
                 MatrixRoomJoinView(
                     matrix: matrix, request: selection.request,
-                    onJoined: { finishMatrixJoin($0, selection: selection) }, onClose: { matrixJoin = nil }
-                ).environmentObject(appearance)
+                    onJoined: { finishMatrixJoin($0, selection: selection) }, onClose: { matrixJoin = nil })
             }
     }
 
     private var presentedContent: some View {
         linkPresentedContent
-            .sheet(item: $publicDirectory) { selection in
+            .modal(item: $channelDetails, closesOnClickOutside: true) { selection in
+                RoomInfoView(
+                    matrix: matrix, room: selection.room, tab: selection.tab, onClose: { channelDetails = nil },
+                    onInvite: { presentCreation(.invite) }, onRecovery: { showRecovery = true },
+                    onOpenProfile: { id, fallback in
+                        channelDetails = nil
+                        profilePane = ProfileSelection(id: id, fallback: fallback)
+                    },
+                    onEditDetails: { roomDetails = DetailsSelection(id: selection.room.id) },
+                    onNotifications: { roomNotifications = DetailsSelection(id: selection.room.id) })
+            }
+            .modal(item: $publicDirectory) { selection in
                 PublicRoomDirectoryView(
                     matrix: matrix, service: matrix.publicDirectory,
                     workspace: matrix.workspaces.first { $0.id == selection.workspaceID },
-                    onResolve: { finishPublicDirectory($0, selection: selection) }, onClose: { publicDirectory = nil }
-                ).environmentObject(appearance)
+                    onResolve: { finishPublicDirectory($0, selection: selection) }, onClose: { publicDirectory = nil })
             }
-            .sheet(item: $creation) { kind in
+            .modal(item: $creation) { kind in
                 CreationSheet(
                     matrix: matrix, kind: kind, workspaceID: workspaceID,
                     roomID: kind == .invite ? inviteTargetRoomID : matrix.selectedRoomID,
@@ -525,51 +542,50 @@ struct RootView: View {
                     onClose: {
                         creation = nil
                         inviteTargetRoomID = nil
-                    }
-                ).environmentObject(appearance)
+                    })
             }
-            .sheet(isPresented: $showRecovery) {
-                EncryptionRecoveryView(matrix: matrix, onClose: { showRecovery = false }).environmentObject(appearance)
+            .modal(isPresented: $showRecovery) {
+                EncryptionRecoveryView(matrix: matrix, onClose: { showRecovery = false })
             }
-            .sheet(item: $roomDetails) { selection in
+            .modal(item: $roomDetails) { selection in
                 RoomDetailsEditor(matrix: matrix, roomID: selection.id, onClose: { roomDetails = nil })
-                    .environmentObject(appearance)
             }
-            .sheet(item: $roomNotifications) { selection in
+            .modal(item: $roomNotifications) { selection in
                 RoomNotificationSettingsView(matrix: matrix, roomID: selection.id, onClose: { roomNotifications = nil })
-                    .environmentObject(appearance)
             }
-            .sheet(item: $forwarding) { selection in
+            .modal(item: $forwarding) { selection in
                 ForwardMessageView(
                     matrix: matrix, target: selection.target,
                     onClose: {
                         guard forwarding?.id == selection.id else { return }
                         forwarding = nil
-                    }
-                ).environmentObject(appearance)
+                    })
             }
-            .sheet(item: $mediaCaption) { selection in
+            .modal(item: $mediaCaption) { selection in
                 MediaCaptionEditor(
                     matrix: matrix, target: selection.target,
                     onClose: {
                         guard mediaCaption?.id == selection.id else { return }
                         mediaCaption = nil
-                    }
-                ).environmentObject(appearance)
+                    })
             }
             .modifier(VerificationPresentation(service: matrix.verification, enabled: !hasPresentedSheet))
-            .sheet(item: Binding(get: { logoutRecovery.request }, set: { if $0 == nil { logoutRecovery.cancel() } })) {
+            .modal(item: Binding(get: { logoutRecovery.request }, set: { if $0 == nil { logoutRecovery.cancel() } })) {
                 request in
                 LogoutRecoveryView(
                     controller: logoutRecovery, request: request,
                     onRetry: { retryLogout(request) }, onLocalSignOut: { localLogout(request) },
                     onCancel: logoutRecovery.cancel)
             }
-            .alert("Sign out of Slatrix?", isPresented: $logoutConfirmation) {
-                Button("Cancel", role: .cancel) {}
-                Button("Sign out", role: .destructive) { beginLogout() }.disabled(logoutRecovery.isBusy)
-            } message: {
-                Text("You’ll need your recovery key to read encrypted messages when you sign back in.")
+            .modal(isPresented: $logoutConfirmation) {
+                ConfirmModal(
+                    title: "Sign out of Slatrix?",
+                    message: "You’ll need your recovery key to read encrypted messages when you sign back in.",
+                    action: "Sign out",
+                    onConfirm: {
+                        logoutConfirmation = false
+                        if !logoutRecovery.isBusy { beginLogout() }
+                    }, onCancel: { logoutConfirmation = false })
             }
             .task {
                 Task.detached(priority: .utility) { ComposerAttachmentImporter.cleanupOrphans() }
@@ -789,14 +805,6 @@ struct RootView: View {
                 }, onClose: { self.profilePane = nil })
         } else if let room, let root = threadRoot {
             threadPanel(root: root, room: room)
-        } else if let room, infoOpen {
-            RoomInfoView(
-                matrix: matrix, room: room, onClose: { infoOpen = false },
-                onInvite: { presentCreation(.invite) }, onRecovery: { showRecovery = true },
-                onOpenProfile: openProfile,
-                onEditDetails: { roomDetails = DetailsSelection(id: room.id) },
-                onNotifications: { roomNotifications = DetailsSelection(id: room.id) }
-            ).background(colors.canvas)
         }
     }
 
@@ -1058,6 +1066,19 @@ struct RootView: View {
             }
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
     }
+    private enum ChannelTab { case messages, pins, files }
+    private func openChannelTab(_ tab: ChannelTab) {
+        switch tab {
+        case .messages:
+            showPins = false
+            route = .home
+        case .pins:
+            matrix.setMessageActionThread(rootID: nil)
+            threadRoot = nil
+            showPins = true
+        case .files: route = .files
+        }
+    }
     private func channelHeader(_ room: ChatRoom) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: m.sp8) {
@@ -1066,10 +1087,7 @@ struct RootView: View {
                     label: room.favorite ? "Remove from Starred" : "Add to Starred", role: .title
                 ) { run { try await matrix.setFavorite(room, value: !room.favorite) } }
                 Button {
-                    matrix.setMessageActionThread(rootID: nil)
-                    threadRoot = nil
-                    infoOpen.toggle()
-                    Task { await matrix.loadMembers() }
+                    channelDetails = ChannelDetailsSelection(room: room, tab: .about)
                 } label: {
                     HStack(spacing: m.sp8) {
                         if !room.isDirect {
@@ -1082,10 +1100,7 @@ struct RootView: View {
                 }.buttonStyle(.row).foregroundStyle(colors.textPrimary).layoutPriority(1)
                 Spacer()
                 Button {
-                    matrix.setMessageActionThread(rootID: nil)
-                    threadRoot = nil
-                    infoOpen.toggle()
-                    Task { await matrix.loadMembers() }
+                    channelDetails = ChannelDetailsSelection(room: room, tab: .members)
                 } label: {
                     HStack(spacing: m.sp4) {
                         Image(systemName: "person")
@@ -1101,11 +1116,7 @@ struct RootView: View {
                     handleMenu("search-conversation")
                 }
                 Menu {
-                    Button("Channel details") {
-                        infoOpen = true
-                        matrix.setMessageActionThread(rootID: nil)
-                        threadRoot = nil
-                    }
+                    Button("Channel details") { channelDetails = ChannelDetailsSelection(room: room, tab: .about) }
                     Button("Invite people…") { presentCreation(.invite) }.disabled(
                         matrix.isPreview || room.membership != "join" || room.canInvite == false)
                     Divider()
@@ -1127,34 +1138,16 @@ struct RootView: View {
                 }.menuStyle(.borderlessButton).frame(width: m.iconButton)
             }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
             HStack(spacing: m.sp24) {
-                Button {
-                    showPins = false
-                    route = .home
-                } label: {
-                    Label("Messages", systemImage: "bubble.left.fill").font(
-                        m.font(.secondary, showPins ? .regular : .semibold)
-                    ).fixedSize().padding(.vertical, m.sp12).overlay(alignment: .bottom) {
-                        if !showPins { Rectangle().fill(colors.textBody).frame(height: 2) }
-                    }
-                }.buttonStyle(.row)
-                Button {
-                    matrix.setMessageActionThread(rootID: nil)
-                    threadRoot = nil
-                    infoOpen = false
-                    showPins = true
-                } label: {
-                    Label(
-                        room.pinnedEventIDs.isEmpty ? "Pins" : "Pins · \(room.pinnedEventIDs.count)", systemImage: "pin"
-                    ).font(m.font(.secondary, showPins ? .semibold : .regular)).fixedSize().padding(.vertical, m.sp12)
-                        .overlay(
-                            alignment: .bottom
-                        ) { if showPins { Rectangle().fill(colors.textBody).frame(height: 2) } }
-                }.buttonStyle(.row).disabled(matrix.isPreview || room.membership != "join")
-                Button {
-                    route = .files
-                } label: {
-                    Label("Files & links", systemImage: "doc.on.doc").font(m.font(.secondary)).fixedSize()
-                }.buttonStyle(.row).foregroundStyle(colors.textSecondary)
+                TabBar(
+                    tabs: [
+                        .init(value: ChannelTab.messages, title: "Messages", symbol: "bubble.left"),
+                        .init(
+                            value: .pins, title: "Pins", symbol: "pin",
+                            count: room.pinnedEventIDs.isEmpty ? nil : room.pinnedEventIDs.count,
+                            disabled: matrix.isPreview || room.membership != "join"),
+                        .init(value: .files, title: "Files & links", symbol: "doc.on.doc"),
+                    ],
+                    selection: Binding(get: { showPins ? .pins : .messages }, set: openChannelTab))
                 Spacer()
                 // In the tab row's reserved height, so it never covers or moves a message.
                 if matrix.hasLockedMessages {
@@ -1704,7 +1697,6 @@ struct RootView: View {
                 }
                 if let thread {
                     threadRoot = thread
-                    infoOpen = false
                     openingThreadID = thread.eventID
                     do {
                         try await matrix.loadThread(thread)
@@ -1777,7 +1769,7 @@ struct RootView: View {
         let request = ThreadOpenRequest(
             message: message, owner: composerIdentity,
             selection: matrix.timelineSelectionID, navigation: navigationGeneration,
-            workspace: workspaceID, informationVisible: infoOpen, sourceRoute: route,
+            workspace: workspaceID, sourceRoute: route,
             selectedRoomID: matrix.selectedRoomID, pinsVisible: showPins)
         pendingThreadOpen = request
         threadOpenTask = Task { @MainActor in
@@ -1807,7 +1799,7 @@ struct RootView: View {
     private func isCurrentThreadOpen(_ request: ThreadOpenRequest) -> Bool {
         pendingThreadOpen?.id == request.id && request.owner == composerIdentity && !matrix.isPreview
             && request.selection == matrix.timelineSelectionID && request.navigation == navigationGeneration
-            && request.workspace == workspaceID && request.informationVisible == infoOpen
+            && request.workspace == workspaceID
             && route == request.sourceRoute && showPins == request.pinsVisible && pendingRoomID == nil && localReady
             && matrix.selectedRoomID == request.selectedRoomID
             && matrix.rooms.contains(where: { $0.id == request.message.roomID && $0.membership == "join" })
@@ -1959,7 +1951,6 @@ struct RootView: View {
         route = .home
         matrix.setMessageActionThread(rootID: nil)
         threadRoot = nil
-        infoOpen = false
         if let first = matrix.rooms.first(where: {
             !$0.isSpace && !$0.isDirect && $0.membership == "join" && $0.spaceIDs.contains(spaceID)
         }) {
@@ -2471,7 +2462,7 @@ struct RootView: View {
         clearComposerState()
         workspaceID = nil
         workspaceInitialized = false
-        infoOpen = false
+        channelDetails = nil
         showPins = false
         pinPermissionRoomID = nil
         pinPermission = false
@@ -2564,13 +2555,7 @@ struct RootView: View {
                 profilePane = nil
                 return
             }
-            guard route == .home, room != nil else { return }
-            if threadRoot != nil {
-                closeThread()
-            } else {
-                infoOpen.toggle()
-                if infoOpen { Task { await matrix.loadMembers() } }
-            }
+            if route == .home, threadRoot != nil { closeThread() }
         case "mark-read": if route == .home, let room { _ = conversationKey(.markRead, room: room, threadRootID: nil) }
         case "mark-all-read":
             for room in matrix.rooms where room.membership == "join" && room.hasUnread {
