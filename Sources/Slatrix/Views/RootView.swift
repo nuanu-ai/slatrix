@@ -1159,7 +1159,6 @@ struct RootView: View {
                     threadReadViewport.record(visible, from: identity, current: matrix.threadReadIdentity)
                 }, onForward: startForward, onEditCaption: startCaption
             ).id(root.eventID)
-                .overlay { ThreadProgress(matrix: matrix, active: openingThreadID == root.eventID) }
             VStack(spacing: 0) {
                 if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
@@ -2693,14 +2692,6 @@ private struct TypingLine: View {
             Spacer()
         }.font(m.font(.caption)).foregroundStyle(appearance.colors.muted).padding(.horizontal, m.sp24)
             .layoutIsolated().frame(height: m.sp24)
-    }
-}
-
-private struct ThreadProgress: View {
-    let matrix: MatrixService
-    let active: Bool
-    var body: some View {
-        DelayedProgress(active: active, hasContent: matrix.threadMessages.count > 1, interval: .threadLoading)
     }
 }
 

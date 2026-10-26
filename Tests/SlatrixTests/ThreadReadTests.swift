@@ -95,7 +95,7 @@ struct ThreadReadTests {
             opened.append(true)
         }
         #expect(await eventually { !opened.all.isEmpty })
-        #expect(f.thread.paginationGate.isWaiting)
+        #expect(await eventually { f.thread.paginationGate.isWaiting })
         #expect(f.service.threadMessages == [root] && f.service.threadReadIdentity == nil)
         f.thread.paginationGate.release()
         try await loading.value

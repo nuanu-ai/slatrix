@@ -1656,11 +1656,21 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
 
+    /// The page a thread is loading, shared by the pane's first page and its history row.
+    private var threadPage: (selection: UUID, task: Task<Bool, Error>)?
     func loadMoreThread(rootID: String) async throws -> Bool {
         guard loadedThreadRootID == rootID, let threadTimeline else { throw MatrixServiceError.noRoom }
         let token = threadSelection
-        let endReached = try await threadTimeline.paginateBackwards(numEvents: 50)
-        if threadSelection == token, loadedThreadRootID == rootID { hasMoreThreadHistory = !endReached }
+        let page =
+            threadPage?.selection == token
+            ? threadPage!.task : Task { try await threadTimeline.paginateBackwards(numEvents: 50) }
+        threadPage = (token, page)
+        defer { if threadPage?.task == page { threadPage = nil } }
+        let endReached = try await page.value
+        if threadSelection == token, loadedThreadRootID == rootID {
+            hasMoreThreadHistory = !endReached
+            readyThreadReadSelection = token
+        }
         return endReached
     }
     func loadThread(_ root: ChatMessage) async throws {
@@ -1710,11 +1720,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             return
         }
         threadHandle = listenerHandle
-        let endReached = try await next.paginateBackwards(numEvents: 50)
-        if token == selection, threadToken == threadSelection {
-            hasMoreThreadHistory = !endReached
-            readyThreadReadSelection = threadToken
-        }
+        // The pane shows what the SDK has cached now; the first page arrives whenever the network allows.
+        Task { _ = try? await loadMoreThread(rootID: root.eventID) }
     }
 
     private func actionMedia(_ target: MessageActionTarget) throws -> ShownMedia {
