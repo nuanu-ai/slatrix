@@ -114,13 +114,29 @@ enum ComposerAttachmentImporter {
 
     // Only remove this process's UUID attachment directories, never originals or another live session.
     static func discard(_ urls: [URL]) {
-        guard !urls.isEmpty, let active = try? session.get() else { return }
-        for folder in Set(urls.map { $0.deletingLastPathComponent() })
-        where folder.deletingLastPathComponent().standardizedFileURL == active.directory.standardizedFileURL
-            && UUID(uuidString: folder.lastPathComponent) != nil && ownedDirectory(folder)
-        {
+        for folder in Set(urls.map { $0.deletingLastPathComponent() }) where isStagingFolder(folder) {
             try? FileManager.default.removeItem(at: folder)
         }
+    }
+
+    /// A queued image as the tray shows it, at most `pixels` on its longer side. Only a staged copy is read, so the
+    /// tray never touches the original or the network.
+    static func thumbnail(of url: URL, pixels: Int) -> CGImage? {
+        guard url.isFileURL, isStagingFolder(url.deletingLastPathComponent()),
+            let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
+        else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(
+            source, 0,
+            [
+                kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: pixels, kCGImageSourceShouldCacheImmediately: true,
+            ] as CFDictionary)
+    }
+
+    private static func isStagingFolder(_ folder: URL) -> Bool {
+        guard let active = try? session.get() else { return false }
+        return folder.deletingLastPathComponent().standardizedFileURL == active.directory.standardizedFileURL
+            && UUID(uuidString: folder.lastPathComponent) != nil && ownedDirectory(folder)
     }
 
     @discardableResult static func cleanupOrphans() -> Int { cleanupOrphans(in: directory) }

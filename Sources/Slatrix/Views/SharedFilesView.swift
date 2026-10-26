@@ -1,5 +1,4 @@
 import AppKit
-import ImageIO
 import SwiftUI
 
 struct SharedFilesView: View {
@@ -11,8 +10,10 @@ struct SharedFilesView: View {
     let matrix: MatrixService
     let service: SharedFilesService
     let workspaceID: String?
+    /// Goes to the message in its conversation.
     let onOpen: (ChatMessage) -> Void
-    let onOpenProfile: (String, ChatUser?) -> Void
+    /// Opens a file in the viewer, which steps through the list's files in order.
+    let onOpenMedia: (ChatMessage, [ChatMessage]) -> Void
     @EnvironmentObject private var appearance: AppearanceStore
     @State private var selectedRoomID = ""
     @State private var query = ""
@@ -70,27 +71,31 @@ struct SharedFilesView: View {
                         .disabled(service.state == "loading" || service.isLoadingMore)
                 }
             }
-            if matrix.isPreview {
-                EmptyStateView(symbol: "doc.on.doc", title: "Sign in to see shared files")
-            } else if roomID == nil {
+            if roomID == nil {
                 EmptyStateView(symbol: "doc.on.doc", title: "No conversations yet")
             } else if service.state == "loading" && service.items.isEmpty {
                 SkeletonRows()
             } else {
                 ScrollView {
-                    LazyVStack(spacing: m.sp12) {
+                    LazyVStack(spacing: 0) {
                         if items.isEmpty {
                             EmptyStateView(
                                 symbol: filter == .links ? "link" : "doc.on.doc",
                                 title: query.isEmpty ? "Nothing shared yet" : "No matches"
                             ).frame(minHeight: m(Self.emptyMinHeight))
                         } else {
-                            ForEach(items) { item in
+                            let shown = items
+                            ForEach(shown) { item in
                                 let session = matrix.notificationSessionID
-                                SharedContentCard(
-                                    matrix: matrix, service: service, item: item,
-                                    onOpen: { if matrix.notificationSessionID == session { onOpen(item.message) } },
-                                    onOpenProfile: onOpenProfile
+                                SharedFileRow(
+                                    matrix: matrix, item: item,
+                                    onOpen: {
+                                        guard matrix.notificationSessionID == session else { return }
+                                        onOpenMedia(item.message, shown.map(\.message))
+                                    },
+                                    onOpenMessage: {
+                                        if matrix.notificationSessionID == session { onOpen(item.message) }
+                                    }
                                 ).id("\(session):\(item.id)")
                             }
                         }
@@ -100,11 +105,11 @@ struct SharedFilesView: View {
                             } label: {
                                 HStack(spacing: m.sp8) {
                                     if service.isLoadingMore { DelayedProgress() }
-                                    Text(service.isLoadingMore ? "Loading…" : "Load more")
+                                    Text("Load more")
                                 }.font(m.font(.meta, .medium)).padding(m.sp12)
                             }.buttonStyle(.textLink).disabled(service.isLoadingMore || service.state == "loading")
                         }
-                    }.padding(m.sp24)
+                    }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
                 }
                 if service.unavailableEncryptedCount > 0 {
                     HStack {
@@ -118,12 +123,19 @@ struct SharedFilesView: View {
             }
         }.background(colors.canvas)
             .task(id: Scope(session: matrix.notificationSessionID, roomID: roomID, preview: matrix.isPreview)) {
-                guard !matrix.isPreview, let id = roomID else {
+                guard let id = roomID else {
                     service.close()
                     return
                 }
                 selectedRoomID = id
-                await service.open(roomID: id)
+                if matrix.isPreview {
+                    service.openPreview(
+                        roomID: id,
+                        messages: id == PreviewMedia.roomID
+                            ? PreviewMedia.messages(roomID: id, members: matrix.members, now: .now) : [])
+                } else {
+                    await service.open(roomID: id)
+                }
             }
             .onDisappear { service.close() }
     }
@@ -134,7 +146,7 @@ struct SharedFilesView: View {
                 Picker("Conversation", selection: Binding(get: { roomID ?? "" }, set: { selectedRoomID = $0 })) {
                     ForEach(rooms) { room in Text(room.name).tag(room.id) }
                 }.labelsHidden().frame(maxWidth: m(Self.roomPickerMaxWidth), alignment: .leading).disabled(
-                    rooms.isEmpty || matrix.isPreview)
+                    rooms.isEmpty)
                 Spacer()
                 IconButton(symbol: "arrow.clockwise", label: "Refresh shared files and links", role: .body) {
                     if let id = roomID { Task { await service.open(roomID: id) } }
@@ -151,219 +163,75 @@ struct SharedFilesView: View {
     }
 }
 
-private struct SharedContentCard: View {
-    private static let thumbnail: CGFloat = 60
-    @Environment(\.metrics) private var m
+/// A row of the Files list: a file, image or video opens in the viewer, a link in the browser.
+private struct SharedFileRow: View {
+    @Environment(\.openURL) private var openURL
     let matrix: MatrixService
-    let service: SharedFilesService
     let item: SharedContentItem
     let onOpen: () -> Void
-    let onOpenProfile: (String, ChatUser?) -> Void
-    @EnvironmentObject private var appearance: AppearanceStore
-    @EnvironmentObject private var previews: AttachmentPreviewController
-    @State private var image: NSImage?
-    @State private var busy = false
-    @State private var error: String?
-    @State private var previewBusy = false
-    @State private var previewError: String?
-    @State private var previewTask: Task<Void, Never>?
-    @State private var previewRequest = UUID()
-    private struct ThumbnailContext: Hashable {
-        let session: UUID
-        let message: ChatMessage
-        let mediaRevision: Data?
-    }
-    private var colors: AppColors { appearance.colors }
+    let onOpenMessage: () -> Void
+    @State private var still: CGImage?
+    @State private var stillFailed = false
+    @State private var downloading = false
     private var message: ChatMessage { item.message }
-    private var canPreview: Bool {
-        message.attachment != nil && !message.isRedacted && !matrix.isPreview && !busy && !previewBusy
-            && !previews.isLoading
-    }
-    private var symbol: String {
-        switch message.kind {
-        case "m.image": "photo"
-        case "m.video": "film"
-        case "m.audio": "waveform"
-        default: message.attachment == nil ? "link" : "doc.text"
-        }
-    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: m.sp16) {
-            HStack(alignment: .top, spacing: m.sp12) {
-                Group {
-                    if let image {
-                        Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        Image(systemName: symbol).font(m.font(.header)).foregroundStyle(colors.textSecondary)
-                    }
-                }.frame(width: m(Self.thumbnail), height: m(Self.thumbnail)).background(
-                    colors.canvas, in: RoundedRectangle(cornerRadius: m.radiusLarge)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
-                VStack(alignment: .leading, spacing: m.sp8) {
-                    Text(message.attachment?.name ?? item.links.first?.host ?? "Shared link").font(
-                        m.font(.body, .semibold)
-                    ).foregroundStyle(colors.textPrimary).lineLimit(2).textSelection(.enabled)
-                    HStack(spacing: m.sp8) {
-                        Button(message.senderName) {
-                            onOpenProfile(
-                                message.senderID,
-                                ChatUser(id: message.senderID, name: message.senderName, avatarURL: message.avatarURL))
-                        }.buttonStyle(.row).help("View profile")
-                        Text("·")
-                        Text(message.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute())
-                        if let size = message.attachment?.size {
-                            Text("·")
-                            Text(ByteCountFormatter.string(fromByteCount: Int64(clamping: size), countStyle: .file))
-                        }
-                        if message.threadRootID != nil {
-                            Label("Thread reply", systemImage: "bubble.left.and.bubble.right")
-                        }
-                    }.font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                if message.attachment != nil {
-                    Button(action: preview) {
-                        HStack(spacing: m.sp8) {
-                            if previewBusy { DelayedProgress() } else { Image(systemName: "eye") }
-                            Text(previewBusy ? "Preparing…" : "Preview")
-                        }.font(m.font(.meta, .medium)).frame(minHeight: m.iconButton)
-                    }.buttonStyle(.row).disabled(!canPreview).help("Open in Quick Look").accessibilityLabel(
-                        "Preview \(message.attachment?.name ?? "attachment")")
-                    Button(action: download) {
-                        if busy {
-                            DelayedProgress().frame(width: m.iconButton, height: m.iconButton)
-                        } else {
-                            Image(systemName: "arrow.down.to.line").font(m.font(.body)).frame(
-                                width: m.iconButton, height: m.iconButton)
-                        }
-                    }.buttonStyle(.row).disabled(busy || previewBusy).help("Download").accessibilityLabel(
-                        "Download \(message.attachment?.name ?? "attachment")")
+        let link = message.attachment == nil ? item.links.first : nil
+        FileRow(
+            tile: tile, name: message.attachment?.name ?? link?.absoluteString ?? "",
+            caption: SharedContentMapping.caption(
+                sender: message.senderName, room: matrix.rooms.first { $0.id == message.roomID },
+                date: message.timestamp),
+            downloading: downloading, onDownload: link == nil ? download : nil,
+            onOpen: { if let link { openURL(link) } else { onOpen() } }
+        ) {
+            if let link {
+                Button("Copy link") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(link.absoluteString, forType: .string)
                 }
+            } else {
+                AttachmentMenuItems(
+                    matrix: matrix, message: message,
+                    copyLink: matrix.isPreview ? nil : { copyFilesLink(item, matrix: matrix) })
             }
-            if !item.links.isEmpty {
-                ForEach(item.links, id: \.absoluteString) { link in
-                    Link(destination: link) {
-                        Label(link.absoluteString, systemImage: "link").font(m.font(.meta)).lineLimit(2)
-                            .truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
-                    }.foregroundStyle(colors.accent)
-                }
-            }
-            HStack {
-                if let error {
-                    Text(error).font(m.font(.caption)).foregroundStyle(colors.warning).fixedSize(
-                        horizontal: false, vertical: true)
-                }
-                Spacer()
-                Button(action: onOpen) {
-                    Label("Open", systemImage: "arrow.up.right").font(m.font(.meta, .medium))
-                }.buttonStyle(.row).foregroundStyle(colors.accent)
-            }
-            if let previewError {
-                HStack(alignment: .top, spacing: m.sp12) {
-                    Text(previewError).font(m.font(.caption)).foregroundStyle(colors.warning).fixedSize(
-                        horizontal: false, vertical: true)
-                    Button("Retry", action: preview).buttonStyle(.textLink).font(m.font(.caption)).disabled(
-                        !canPreview)
-                }
-            }
-        }.padding(m.sp20).frame(maxWidth: .infinity, alignment: .leading).background(
-            colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge)
-        ).overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
-            .task(
-                id: ThumbnailContext(
-                    session: matrix.notificationSessionID, message: message, mediaRevision: item.mediaRevision)
-            ) {
-                image = nil
-                let session = matrix.notificationSessionID
-                guard message.kind == "m.image", let revision = item.mediaRevision else { return }
-                do {
-                    let data = try await service.thumbnailData(item)
-                    let decoded = await Task.detached(priority: .utility) { () -> CGImage? in
-                        guard
-                            let source = CGImageSourceCreateWithData(
-                                data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
-                        else { return nil }
-                        return CGImageSourceCreateThumbnailAtIndex(
-                            source, 0,
-                            [
-                                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                                kCGImageSourceCreateThumbnailWithTransform: true,
-                                kCGImageSourceThumbnailMaxPixelSize: 160, kCGImageSourceShouldCacheImmediately: true,
-                            ] as CFDictionary)
-                    }.value
-                    guard !Task.isCancelled, matrix.notificationSessionID == session,
-                        service.items.first(where: { $0.id == item.id })?.mediaRevision == revision
-                    else { return }
-                    image = decoded.map { NSImage(cgImage: $0, size: .zero) }
-                } catch {
-                    // Optional; Download still works.
-                }
-            }
-            .onChange(of: item) { _, _ in
-                cancelPreview()
-                previewError = nil
-                error = nil
-            }
-            .onChange(of: matrix.notificationSessionID) { _, _ in
-                cancelPreview()
-                image = nil
-                previewError = nil
-                error = nil
-            }
-            .onDisappear { cancelPreview() }
-    }
-    private func preview() {
-        guard canPreview else { return }
-        let session = matrix.notificationSessionID
-        let target = item
-        let token = UUID()
-        previewRequest = token
-        previewBusy = true
-        previewError = nil
-        previewTask = Task { @MainActor in
-            defer {
-                if previewRequest == token {
-                    previewBusy = false
-                    previewTask = nil
-                }
-            }
-            do {
-                try await previews.show(sessionID: session) { try await service.preparePreview(target) }
-            } catch is CancellationError {} catch {
-                guard !Task.isCancelled, previewRequest == token, matrix.notificationSessionID == session else {
-                    return
-                }
-                previewError = MatrixService.safeError(error)
-            }
+            Button("View in conversation", action: onOpenMessage)
+        }
+        .task(id: item) {
+            // An edit keeps the row but may replace its file.
+            still = nil
+            stillFailed = false
+            guard message.isViewerMedia, matrix.cachedMediaImage(message) == nil else { return }
+            still = await matrix.loadMediaImage(message)
+            stillFailed = still == nil && !Task.isCancelled
         }
     }
-    private func cancelPreview() {
-        previewTask?.cancel()
-        previewTask = nil
-        previewRequest = UUID()
-        previewBusy = false
+
+    private var tile: FileRowTile {
+        guard let attachment = message.attachment else { return .link }
+        guard message.isViewerMedia, !stillFailed else { return .file(attachment.fileKind) }
+        return .thumbnail(still ?? matrix.cachedMediaImage(message))
     }
+
     private func download() {
-        guard message.attachment != nil, !busy else { return }
-        let session = matrix.notificationSessionID
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = item.filename ?? "attachment"
-        panel.title = "Save attachment"
-        guard let window = NSApp.windows.first(where: { $0.frameAutosaveName == "SlatrixMainWindow" }) else { return }
-        panel.beginSheetModal(for: window) { result in
-            guard result == .OK, let destination = panel.url, matrix.notificationSessionID == session else { return }
-            busy = true
-            error = nil
-            Task {
-                defer { busy = false }
-                do {
-                    try await service.saveAttachment(item, to: destination)
-                    guard matrix.notificationSessionID == session, !Task.isCancelled else { return }
-                    NSWorkspace.shared.activateFileViewerSelecting([destination])
-                } catch is CancellationError {} catch {
-                    if matrix.notificationSessionID == session { self.error = MatrixService.safeError(error) }
-                }
-            }
+        downloading = true
+        Task {
+            await AttachmentFiles.shared.download(message, matrix: matrix)
+            downloading = false
+        }
+    }
+}
+
+/// Copies a Files row's permalink; a failure lands in the window's error toast.
+@MainActor func copyFilesLink(_ item: SharedContentItem, matrix: MatrixService) {
+    let session = matrix.notificationSessionID
+    Task {
+        do {
+            let link = try await matrix.sharedFiles.permalink(item)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(link, forType: .string)
+        } catch is CancellationError {} catch {
+            if matrix.notificationSessionID == session { matrix.errorMessage = MatrixService.safeError(error) }
         }
     }
 }

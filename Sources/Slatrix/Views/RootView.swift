@@ -95,7 +95,6 @@ struct RootView: View {
     @State private var editActionTarget: MessageActionTarget?
     @State private var editText = ""
     @State private var drafts = ComposerDrafts()
-    @StateObject private var previews = AttachmentPreviewController()
     @State private var viewer = MediaViewerState()
     @StateObject private var attachmentDrafts = AttachmentDraftController()
     @State private var invitationResponseID: String?
@@ -243,7 +242,7 @@ struct RootView: View {
     private var hasPresentedSheet: Bool {
         publicDirectory != nil || showRecovery || creation != nil || channelDetails != nil
             || roomDetails != nil || roomNotifications != nil || forwarding != nil
-            || mediaCaption != nil || matrixJoin != nil || previews.url != nil || logoutConfirmation
+            || mediaCaption != nil || matrixJoin != nil || logoutConfirmation
             || logoutRecovery.request != nil || logoutRecovery.isBusy
     }
     private var hasNativeModal: Bool { ReadInputs.hasNativeModal }
@@ -269,8 +268,7 @@ struct RootView: View {
         .overlay {
             MediaViewer(matrix: matrix, viewer: viewer, onForward: startForward)
         }
-        // Outside the modal host, so modals open links, show mentions and preview files as the window does.
-        .environmentObject(previews)
+        // Outside the modal host, so modals open links and show mentions as the window does.
         .environment(\.openURL, OpenURLAction(handler: handleOpenURL))
         .environment(\.mentions, MentionContext(me: matrix.user?.id))
     }
@@ -347,15 +345,13 @@ struct RootView: View {
                     .padding(m.sp24).background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
                 }
             }
-            .quickLookPreview(Binding(get: { previews.url }, set: previews.presentationChanged))
-            .background(PreviewInvalidation(matrix: matrix, previews: previews, viewer: viewer))
+            .background(ViewerInvalidation(matrix: matrix, viewer: viewer))
             .background(layoutMeasurement)
     }
 
     private var readAwareContent: some View {
         notificationAwareContent
             .onAppear {
-                previews.setSession(matrix.notificationSessionID)
                 SlatrixTermination.flush = {
                     try await flushLocalData()
                     await attachmentDrafts.close()
@@ -736,14 +732,6 @@ struct RootView: View {
                         openPendingNotification()
                     }.buttonStyle(.textLink)
                 }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.linkLoading)
-            }
-            if previews.isLoading {
-                HStack(spacing: m.sp8) {
-                    DelayedProgress()
-                    Text("Opening preview…").font(m.font(.meta))
-                    Spacer()
-                    Button("Cancel") { previews.close() }.buttonStyle(.textLink)
-                }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.previewLoading)
             }
             if let request = pendingThreadOpen, isCurrentThreadOpen(request) {
                 HStack(spacing: m.sp8) {
@@ -1281,7 +1269,8 @@ struct RootView: View {
             case .files:
                 SharedFilesView(
                     matrix: matrix, service: matrix.sharedFiles, workspaceID: workspaceID,
-                    onOpen: { selectRoom($0.roomID, record: true, eventID: $0.eventID) }, onOpenProfile: openProfile)
+                    onOpen: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
+                    onOpenMedia: { [viewer] in viewer.open($0, files: $1) })
             case .saved: savedCollection
             case .drafts: draftsCollection
             case .activity:
@@ -2456,8 +2445,6 @@ struct RootView: View {
         cancelThreadOpen()
         cancelMatrixLink()
         matrixJoin = nil
-        previews.close()
-        previews.setSession(matrix.notificationSessionID)
         viewer.close()
         clearComposerState()
         workspaceID = nil
@@ -2814,24 +2801,22 @@ private struct BindingScope<Value, Content: View>: View {
     var body: some View { content(binding()) }
 }
 
-/// Closes Quick Look and the media viewer once their message leaves what is shown; on its own, so new messages do
-/// not redraw the window.
-private struct PreviewInvalidation: View {
+/// Closes the media viewer once its message leaves what is shown; on its own, so new messages do not redraw the
+/// window.
+private struct ViewerInvalidation: View {
     let matrix: MatrixService
-    let previews: AttachmentPreviewController
     let viewer: MediaViewerState
     var body: some View {
         Color.clear
             .onChange(of: matrix.messages) {
-                previews.invalidateIfNeeded()
-                if viewer.surface == .conversation { viewer.update(from: matrix.messages) }
+                if viewer.files == nil && viewer.surface == .conversation { viewer.update(from: matrix.messages) }
             }
             .onChange(of: matrix.threadMessages) {
-                previews.invalidateIfNeeded()
-                if viewer.surface != .conversation { viewer.update(from: matrix.threadMessages) }
+                if viewer.files == nil && viewer.surface != .conversation { viewer.update(from: matrix.threadMessages) }
             }
-            .onChange(of: matrix.sharedFiles.items) { previews.invalidateIfNeeded() }
-            .onChange(of: matrix.rooms) { previews.invalidateIfNeeded() }
+            .onChange(of: matrix.sharedFiles.items) {
+                if viewer.files != nil { viewer.update(from: matrix.sharedFiles.items.map(\.message)) }
+            }
     }
 }
 

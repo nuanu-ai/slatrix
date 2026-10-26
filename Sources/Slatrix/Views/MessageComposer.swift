@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 
 struct MessageComposer: View {
-    private static let attachmentNameWidth: CGFloat = 152
     private static let emojiCell: CGFloat = 32
     private static let emojiColumns = 8
     @Binding var text: String
@@ -288,29 +287,10 @@ struct MessageComposer: View {
         ScrollView(.horizontal) {
             HStack(spacing: m.sp8) {
                 ForEach(attachments, id: \.self) { url in
-                    HStack(spacing: m.sp8) {
-                        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(
-                            width: m.control, height: m.control)
-                        VStack(alignment: .leading, spacing: m.sp4) {
-                            Text(url.lastPathComponent).font(m.font(.meta, .medium)).lineLimit(1)
-                            Text(
-                                sending
-                                    ? "Sending…" : url.pathExtension.isEmpty ? "File" : url.pathExtension.uppercased()
-                            )
-                            .font(m.font(.caption)).foregroundStyle(muted)
-                        }.frame(maxWidth: m(Self.attachmentNameWidth), alignment: .leading)
-                        Button {
-                            attachments.removeAll { $0 == url }
-                            discardAttachments([url])
-                        } label: {
-                            Image(systemName: "xmark").font(m.font(.caption, .semibold))
-                        }
-                        .buttonStyle(.row).disabled(sending || preparingAttachments).help(
-                            "Remove \(url.lastPathComponent)"
-                        )
-                        .accessibilityLabel("Remove \(url.lastPathComponent)")
-                    }.padding(m.sp8).background(muted.opacity(0.06), in: RoundedRectangle(cornerRadius: m.radius))
-                        .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(muted.opacity(0.25)))
+                    StagedAttachmentTile(url: url) {
+                        attachments.removeAll { $0 == url }
+                        discardAttachments([url])
+                    }.disabled(sending || preparingAttachments)
                 }
             }.padding(.horizontal, m.sp12)
         }.scrollIndicators(.hidden).padding(.bottom, m.sp8)
@@ -977,5 +957,82 @@ private final class ComposerTextView: NSTextView {
         guard pasteboard.types?.contains(.fileURL) == true else { return [] }
         return (pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL])
             ?? []
+    }
+}
+
+/// A staged attachment as Slack's composer shows it: an image as a square thumbnail, any other file as a tile with
+/// its type, name and kind. Removing it takes the ✕ that shows in the corner on hover or keyboard focus.
+private struct StagedAttachmentTile: View {
+    private static let side: CGFloat = 62
+    private static let fileWidth: CGFloat = 220
+    @Environment(\.metrics) private var m
+    @Environment(\.displayScale) private var displayScale
+    @EnvironmentObject private var appearance: AppearanceStore
+    let url: URL
+    let onRemove: () -> Void
+    @State private var thumbnail: CGImage?
+    @State private var undecodable = false
+    @State private var hovering = false
+    @FocusState private var removeFocused: Bool
+    private var attachment: MessageAttachment {
+        MessageAttachment(name: url.lastPathComponent, url: url.absoluteString)
+    }
+
+    var body: some View {
+        let colors = appearance.colors
+        let shape = RoundedRectangle(cornerRadius: m.radiusLarge)
+        Group {
+            if attachment.fileKind == .image {
+                shape.fill(colors.sunken)
+                    .overlay {
+                        if let thumbnail {
+                            Image(decorative: thumbnail, scale: 1).resizable().scaledToFill().transition(.opacity)
+                        } else if undecodable {
+                            FileTypeIcon(kind: .image)
+                        }
+                    }
+                    .frame(width: m(Self.side), height: m(Self.side)).clipShape(shape)
+            } else {
+                HStack(spacing: m.sp8) {
+                    FileTypeIcon(kind: attachment.fileKind)
+                    VStack(alignment: .leading, spacing: m.sp2) {
+                        Text(attachment.name).font(m.font(.secondary, .semibold)).foregroundStyle(colors.textPrimary)
+                            .lineLimit(1).truncationMode(.middle)
+                        Text(attachment.typeLabel).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, m.sp12).frame(width: m(Self.fileWidth), height: m(Self.side))
+                .background(colors.canvas, in: shape)
+            }
+        }
+        .overlay(shape.strokeBorder(colors.border))
+        .help(attachment.name).accessibilityElement(children: .ignore).accessibilityLabel(attachment.name)
+        .overlay(alignment: .topTrailing) {
+            Button(action: onRemove) {
+                Image(systemName: "xmark").font(m.font(.caption, .bold)).foregroundStyle(colors.onMedia)
+                    .frame(width: m.sp20, height: m.sp20).background(colors.mediaControl, in: Circle())
+            }
+            .buttonStyle(.row).focused($removeFocused).help("Remove \(attachment.name)")
+            .accessibilityLabel("Remove \(attachment.name)")
+            .padding(m.sp4).opacity(hovering || removeFocused ? 1 : 0)
+        }
+        .onHover { hovering = $0 }
+        .task(id: url) { await decode() }
+    }
+
+    /// Off the main thread and at the tile's pixel size, never the full image.
+    private func decode() async {
+        guard attachment.fileKind == .image, thumbnail == nil else { return }
+        let url = url
+        let pixels = Int((m(Self.side) * displayScale).rounded(.up))
+        let image = await Task.detached(priority: .userInitiated) {
+            ComposerAttachmentImporter.thumbnail(of: url, pixels: pixels)
+        }.value
+        guard !Task.isCancelled else { return }
+        withAnimation(Motion.content) {
+            thumbnail = image
+            undecodable = image == nil
+        }
     }
 }

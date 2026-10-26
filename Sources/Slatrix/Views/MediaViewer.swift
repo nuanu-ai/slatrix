@@ -5,7 +5,7 @@ import SwiftUI
 
 /// Slack's media viewer: the picture, video or file over a dark backdrop, with who sent it and where. It opens at
 /// once on the row's own thumbnail and swaps in the full file when it arrives. ← and → step through the
-/// conversation's images and videos, Esc closes it.
+/// conversation's images and videos, or the Files list it was opened from; Esc closes it.
 struct MediaViewer: View {
     let matrix: MatrixService
     let viewer: MediaViewerState
@@ -97,7 +97,7 @@ private struct MediaViewerPage: View {
     }
 
     @ViewBuilder private func arrow(_ offset: Int) -> some View {
-        if MediaViewerNavigation.neighbor(of: message.eventID, by: offset, in: messages) != nil {
+        if viewer.neighbor(offset, in: messages) != nil {
             ViewerButton(
                 symbol: offset < 0 ? "chevron.left" : "chevron.right", label: offset < 0 ? "Previous" : "Next",
                 filled: true
@@ -157,6 +157,10 @@ private struct MediaViewerPage: View {
     }
 
     private var copyLink: (() -> Void)? {
+        if viewer.files != nil {
+            guard !matrix.isPreview else { return nil }
+            return matrix.sharedFiles.item(for: message).map { item in { copyFilesLink(item, matrix: matrix) } }
+        }
         guard let target = matrix.captureMessagePermalink(message: message, surface: viewer.surface) else { return nil }
         return {
             Task {
@@ -369,6 +373,8 @@ final class MediaStageView: NSView {
         case .file(let url):
             guard let view = preview ?? QLPreviewView(frame: bounds, style: .normal) else { return }
             view.autoresizingMask = [.width, .height]
+            // The stage closes it; closing it again after the window did is a Quick Look crash.
+            view.shouldCloseWithWindow = false
             view.previewItem = url as NSURL
             if preview == nil { addSubview(view) }
             preview = view

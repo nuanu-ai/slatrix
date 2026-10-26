@@ -28,6 +28,19 @@ enum SharedContentMapping {
         return result.isEmpty ? "attachment" : result
     }
 
+    /// "Shared by Alice in #design · Oct 24", as a Files row reads; a direct message needs no place.
+    static func caption(
+        sender: String, room: ChatRoom?, date: Date, now: Date = .now, calendar: Calendar = .current
+    ) -> String {
+        let place = room.flatMap { $0.isDirect ? nil : " in #\($0.name)" } ?? ""
+        var day = Date.FormatStyle(
+            date: .omitted, time: .omitted, locale: calendar.locale ?? .current, calendar: calendar,
+            timeZone: calendar.timeZone
+        ).month(.abbreviated).day()
+        if !calendar.isDate(date, equalTo: now, toGranularity: .year) { day = day.year() }
+        return "Shared by \(sender)\(place) · \(date.formatted(day))"
+    }
+
     static func links(in rendered: RenderedMessageBody) -> [URL] {
         guard !rendered.containsSpoilers else { return [] }
         var urls: [URL] = []
@@ -82,7 +95,6 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
     private(set) var errorMessage: String?
     private(set) var historyLoads = 0
     private(set) var unavailableEncryptedCount = 0
-    private(set) var savingItemIDs = Set<String>()
 
     private struct Media {
         let message: ChatMessage
@@ -131,7 +143,24 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
         errorMessage = nil
         historyLoads = 0
         unavailableEncryptedCount = 0
-        savingItemIDs = []
+    }
+
+    /// The sample workspace's files, which have no timeline behind them.
+    func openPreview(roomID id: String, messages: [ChatMessage]) {
+        close()
+        roomID = id
+        state = "ready"
+        items = messages.reversed().filter { $0.attachment != nil }.map {
+            SharedContentItem(id: $0.eventID, message: $0, links: [], scopeID: scope)
+        }
+    }
+
+    /// The row still showing this message's file, if any.
+    func item(for message: ChatMessage) -> SharedContentItem? {
+        items.first {
+            $0.message.eventID == message.eventID && $0.message.roomID == message.roomID
+                && $0.message.attachment == message.attachment
+        }
     }
 
     func open(roomID id: String) async {
@@ -325,6 +354,10 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
         let session = account
         let token = scope
         let record = try currentMedia(item, session, token)
+        // A video's own file is no picture, so it has a poster only when the sender attached one.
+        guard record.message.kind != "m.video" || record.thumbnail != nil else {
+            throw MatrixServiceError.request("This video has no poster.")
+        }
         let source: MediaSource
         if let thumbnail = record.thumbnail, thumbnail.url() != record.source.url() {
             guard MatrixMapping.permitsAutomaticOriginalPreview(size: record.thumbnailSize) else {
@@ -360,43 +393,28 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
         let media: Media
         do { media = try currentMedia(item, session, token) } catch { throw CancellationError() }
         guard let client, let attachment = media.message.attachment else { throw MatrixServiceError.noRoom }
-        return try await mediaFiles.file(
-            source: media.source, identity: String(decoding: media.fingerprint, as: UTF8.self), attachment: attachment,
-            client: client
-        ) {
-            [weak self] in
-            (try? self?.currentMedia(item, session, token))?.fingerprint == media.fingerprint
+        do {
+            return try await mediaFiles.file(
+                source: media.source, identity: String(decoding: media.fingerprint, as: UTF8.self),
+                attachment: attachment, client: client
+            ) { [weak self] in
+                (try? self?.currentMedia(item, session, token))?.fingerprint == media.fingerprint
+            }
+        } catch {
+            // A failure from before a sign-out or a reopened list belongs to nobody.
+            guard (try? currentMedia(item, session, token)) != nil else { throw CancellationError() }
+            throw error
         }
     }
 
-    func saveAttachment(_ item: SharedContentItem, to destination: URL) async throws {
+    func permalink(_ item: SharedContentItem) async throws -> String {
         let session = account
         let token = scope
-        let record = try currentMedia(item, session, token)
-        guard destination.isFileURL, !destination.hasDirectoryPath,
-            !["", ".", ".."].contains(destination.lastPathComponent)
-        else { throw MatrixServiceError.request("Choose a file destination for this attachment.") }
-        guard savingItemIDs.insert(item.id).inserted else {
-            throw MatrixServiceError.request("This attachment is already being saved.")
-        }
-        defer { if account == session, scope == token { savingItemIDs.remove(item.id) } }
-        let access = destination.startAccessingSecurityScopedResource()
-        defer { if access { destination.stopAccessingSecurityScopedResource() } }
-        do {
-            let file = try await preparePreview(item)
-            try validateMedia(item, record, session, token)
-            let source = file.url
-            try await Task.detached(priority: .userInitiated) {
-                try await MainActor.run { try self.validateMedia(item, record, session, token) }
-                try Task.checkCancellation()
-                try Self.copyAtomically(from: source, to: destination)
-            }.value
-            try validateMedia(item, record, session, token)
-            withExtendedLifetime(file) {}
-        } catch {
-            try validateMedia(item, record, session, token)
-            throw error
-        }
+        try validate(session, token)
+        guard let room, items.contains(item) else { throw CancellationError() }
+        let link = try await room.matrixToEventPermalink(eventId: item.message.eventID)
+        try validate(session, token)
+        return link
     }
 
     private func currentMedia(_ item: SharedContentItem, _ session: UUID, _ token: UUID) throws -> Media {
@@ -424,19 +442,6 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
         guard account == session, scope == token else { throw CancellationError() }
         guard client != nil, room?.membership() == .joined else {
             throw MatrixServiceError.request("Join this conversation to browse shared files and links.")
-        }
-    }
-
-    private nonisolated static func copyAtomically(from source: URL, to destination: URL) throws {
-        let manager = FileManager.default
-        let staged = destination.deletingLastPathComponent().appendingPathComponent(".slatrix-" + UUID().uuidString)
-        defer { try? manager.removeItem(at: staged) }
-        try manager.copyItem(at: source, to: staged)
-        try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: staged.path)
-        if manager.fileExists(atPath: destination.path) {
-            _ = try manager.replaceItemAt(destination, withItemAt: staged)
-        } else {
-            try manager.moveItem(at: staged, to: destination)
         }
     }
 }
