@@ -45,3 +45,5 @@ Slatrix updates itself from GitHub releases with [Sparkle](https://sparkle-proje
 ## License
 
 [Apache 2.0](LICENSE)
+
+Emoji names and shortcodes come from Cal Henderson's [emoji-data](https://github.com/iamcal/emoji-data), under the MIT license; its notice is in `Sources/Slatrix/Core/EmojiData.swift`.
