@@ -196,7 +196,7 @@ struct SidebarView: View {
     private func workspaceIcon(_ space: Workspace?) -> some View {
         let selected = workspaceID == space?.id
         let name = space?.name ?? "All conversations"
-        let badge = selected ? WorkspaceRail.Badge.quiet : WorkspaceRail.badge(space?.id, rooms: matrix.rooms)
+        let badge = selected ? UnreadBadge.none : WorkspaceRail.badge(space?.id, rooms: matrix.rooms)
         let corner = m.avatar * 0.19
         return Button {
             workspaceID = space?.id
@@ -218,12 +218,11 @@ struct SidebarView: View {
             )
             .overlay(alignment: .topTrailing) {
                 switch badge {
-                case .mentions(let count):
-                    CountBadge(text: count > 99 ? "99+" : "\(count)")
-                case .unread:
+                case .count(let count): CountBadge(text: count)
+                case .bold:
                     Circle().fill(colors.textPrimary).frame(width: m(Self.dot) * 1.5, height: m(Self.dot) * 1.5)
                         .overlay(Circle().stroke(colors.frame, lineWidth: m.sp2))
-                case .quiet: EmptyView()
+                case .none: EmptyView()
                 }
             }
         }.buttonStyle(.row).help(name)
@@ -231,9 +230,9 @@ struct SidebarView: View {
             .accessibilityValue(
                 {
                     switch badge {
-                    case .mentions(let count): "\(count) \(count == 1 ? "mention" : "mentions")"
-                    case .unread: "Unread messages"
-                    case .quiet: ""
+                    case .count(let count): "\(count) \(count == "1" ? "mention" : "mentions")"
+                    case .bold: "Unread messages"
+                    case .none: ""
                     }
                 }()
             )
@@ -321,6 +320,7 @@ private struct SidebarRoomRow: View, Equatable {
     }
 
     var body: some View {
+        let badge = UnreadBadge(room)
         Button {
             onSelect(room.id)
         } label: {
@@ -331,9 +331,9 @@ private struct SidebarRoomRow: View, Equatable {
                     Image(systemName: room.isEncrypted ? "lock" : "number").font(m.font(.body)).frame(
                         width: m.avatarSmall
                     )
-                    .foregroundStyle(room.hasUnread ? colors.textPrimary : colors.textSecondary)
+                    .foregroundStyle(badge != .none ? colors.textPrimary : colors.textSecondary)
                 }
-                Text(room.name).font(m.font(.body, room.hasUnread ? .bold : .regular)).lineLimit(1)
+                Text(room.name).font(m.font(.body, badge != .none ? .bold : .regular)).lineLimit(1)
                     .truncationMode(.tail)
                 if room.muted {
                     Image(systemName: "bell.slash").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
@@ -342,14 +342,7 @@ private struct SidebarRoomRow: View, Equatable {
                 if hasDraft {
                     Image(systemName: "pencil").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                 }
-                switch UnreadBadge(room) {
-                case .mentions(let count): CountBadge(text: count)
-                case .messages(let count): CountBadge(text: count, mention: false)
-                case .marked:
-                    Circle().fill(colors.textPrimary).frame(width: m(Self.dot), height: m(Self.dot)).accessibilityLabel(
-                        "Marked unread")
-                case .none: EmptyView()
-                }
+                if case .count(let count) = badge { CountBadge(text: count) }
             }.padding(.leading, m.sp32).padding(.trailing, m.sp12).frame(height: m.row)
                 .background(
                     selected ? colors.selection : .clear,

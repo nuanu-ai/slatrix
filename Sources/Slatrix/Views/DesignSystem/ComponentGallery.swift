@@ -197,7 +197,7 @@ struct ComponentGallery: View {
             AvatarView(name: "Mina Cho", size: m.avatar, presence: .away)
             AvatarView(name: "Harbor", size: m.avatarLarge, presence: .active)
             CountBadge(text: "3")
-            CountBadge(text: "12", mention: false)
+            CountBadge(text: "99+")
             TagLabel(text: "You")
             TagLabel(text: "Invited")
             Circle().fill(c.mention).frame(width: m(9), height: m(9))
