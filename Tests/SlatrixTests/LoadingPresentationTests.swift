@@ -14,4 +14,9 @@ struct LoadingPresentationTests {
     func indicatorWaits(waited: Duration, hasContent: Bool, shows: Bool) {
         #expect(LoadingPresentation.showsIndicator(waited: waited, hasContent: hasContent) == shows)
     }
+
+    @Test("A wait on the network shows no indicator while offline, where the connection notice already says why")
+    func offlineWaitIsQuiet() {
+        #expect(!LoadingPresentation.showsIndicator(waited: .seconds(30), hasContent: false, offline: true))
+    }
 }
