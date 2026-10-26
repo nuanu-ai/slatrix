@@ -225,8 +225,14 @@ struct TimelineHostedTests {
                 harness.layout()
                 return Harness.views(in: harness.hosting).contains { ($0 as? NSImageView)?.image != nil }
             })
-        await drainMainActor()
         harness.layout()
+        // The row's content still measures the height the table gave it before the image came.
+        let row = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }.first { cell in
+                guard cell.window != nil, case .message(let entry) = cell.entry?.kind else { return false }
+                return entry.message.eventID == "$photo"
+            })
+        #expect(ceil(row.height(width: row.frame.width)) == row.frame.height)
         #expect(try #require(harness.top(of: "Before the photo")) == before)
         #expect(try #require(harness.top(of: "After the photo")) == after)
     }
