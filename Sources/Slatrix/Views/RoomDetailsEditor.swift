@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct RoomDetailsEditor: View {
-    private static let size = CGSize(width: 552, height: 572)
+    /// Fixed, so the form doesn't grow once the details load.
+    private static let height: CGFloat = 520
     private static let topicMinHeight: CGFloat = 112
     private static let topicMaxHeight: CGFloat = 180
     @Environment(\.metrics) private var m
@@ -53,81 +54,65 @@ struct RoomDetailsEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: m.sp16) {
-                VStack(alignment: .leading, spacing: m.sp8) {
-                    Text("Edit details").font(m.font(.header, .bold)).foregroundStyle(
-                        colors.textPrimary)
+        Modal(
+            title: "Edit details", height: Self.height, busy: saving, onClose: onClose,
+            secondary: ModalAction("Cancel", action: onClose),
+            primary: ModalAction(
+                error != nil && snapshot != nil ? "Try again" : "Save", disabled: !canSave,
+                // Return adds a line to the description.
+                shortcut: KeyboardShortcut(.return, modifiers: .command), action: save)
+        ) {
+            VStack(alignment: .leading, spacing: m.sp24) {
+                VStack(alignment: .leading, spacing: m.sp4) {
                     Text(destinationName).font(m.font(.secondary, .medium)).lineLimit(2)
-                    Text(roomID).font(m.font(.caption, design: .monospaced)).foregroundStyle(colors.textSecondary)
-                        .textSelection(.enabled).lineLimit(2)
+                    Text(roomID).font(m.font(.caption, design: .monospaced)).foregroundStyle(
+                        colors.textSecondary
+                    )
+                    .textSelection(.enabled).lineLimit(2)
                 }
-                Spacer(minLength: 0)
-                IconButton(symbol: "xmark", label: "Close", role: .secondary, action: onClose).disabled(
-                    saving)
-            }.padding(m.sp24)
-            Divider().overlay(colors.border)
-            ScrollView {
-                VStack(alignment: .leading, spacing: m.sp24) {
-                    if loading {
-                        HStack(spacing: m.sp12) {
-                            DelayedProgress(interval: .sheetLoading)
-                            Text("Loading…").font(m.font(.secondary)).foregroundStyle(
-                                colors.textSecondary)
-                        }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, m.sp20)
-                    } else if let snapshot, current {
-                        detailField("Name", editable: snapshot.canEditName) {
-                            TextField(snapshot.isSpace ? "Workspace name" : "Conversation name", text: $name)
-                                .textFieldStyle(.field).font(m.font(.body)).focused(
-                                    $focusedField, equals: .name
-                                )
-                                .disabled(!snapshot.canEditName || saving)
-                            if blankName {
-                                Text("Enter a name.").font(m.font(.meta)).foregroundStyle(
-                                    colors.destructive)
-                            }
-                        }
-                        detailField("Description", editable: snapshot.canEditTopic) {
-                            TextEditor(text: $topic).font(m.font(.secondary)).scrollContentBackground(.hidden)
-                                .padding(m.sp8).frame(
-                                    minHeight: m(Self.topicMinHeight), maxHeight: m(Self.topicMaxHeight)
-                                )
-                                .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius))
-                                .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border))
-                                .focused($focusedField, equals: .topic).disabled(!snapshot.canEditTopic || saving)
-                        }
-                        if !snapshot.canEditName && !snapshot.canEditTopic {
-                            Label("You can’t edit these details.", systemImage: "lock")
-                                .font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                if loading {
+                    HStack(spacing: m.sp12) {
+                        DelayedProgress(interval: .sheetLoading)
+                        Text("Loading…").font(m.font(.secondary)).foregroundStyle(
+                            colors.textSecondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, m.sp20)
+                } else if let snapshot, current {
+                    detailField("Name", editable: snapshot.canEditName) {
+                        TextField(snapshot.isSpace ? "Workspace name" : "Conversation name", text: $name)
+                            .textFieldStyle(.field).font(m.font(.body)).focused(
+                                $focusedField, equals: .name
+                            )
+                            .disabled(!snapshot.canEditName || saving)
+                        if blankName {
+                            Text("Enter a name.").font(m.font(.meta)).foregroundStyle(
+                                colors.destructive)
                         }
                     }
-                    if let error {
-                        VStack(alignment: .leading, spacing: m.sp12) {
-                            Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive)
-                                .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                            if snapshot == nil && current && !loading {
-                                Button("Try again") { Task { await load() } }.buttonStyle(.textLink)
-                            }
-                        }.accessibilityElement(children: .contain)
+                    detailField("Description", editable: snapshot.canEditTopic) {
+                        TextEditor(text: $topic).font(m.font(.secondary)).scrollContentBackground(.hidden)
+                            .padding(m.sp8).frame(
+                                minHeight: m(Self.topicMinHeight), maxHeight: m(Self.topicMaxHeight)
+                            )
+                            .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius))
+                            .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border))
+                            .focused($focusedField, equals: .topic).disabled(!snapshot.canEditTopic || saving)
                     }
-                }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading)
+                    if !snapshot.canEditName && !snapshot.canEditTopic {
+                        Label("You can’t edit these details.", systemImage: "lock")
+                            .font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                    }
+                }
+                if let error {
+                    VStack(alignment: .leading, spacing: m.sp12) {
+                        Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive)
+                            .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                        if snapshot == nil && current && !loading {
+                            Button("Try again") { Task { await load() } }.buttonStyle(.textLink)
+                        }
+                    }.accessibilityElement(children: .contain)
+                }
             }
-            Divider().overlay(colors.border)
-            HStack(spacing: m.sp12) {
-                if saving {
-                    DelayedProgress()
-                    Text("Saving…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
-                }
-                Spacer()
-                Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(saving)
-                Button(error != nil && snapshot != nil ? "Try again" : "Save", action: save)
-                    .buttonStyle(.primary).disabled(!canSave)
-                    .keyboardShortcut(.return, modifiers: .command).help("Save changes (⌘Return)")
-            }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
         }
-        .sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.textBody
-        )
         .task(id: context) {
             if owner == nil { owner = context }
             guard current else {

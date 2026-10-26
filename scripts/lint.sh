@@ -12,7 +12,7 @@ fi
 # Views draw with the design system; raw values and off-system styles live only in Views/DesignSystem.
 failed=0
 offsystem() {
-    if grep -rnE "$2" Sources/Slatrix/Views --exclude-dir=DesignSystem; then
+    if grep -rnE "$2" Sources/Slatrix/Views --exclude-dir=DesignSystem "${@:3}"; then
         echo "error: $1" >&2
         failed=1
     fi
@@ -25,4 +25,7 @@ offsystem "use DelayedProgress or SkeletonRows" 'ProgressView\('
 offsystem "use .elevation(_:cornerRadius:)" '\.shadow\('
 offsystem "use Motion for animation" '(withAnimation|\.animation)\(\.(easeIn|easeOut|easeInOut|linear|spring)'
 offsystem "use .textFieldStyle(.field)" 'textFieldStyle\(\.roundedBorder\)'
+offsystem "use .modal with Modal or ConfirmModal" '\.sheet\(|\.alert\(|confirmationDialog\('
+# The search modal and Files get their own tab bars next; until then they keep their pickers.
+offsystem "use TabBar" 'pickerStyle\(\.segmented\)' --exclude=ConversationSheets.swift --exclude=SharedFilesView.swift
 exit $failed

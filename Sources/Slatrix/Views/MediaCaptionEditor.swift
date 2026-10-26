@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct MediaCaptionEditor: View {
-    private static let width: CGFloat = 512
     private static let editorHeight: CGFloat = 128
     @Environment(\.metrics) private var m
     let matrix: MatrixService
@@ -26,19 +25,16 @@ struct MediaCaptionEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: m.sp16) {
-            HStack {
-                Text("Edit caption").font(m.font(.header, .bold))
-                Spacer()
-                IconButton(symbol: "xmark", label: "Close", role: .body, action: onClose).disabled(
-                    saving)
-            }
+        Modal(
+            title: "Edit caption", busy: saving, onClose: onClose,
+            secondary: accepted ? nil : ModalAction("Cancel", action: onClose),
+            primary: accepted
+                ? ModalAction("Done", action: onClose)
+                // Return adds a line to the caption.
+                : ModalAction("Save", disabled: !canSave, shortcut: nil, action: save)
+        ) {
             if accepted {
                 Label("Caption saved", systemImage: "checkmark.circle").foregroundStyle(colors.success)
-                HStack {
-                    Spacer()
-                    Button("Done", action: onClose).keyboardShortcut(.defaultAction)
-                }
             } else {
                 Text(snapshot?.filename ?? target.message.attachment?.name ?? "Attachment")
                     .font(m.font(.secondary, .semibold)).textSelection(.enabled)
@@ -73,22 +69,13 @@ struct MediaCaptionEditor: View {
                     Button("Reload") { Task { await load() } }.buttonStyle(.textLink).disabled(
                         saving || !current)
                 }
-                HStack {
-                    Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(saving)
-                    Spacer()
-                    if saving { DelayedProgress() }
-                    Button(saving ? "Saving…" : "Save", action: save).buttonStyle(.primary).disabled(
-                        !canSave)
-                }
             }
-        }.padding(m.sp24).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)
-            .interactiveDismissDisabled(saving)
-            .task(id: matrix.mediaCaptionSourceRevision(target)) { await load() }
-            .onDisappear {
-                presented = false
-                request = UUID()
-            }
-            .onExitCommand { if !saving { onClose() } }
+        }
+        .task(id: matrix.mediaCaptionSourceRevision(target)) { await load() }
+        .onDisappear {
+            presented = false
+            request = UUID()
+        }
     }
     @MainActor private func adopt(_ fresh: MediaCaptionSnapshot) {
         let previous = snapshot

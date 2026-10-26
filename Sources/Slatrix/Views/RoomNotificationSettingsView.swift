@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct RoomNotificationSettingsView: View {
-    private static let size = CGSize(width: 532, height: 492)
+    /// Fixed, so the modal doesn't grow once the settings load.
+    private static let height: CGFloat = 440
     @Environment(\.metrics) private var m
     let matrix: MatrixService
     private var retries: NotificationSettingsRetryState { matrix.notificationRetries }
@@ -46,77 +47,55 @@ struct RoomNotificationSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: m.sp16) {
-                VStack(alignment: .leading, spacing: m.sp8) {
-                    Text("Notifications").font(m.font(.header, .bold)).foregroundStyle(
-                        colors.textPrimary)
-                    Text(name).font(m.font(.secondary)).lineLimit(2)
-                }
-                Spacer(minLength: 0)
-                IconButton(symbol: "xmark", label: "Close", role: .secondary, action: onClose)
-                    .disabled(
-                        saving)
-            }.padding(m.sp24)
-            Divider().overlay(colors.border)
-            ScrollView {
-                VStack(alignment: .leading, spacing: m.sp20) {
-                    if loading {
-                        HStack(spacing: m.sp8) {
-                            DelayedProgress(interval: .sheetLoading)
-                            Text("Loading…").font(m.font(.secondary)).foregroundStyle(
-                                colors.textSecondary)
-                        }.padding(.vertical, m.sp20)
-                    } else if let snapshot, current {
-                        Picker("Notify me about", selection: $choice) {
-                            ForEach(RoomNotificationChoice.allCases) { option in
-                                Text(
-                                    option == .accountDefault
-                                        ? "Default (\(snapshot.defaultChoice.title))" : option.title
-                                ).tag(option)
-                            }
-                        }.pickerStyle(.radioGroup).font(m.font(.secondary)).disabled(
-                            saving || retries.isWriting || needsReload)
+        Modal(
+            title: "Notifications", height: Self.height, busy: saving, onClose: onClose,
+            secondary: ModalAction("Cancel", action: onClose),
+            primary: ModalAction(
+                retryingFailedUpdate ? "Retry update" : "Save changes", disabled: !canSave, action: save)
+        ) {
+            VStack(alignment: .leading, spacing: m.sp20) {
+                Text(name).font(m.font(.secondary)).foregroundStyle(colors.textSecondary).lineLimit(2)
+                if loading {
+                    HStack(spacing: m.sp8) {
+                        DelayedProgress(interval: .sheetLoading)
+                        Text("Loading…").font(m.font(.secondary)).foregroundStyle(
+                            colors.textSecondary)
+                    }.padding(.vertical, m.sp20)
+                } else if let snapshot, current {
+                    Picker("Notify me about", selection: $choice) {
+                        ForEach(RoomNotificationChoice.allCases) { option in
+                            Text(
+                                option == .accountDefault
+                                    ? "Default (\(snapshot.defaultChoice.title))" : option.title
+                            ).tag(option)
+                        }
+                    }.pickerStyle(.radioGroup).font(m.font(.secondary)).disabled(
+                        saving || retries.isWriting || needsReload)
 
-                    }
-                    if let notice {
-                        Label(notice, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(
-                            colors.textSecondary
-                        )
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let error {
-                        Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive).fixedSize(
-                            horizontal: false, vertical: true
-                        ).textSelection(.enabled)
-                    }
-                    if retries.isWriting && !saving {
-                        HStack(spacing: m.sp8) {
-                            DelayedProgress()
-                            Text("Saving…")
-                        }.font(m.font(.meta))
-                    }
-                    if current && !loading && !saving && !retries.isWriting {
-                        Button(snapshot == nil ? "Try again" : "Reload") { Task { await load() } }
-                            .buttonStyle(.textLink).font(m.font(.meta))
-                    }
-                }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Divider().overlay(colors.border)
-            HStack(spacing: m.sp12) {
-                if saving {
-                    DelayedProgress()
-                    Text("Saving…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
-                Spacer()
-                Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(saving)
-                Button(retryingFailedUpdate ? "Retry update" : "Save changes", action: save)
-                    .buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(
-                        !canSave)
-            }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
-        }.sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.textBody
-        )
+                if let notice {
+                    Label(notice, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(
+                        colors.textSecondary
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                if let error {
+                    Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive).fixedSize(
+                        horizontal: false, vertical: true
+                    ).textSelection(.enabled)
+                }
+                if retries.isWriting && !saving {
+                    HStack(spacing: m.sp8) {
+                        DelayedProgress()
+                        Text("Saving…")
+                    }.font(m.font(.meta))
+                }
+                if current && !loading && !saving && !retries.isWriting {
+                    Button(snapshot == nil ? "Try again" : "Reload") { Task { await load() } }
+                        .buttonStyle(.textLink).font(m.font(.meta))
+                }
+            }
+        }
         .task(id: context) {
             if owner == nil { owner = context }
             guard current else {

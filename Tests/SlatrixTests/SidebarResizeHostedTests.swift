@@ -114,7 +114,7 @@ struct SidebarResizeHostedTests {
             clickCount: clicks, pressure: 1)
     }
 
-    @Test("Dragging the details pane divider widens the pane, keeps the conversation usable, and remembers the width")
+    @Test("Dragging the thread pane divider widens the pane, keeps the conversation usable, and remembers the width")
     func paneDivider() async throws {
         _ = NSApplication.shared
         let matrix = MatrixService()
@@ -150,7 +150,16 @@ struct SidebarResizeHostedTests {
         }
 
         _ = await eventually { frames().count == 1 }
-        NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "toggle-pane"])
+        // A thread, from a message's own context menu, opens the pane.
+        func messages() -> [NSTextView] {
+            func all(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(all) }
+            return all(hosting).compactMap { $0 as? NSTextView }.filter { !$0.isEditable && !$0.string.isEmpty }
+        }
+        _ = await eventually { !messages().isEmpty }
+        let click = try #require(mouseEvent(.rightMouseDown, at: .zero, in: window))
+        let menu = try #require(messages().last?.menu(for: click))
+        let thread = try #require(menu.items.first { $0.identifier?.rawValue == "thread" })
+        _ = thread.target?.perform(thread.action, with: thread)
         _ = await eventually { frames().count == 2 }
         let before = try #require(frames().last)
         #expect(frames().count == 2)
@@ -162,7 +171,7 @@ struct SidebarResizeHostedTests {
         try drag(by: -40)
         _ = await eventually { abs((frames().last?.minX ?? 0) - before.minX + 40) < 0.5 }
         #expect(abs(try #require(frames().last).minX - before.minX + 40) < 0.5)
-        #expect(UserDefaults.standard.double(forKey: "layout.paneWidth") == 376)
+        #expect(UserDefaults.standard.double(forKey: "layout.paneWidth") == 420)
 
         // Far past the limit, the conversation between the two dividers keeps its 360 pt.
         try drag(by: -2_000)

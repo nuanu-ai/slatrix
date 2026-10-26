@@ -92,47 +92,38 @@ struct TimelineView: View {
             if let deleting, !matrix.isCurrentMessageAction(deleting) { self.deleting = nil }
             if let linkCopy, !matrix.isCurrentMessagePermalink(linkCopy.target) { self.linkCopy = nil }
         }
-        .alert(
-            "Delete message?",
-            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })
-        ) {
-            Button("Cancel", role: .cancel) { deleting = nil }
-            Button("Delete", role: .destructive) {
-                let target = deleting
-                deleting = nil
-                if let target {
-                    Task {
-                        do { try await matrix.deleteMessage(target) } catch is CancellationError {} catch {
-                            if matrix.isCurrentMessageAction(target) {
-                                matrix.errorMessage = MatrixService.safeError(error)
+        .modal(isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+            ConfirmModal(
+                title: "Delete message?", message: "This can’t be undone.", action: "Delete",
+                onConfirm: {
+                    let target = deleting
+                    deleting = nil
+                    if let target {
+                        Task {
+                            do { try await matrix.deleteMessage(target) } catch is CancellationError {} catch {
+                                if matrix.isCurrentMessageAction(target) {
+                                    matrix.errorMessage = MatrixService.safeError(error)
+                                }
                             }
                         }
                     }
-                }
-            }
-        } message: {
-            Text("This can’t be undone.")
+                }, onCancel: { deleting = nil })
         }
-        .alert(
-            "Cancel sending this message?",
-            isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } })
-        ) {
-            Button("Keep sending", role: .cancel) { cancelling = nil }
-            Button("Cancel sending", role: .destructive) {
-                if let message = cancelling { cancelSend(message) }
-                cancelling = nil
-            }
-        } message: {
-            Text("It may already have been delivered.")
+        .modal(isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } })) {
+            ConfirmModal(
+                title: "Cancel sending this message?", message: "It may already have been delivered.",
+                action: "Cancel sending", cancel: "Keep sending",
+                onConfirm: {
+                    if let message = cancelling { cancelSend(message) }
+                    cancelling = nil
+                }, onCancel: { cancelling = nil })
         }
-        .alert(
-            "Couldn’t copy message link",
-            isPresented: Binding(get: { linkCopy?.error != nil }, set: { if !$0 { linkCopy?.error = nil } })
-        ) {
-            Button("Retry") { [target = linkCopy?.target] in if let target { copyLink(target) } }
-            Button("Cancel", role: .cancel) { linkCopy = nil }
-        } message: {
-            Text(linkCopy?.error ?? "Try again in a moment.")
+        .modal(isPresented: Binding(get: { linkCopy?.error != nil }, set: { if !$0 { linkCopy?.error = nil } })) {
+            ConfirmModal(
+                title: "Couldn’t copy message link", message: linkCopy?.error ?? "Try again in a moment.",
+                action: "Retry", kind: .primary,
+                onConfirm: { [target = linkCopy?.target] in if let target { copyLink(target) } },
+                onCancel: { linkCopy = nil })
         }
     }
 

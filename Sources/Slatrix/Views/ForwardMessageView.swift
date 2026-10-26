@@ -4,7 +4,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ForwardMessageView: View {
-    private static let width: CGFloat = 540
     private static let imagePreviewHeight: CGFloat = 300
     private static let previewHeight: CGFloat = 212
     private static let imageMaxSize = CGSize(width: 460, height: 160)
@@ -49,21 +48,18 @@ struct ForwardMessageView: View {
     private var colors: AppColors { appearance.colors }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: m.sp20) {
-            HStack(alignment: .top) {
-                Text("Forward message").font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
-                Spacer(minLength: m.sp8)
-                IconButton(symbol: "xmark", label: "Close forwarding", role: .body, action: onClose).disabled(sending)
-            }
+        Modal(
+            title: "Forward message", busy: sending, onClose: onClose,
+            secondary: queued == nil ? ModalAction("Cancel", action: onClose) : nil,
+            primary: queued == nil
+                ? ModalAction("Forward", disabled: !canSend, shortcut: nil, action: send)
+                : ModalAction("Done", action: onClose)
+        ) {
             if let queued {
                 Label(
                     "Forwarded to \(matrix.rooms.first(where: { $0.id == queued.destinationRoomID })?.name ?? queued.destinationRoomID)",
                     systemImage: "checkmark.circle"
                 ).foregroundStyle(colors.success)
-                HStack {
-                    Spacer()
-                    Button("Done", action: onClose).keyboardShortcut(.defaultAction)
-                }
             } else {
                 if loading {
                     HStack(spacing: m.sp8) {
@@ -101,25 +97,16 @@ struct ForwardMessageView: View {
                 if destinations.isEmpty {
                     Text("No conversations to forward to.").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
-                HStack {
-                    Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(sending)
-                    Spacer()
-                    if sending { DelayedProgress() }
-                    Button(sending ? "Forwarding…" : "Forward", action: send).buttonStyle(.primary)
-                        .disabled(!canSend)
-                }
             }
-        }.padding(m.sp24).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)
-            .interactiveDismissDisabled(sending)
-            .task(id: matrix.forwardMessageSourceRevision(target)) { await loadReview() }
-            .task(id: thumbnailContext) { await loadThumbnail() }
-            .onChange(of: thumbnailContext) { _, _ in thumbnail = nil }
-            .onDisappear {
-                presented = false
-                request = UUID()
-                thumbnail = nil
-            }
-            .onExitCommand { if !sending { onClose() } }
+        }
+        .task(id: matrix.forwardMessageSourceRevision(target)) { await loadReview() }
+        .task(id: thumbnailContext) { await loadThumbnail() }
+        .onChange(of: thumbnailContext) { _, _ in thumbnail = nil }
+        .onDisappear {
+            presented = false
+            request = UUID()
+            thumbnail = nil
+        }
     }
 
     @ViewBuilder private func messagePreview(_ review: ForwardMessageReview) -> some View {

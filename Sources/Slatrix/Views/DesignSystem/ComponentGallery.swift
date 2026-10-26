@@ -38,6 +38,7 @@ struct ComponentGallery: View {
             }
             section("Profile") { profile }
             section("Files") { files }
+            section("Modals, tabs and people") { modals }
             section("Emoji") { emoji }
         }
         .padding(m.sp40).frame(width: m(Self.width), alignment: .leading)
@@ -251,6 +252,27 @@ struct ComponentGallery: View {
                 MessageToolbar(
                     quick: EmojiRecents.quick([]), isThread: false, isSaved: false, pending: false,
                     actions: MessageRowActions(react: { _ in }, openReactions: {}, forward: {}))
+            }
+        }
+    }
+
+    private var modals: some View {
+        HStack(alignment: .top, spacing: m.sp40) {
+            ConfirmModal(
+                title: "Delete message?", message: "This can’t be undone.", action: "Delete", onConfirm: {},
+                onCancel: {}
+            )
+            .padding(-m.sp40)
+            VStack(alignment: .leading, spacing: m.sp24) {
+                TabBar(
+                    tabs: [
+                        .init(value: 0, title: "About"), .init(value: 1, title: "Members", count: 12),
+                        .init(value: 2, title: "Settings"),
+                    ], selection: .constant(1))
+                VStack(spacing: 0) {
+                    PersonRow(name: "Julia Park", userID: "@julia:harbor.example", presence: .active) {}
+                    PersonRow(name: "Sam Ortiz", userID: "@sam:harbor.example", isYou: true, presence: .away) {}
+                }.frame(width: m(400))
             }
         }
     }

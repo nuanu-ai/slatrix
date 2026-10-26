@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct PublicRoomDirectoryView: View {
-    private static let size = CGSize(width: 720, height: 620)
+    private static let height: CGFloat = 620
     private static let searchHeight: CGFloat = 40
     @Environment(\.metrics) private var m
     let matrix: MatrixService
@@ -51,17 +51,16 @@ struct PublicRoomDirectoryView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().overlay(colors.border)
-            directoryContent.frame(maxWidth: .infinity, maxHeight: .infinity)
-        }.sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.textBody
-        )
+        Modal(title: "Browse channels", size: .large, height: Self.height, padded: false, onClose: close) {
+            VStack(spacing: 0) {
+                header
+                Divider().overlay(colors.border)
+                directoryContent.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
         .onAppear {
             owner = context
             isPresented = true
-            searchFocused = true
         }
         .onChange(of: context) { _, _ in close() }
         .onChange(of: query) { _, _ in
@@ -74,23 +73,13 @@ struct PublicRoomDirectoryView: View {
             resolutionRequest = UUID()
             service.close()
         }
-        .onExitCommand(perform: close)
         .task(id: request) { await search(request) }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: m.sp16) {
-            HStack(alignment: .top, spacing: m.sp16) {
-                VStack(alignment: .leading, spacing: m.sp8) {
-                    Text("Browse channels").font(m.font(.header, .bold)).foregroundStyle(
-                        colors.textPrimary)
-                    Text(workspace?.name ?? serverName).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
-                        .lineLimit(2).textSelection(.enabled)
-                }
-                Spacer()
-                IconButton(symbol: "xmark", label: "Close", role: .secondary, action: close)
-                    .keyboardShortcut(.cancelAction)
-            }
+            Text(workspace?.name ?? serverName).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                .lineLimit(2).textSelection(.enabled)
             HStack(spacing: m.sp8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
                 TextField("Search by channel name or topic", text: $query).textFieldStyle(.plain).font(
@@ -108,7 +97,7 @@ struct PublicRoomDirectoryView: View {
                 colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge)
             )
             .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
-        }.padding(m.sp24)
+        }.padding([.horizontal, .bottom], m.sp24)
     }
 
     @ViewBuilder private var directoryContent: some View {
