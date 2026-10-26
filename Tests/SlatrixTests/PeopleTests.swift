@@ -56,6 +56,7 @@ private final class PeopleClient: Client, @unchecked Sendable {
     var unavailableProfiles = Set<String>()
     let searchGate = Gate()
     let profileGate = Gate()
+    let statusGate = Gate()
     let createGate = Gate()
     let searches = Recorder<String>()
     let creations = Recorder<CreateRoomParameters>()
@@ -82,7 +83,10 @@ private final class PeopleClient: Client, @unchecked Sendable {
             userId: userId, displayName: "Profile", avatarUrl: "mxc://example.org/avatar",
             status: UserStatus(emoji: "🌱", text: "Working"), call: nil)
     }
-    override func isUserStatusSupported() async throws -> Bool { true }
+    override func isUserStatusSupported() async throws -> Bool {
+        await statusGate.wait()
+        return true
+    }
     override func createRoom(request: CreateRoomParameters) async throws -> String {
         creations.append(request)
         await createGate.wait()
@@ -178,6 +182,22 @@ struct PeopleSearchTests {
         #expect(people.profile?.name == "Room name" && people.profile?.profileAvailable == false)
         #expect(people.profileState == "error")
         #expect(client.creations.all.isEmpty)
+    }
+
+    @Test("A status check that never answers doesn't hold back the fetched name and photo")
+    func slowStatusCheck() async {
+        client.statusGate.arm()
+        let lookup = Task { await people.loadProfile(userID: alice, fallback: ChatUser(id: alice, name: "Room name")) }
+        #expect(await eventually { people.profile?.name == "Profile" })
+        #expect(people.profile?.avatarURL == "mxc://example.org/avatar")
+        client.statusGate.release()
+        await lookup.value
+    }
+
+    @Test("Status from a server that supports it arrives after the profile")
+    func statusAfterProfile() async {
+        await people.loadProfile(userID: alice)
+        #expect(people.profile?.status == "🌱 Working" && people.statusSupported)
     }
 
     @Test("Signing out discards a profile that arrives late")
