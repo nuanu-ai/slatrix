@@ -59,19 +59,21 @@ struct AvatarView: View {
 struct DelayedProgress: View {
     var active = true
     var hasContent = false
+    var offline = false
     /// Logs the whole wait, shown or not.
     let interval: Performance.Name
     @State private var shown = false
     var body: some View {
         ZStack { if shown { ProgressView().controlSize(.small) } }
             .loadingInterval(interval, while: active && !hasContent)
-            .task(id: active && !hasContent) {
+            .task(id: [active && !hasContent, offline]) {
                 shown = false
                 guard active, !hasContent else { return }
                 let start = ContinuousClock.now
                 try? await Task.sleep(for: LoadingPresentation.indicatorDelay)
                 guard !Task.isCancelled else { return }
-                shown = LoadingPresentation.showsIndicator(waited: .now - start, hasContent: hasContent)
+                shown = LoadingPresentation.showsIndicator(
+                    waited: .now - start, hasContent: hasContent, offline: offline)
             }
     }
 }

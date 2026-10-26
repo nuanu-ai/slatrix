@@ -38,6 +38,8 @@ struct MessageSendFailure: Hashable {
     let kind: Kind
     let message: String
     var canRetry: Bool { kind == .recoverable || kind == .verification || kind == .rejected }
+    /// Offline, a network failure is only a wait: the message goes out by itself when the connection returns.
+    func shown(offline: Bool) -> MessageSendFailure? { offline && kind == .recoverable ? nil : self }
 
     static func failure(_ state: EventSendState?) -> MessageSendFailure? {
         guard case .sendingFailed(let error, let recoverable) = state else { return nil }
@@ -479,6 +481,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var status: ConnectionStatus = .signedOut
     var connectionDetail = "Opening your workspace…"
     private(set) var connectionErrorMessage: String?
+    private(set) var connectionState = MatrixConnectionState.idle
     private(set) var isRetryingConnection = false
     private(set) var canRetryConnection = false
     private let connectionRecovery = ConnectionRecovery()
@@ -940,10 +943,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let service = try await newClient.syncService().withOfflineMode().finish()
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         roomSubscriptions.attach(service.roomListService())
-        try await connectionRecovery.attach(service) { [weak self] feedback in
+        try await connectionRecovery.attach(service, client: newClient) { [weak self] feedback in
             guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
             self.connectionDetail = feedback.detail
             self.connectionErrorMessage = feedback.errorMessage
+            self.connectionState = feedback.state
             self.isRetryingConnection = feedback.isRetrying
             self.canRetryConnection = feedback.canRetry
             switch feedback.state {
@@ -1049,6 +1053,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         profileLoadTask?.cancel()
         profileLoadTask = nil
         connectionErrorMessage = nil
+        connectionState = .idle
         isRetryingConnection = false
         canRetryConnection = false
         readDelivery.reset()
@@ -1656,11 +1661,21 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
 
+    /// The page a thread is loading, shared by the pane's first page and its history row.
+    private var threadPage: (selection: UUID, task: Task<Bool, Error>)?
     func loadMoreThread(rootID: String) async throws -> Bool {
         guard loadedThreadRootID == rootID, let threadTimeline else { throw MatrixServiceError.noRoom }
         let token = threadSelection
-        let endReached = try await threadTimeline.paginateBackwards(numEvents: 50)
-        if threadSelection == token, loadedThreadRootID == rootID { hasMoreThreadHistory = !endReached }
+        let page =
+            threadPage?.selection == token
+            ? threadPage!.task : Task { try await threadTimeline.paginateBackwards(numEvents: 50) }
+        threadPage = (token, page)
+        defer { if threadPage?.task == page { threadPage = nil } }
+        let endReached = try await page.value
+        if threadSelection == token, loadedThreadRootID == rootID {
+            hasMoreThreadHistory = !endReached
+            readyThreadReadSelection = token
+        }
         return endReached
     }
     func loadThread(_ root: ChatMessage) async throws {
@@ -1710,11 +1725,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             return
         }
         threadHandle = listenerHandle
-        let endReached = try await next.paginateBackwards(numEvents: 50)
-        if token == selection, threadToken == threadSelection {
-            hasMoreThreadHistory = !endReached
-            readyThreadReadSelection = threadToken
-        }
+        // The pane shows what the SDK has cached now; the first page arrives whenever the network allows.
+        Task { _ = try? await loadMoreThread(rootID: root.eventID) }
     }
 
     private func actionMedia(_ target: MessageActionTarget) throws -> ShownMedia {

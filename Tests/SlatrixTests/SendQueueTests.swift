@@ -69,6 +69,15 @@ struct SendQueueTests {
         #expect(try !failure(error, recoverable: recoverable).message.contains("private-payload"))
     }
 
+    @Test("A message that couldn't go out offline waits as pending; other failures still show")
+    func offlineFailureIsPending() throws {
+        let network = try failure(.genericApiError(msg: "x"), recoverable: true)
+        #expect(network.shown(offline: true) == nil)
+        #expect(network.shown(offline: false) == network)
+        let verification = try failure(.crossVerificationRequired, recoverable: true)
+        #expect(verification.shown(offline: true) == verification)
+    }
+
     @Test("Retrying a recoverable failure resumes the room's queue without re-sending anything")
     func recoverableRetryResumesQueue() async throws {
         let recoverable = try failure(.genericApiError(msg: "x"), recoverable: true)

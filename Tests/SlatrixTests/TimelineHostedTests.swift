@@ -321,6 +321,63 @@ struct TimelineHostedTests {
     }
 }
 
+extension TimelineHostedTests {
+    @Test("The pointer is an I-beam over message text and an arrow over the hover toolbar on top of it")
+    func toolbarCursor() throws {
+        _ = NSApplication.shared
+        let appearance = AppearanceStore()
+        let message = ChatMessage(
+            id: "$one", roomID: Self.room.id, senderID: Self.user, senderName: "Reader",
+            body: String(repeating: "word ", count: 30), timestamp: Date(timeIntervalSince1970: 0))
+        let hosting = NSHostingView(
+            rootView: MessageRow(message: message, grouped: true, own: false, hovered: true, timeLabel: "12:00 AM")
+                .environmentObject(appearance).frame(width: 400))
+        let window = NSWindow(
+            contentRect: NSRect(x: -20_000, y: -20_000, width: 400, height: 200), styleMask: .borderless,
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        hosting.layoutSubtreeIfNeeded()
+        let text = try #require(Harness.views(in: hosting).compactMap { $0 as? MessageTextView }.first)
+        let frame = text.convert(text.bounds, to: nil)
+        // The toolbar's More button, at the trailing end of the text's first line.
+        let more = try #require(Harness.views(in: hosting).first { $0 is NSPopUpButton })
+        let button = more.convert(more.bounds, to: nil)
+        let toolbar = NSPoint(x: button.midX, y: button.midY)
+        let body = NSPoint(x: frame.minX + 10, y: frame.minY + 6)
+        #expect(frame.contains(toolbar))
+
+        // AppKit sends the text view these for its whole visible rect, wherever the pointer enters or moves.
+        func entered(at point: NSPoint) throws -> NSCursor {
+            NSCursor.crosshair.set()
+            text.cursorUpdate(
+                with: try #require(
+                    NSEvent.enterExitEvent(
+                        with: .cursorUpdate, location: point, modifierFlags: [], timestamp: 0,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0,
+                        userData: nil)))
+            return NSCursor.current
+        }
+        func moved(to point: NSPoint) throws -> NSCursor {
+            text.mouseMoved(
+                with: try #require(
+                    NSEvent.mouseEvent(
+                        with: .mouseMoved, location: point, modifierFlags: [], timestamp: 0,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)))
+            return NSCursor.current
+        }
+        #expect(try entered(at: body) == .iBeam)
+        #expect(try entered(at: toolbar) == .arrow)
+        #expect(try moved(to: body) == .iBeam)
+        #expect(try moved(to: toolbar) == .arrow)
+        #expect(try moved(to: body) == .iBeam)
+    }
+}
+
 /// Budgets for the table at the scale of a busy room; see `PerformanceBudgetTests`.
 extension TimelineHostedTests {
     /// Lays out until `body` is on screen and returns how long that took.
