@@ -19,4 +19,11 @@ struct LoadingPresentationTests {
     func offlineWaitIsQuiet() {
         #expect(!LoadingPresentation.showsIndicator(waited: .seconds(30), hasContent: false, offline: true))
     }
+
+    @Test(
+        "A connection that drops and comes straight back shows nothing; one that stays down gets the notice",
+        arguments: [(Duration.milliseconds(0), false), (.seconds(1), false), (.seconds(3), true), (.seconds(60), true)])
+    func connectionNoticeWaits(down: Duration, shows: Bool) {
+        #expect(LoadingPresentation.showsConnectionNotice(downFor: down) == shows)
+    }
 }
