@@ -126,6 +126,14 @@ final class FakeClient: Client, @unchecked Sendable {
         try Data("downloaded".utf8).write(to: url)
         return FakeMediaFile(url)
     }
+
+    /// What every thumbnail request answers, once `thumbnails` lets it through.
+    var thumbnail = Data()
+    let thumbnails = Gate()
+    override func getMediaThumbnail(mediaSource: MediaSource, width: UInt64, height: UInt64) async throws -> Data {
+        await thumbnails.wait()
+        return thumbnail
+    }
 }
 
 final class FakeMediaFile: MediaFileHandle, @unchecked Sendable {
