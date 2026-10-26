@@ -74,7 +74,7 @@ struct VerificationView: View {
             }
             if waiting {
                 HStack(spacing: m.sp12) {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                     Text(waitingText).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
                 .padding(.vertical, m.sp4).accessibilityElement(children: .combine)
@@ -180,35 +180,33 @@ struct VerificationView: View {
         HStack(spacing: m.sp12) {
             if service.phase == .comparison {
                 Button("They don’t match", role: .destructive) { Task { await service.rejectMismatch() } }.buttonStyle(
-                    .bordered)
+                    .destructive)
                 Spacer()
                 // Deliberately no default/Return shortcut for a trust decision.
-                Button("They match") { Task { await service.confirmMatch() } }.buttonStyle(.borderedProminent).tint(
-                    colors.buttonPrimary
-                ).disabled(service.isWorking)
+                Button("They match") { Task { await service.confirmMatch() } }.buttonStyle(.primary).disabled(
+                    service.isWorking)
             } else if service.phase == .incoming {
-                Button("Decline") { Task { await service.cancel() } }.buttonStyle(.bordered)
+                Button("Decline") { Task { await service.cancel() } }.buttonStyle(.secondary)
                 Spacer()
-                Button("Accept request") { Task { await service.accept() } }.buttonStyle(.borderedProminent).tint(
-                    colors.buttonPrimary
-                ).disabled(service.isWorking)
+                Button("Accept request") { Task { await service.accept() } }.buttonStyle(.primary).disabled(
+                    service.isWorking)
             } else if service.phase == .ready {
-                Button("Cancel") { Task { await service.cancel() } }.buttonStyle(.bordered)
+                Button("Cancel") { Task { await service.cancel() } }.buttonStyle(.secondary)
                 Spacer()
-                Button("Compare codes") { Task { await service.startComparison() } }.buttonStyle(.borderedProminent)
-                    .tint(colors.buttonPrimary).disabled(service.isWorking)
+                Button("Compare codes") { Task { await service.startComparison() } }.buttonStyle(.primary)
+                    .disabled(service.isWorking)
             } else if service.phase == .cancelling {
                 Spacer()
-                Button("Close") { close() }.buttonStyle(.bordered)
+                Button("Close") { close() }.buttonStyle(.secondary)
             } else if service.phase.isActive || service.phase == .preparing {
                 Spacer()
-                Button("Cancel verification") { Task { await service.cancel() } }.buttonStyle(.bordered)
+                Button("Cancel verification") { Task { await service.cancel() } }.buttonStyle(.secondary)
             } else {
                 Spacer()
                 Button(service.phase == .finished ? "Done" : "Close") {
                     service.dismiss()
                     onClose()
-                }.buttonStyle(.borderedProminent).tint(colors.buttonPrimary)
+                }.buttonStyle(.primary)
             }
         }
     }

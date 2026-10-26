@@ -66,7 +66,7 @@ struct SharedFilesView: View {
             if let error = service.errorMessage {
                 HStack {
                     InlineErrorView(message: error)
-                    Button("Retry") { Task { await service.retry() } }.buttonStyle(.link).padding(.trailing, m.sp20)
+                    Button("Retry") { Task { await service.retry() } }.buttonStyle(.textLink).padding(.trailing, m.sp20)
                         .disabled(service.state == "loading" || service.isLoadingMore)
                 }
             }
@@ -75,10 +75,7 @@ struct SharedFilesView: View {
             } else if roomID == nil {
                 EmptyStateView(symbol: "doc.on.doc", title: "No conversations yet")
             } else if service.state == "loading" && service.items.isEmpty {
-                VStack(spacing: m.sp12) {
-                    ProgressView()
-                    Text("Loading…").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                SkeletonRows()
             } else {
                 ScrollView {
                     LazyVStack(spacing: m.sp12) {
@@ -102,10 +99,10 @@ struct SharedFilesView: View {
                                 Task { await service.loadMore() }
                             } label: {
                                 HStack(spacing: m.sp8) {
-                                    if service.isLoadingMore { ProgressView().controlSize(.small) }
+                                    if service.isLoadingMore { DelayedProgress() }
                                     Text(service.isLoadingMore ? "Loading…" : "Load more")
                                 }.font(m.font(.meta, .medium)).padding(m.sp12)
-                            }.buttonStyle(.link).disabled(service.isLoadingMore || service.state == "loading")
+                            }.buttonStyle(.textLink).disabled(service.isLoadingMore || service.state == "loading")
                         }
                     }.padding(m.sp24)
                 }
@@ -147,21 +144,7 @@ struct SharedFilesView: View {
                 Picker("Shared content type", selection: $filter) {
                     ForEach(ContentFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }.pickerStyle(.segmented).labelsHidden().frame(width: m(Self.typePickerWidth))
-                HStack(spacing: m.sp8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
-                    TextField("Search files and links", text: $query).textFieldStyle(.plain).font(
-                        m.font(.meta))
-                    if !query.isEmpty {
-                        Button {
-                            query = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(colors.textSecondary)
-                        }.buttonStyle(.row).help("Clear filter")
-                    }
-                }.padding(.horizontal, m.sp12).frame(height: m.row).background(
-                    colors.raised, in: RoundedRectangle(cornerRadius: m.radius)
-                ).overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border)).frame(
-                    maxWidth: m(Self.filterMaxWidth))
+                SearchField(prompt: "Search files and links", text: $query).frame(maxWidth: m(Self.filterMaxWidth))
                 Spacer(minLength: 0)
             }
         }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
@@ -241,14 +224,14 @@ private struct SharedContentCard: View {
                 if message.attachment != nil {
                     Button(action: preview) {
                         HStack(spacing: m.sp8) {
-                            if previewBusy { ProgressView().controlSize(.small) } else { Image(systemName: "eye") }
+                            if previewBusy { DelayedProgress() } else { Image(systemName: "eye") }
                             Text(previewBusy ? "Preparing…" : "Preview")
                         }.font(m.font(.meta, .medium)).frame(minHeight: m.iconButton)
                     }.buttonStyle(.row).disabled(!canPreview).help("Open in Quick Look").accessibilityLabel(
                         "Preview \(message.attachment?.name ?? "attachment")")
                     Button(action: download) {
                         if busy {
-                            ProgressView().controlSize(.small).frame(width: m.iconButton, height: m.iconButton)
+                            DelayedProgress().frame(width: m.iconButton, height: m.iconButton)
                         } else {
                             Image(systemName: "arrow.down.to.line").font(m.font(.body)).frame(
                                 width: m.iconButton, height: m.iconButton)
@@ -267,7 +250,7 @@ private struct SharedContentCard: View {
             }
             HStack {
                 if let error {
-                    Text(error).font(m.font(.caption)).foregroundStyle(.orange).fixedSize(
+                    Text(error).font(m.font(.caption)).foregroundStyle(colors.warning).fixedSize(
                         horizontal: false, vertical: true)
                 }
                 Spacer()
@@ -277,9 +260,9 @@ private struct SharedContentCard: View {
             }
             if let previewError {
                 HStack(alignment: .top, spacing: m.sp12) {
-                    Text(previewError).font(m.font(.caption)).foregroundStyle(.orange).fixedSize(
+                    Text(previewError).font(m.font(.caption)).foregroundStyle(colors.warning).fixedSize(
                         horizontal: false, vertical: true)
-                    Button("Retry", action: preview).buttonStyle(.link).font(m.font(.caption)).disabled(
+                    Button("Retry", action: preview).buttonStyle(.textLink).font(m.font(.caption)).disabled(
                         !canPreview)
                 }
             }

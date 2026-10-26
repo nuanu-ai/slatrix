@@ -172,7 +172,12 @@ struct PreferencesView: View {
             Toggle(isOn: Binding(get: { appearance.notifications }, set: changeNotifications)) {
                 sectionTitle("Desktop notifications")
             }.toggleStyle(.switch).disabled(requestingNotifications)
-            if requestingNotifications { ProgressView("Waiting for macOS…").font(m.font(.meta)) }
+            if requestingNotifications {
+                HStack(spacing: m.sp8) {
+                    DelayedProgress()
+                    Text("Waiting for macOS…")
+                }.font(m.font(.meta))
+            }
             macOSNotificationStatus
             Divider().overlay(colors.border)
             Toggle(isOn: $appearance.notificationPreview) {
@@ -190,9 +195,9 @@ struct PreferencesView: View {
                     m.font(.secondary, .semibold))
                 Spacer()
                 if readingNotificationStatus {
-                    ProgressView().controlSize(.small).accessibilityLabel("Checking macOS notification settings")
+                    DelayedProgress().accessibilityLabel("Checking macOS notification settings")
                 }
-                Button("Refresh") { Task { await refreshNotificationStatus() } }.buttonStyle(.link)
+                Button("Refresh") { Task { await refreshNotificationStatus() } }.buttonStyle(.textLink)
                     .disabled(readingNotificationStatus || requestingNotifications)
             }
             if let notificationStatus {
@@ -200,7 +205,7 @@ struct PreferencesView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let notificationStatusError {
-                Text(notificationStatusError).font(m.font(.meta)).foregroundStyle(.orange).fixedSize(
+                Text(notificationStatusError).font(m.font(.meta)).foregroundStyle(colors.warning).fixedSize(
                     horizontal: false, vertical: true)
             }
         }.padding(m.sp16).frame(maxWidth: .infinity, alignment: .leading)
@@ -262,8 +267,9 @@ struct PreferencesView: View {
             VStack(alignment: .leading, spacing: m.sp8) {
                 sectionTitle("Display name")
                 HStack(spacing: m.sp12) {
-                    TextField("Your name", text: $profileName).textFieldStyle(.roundedBorder).onChange(of: profileName)
-                    { _, _ in savedProfile = false }
+                    TextField("Your name", text: $profileName).textFieldStyle(.field).onChange(of: profileName) {
+                        _, _ in savedProfile = false
+                    }
                     Button(savedProfile ? "Saved" : saving ? "Saving…" : "Save") { saveProfile() }.disabled(
                         saving || matrix.isPreview || matrix.user == nil
                             || profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -281,7 +287,7 @@ struct PreferencesView: View {
                 Label(
                     matrix.isPreview ? "Leave preview" : "Sign out",
                     systemImage: "rectangle.portrait.and.arrow.right")
-            }.buttonStyle(.bordered)
+            }.buttonStyle(.secondary)
         }
     }
 
@@ -415,7 +421,7 @@ private struct AppMiniature: View {
                     ForEach(0..<2) { index in
                         HStack(alignment: .top, spacing: m.sp4) {
                             RoundedRectangle(cornerRadius: m(2)).fill(
-                                index == 0 ? Color(hex: 0x568b92) : Color(hex: 0xaa8966)
+                                avatarColor(index == 0 ? "Alex" : "Julia")
                             ).frame(width: m(9), height: m(9))
                             VStack(alignment: .leading, spacing: m.sp4) {
                                 Capsule().fill(colors.textBody.opacity(0.3)).frame(width: m(23), height: m(3))
@@ -424,7 +430,8 @@ private struct AppMiniature: View {
                         }
                     }
                     Spacer(minLength: 0)
-                }.padding(m.sp8).frame(maxWidth: .infinity).background(split ? Color(hex: 0xf8f8f8) : colors.canvas)
+                }.padding(m.sp8).frame(maxWidth: .infinity).background(
+                    split ? AppColors(dark: false, palette: colors.palette).raised : colors.canvas)
             }
         }.accessibilityHidden(true)
     }

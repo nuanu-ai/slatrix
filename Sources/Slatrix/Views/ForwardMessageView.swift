@@ -67,7 +67,7 @@ struct ForwardMessageView: View {
             } else {
                 if loading {
                     HStack(spacing: m.sp8) {
-                        ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
+                        DelayedProgress(interval: .sheetLoading)
                         Text("Loading…").font(m.font(.meta))
                     }
                 }
@@ -91,7 +91,7 @@ struct ForwardMessageView: View {
                 }
                 if let error { InlineErrorView(message: error).clipShape(RoundedRectangle(cornerRadius: m.radius)) }
                 if review == nil && !loading && error != nil {
-                    Button("Reload") { Task { await loadReview() } }.buttonStyle(.link).disabled(
+                    Button("Reload") { Task { await loadReview() } }.buttonStyle(.textLink).disabled(
                         sending || !current)
                 }
                 Picker("Destination", selection: $destinationID) {
@@ -104,8 +104,8 @@ struct ForwardMessageView: View {
                 HStack {
                     Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(sending)
                     Spacer()
-                    if sending { ProgressView().controlSize(.small) }
-                    Button(sending ? "Forwarding…" : "Forward", action: send).buttonStyle(.borderedProminent)
+                    if sending { DelayedProgress() }
+                    Button(sending ? "Forwarding…" : "Forward", action: send).buttonStyle(.primary)
                         .disabled(!canSend)
                 }
             }

@@ -179,7 +179,7 @@ struct QuickSwitcherView: View {
                 }.pickerStyle(.segmented).labelsHidden().frame(width: m(Self.modeWidth))
                 Spacer()
                 if searchBusy {
-                    ProgressView().controlSize(.small).accessibilityLabel("Searching").loadingInterval(.searchLoading)
+                    DelayedProgress().accessibilityLabel("Searching").loadingInterval(.searchLoading)
                 }
             }
             if mode == .messages {
@@ -209,7 +209,7 @@ struct QuickSwitcherView: View {
                     3
                 )
                 .padding(.horizontal, m.sp32)
-                Button("Open", action: activateSelected).buttonStyle(.borderedProminent).tint(colors.accent)
+                Button("Open", action: activateSelected).buttonStyle(.primary)
             }
         } else if let searchError, mode == .messages && count == 0 {
             EmptyStateView(symbol: "exclamationmark.circle", title: searchError) {
@@ -219,7 +219,7 @@ struct QuickSwitcherView: View {
             EmptyStateView(symbol: "text.magnifyingglass", title: "Search your messages")
         } else if count == 0 && searchBusy {
             VStack(spacing: m.sp12) {
-                ProgressView().controlSize(.small).loadingInterval(.searchLoading)
+                DelayedProgress(interval: .searchLoading)
                 Text("Searching…").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
             }
         } else if count == 0 {
@@ -253,7 +253,7 @@ struct QuickSwitcherView: View {
                         VStack(alignment: .leading, spacing: m.sp8) {
                             InlineErrorView(message: searchError)
                             Button("Try search again") { queueSearch() }
-                                .buttonStyle(.link).disabled(searchBusy || paging)
+                                .buttonStyle(.textLink).disabled(searchBusy || paging)
                         }.padding(.horizontal, m.sp12).padding(.top, m.sp12)
                     }
                     Text(
@@ -291,7 +291,7 @@ struct QuickSwitcherView: View {
             }
             .onChange(of: selectedResultID) { _, id in
                 guard let id else { return }
-                withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id, anchor: .center) }
+                withAnimation(Motion.content) { proxy.scrollTo(id, anchor: .center) }
             }
         }
     }
@@ -326,10 +326,10 @@ struct QuickSwitcherView: View {
             loadMore()
         } label: {
             HStack(spacing: m.sp8) {
-                if paging { ProgressView().controlSize(.small).loadingInterval(.searchLoading) }
+                if paging { DelayedProgress(interval: .searchLoading) }
                 Text(paging ? "Loading…" : "Load more").font(m.font(.meta, .medium))
             }
-        }.buttonStyle(.link).disabled(paging || searchBusy)
+        }.buttonStyle(.textLink).disabled(paging || searchBusy)
     }
 
     private var indexingTitle: String {
@@ -345,7 +345,7 @@ struct QuickSwitcherView: View {
         HStack(alignment: .center, spacing: m.sp12) {
             Text(indexingTitle).font(m.font(.caption, .medium))
             Spacer(minLength: 0)
-            if indexBusy { ProgressView().controlSize(.small).accessibilityLabel(indexingTitle) }
+            if indexBusy { DelayedProgress().accessibilityLabel(indexingTitle) }
             if matrix.searchIndexingState.isBusy {
                 Button(matrix.searchIndexingState == .stopping ? "Stopping…" : "Stop") {
                     [session = presentationSession] in
@@ -660,11 +660,11 @@ struct CreationSheet: View {
                             .foregroundStyle(colors.textSecondary)
                     } else if kind == .invite && roomID == nil {
                         Text("Open a conversation first.").font(m.font(.meta)).foregroundStyle(
-                            .orange)
+                            colors.warning)
                     }
                     if kind == .invite && invitePermission == false {
                         Text("You can’t invite people here.").font(m.font(.meta))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(colors.warning)
                     }
                 case .channel, .workspace:
                     field(
@@ -692,7 +692,7 @@ struct CreationSheet: View {
                             {
                                 Text("You can’t add channels to this workspace.").font(
                                     m.font(.meta)
-                                ).foregroundStyle(.orange)
+                                ).foregroundStyle(colors.warning)
                             }
                         }
                     }
@@ -708,14 +708,14 @@ struct CreationSheet: View {
             }
             HStack(spacing: m.sp12) {
                 if busy {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                 }
                 Spacer()
                 Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(busy)
                 Button(action: submit) {
                     Text(kind.action).font(m.font(.secondary, .semibold)).padding(.horizontal, m.sp12).padding(
                         .vertical, m.sp4)
-                }.buttonStyle(.borderedProminent).tint(colors.buttonPrimary)
+                }.buttonStyle(.primary)
                     .keyboardShortcut(kind == .directMessage || kind == .invite ? nil : KeyboardShortcut.defaultAction)
                     .disabled(!valid)
             }.padding(.top, m.sp24)

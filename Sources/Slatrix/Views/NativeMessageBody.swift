@@ -40,7 +40,7 @@ struct NativeMessageBody: View {
             if showsSpoilerControl && rendered.containsSpoilers {
                 Button(revealed ? "Hide spoilers" : "Show spoilers") {
                     revealedSpoilerKey = revealed ? nil : source
-                }.buttonStyle(.link).font(m.font(.caption)).accessibilityLabel(
+                }.buttonStyle(.textLink).font(m.font(.caption)).accessibilityLabel(
                     revealed ? "Hide message spoilers" : "Reveal message spoilers")
             }
         }

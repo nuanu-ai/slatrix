@@ -297,7 +297,7 @@ struct RootView: View {
             .overlay {
                 if logoutRecovery.isBusy {
                     VStack(spacing: m.sp12) {
-                        ProgressView()
+                        DelayedProgress()
                         Text("Signing out…").font(m.font(.secondary))
                     }
                     .padding(m.sp24).background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
@@ -582,8 +582,8 @@ struct RootView: View {
         VStack(spacing: 0) {
             titleBar
             if bootstrapping {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(colors.canvas)
-                    .loadingInterval(.appLoading)
+                DelayedProgress(interval: .appLoading).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(colors.canvas)
             } else if matrix.user == nil && !matrix.isPreview {
                 LoginView(matrix: matrix) {
                     matrix.enterPreview()
@@ -681,21 +681,21 @@ struct RootView: View {
             ConnectionBanner(matrix: matrix, onRetry: retryConnection)
             if pendingMatrixLink != nil {
                 HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                     Text("Opening…").font(m.font(.meta))
                     Spacer()
                     Button("Cancel") {
                         cancelMatrixLink()
                         openPendingNotification()
-                    }.buttonStyle(.link)
+                    }.buttonStyle(.textLink)
                 }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.linkLoading)
             }
             if previews.isLoading {
                 HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                     Text("Opening preview…").font(m.font(.meta))
                     Spacer()
-                    Button("Cancel") { previews.close() }.buttonStyle(.link)
+                    Button("Cancel") { previews.close() }.buttonStyle(.textLink)
                 }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.previewLoading)
             }
             if let request = pendingThreadOpen, isCurrentThreadOpen(request) {
@@ -722,11 +722,11 @@ struct RootView: View {
             }
             if let target = platform.pendingNotification, target.accountID == matrix.user?.id {
                 HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                     Text("Opening…").font(m.font(.meta))
                     Spacer()
                     Button("Cancel") { PlatformIntegration.shared.consumeNotification(target) }
-                        .buttonStyle(.link).font(m.font(.meta))
+                        .buttonStyle(.textLink).font(m.font(.meta))
                 }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.linkLoading)
             }
             if let localError {
@@ -734,13 +734,13 @@ struct RootView: View {
                     InlineErrorView(message: localError)
                     Button("Retry") {
                         if localAccess == nil { loadLocalData(retry: true) } else { saveLocalData() }
-                    }.buttonStyle(.link).padding(.trailing, m.sp16)
+                    }.buttonStyle(.textLink).padding(.trailing, m.sp16)
                 }.modifier(Toast(colors: colors))
             }
             if let error = attachmentDrafts.errorMessage {
                 HStack {
                     InlineErrorView(message: error)
-                    Button("Retry saving") { retryAttachmentDrafts() }.buttonStyle(.link).padding(
+                    Button("Retry saving") { retryAttachmentDrafts() }.buttonStyle(.textLink).padding(
                         .trailing, m.sp16)
                 }.modifier(Toast(colors: colors))
             }
@@ -893,9 +893,7 @@ struct RootView: View {
                 Button("Sign in") {
                     matrix.exitPreview()
                     resetUI()
-                }.buttonStyle(.row).font(m.font(.secondary, .semibold)).foregroundStyle(.white)
-                    .padding(.horizontal, m.sp12).frame(height: m.row)
-                    .background(colors.accent, in: RoundedRectangle(cornerRadius: m.radius))
+                }.buttonStyle(.primary).controlSize(.small)
             }
             if updater.updateAvailable {
                 Button("Update") { updater.checkForUpdates() }.buttonStyle(.row).font(m.font(.caption, .semibold))
@@ -951,7 +949,7 @@ struct RootView: View {
                     if let target = editTarget, target.surface == .conversation, target.message.roomID == room.id {
                         editComposer(target, room: room).padding(.horizontal, m.sp20).padding(.vertical, m.sp4)
                     } else if matrix.focusedEventID != nil {
-                        Button("Jump to recent") { selectRoom(room.id) }.buttonStyle(.link).font(m.font(.meta))
+                        Button("Jump to recent") { selectRoom(room.id) }.buttonStyle(.textLink).font(m.font(.meta))
                             .padding(m.sp20)
                     } else {
                         BindingScope({ draftBinding(room.id) }) { text in
@@ -1307,7 +1305,7 @@ struct RootView: View {
     @ViewBuilder private func attachmentDraftStatus(_ address: AttachmentDraftAddress) -> some View {
         if !attachmentDrafts.ready {
             HStack(spacing: m.sp8) {
-                ProgressView().controlSize(.small)
+                DelayedProgress()
                 Text("Restoring attachments…")
                 Spacer()
             }.font(m.font(.meta)).foregroundStyle(colors.textSecondary).padding(m.sp12).modifier(Toast(colors: colors))
@@ -1318,7 +1316,7 @@ struct RootView: View {
                 Image(systemName: "exclamationmark.triangle")
                 Text("Upload interrupted; it may have sent.")
                 Spacer()
-                Button("Send anyway") { attachmentDrafts.allowResend(address) }.buttonStyle(.link)
+                Button("Send anyway") { attachmentDrafts.allowResend(address) }.buttonStyle(.textLink)
             }.font(m.font(.meta)).padding(m.sp12).modifier(Toast(colors: colors))
         }
         ForEach(localReady ? attachmentDrafts.files[address, default: []].filter { $0.url == nil } : []) { file in
@@ -1329,7 +1327,7 @@ struct RootView: View {
                     Text(file.errorMessage ?? "Saved attachment unavailable")
                 }
                 Spacer()
-                Button("Remove") { attachmentDrafts.removeUnavailable(file, at: address) }.buttonStyle(.link)
+                Button("Remove") { attachmentDrafts.removeUnavailable(file, at: address) }.buttonStyle(.textLink)
             }.font(m.font(.meta)).padding(m.sp12).modifier(Toast(colors: colors))
         }
     }
@@ -1373,7 +1371,7 @@ struct RootView: View {
         }
     }
     private var syncingView: some View {
-        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).loadingInterval(.conversationLoading)
+        DelayedProgress(interval: .conversationLoading).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private var noRoomsView: some View {
         let workspace = matrix.workspaces.first { $0.id == workspaceID }
@@ -1401,7 +1399,7 @@ struct RootView: View {
                     .buttonStyle(.primary)
             }.disabled(busy || matrix.isPreview)
             // Reserved, so the buttons never move when the spinner comes and goes.
-            ProgressView().controlSize(.small).opacity(busy ? 1 : 0)
+            DelayedProgress().opacity(busy ? 1 : 0)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private func respondToInvitation(_ room: ChatRoom, accepting: Bool) {
@@ -1495,7 +1493,7 @@ struct RootView: View {
             if !replyOpening, let replyError {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                     Text(replyError).foregroundStyle(colors.textSecondary)
-                    Button("Retry") { prepareReply(target) }.buttonStyle(.link)
+                    Button("Retry") { prepareReply(target) }.buttonStyle(.textLink)
                 }.font(m.font(.meta))
             }
         }.padding(.horizontal, m.sp16).padding(.vertical, m.sp8).frame(maxWidth: .infinity, alignment: .leading)
@@ -2788,6 +2786,6 @@ private struct Toast: ViewModifier {
     func body(content: Content) -> some View {
         content.background(colors.raised).clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
             .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
-            .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+            .elevation(.e2, cornerRadius: m.radiusLarge)
     }
 }

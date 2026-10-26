@@ -28,15 +28,12 @@ struct PinnedMessagesView: View {
             if let error = service.errorMessage {
                 HStack {
                     InlineErrorView(message: error)
-                    Button("Retry") { Task { await service.retry() } }.buttonStyle(.link).padding(.trailing, m.sp20)
+                    Button("Retry") { Task { await service.retry() } }.buttonStyle(.textLink).padding(.trailing, m.sp20)
                 }
             }
             if service.messages.isEmpty {
                 if service.state == "loading" {
-                    VStack(spacing: m.sp12) {
-                        ProgressView().loadingInterval(.pinsLoading)
-                        Text("Loading…").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    SkeletonRows(interval: .pinsLoading)
                 } else if service.state != "error" {
                     EmptyStateView(
                         symbol: "pin", title: service.totalPinned == 0 ? "No pinned messages" : "Couldn’t load pins")
@@ -48,7 +45,7 @@ struct PinnedMessagesView: View {
                     LazyVStack(spacing: m.sp16) {
                         ForEach(service.messages) { message in card(message) }
                         if service.hasMore {
-                            Button("Show more") { service.loadMore() }.buttonStyle(.link).font(
+                            Button("Show more") { service.loadMore() }.buttonStyle(.textLink).font(
                                 m.font(.meta)
                             ).padding(m.sp16)
                         }

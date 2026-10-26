@@ -30,7 +30,7 @@ struct ReplyPreviewView: View {
                         Button("Retry") { [target = origin] in
                             guard let target else { return }
                             Task { await matrix.loadReplyPreview(for: target) }
-                        }.buttonStyle(.link).font(m.font(.caption)).disabled(origin == nil)
+                        }.buttonStyle(.textLink).font(m.font(.caption)).disabled(origin == nil)
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)

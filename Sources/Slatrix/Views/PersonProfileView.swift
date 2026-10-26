@@ -66,7 +66,7 @@ struct PersonProfileView: View {
             }
             if people.profileState == "loading" {
                 HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small).loadingInterval(.profileLoading)
+                    DelayedProgress(interval: .profileLoading)
                     Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
             } else if people.profileState == "error" || profile?.profileAvailable == false {
@@ -74,13 +74,13 @@ struct PersonProfileView: View {
                     Text(people.profileErrorMessage ?? "No public profile").font(m.font(.meta)).foregroundStyle(
                         colors.textSecondary
                     ).fixedSize(horizontal: false, vertical: true)
-                    Button("Retry") { loadProfile() }.buttonStyle(.link).font(m.font(.meta)).disabled(messaging)
+                    Button("Retry") { loadProfile() }.buttonStyle(.textLink).font(m.font(.meta)).disabled(messaging)
                 }
             }
             if let error { InlineErrorView(message: error).clipShape(RoundedRectangle(cornerRadius: m.radius)) }
             HStack(spacing: m.sp12) {
                 if messaging {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                 }
                 Spacer(minLength: 0)
                 Button("Close", action: close).keyboardShortcut(.cancelAction).disabled(messaging)
@@ -89,7 +89,7 @@ struct PersonProfileView: View {
                         m.font(.secondary, .semibold)
                     ).padding(.horizontal, m.sp8).padding(.vertical, m.sp4)
                 }
-                .buttonStyle(.borderedProminent).tint(colors.buttonPrimary)
+                .buttonStyle(.primary)
                 .disabled(
                     messaging || matrix.isPreview || ownProfile || (try? PeopleMapping.validatedID(userID)) == nil
                 )

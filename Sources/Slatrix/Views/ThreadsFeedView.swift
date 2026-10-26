@@ -29,12 +29,13 @@ struct ThreadsFeedView: View {
             if let error = feed.errorMessage {
                 HStack {
                     InlineErrorView(message: error)
-                    Button("Retry", action: refresh).buttonStyle(.link).font(m.font(.meta)).padding(.trailing, m.sp20)
+                    Button("Retry", action: refresh).buttonStyle(.textLink).font(m.font(.meta)).padding(
+                        .trailing, m.sp20)
                 }.disabled(feed.isLoading)
             }
             if items.isEmpty {
                 if feed.isLoading {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).loadingInterval(.threadsLoading)
+                    SkeletonRows(interval: .threadsLoading)
                 } else {
                     EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No threads yet") {
                         if feed.canCheckMore { Button("Look further") { Task { await matrix.checkMoreThreads() } } }
@@ -60,7 +61,7 @@ struct ThreadsFeedView: View {
                             Divider().overlay(colors.border).padding(.leading, m.sp24 + m.avatar + m.sp12)
                         }
                         if feed.isLoading {
-                            ProgressView().controlSize(.small).padding(m.sp20).accessibilityLabel(
+                            DelayedProgress().padding(m.sp20).accessibilityLabel(
                                 "Checking more threads"
                             ).loadingInterval(.threadsLoading)
                         }
@@ -137,7 +138,7 @@ struct ThreadsFeedView: View {
         VStack(alignment: .leading, spacing: m.sp12) {
             HStack(alignment: .center) {
                 if failedRoomCount > 0 {
-                    Button("\(failedRoomCount) couldn’t load") { coverageExpanded = true }.buttonStyle(.link).font(
+                    Button("\(failedRoomCount) couldn’t load") { coverageExpanded = true }.buttonStyle(.textLink).font(
                         m.font(.caption))
                 }
                 Spacer()
@@ -154,16 +155,16 @@ struct ThreadsFeedView: View {
                                 Text(state.name).font(m.font(.caption)).lineLimit(1)
                                 Spacer()
                                 if state.state == .loading {
-                                    ProgressView().controlSize(.mini)
+                                    DelayedProgress()
                                 } else if state.state == .error {
                                     Button("Retry") { Task { await matrix.retryThreads(roomID: state.id) } }
-                                        .buttonStyle(.link).font(m.font(.caption)).help(
+                                        .buttonStyle(.textLink).font(m.font(.caption)).help(
                                             state.errorMessage ?? "Retry this conversation")
                                 } else if state.state == .unloaded {
                                     Text("Not loaded").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                                 } else if state.hasMore {
                                     Button("Load older") { Task { await matrix.loadOlderThreads(roomID: state.id) } }
-                                        .buttonStyle(.link).font(m.font(.caption)).disabled(feed.isLoading)
+                                        .buttonStyle(.textLink).font(m.font(.caption)).disabled(feed.isLoading)
                                 } else {
                                     Text("Done").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                                 }

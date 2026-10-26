@@ -18,7 +18,7 @@ struct LogoutRecoveryView: View {
             Text("Signing out only on this Mac leaves the session active on the server.")
                 .font(m.font(.secondary)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: m.sp12) {
-                if controller.isBusy { ProgressView().controlSize(.small) }
+                if controller.isBusy { DelayedProgress() }
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Try again", action: onRetry)

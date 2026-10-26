@@ -71,20 +71,20 @@ struct RoomDetailsEditor: View {
                 VStack(alignment: .leading, spacing: m.sp24) {
                     if loading {
                         HStack(spacing: m.sp12) {
-                            ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
+                            DelayedProgress(interval: .sheetLoading)
                             Text("Loading…").font(m.font(.secondary)).foregroundStyle(
                                 colors.textSecondary)
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, m.sp20)
                     } else if let snapshot, current {
                         detailField("Name", editable: snapshot.canEditName) {
                             TextField(snapshot.isSpace ? "Workspace name" : "Conversation name", text: $name)
-                                .textFieldStyle(.roundedBorder).font(m.font(.body)).focused(
+                                .textFieldStyle(.field).font(m.font(.body)).focused(
                                     $focusedField, equals: .name
                                 )
                                 .disabled(!snapshot.canEditName || saving)
                             if blankName {
                                 Text("Enter a name.").font(m.font(.meta)).foregroundStyle(
-                                    Color(nsColor: .systemRed))
+                                    colors.destructive)
                             }
                         }
                         detailField("Description", editable: snapshot.canEditTopic) {
@@ -103,10 +103,10 @@ struct RoomDetailsEditor: View {
                     }
                     if let error {
                         VStack(alignment: .leading, spacing: m.sp12) {
-                            Text(error).font(m.font(.meta)).foregroundStyle(Color(nsColor: .systemRed))
+                            Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive)
                                 .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                             if snapshot == nil && current && !loading {
-                                Button("Try again") { Task { await load() } }.buttonStyle(.link)
+                                Button("Try again") { Task { await load() } }.buttonStyle(.textLink)
                             }
                         }.accessibilityElement(children: .contain)
                     }
@@ -115,13 +115,13 @@ struct RoomDetailsEditor: View {
             Divider().overlay(colors.border)
             HStack(spacing: m.sp12) {
                 if saving {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                     Text("Saving…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
                 Spacer()
                 Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(saving)
                 Button(error != nil && snapshot != nil ? "Try again" : "Save", action: save)
-                    .buttonStyle(.borderedProminent).tint(colors.accent).disabled(!canSave)
+                    .buttonStyle(.primary).disabled(!canSave)
                     .keyboardShortcut(.return, modifiers: .command).help("Save changes (⌘Return)")
             }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
         }

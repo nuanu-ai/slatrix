@@ -44,8 +44,7 @@ struct PeopleDirectoryView: View {
                         .onKeyPress(.downArrow) { move(1) }
                         .accessibilityLabel("Search people")
                     if people.searchState == "loading" {
-                        ProgressView().controlSize(.small).accessibilityLabel("Searching people").loadingInterval(
-                            .peopleLoading)
+                        DelayedProgress(interval: .peopleLoading).accessibilityLabel("Searching people")
                     }
                     if !query.isEmpty {
                         IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body) {
@@ -79,10 +78,7 @@ struct PeopleDirectoryView: View {
         if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             EmptyStateView(symbol: "person.2", title: matrix.isPreview ? "Sign in to find people" : "Search for people")
         } else if (people.searchState == "loading" || activeRequest != request) && results.isEmpty {
-            VStack(spacing: m.sp12) {
-                ProgressView().loadingInterval(.peopleLoading)
-                Text("Searching people…").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            SkeletonRows(interval: .peopleLoading)
         } else if people.searchState == "error" && results.isEmpty {
             EmptyStateView(
                 symbol: "exclamationmark.circle", title: people.searchErrorMessage ?? "Couldn’t search. Try again."
@@ -125,7 +121,7 @@ struct PeopleDirectoryView: View {
                     }.padding(.bottom, m.sp16)
                 }
                 .onChange(of: selection) { _, id in
-                    if let id { withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id, anchor: .center) } }
+                    if let id { withAnimation(Motion.content) { proxy.scrollTo(id, anchor: .center) } }
                 }
             }
         }
@@ -242,7 +238,7 @@ struct PersonRecipientPicker: View {
                         }
                         .accessibilityLabel("Search and select a recipient")
                     if people.searchState == "loading" {
-                        ProgressView().controlSize(.small).loadingInterval(.peopleLoading)
+                        DelayedProgress(interval: .peopleLoading)
                     }
                 }.padding(m.sp12).background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius)).overlay(
                     RoundedRectangle(cornerRadius: m.radius).stroke(colors.textSecondary.opacity(0.5)))
@@ -250,7 +246,7 @@ struct PersonRecipientPicker: View {
                     if people.searchState == "error" {
                         HStack(spacing: m.sp8) {
                             Text(people.searchErrorMessage ?? "Couldn’t search.")
-                            Button("Retry") { retryRevision += 1 }.buttonStyle(.link)
+                            Button("Retry") { retryRevision += 1 }.buttonStyle(.textLink)
                         }.font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                     }
                     if !results.isEmpty {

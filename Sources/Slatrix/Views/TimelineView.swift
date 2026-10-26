@@ -74,11 +74,11 @@ struct TimelineView: View {
                     Label("Jump to recent", systemImage: "arrow.down").font(m.font(.meta, .semibold))
                         .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
                         .background(colors.raised, in: Capsule()).overlay(Capsule().stroke(colors.border))
-                        .shadow(color: .black.opacity(0.16), radius: 8, y: 3)
+                        .elevation(.e2, cornerRadius: m.sp20)
                 }.buttonStyle(.row).padding(m.sp16).transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.12), value: jumpVisible)
+        .animation(Motion.overlay, value: jumpVisible)
         .background(colors.canvas)
         // Every message redraws the timeline; it fills what it is given, so that never lays out the window.
         .layoutIsolated()
@@ -765,6 +765,8 @@ struct AttachmentView: View {
     let message: ChatMessage
     let attachment: MessageAttachment
     @EnvironmentObject private var previews: AttachmentPreviewController
+    @EnvironmentObject private var appearance: AppearanceStore
+    private var colors: AppColors { appearance.colors }
     @State private var image: NSImage?
     @State private var busy = false
     @State private var error: String?
@@ -795,7 +797,7 @@ struct AttachmentView: View {
             if isImage {
                 let box = imageBox
                 Button(action: preview) {
-                    RoundedRectangle(cornerRadius: m.radiusLarge).fill(Color.primary.opacity(0.04))
+                    RoundedRectangle(cornerRadius: m.radiusLarge).fill(colors.sunken)
                         .overlay {
                             if let image { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill) }
                         }
@@ -819,14 +821,14 @@ struct AttachmentView: View {
                 HStack(spacing: m.sp16) {
                     Button(action: preview) {
                         HStack(spacing: m.sp8) {
-                            if previewBusy { ProgressView().controlSize(.mini) } else { Image(systemName: "eye") }
+                            if previewBusy { DelayedProgress() } else { Image(systemName: "eye") }
                             Text(previewBusy ? "Opening…" : "Preview")
                         }
                     }.disabled(!canPreview).help("Open in Quick Look")
                     Button(action: download) {
                         HStack(spacing: m.sp8) {
                             if busy {
-                                ProgressView().controlSize(.mini)
+                                DelayedProgress()
                             } else {
                                 Image(systemName: "arrow.down.to.line")
                             }
@@ -835,17 +837,17 @@ struct AttachmentView: View {
                     }.disabled(busy || previewBusy || matrix.isPreview).help("Download")
                 }.buttonStyle(.row).font(m.font(.meta, .medium))
             }.padding(m.sp12).frame(maxWidth: m(Self.fileCardWidth)).background(
-                Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: m.radiusLarge)
+                colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge)
             )
-            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(Color.primary.opacity(0.14)))
+            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
             if let previewError {
                 HStack(alignment: .top, spacing: m.sp8) {
-                    Text(previewError).font(m.font(.caption)).foregroundStyle(.orange)
-                    Button("Retry", action: preview).buttonStyle(.link).font(m.font(.caption)).disabled(
+                    Text(previewError).font(m.font(.caption)).foregroundStyle(colors.warning)
+                    Button("Retry", action: preview).buttonStyle(.textLink).font(m.font(.caption)).disabled(
                         !canPreview)
                 }
             }
-            if let error { Text(error).font(m.font(.caption)).foregroundStyle(.orange) }
+            if let error { Text(error).font(m.font(.caption)).foregroundStyle(colors.warning) }
         }
         .task(id: attachmentContext) {
             image = nil

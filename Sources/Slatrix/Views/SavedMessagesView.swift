@@ -97,7 +97,7 @@ private struct SavedMessageCard: View {
                 }
             } else if loading {
                 HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                     Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }.padding(.vertical, m.sp12)
             } else {
@@ -105,7 +105,7 @@ private struct SavedMessageCard: View {
                     Image(systemName: "exclamationmark.bubble").foregroundStyle(colors.textSecondary)
                     VStack(alignment: .leading, spacing: m.sp4) {
                         Text(error ?? "Preview unavailable").font(m.font(.secondary, .medium))
-                        Button("Retry") { retry = UUID() }.buttonStyle(.link).font(m.font(.caption))
+                        Button("Retry") { retry = UUID() }.buttonStyle(.textLink).font(m.font(.caption))
                     }
                 }.padding(.vertical, m.sp8)
             }

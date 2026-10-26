@@ -13,7 +13,7 @@ struct EmptyStateView<Action: View>: View {
             Image(systemName: symbol).font(m.font(.header)).foregroundStyle(.secondary)
             Text(title).font(m.font(.body, .semibold)).multilineTextAlignment(.center).frame(
                 maxWidth: m(Self.textWidth))
-            action().buttonStyle(.link).font(m.font(.secondary))
+            action().buttonStyle(.textLink).font(m.font(.secondary))
         }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(m.sp32)
     }
 }
@@ -24,15 +24,17 @@ extension EmptyStateView where Action == EmptyView {
 
 struct InlineErrorView: View {
     @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+    private var colors: AppColors { appearance.colors }
     let message: String
     var dismiss: (() -> Void)? = nil
     var body: some View {
         HStack(spacing: m.sp8) {
-            Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
+            Image(systemName: "exclamationmark.circle").foregroundStyle(colors.warning)
             Text(message).font(m.font(.meta)).textSelection(.enabled).frame(
                 maxWidth: .infinity, alignment: .leading)
             if let dismiss { IconButton(symbol: "xmark", label: "Dismiss error", role: .caption, action: dismiss) }
-        }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8).background(Color.orange.opacity(0.08))
+        }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8).background(colors.warning.opacity(0.08))
             .accessibilityElement(
                 children: .combine)
     }

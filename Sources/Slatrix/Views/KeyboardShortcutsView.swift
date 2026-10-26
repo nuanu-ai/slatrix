@@ -66,7 +66,7 @@ struct KeyboardShortcutsView: View {
             HStack {
                 Spacer()
                 Button("Close", action: onClose).keyboardShortcut(.cancelAction).focused($closeFocused)
-                    .buttonStyle(.bordered).controlSize(.regular)
+                    .buttonStyle(.secondary).controlSize(.regular)
             }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
         }
         .sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)

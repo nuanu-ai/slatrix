@@ -90,7 +90,7 @@ struct MatrixRoomJoinView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     }
                     if let error {
-                        Text(error).font(m.font(.meta)).foregroundStyle(Color(nsColor: .systemRed))
+                        Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive)
                             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }
                 }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading)
@@ -98,7 +98,7 @@ struct MatrixRoomJoinView: View {
             Divider().overlay(colors.border)
             HStack(spacing: m.sp12) {
                 if joining {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                     Text("Joining…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
                 Spacer()
@@ -110,7 +110,7 @@ struct MatrixRoomJoinView: View {
                         error == nil ? "Join" : "Try again",
                         action: join
                     )
-                    .buttonStyle(.borderedProminent).tint(colors.accent).disabled(!current || joining)
+                    .buttonStyle(.primary).disabled(!current || joining)
                 }
             }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
         }

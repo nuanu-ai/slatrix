@@ -113,7 +113,7 @@ struct RoomInfoView: View {
                     if !matrix.isPreview, currentRoom.membership == "join" {
                         Button(action: onEditDetails) {
                             Label("Edit details", systemImage: "pencil").font(m.font(.meta))
-                        }.buttonStyle(.link).disabled(busy)
+                        }.buttonStyle(.textLink).disabled(busy)
                     }
                 }
                 section("Preferences") {
@@ -144,7 +144,7 @@ struct RoomInfoView: View {
                         )
                         .font(m.font(.meta, .medium))
                         if currentRoom.isEncrypted {
-                            Button("Unlock history…", action: onRecovery).buttonStyle(.link).font(
+                            Button("Unlock history…", action: onRecovery).buttonStyle(.textLink).font(
                                 m.font(.meta)
                             ).disabled(matrix.isPreview)
                         }
@@ -214,7 +214,7 @@ struct RoomInfoView: View {
                             )
                             .font(m.font(.meta))
                         }
-                        .buttonStyle(.link)
+                        .buttonStyle(.textLink)
                     }
                 }
                 Divider().overlay(colors.border)
@@ -227,19 +227,15 @@ struct RoomInfoView: View {
                 } label: {
                     Label("Leave conversation", systemImage: "rectangle.portrait.and.arrow.right").font(
                         m.font(.secondary))
-                }.buttonStyle(.row).foregroundStyle(Color(nsColor: .systemRed)).disabled(busy || matrix.isPreview)
-                if busy { ProgressView().controlSize(.small).accessibilityLabel("Updating conversation") }
+                }.buttonStyle(.row).foregroundStyle(colors.destructive).disabled(busy || matrix.isPreview)
+                if busy { DelayedProgress().accessibilityLabel("Updating conversation") }
             }.padding(.horizontal, m.sp20).padding(.bottom, m.sp24)
         }
     }
 
     private var membersContent: some View {
         VStack(alignment: .leading, spacing: m.sp12) {
-            HStack(spacing: m.sp8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
-                TextField("Find a member", text: $memberSearch).textFieldStyle(.plain).font(m.font(.meta))
-            }.padding(m.sp8).background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius)).padding(
-                .horizontal, m.sp16)
+            SearchField(prompt: "Find a member", text: $memberSearch).padding(.horizontal, m.sp16)
             Button(action: onInvite) {
                 HStack(spacing: m.sp12) {
                     Image(systemName: "person.badge.plus").font(m.font(.body)).frame(
@@ -252,7 +248,7 @@ struct RoomInfoView: View {
             }.buttonStyle(.row).padding(.horizontal, m.sp16).disabled(
                 busy || matrix.isPreview || currentRoom.membership != "join" || currentRoom.canInvite == false)
             if loadingMembers {
-                ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(.top, m.sp16)
+                DelayedProgress().frame(maxWidth: .infinity).padding(.top, m.sp16)
             } else if members.isEmpty {
                 VStack(spacing: m.sp8) {
                     Text(memberSearch.isEmpty ? "No members to show" : "No matches").font(
@@ -265,7 +261,7 @@ struct RoomInfoView: View {
                                 await matrix.loadMembers()
                                 loadingMembers = false
                             }
-                        }.buttonStyle(.link).font(m.font(.meta))
+                        }.buttonStyle(.textLink).font(m.font(.meta))
                     }
                 }.padding(m.sp16).frame(maxWidth: .infinity)
             }
@@ -373,13 +369,13 @@ struct EncryptionRecoveryView: View {
             }
             HStack(spacing: m.sp12) {
                 if busy {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                     Text("Unlocking…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
                 Spacer()
                 if !recovered { Button("Cancel") { close() }.disabled(busy).keyboardShortcut(.cancelAction) }
                 Button(recovered ? "Done" : "Unlock") { if recovered { close() } else { recover() } }
-                    .buttonStyle(.borderedProminent).tint(colors.buttonPrimary).keyboardShortcut(.defaultAction)
+                    .buttonStyle(.primary).keyboardShortcut(.defaultAction)
                     .disabled(
                         busy
                             || (!recovered
