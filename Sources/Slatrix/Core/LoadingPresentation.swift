@@ -5,7 +5,8 @@ enum LoadingPresentation {
     /// header changes and the rows follow.
     static let handoff = Duration.milliseconds(100)
 
-    static func showsIndicator(waited: Duration, hasContent: Bool) -> Bool {
-        !hasContent && waited >= indicatorDelay
+    /// Offline, a network wait lasts until the connection returns; the connection notice says so instead.
+    static func showsIndicator(waited: Duration, hasContent: Bool, offline: Bool = false) -> Bool {
+        !hasContent && !offline && waited >= indicatorDelay
     }
 }

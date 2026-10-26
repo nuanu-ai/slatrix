@@ -479,6 +479,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var status: ConnectionStatus = .signedOut
     var connectionDetail = "Opening your workspace…"
     private(set) var connectionErrorMessage: String?
+    private(set) var connectionState = MatrixConnectionState.idle
     private(set) var isRetryingConnection = false
     private(set) var canRetryConnection = false
     private let connectionRecovery = ConnectionRecovery()
@@ -944,6 +945,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
             self.connectionDetail = feedback.detail
             self.connectionErrorMessage = feedback.errorMessage
+            self.connectionState = feedback.state
             self.isRetryingConnection = feedback.isRetrying
             self.canRetryConnection = feedback.canRetry
             switch feedback.state {
@@ -1049,6 +1051,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         profileLoadTask?.cancel()
         profileLoadTask = nil
         connectionErrorMessage = nil
+        connectionState = .idle
         isRetryingConnection = false
         canRetryConnection = false
         readDelivery.reset()

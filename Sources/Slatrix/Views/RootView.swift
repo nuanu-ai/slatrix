@@ -1486,7 +1486,9 @@ struct RootView: View {
                     cancelReply()
                 }
             }.overlay(alignment: .trailing) {
-                DelayedProgress(active: replyOpening, interval: .replyLoading).padding(.trailing, m.iconButton + m.sp8)
+                DelayedProgress(
+                    active: replyOpening, offline: matrix.connectionState == .offline, interval: .replyLoading
+                ).padding(.trailing, m.iconButton + m.sp8)
             }
             if !replyOpening, let replyError {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
