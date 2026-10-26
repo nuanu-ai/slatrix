@@ -4,8 +4,27 @@ import Testing
 
 @testable import Slatrix
 
+/// Records the SDK's switch for every room's send queue.
+private final class SendQueueClient: Client, @unchecked Sendable {
+    let enabled = Recorder<Bool>()
+    init() { super.init(noHandle: .init()) }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func enableAllSendQueues(enable: Bool) async { enabled.append(enable) }
+}
+
 @MainActor
 struct ConnectionRecoveryTests {
+    @Test("Messages the SDK paused while offline go out when the connection returns, without a click")
+    func reconnectResumesSending() async throws {
+        let recovery = ConnectionRecovery()
+        let service = FakeSyncService(state: .offline)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        service.emit(.running)
+        #expect(await eventually { client.enabled.all == [true] })
+        await recovery.stop()
+    }
+
     @Test(
         "A sync error restarts sync without the user pressing Retry", arguments: [SyncServiceState.error, .terminated])
     func restartsAfterFailure(state: SyncServiceState) async throws {
