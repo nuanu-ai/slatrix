@@ -91,17 +91,14 @@ extension RoomListRefresherTests {
 }
 
 extension RoomListRefresherTests {
-    @Test("A slow SDK call never holds the main actor")
-    func slowCallLeavesMainActorFree() async {
+    @Test("SDK room calls run off the main thread")
+    func roomCallsLeaveMainThreadFree() async {
         let client = FakeClient(rooms: [FakeRoom(roomInfo(id: "!room:example.org"))])
-        client.roomsGate.arm()
         let refresher = RoomListRefresher()
         refresher.attach(client)
         refresher.request()
-        // A main actor stuck in the call only gets here after the call gives up waiting.
-        #expect(await eventually { client.roomsGate.isWaiting })
-        client.roomsGate.release()
         #expect(await eventually { refresher.rooms.count == 1 })
+        #expect(!client.roomsOnMainThread.all.contains(true))
     }
 }
 
