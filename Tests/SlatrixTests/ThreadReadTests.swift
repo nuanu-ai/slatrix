@@ -82,17 +82,25 @@ struct ThreadReadTests {
         ThreadReadReceiptTarget(identity: try #require(f.service.threadReadIdentity), eventID: "$reply")
     }
 
-    @Test("Opening a thread makes it readable only once its first page has loaded")
+    @Test("Opening a thread shows what is cached at once, and makes it readable only once its first page has loaded")
     func readyAfterInitialPage() async throws {
         let f = fixture()
         let root = f.message(f.rootID)
         f.thread.paginationGate.arm()
-        let loading = Task { try await f.service.loadThread(root) }
-        #expect(await eventually { f.thread.paginationGate.isWaiting })
+        defer { f.thread.paginationGate.release() }
+        let opened = Recorder<Bool>()
+        // Offline, the first page waits for the network indefinitely.
+        let loading = Task {
+            try await f.service.loadThread(root)
+            opened.append(true)
+        }
+        #expect(await eventually { !opened.all.isEmpty })
+        #expect(f.thread.paginationGate.isWaiting)
         #expect(f.service.threadMessages == [root] && f.service.threadReadIdentity == nil)
         f.thread.paginationGate.release()
         try await loading.value
-        #expect(f.service.threadReadIdentity != nil && f.service.hasMoreThreadHistory)
+        #expect(await eventually { f.service.threadReadIdentity != nil })
+        #expect(f.service.hasMoreThreadHistory)
         #expect(f.room.configurations.all.map(\.focus) == [.thread(rootEventId: f.rootID)])
     }
 
@@ -101,10 +109,11 @@ struct ThreadReadTests {
         let f = fixture()
         let root = f.message(f.rootID)
         f.thread.failsPagination = true
-        await #expect(throws: MatrixServiceError.self) { try await f.service.loadThread(root) }
+        try await f.service.loadThread(root)
+        await #expect(throws: MatrixServiceError.self) { try await f.service.loadMoreThread(rootID: f.rootID) }
         #expect(f.service.threadReadIdentity == nil && f.service.threadMessages == [root])
         f.thread.failsPagination = false
-        try await f.service.loadThread(root)
+        _ = try await f.service.loadMoreThread(rootID: f.rootID)
         #expect(f.service.threadReadIdentity != nil)
         #expect(f.thread.writes.all.isEmpty && f.main.writes.all.isEmpty)
     }
