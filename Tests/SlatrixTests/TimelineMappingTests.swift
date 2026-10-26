@@ -58,4 +58,68 @@ struct TimelineMappingTests {
                 event(.eventId(eventId: "$image"), remote: true, kind: kind), roomID: "!r:example.org", ownUserID: nil))
         #expect(message.attachment?.width == 1_600 && message.attachment?.height == 900)
     }
+
+    private func mapped(_ type: MessageType, body: String) throws -> MessageAttachment {
+        let kind = MsgLikeKind.message(
+            content: MessageContent(msgType: type, body: body, isEdited: false, mentions: nil))
+        let message = try #require(
+            MatrixMapping.message(
+                event(.eventId(eventId: "$media"), remote: true, kind: kind), roomID: "!r:example.org", ownUserID: nil))
+        return try #require(message.attachment)
+    }
+
+    @Test(
+        "A GIF animates inline and a still image does not, whether or not the sender said so",
+        arguments: [
+            ("image/gif", nil, true), ("image/gif", false, false), ("image/png", true, true),
+            ("image/jpeg", nil, false),
+        ] as [(String, Bool?, Bool)])
+    func animatedImage(mime: String, declared: Bool?, animates: Bool) throws {
+        let image = ImageMessageContent(
+            filename: "party", caption: nil, formattedCaption: nil, source: try encryptedSource(),
+            info: ImageInfo(
+                height: 200, width: 200, mimetype: mime, size: 1_000, thumbnailInfo: nil, thumbnailSource: nil,
+                blurhash: nil, isAnimated: declared))
+        #expect(try mapped(.image(content: image), body: "party").animated == animates)
+    }
+
+    @Test("A video carries its duration and size for its poster")
+    func videoDuration() throws {
+        let video = VideoMessageContent(
+            filename: "demo.mp4", caption: nil, formattedCaption: nil, source: try encryptedSource(),
+            info: VideoInfo(
+                duration: 83, height: 720, width: 1_280, mimetype: "video/mp4", size: 4_000_000, thumbnailInfo: nil,
+                thumbnailSource: nil, blurhash: nil))
+        let attachment = try mapped(.video(content: video), body: "demo.mp4")
+        #expect(attachment.duration == 83 && attachment.width == 1_280 && attachment.height == 720)
+    }
+
+    @Test(
+        "A file is classified by its extension first, then by its MIME type",
+        arguments: [
+            ("Q3 report.pdf", "application/octet-stream", FileKind.pdf),
+            ("scan", "application/pdf", .pdf),
+            ("notes.docx", nil, .document),
+            ("readme.txt", "text/plain", .document),
+            ("budget.xlsx", nil, .spreadsheet),
+            ("export.csv", "text/plain", .spreadsheet),
+            ("pitch.key", nil, .presentation),
+            ("deck", "application/vnd.openxmlformats-officedocument.presentationml.presentation", .presentation),
+            ("assets.zip", "application/zip", .archive),
+            ("backup.tar.gz", nil, .archive),
+            ("main.swift", "text/plain", .code),
+            ("config.json", "application/json", .code),
+            ("memo.m4a", nil, .audio),
+            ("voice", "audio/ogg", .audio),
+            ("clip.mov", nil, .video),
+            ("photo.heic", nil, .image),
+            ("data.bin", "application/octet-stream", .generic),
+            ("unknown", nil, .generic),
+        ] as [(String, String?, FileKind)])
+    func fileKind(name: String, mime: String?, kind: FileKind) throws {
+        let file = FileMessageContent(
+            filename: name, caption: nil, formattedCaption: nil, source: try encryptedSource(),
+            info: FileInfo(mimetype: mime, size: 2_000_000, thumbnailInfo: nil, thumbnailSource: nil))
+        #expect(try mapped(.file(content: file), body: name).fileKind == kind)
+    }
 }

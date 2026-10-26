@@ -30,6 +30,31 @@ struct AttachmentPreviewTests {
         #expect(first.url == second.url && client.downloads == 1)
     }
 
+    @Test("A video without a poster gets a plain box instead of fetching its own file as a thumbnail")
+    func videoWithoutPoster() async throws {
+        client.thumbnail = Data([1, 2, 3])
+        let video = VideoMessageContent(
+            filename: "demo.mp4", caption: nil, formattedCaption: nil, source: try encryptedSource(),
+            info: VideoInfo(
+                duration: 12, height: 720, width: 1_280, mimetype: "video/mp4", size: 1_000, thumbnailInfo: nil,
+                thumbnailSource: nil, blurhash: nil))
+        let event = EventTimelineItem(
+            isRemote: true, eventOrTransactionId: .eventId(eventId: "$video"), sender: "@owner:example.org",
+            senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil, isOwn: true, isEditable: true,
+            content: .msgLike(
+                content: MsgLikeContent(
+                    kind: .message(
+                        content: MessageContent(
+                            msgType: .video(content: video), body: "demo.mp4", isEdited: false, mentions: nil)),
+                    inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
+            reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000, localSendState: nil, editSendState: nil,
+            redactionSendState: nil, localCreatedAt: nil, readReceipts: [:], origin: nil, canBeRepliedTo: true,
+            lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
+        show(event)
+        let message = try #require(service.messages.first)
+        await #expect(throws: MatrixServiceError.self) { _ = try await self.service.thumbnailData(message) }
+    }
+
     @Test(
         "A preview ends when its message is deleted or its file is replaced, even under the same URL",
         arguments: [nil, "AQAAAAAAAAAAAAAAAAAAAA"])

@@ -34,7 +34,6 @@ struct TimelineHostedTests {
         let service: MatrixService
         let room: ChatRoom
         let appearance: AppearanceStore
-        let previews: AttachmentPreviewController
         let atBottom: (Bool) -> Void
         var zoom: CGFloat = 1
         var body: some View {
@@ -43,7 +42,7 @@ struct TimelineHostedTests {
                 onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onBottomVisibilityChange: atBottom
             )
             .id(room.id)
-            .environmentObject(appearance).environmentObject(previews).environment(\.metrics, Metrics(zoom: zoom))
+            .environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom))
         }
     }
 
@@ -51,33 +50,34 @@ struct TimelineHostedTests {
         let service = MatrixService()
         let timeline = HistoryTimeline(noHandle: .init())
         let appearance = AppearanceStore()
-        let previews = AttachmentPreviewController()
+        let client: FakeClient
         let window: NSWindow
         let hosting: NSHostingView<Fixture>
         var bottomReports: [Bool] = []
 
-        init(messages: [ChatMessage], room: ChatRoom = TimelineHostedTests.room) {
+        init(messages: [ChatMessage], room: ChatRoom = TimelineHostedTests.room, height: CGFloat = 400) {
+            client = FakeClient(rooms: [FakeRoom(roomInfo(id: room.id))])
             service.user = ChatUser(id: TimelineHostedTests.user, name: "Reader")
             service.rooms = [room]
             service.selectedRoomID = room.id
             service.configureMessageActionsForChecks(
-                client: FakeClient(rooms: [FakeRoom(roomInfo(id: room.id))]), main: timeline, thread: nil,
+                client: client, main: timeline, thread: nil,
                 rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
             service.messages = messages
             window = NSWindow(
-                contentRect: NSRect(x: -20_000, y: -20_000, width: 620, height: 400), styleMask: .borderless,
+                contentRect: NSRect(x: -20_000, y: -20_000, width: 620, height: height), styleMask: .borderless,
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             hosting = NSHostingView(
                 rootView: Fixture(
-                    service: service, room: room, appearance: appearance, previews: previews, atBottom: { _ in }))
+                    service: service, room: room, appearance: appearance, atBottom: { _ in }))
             hosting.rootView = fixture(room)
             window.contentView = hosting
         }
 
         func fixture(_ room: ChatRoom) -> Fixture {
             Fixture(
-                service: service, room: room, appearance: appearance, previews: previews,
+                service: service, room: room, appearance: appearance,
                 atBottom: { [weak self] in self?.bottomReports.append($0) })
         }
 
@@ -198,6 +198,43 @@ struct TimelineHostedTests {
         await settle(harness) { harness.rowCount >= rows + 5 }
         #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
         #expect(harness.distanceFromBottom > 900)
+    }
+
+    @Test("An image's row keeps the height it reserved when the image arrives, so nothing around it moves")
+    func imageArrivalKeepsLayout() async throws {
+        let harness = Harness(messages: [], height: 800)
+        defer { harness.close() }
+        let image = try #require(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 160, pixelsHigh: 90, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        harness.client.thumbnail = try #require(image.representation(using: .png, properties: [:]))
+        harness.client.thumbnails.arm()
+        harness.service.projectMediaCaptionForChecks(
+            [
+                FakeTimelineItem(textEvent("$before", body: "Before the photo")),
+                FakeTimelineItem(try imageEvent("$photo", width: 1_600, height: 900)),
+                FakeTimelineItem(textEvent("$after", body: "After the photo")),
+            ], roomID: Self.room.id, inThread: false)
+        await settle(harness) { harness.top(of: "After the photo") != nil && harness.client.thumbnails.isWaiting }
+        let before = try #require(harness.top(of: "Before the photo"))
+        let after = try #require(harness.top(of: "After the photo"))
+        harness.client.thumbnails.release()
+        #expect(
+            await eventually {
+                harness.layout()
+                return Harness.views(in: harness.hosting).contains { ($0 as? NSImageView)?.image != nil }
+            })
+        harness.layout()
+        // The row's content still measures the height the table gave it before the image came.
+        let row = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }.first { cell in
+                guard cell.window != nil, case .message(let entry) = cell.entry?.kind else { return false }
+                return entry.message.eventID == "$photo"
+            })
+        #expect(ceil(row.height(width: row.frame.width)) == row.frame.height)
+        #expect(try #require(harness.top(of: "Before the photo")) == before)
+        #expect(try #require(harness.top(of: "After the photo")) == after)
     }
 
     @Test("Older history arrives without moving a pixel of what you are reading")

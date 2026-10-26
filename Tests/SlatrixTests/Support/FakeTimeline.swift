@@ -48,6 +48,27 @@ func fileEvent(_ id: String, source: MediaSource?, sender: String = "@owner:exam
         lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
 }
 
+func imageEvent(_ id: String, width: UInt64?, height: UInt64?, mime: String = "image/png") throws -> EventTimelineItem {
+    let image = ImageMessageContent(
+        filename: "photo.png", caption: nil, formattedCaption: nil,
+        source: try MediaSource.fromUrl(url: "mxc://example.org/\(id.dropFirst())"),
+        info: ImageInfo(
+            height: height, width: width, mimetype: mime, size: 1_000, thumbnailInfo: nil, thumbnailSource: nil,
+            blurhash: nil, isAnimated: nil))
+    return EventTimelineItem(
+        isRemote: true, eventOrTransactionId: .eventId(eventId: id), sender: "@alice:example.org",
+        senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil, isOwn: false, isEditable: false,
+        content: .msgLike(
+            content: MsgLikeContent(
+                kind: .message(
+                    content: MessageContent(
+                        msgType: .image(content: image), body: "photo.png", isEdited: false, mentions: nil)),
+                inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
+        reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000, localSendState: nil, editSendState: nil,
+        redactionSendState: nil, localCreatedAt: nil, readReceipts: [:], origin: nil, canBeRepliedTo: true,
+        lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
+}
+
 func textEvent(
     _ id: String, body: String, sender: String = "@alice:example.org", edited: Bool = false, redacted: Bool = false
 ) -> EventTimelineItem {
