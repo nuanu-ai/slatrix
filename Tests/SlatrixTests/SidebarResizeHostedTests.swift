@@ -9,7 +9,7 @@ import Testing
 @Suite(
     .serialized, .tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
 struct SidebarResizeHostedTests {
-    @Test("Clicking keeps the divider neutral and dragging widens the real sidebar")
+    @Test("Clicking keeps the divider neutral, with no focus ring, and dragging widens the real sidebar")
     func clickAndDrag() async throws {
         _ = NSApplication.shared
         let matrix = MatrixService()
@@ -50,6 +50,9 @@ struct SidebarResizeHostedTests {
         }
         #expect(focusChanged)
         #expect(try image(hosting, in: before) == neutralDivider)
+        // The divider takes the keyboard without the system focus ring, which would draw a blue strip around it.
+        #expect(window.firstResponder === handle)
+        #expect(handle.focusRingType == .none)
 
         window.sendEvent(
             try #require(mouseEvent(.leftMouseDragged, at: NSPoint(x: start.x + 10, y: start.y), in: window)))
@@ -66,6 +69,15 @@ struct SidebarResizeHostedTests {
         let current = try #require(pointer(in: hosting))
         let after = current.convert(current.bounds, to: hosting)
         #expect(abs(after.minX - before.minX - 40) < 0.5)
+
+        // The arrow keys still resize the focused divider.
+        window.sendEvent(try #require(arrowKey(.leftArrow, in: window)))
+        let narrowed = await eventually {
+            hosting.layoutSubtreeIfNeeded()
+            guard let current = pointer(in: hosting) else { return false }
+            return current.convert(current.bounds, to: hosting).minX < after.minX - 1
+        }
+        #expect(narrowed)
     }
 
     /// The leftmost divider: the sidebar's.
@@ -83,6 +95,14 @@ struct SidebarResizeHostedTests {
         let image = try #require(view.bitmapImageRepForCachingDisplay(in: rect))
         view.cacheDisplay(in: rect, to: image)
         return try #require(image.representation(using: .png, properties: [:]))
+    }
+
+    private func arrowKey(_ key: NSEvent.SpecialKey, in window: NSWindow) -> NSEvent? {
+        let character = String(Character(Unicode.Scalar(key.rawValue)!))
+        return NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [.numericPad, .function], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: character,
+            charactersIgnoringModifiers: character, isARepeat: false, keyCode: key == .leftArrow ? 123 : 124)
     }
 
     private func mouseEvent(
