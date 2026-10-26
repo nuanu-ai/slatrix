@@ -23,10 +23,7 @@ struct SharedFilesHostedTests {
                     onOpenMedia: { viewer.open($0, files: $1) })
                 MediaViewer(matrix: matrix, viewer: viewer, onForward: { _ in })
             }.environmentObject(AppearanceStore()))
-        let window = NSWindow(
-            contentRect: NSRect(x: -20_000, y: -20_000, width: 900, height: 700), styleMask: .titled,
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(NSSize(width: 900, height: 700))
         window.contentView = hosting
         window.makeKeyAndOrderFront(nil)
         defer {

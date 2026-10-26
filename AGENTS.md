@@ -34,6 +34,7 @@ Tests use Swift Testing in `Tests/SlatrixTests`. Shared fakes and fixtures live 
 - Wait on conditions (`Gate`, `eventually`), never on `Task.sleep` or a fixed number of yields. `drainMainActor()` proves SDK callbacks already queued for the main actor have run.
 - Check that a test can fail: mutate the production line it protects and watch it go red. `scripts/mutate.sh <file> --filter <Suite>` tries every operator mutation in a file and lists the survivors.
 - Speed budgets carry the `budget` tag and `Budget` in their names. They time real work at the scale of a busy account against about three times a local debug run. Parallel tests skew the clock, so they run only alone: `SLATRIX_BUDGETS=1 scripts/test.sh --filter Budget --no-parallel`, which CI does in a step of its own. Raise one only with a measurement that explains why.
+- Tests open windows only through `offscreenWindow(_:)`, and lint rejects any other. AppKit pulls a titled window onto the screen, so whoever runs the tests would see it flash.
 - Synthetic events from `window.sendEvent` skip the window server, so window dragging, cursor rects and scroll momentum never show up in them. Check those through the contract AppKit reads, such as `mouseDownCanMoveWindow`.
 
 Agreed seams, where tests belong:

@@ -19,10 +19,7 @@ struct DesignSystemHostedTests {
             // NSApp's run loop.
             UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
             hosting = NSHostingView(rootView: view.environmentObject(AppearanceStore()))
-            window = NSWindow(
-                contentRect: NSRect(origin: CGPoint(x: -20_000, y: -20_000), size: size), styleMask: .titled,
-                backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
+            window = offscreenWindow(size)
             window.contentView = hosting
             window.makeKeyAndOrderFront(nil)
         }

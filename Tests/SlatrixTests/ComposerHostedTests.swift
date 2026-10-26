@@ -20,10 +20,7 @@ struct ComposerHostedTests {
 
     private func host(_ view: some View) -> (NSHostingView<AnyView>, NSWindow) {
         let hosting = NSHostingView(rootView: AnyView(view.environmentObject(AppearanceStore())))
-        let window = NSWindow(
-            contentRect: NSRect(x: -20_000, y: -20_000, width: 400, height: 400), styleMask: .borderless,
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(NSSize(width: 400, height: 400))
         window.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
         return (hosting, window)
