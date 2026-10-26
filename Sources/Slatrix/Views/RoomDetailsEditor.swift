@@ -57,9 +57,9 @@ struct RoomDetailsEditor: View {
             HStack(alignment: .top, spacing: m.sp16) {
                 VStack(alignment: .leading, spacing: m.sp8) {
                     Text("Edit details").font(m.font(.header, .bold)).foregroundStyle(
-                        colors.primaryText)
+                        colors.textPrimary)
                     Text(destinationName).font(m.font(.secondary, .medium)).lineLimit(2)
-                    Text(roomID).font(m.font(.caption, design: .monospaced)).foregroundStyle(colors.muted)
+                    Text(roomID).font(m.font(.caption, design: .monospaced)).foregroundStyle(colors.textSecondary)
                         .textSelection(.enabled).lineLimit(2)
                 }
                 Spacer(minLength: 0)
@@ -73,7 +73,7 @@ struct RoomDetailsEditor: View {
                         HStack(spacing: m.sp12) {
                             ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
                             Text("Loading…").font(m.font(.secondary)).foregroundStyle(
-                                colors.muted)
+                                colors.textSecondary)
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, m.sp20)
                     } else if let snapshot, current {
                         detailField("Name", editable: snapshot.canEditName) {
@@ -98,7 +98,7 @@ struct RoomDetailsEditor: View {
                         }
                         if !snapshot.canEditName && !snapshot.canEditTopic {
                             Label("You can’t edit these details.", systemImage: "lock")
-                                .font(m.font(.meta)).foregroundStyle(colors.muted)
+                                .font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                         }
                     }
                     if let error {
@@ -116,7 +116,7 @@ struct RoomDetailsEditor: View {
             HStack(spacing: m.sp12) {
                 if saving {
                     ProgressView().controlSize(.small)
-                    Text("Saving…").font(m.font(.meta)).foregroundStyle(colors.muted)
+                    Text("Saving…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
                 Spacer()
                 Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(saving)
@@ -126,7 +126,7 @@ struct RoomDetailsEditor: View {
             }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
         }
         .sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.text
+            colors.textBody
         )
         .task(id: context) {
             if owner == nil { owner = context }
@@ -150,9 +150,9 @@ struct RoomDetailsEditor: View {
     {
         VStack(alignment: .leading, spacing: m.sp8) {
             HStack(spacing: m.sp8) {
-                Text(title).font(m.font(.secondary, .semibold)).foregroundStyle(colors.primaryText)
+                Text(title).font(m.font(.secondary, .semibold)).foregroundStyle(colors.textPrimary)
                 if !editable {
-                    Label("Read only", systemImage: "lock").font(m.font(.caption)).foregroundStyle(colors.muted)
+                    Label("Read only", systemImage: "lock").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                 }
             }
             content()

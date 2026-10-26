@@ -85,7 +85,7 @@ struct ActivityFeedView: View {
     }
 
     private func sectionLabel(_ label: String) -> some View {
-        Text(label).font(m.font(.caption, .semibold)).tracking(0.6).foregroundStyle(colors.muted).padding(
+        Text(label).font(m.font(.caption, .semibold)).tracking(0.6).foregroundStyle(colors.textSecondary).padding(
             .horizontal, m.sp24
         ).padding(.top, m.sp20).padding(.bottom, m.sp12)
     }
@@ -98,7 +98,7 @@ struct ActivityFeedView: View {
                     .padding(m.sp2).background(colors.canvas, in: Circle()).offset(x: m.sp4, y: m.sp4)
             }
             VStack(alignment: .leading, spacing: m.sp4) {
-                Text(room.name).font(m.font(.secondary, .semibold)).foregroundStyle(colors.primaryText)
+                Text(room.name).font(m.font(.secondary, .semibold)).foregroundStyle(colors.textPrimary)
                     .lineLimit(1)
                 Text(
                     room.membership == "invite"
@@ -108,7 +108,7 @@ struct ActivityFeedView: View {
                             : room.unreadMessages > 0 || room.unread > 0
                                 ? "\(max(room.unreadMessages, room.unread)) unread messages" : "Marked unread"
                 )
-                .font(m.font(.meta)).foregroundStyle(colors.muted)
+                .font(m.font(.meta)).foregroundStyle(colors.textSecondary)
             }
             Spacer()
             if room.membership == "invite" {
@@ -129,14 +129,14 @@ struct ActivityFeedView: View {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                     Text(item.senderName.isEmpty ? item.roomName : item.senderName).font(
                         m.font(.secondary, .semibold)
-                    ).foregroundStyle(colors.primaryText).lineLimit(1)
+                    ).foregroundStyle(colors.textPrimary).lineLimit(1)
                     Text(
                         item.kind == .invite ? "invited you" : item.hasMention ? "mentioned you" : "in \(item.roomName)"
-                    ).font(m.font(.caption)).foregroundStyle(colors.muted).lineLimit(1)
+                    ).font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
                     Spacer()
                     Text(item.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
                         m.font(.caption)
-                    ).foregroundStyle(colors.muted)
+                    ).foregroundStyle(colors.textSecondary)
                 }
                 if item.hasMention || item.kind == .invite {
                     Text(item.roomName).font(m.font(.caption, .medium)).foregroundStyle(colors.accent)
@@ -147,10 +147,10 @@ struct ActivityFeedView: View {
                         ? item.kind == .invite ? "Invitation" : "New message"
                         : item.body
                 )
-                .font(m.font(.secondary)).foregroundStyle(colors.text).lineLimit(3).multilineTextAlignment(.leading)
+                .font(m.font(.secondary)).foregroundStyle(colors.textBody).lineLimit(3).multilineTextAlignment(.leading)
                 if item.threadRootID != nil {
                     Label("Thread reply", systemImage: "bubble.left.and.bubble.right").font(m.font(.caption))
-                        .foregroundStyle(colors.muted)
+                        .foregroundStyle(colors.textSecondary)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
             if item.hasMention {

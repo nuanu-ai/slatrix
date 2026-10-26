@@ -35,7 +35,7 @@ struct PeopleDirectoryView: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: m.sp12) {
                 HStack(spacing: m.sp12) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(colors.muted)
+                    Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
                     TextField("Search people", text: $query).textFieldStyle(.plain).font(
                         m.font(.body)
                     ).focused($searchFocused)
@@ -81,7 +81,7 @@ struct PeopleDirectoryView: View {
         } else if (people.searchState == "loading" || activeRequest != request) && results.isEmpty {
             VStack(spacing: m.sp12) {
                 ProgressView().loadingInterval(.peopleLoading)
-                Text("Searching people…").font(m.font(.secondary)).foregroundStyle(colors.muted)
+                Text("Searching people…").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if people.searchState == "error" && results.isEmpty {
             EmptyStateView(
@@ -111,8 +111,9 @@ struct PeopleDirectoryView: View {
                             Text("PEOPLE").font(m.font(.caption, .semibold)).tracking(0.7)
                             Spacer()
                             if people.limited { Text("Showing top results").font(m.font(.caption)) }
-                        }.foregroundStyle(colors.muted).padding(.horizontal, m.sp24).padding(.top, m.sp20).padding(
-                            .bottom, m.sp12)
+                        }.foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24).padding(.top, m.sp20)
+                            .padding(
+                                .bottom, m.sp12)
                         ForEach(results) { person in
                             Button {
                                 open(person)
@@ -162,17 +163,17 @@ private struct PersonDirectoryRow: View {
         HStack(spacing: m.sp12) {
             AvatarView(name: person.name, size: m.avatar, matrix: matrix, source: person.avatarURL)
             VStack(alignment: .leading, spacing: m.sp4) {
-                Text(person.name).font(m.font(.body, .semibold)).foregroundStyle(colors.primaryText)
+                Text(person.name).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
                     .lineLimit(1)
-                Text(person.id).font(m.font(.caption)).foregroundStyle(colors.muted).lineLimit(1)
+                Text(person.id).font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 if !person.profileAvailable {
                     Text("No public profile").font(m.font(.caption)).foregroundStyle(
-                        colors.muted)
+                        colors.textSecondary)
                 }
             }
             Spacer()
             Image(systemName: selected ? "return" : "chevron.right").font(m.font(.caption)).foregroundStyle(
-                colors.muted)
+                colors.textSecondary)
         }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)
             .background(selected ? colors.selection.opacity(0.4) : .clear).contentShape(Rectangle())
             .accessibilityElement(children: .combine).accessibilityLabel("View profile, \(person.name), \(person.id)")
@@ -213,7 +214,7 @@ struct PersonRecipientPicker: View {
                     AvatarView(name: chosen.name, size: m.avatar, matrix: matrix, source: chosen.avatarURL)
                     VStack(alignment: .leading, spacing: m.sp4) {
                         Text(chosen.name).font(m.font(.secondary, .medium))
-                        Text(chosen.id).font(m.font(.caption)).foregroundStyle(colors.muted)
+                        Text(chosen.id).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                     }
                     Spacer()
                     IconButton(symbol: "xmark", label: "Remove recipient", role: .caption) {
@@ -226,11 +227,11 @@ struct PersonRecipientPicker: View {
                     RoundedRectangle(cornerRadius: m.radius).stroke(colors.border))
                 if !chosen.profileAvailable {
                     Text("No public profile; check the ID.").font(m.font(.caption))
-                        .foregroundStyle(colors.muted)
+                        .foregroundStyle(colors.textSecondary)
                 }
             } else {
                 HStack(spacing: m.sp8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(colors.muted)
+                    Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
                     TextField("Name or @name:server.org", text: $query).textFieldStyle(.plain).font(m.font(.body))
                         .focused($focused)
                         .onSubmit(selectCurrent)
@@ -244,13 +245,13 @@ struct PersonRecipientPicker: View {
                         ProgressView().controlSize(.small).loadingInterval(.peopleLoading)
                     }
                 }.padding(m.sp12).background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius)).overlay(
-                    RoundedRectangle(cornerRadius: m.radius).stroke(colors.muted.opacity(0.5)))
+                    RoundedRectangle(cornerRadius: m.radius).stroke(colors.textSecondary.opacity(0.5)))
                 if !query.isEmpty {
                     if people.searchState == "error" {
                         HStack(spacing: m.sp8) {
                             Text(people.searchErrorMessage ?? "Couldn’t search.")
                             Button("Retry") { retryRevision += 1 }.buttonStyle(.link)
-                        }.font(m.font(.caption)).foregroundStyle(colors.muted)
+                        }.font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                     }
                     if !results.isEmpty {
                         ScrollViewReader { proxy in
@@ -267,13 +268,13 @@ struct PersonRecipientPicker: View {
                                                 VStack(alignment: .leading, spacing: m.sp4) {
                                                     Text(person.name).font(m.font(.meta, .medium))
                                                     Text(person.id).font(m.font(.caption)).foregroundStyle(
-                                                        colors.muted
+                                                        colors.textSecondary
                                                     ).lineLimit(1)
                                                 }
                                                 Spacer()
                                                 if person.id == selection {
                                                     Image(systemName: "return").font(m.font(.caption)).foregroundStyle(
-                                                        colors.muted)
+                                                        colors.textSecondary)
                                                 }
                                             }.padding(m.sp8).frame(maxWidth: .infinity, alignment: .leading).background(
                                                 person.id == selection ? colors.selection.opacity(0.4) : .clear
@@ -289,7 +290,7 @@ struct PersonRecipientPicker: View {
                         }
                     } else if people.searchState == "ready" {
                         Text("No matches. Enter a full ID like @name:server.org.").font(m.font(.caption))
-                            .foregroundStyle(colors.muted)
+                            .foregroundStyle(colors.textSecondary)
                     }
                 }
             }

@@ -70,7 +70,7 @@ struct PreferencesView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, m.sp12).frame(
                                     height: m.control
                                 )
-                                .foregroundStyle(tab == item ? colors.primaryText : colors.muted)
+                                .foregroundStyle(tab == item ? colors.textPrimary : colors.textSecondary)
                                 .background(
                                     tab == item ? colors.selection : .clear,
                                     in: RoundedRectangle(cornerRadius: m.radius))
@@ -81,7 +81,7 @@ struct PreferencesView: View {
                 Divider().overlay(colors.border)
                 ScrollView {
                     VStack(alignment: .leading, spacing: m.sp24) {
-                        Text(tab.title).font(m.font(.header, .bold)).foregroundStyle(colors.primaryText)
+                        Text(tab.title).font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
                         if let error {
                             InlineErrorView(message: error, dismiss: { self.error = nil }).clipShape(
                                 RoundedRectangle(cornerRadius: m.radius))
@@ -96,7 +96,7 @@ struct PreferencesView: View {
                 }
             }
         }.sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.text
+            colors.textBody
         )
         .preferredColorScheme(appearance.preferredColorScheme)
         .onAppear {
@@ -255,7 +255,7 @@ struct PreferencesView: View {
                 VStack(alignment: .leading, spacing: m.sp4) {
                     Text(matrix.user?.name ?? "Not signed in").font(m.font(.title, .semibold))
                     Text(matrix.isPreview ? "Preview" : matrix.user?.id ?? "")
-                        .font(m.font(.meta)).foregroundStyle(colors.muted).textSelection(.enabled)
+                        .font(m.font(.meta)).foregroundStyle(colors.textSecondary).textSelection(.enabled)
                 }
             }
             Divider().overlay(colors.border)
@@ -311,12 +311,12 @@ struct PreferencesView: View {
     }
 
     private func sectionTitle(_ title: String) -> some View {
-        Text(title).font(m.font(.body, .semibold)).foregroundStyle(colors.primaryText)
+        Text(title).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
     }
 
     private func detailRow(_ title: String, value: String) -> some View {
         HStack {
-            Text(title).foregroundStyle(colors.muted)
+            Text(title).foregroundStyle(colors.textSecondary)
             Spacer()
             Text(value).textSelection(.enabled)
         }.font(m.font(.secondary))
@@ -333,8 +333,8 @@ struct PreferencesView: View {
                             selected ? colors.accent : colors.border, lineWidth: selected ? 2 : 1))
                 HStack(spacing: m.sp4) {
                     Image(systemName: selected ? "checkmark.circle.fill" : "circle").foregroundStyle(
-                        selected ? colors.accent : colors.muted)
-                    Text(label).foregroundStyle(colors.text)
+                        selected ? colors.accent : colors.textSecondary)
+                    Text(label).foregroundStyle(colors.textBody)
                 }.font(m.font(.meta, selected ? .semibold : .regular))
             }.frame(maxWidth: .infinity)
         }.buttonStyle(.row).accessibilityLabel(label).accessibilityAddTraits(selected ? .isSelected : [])
@@ -396,29 +396,30 @@ private struct AppMiniature: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: m.sp4) {
-                ForEach(0..<3) { _ in Circle().fill(colors.muted.opacity(0.45)).frame(width: m(4), height: m(4)) }
+                ForEach(0..<3) { _ in Circle().fill(colors.textSecondary.opacity(0.45)).frame(width: m(4), height: m(4))
+                }
                 Spacer()
-                Capsule().fill(colors.muted.opacity(0.13)).frame(width: m(42), height: m(5))
+                Capsule().fill(colors.textSecondary.opacity(0.13)).frame(width: m(42), height: m(5))
                 Spacer()
             }.padding(.horizontal, m.sp8).frame(height: m(15)).background(colors.frame)
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: m.sp4) {
-                    Capsule().fill(colors.muted.opacity(0.55)).frame(width: m(29), height: m(4))
+                    Capsule().fill(colors.textSecondary.opacity(0.55)).frame(width: m(29), height: m(4))
                     RoundedRectangle(cornerRadius: m(2)).fill(colors.selection).frame(height: m(8))
-                    Capsule().fill(colors.muted.opacity(0.25)).frame(width: m(25), height: m(3))
-                    Capsule().fill(colors.muted.opacity(0.25)).frame(width: m(31), height: m(3))
+                    Capsule().fill(colors.textSecondary.opacity(0.25)).frame(width: m(25), height: m(3))
+                    Capsule().fill(colors.textSecondary.opacity(0.25)).frame(width: m(31), height: m(3))
                     Spacer(minLength: 0)
                 }.padding(m.sp8).frame(width: m(47)).background(colors.sidebar)
                 VStack(alignment: .leading, spacing: m.sp8) {
-                    Capsule().fill(colors.text.opacity(0.5)).frame(width: m(29), height: m(4))
+                    Capsule().fill(colors.textBody.opacity(0.5)).frame(width: m(29), height: m(4))
                     ForEach(0..<2) { index in
                         HStack(alignment: .top, spacing: m.sp4) {
                             RoundedRectangle(cornerRadius: m(2)).fill(
                                 index == 0 ? Color(hex: 0x568b92) : Color(hex: 0xaa8966)
                             ).frame(width: m(9), height: m(9))
                             VStack(alignment: .leading, spacing: m.sp4) {
-                                Capsule().fill(colors.text.opacity(0.3)).frame(width: m(23), height: m(3))
-                                Capsule().fill(colors.muted.opacity(0.17)).frame(height: m(3))
+                                Capsule().fill(colors.textBody.opacity(0.3)).frame(width: m(23), height: m(3))
+                                Capsule().fill(colors.textSecondary.opacity(0.17)).frame(height: m(3))
                             }
                         }
                     }

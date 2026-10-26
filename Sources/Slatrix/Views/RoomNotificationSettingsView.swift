@@ -50,7 +50,7 @@ struct RoomNotificationSettingsView: View {
             HStack(alignment: .top, spacing: m.sp16) {
                 VStack(alignment: .leading, spacing: m.sp8) {
                     Text("Notifications").font(m.font(.header, .bold)).foregroundStyle(
-                        colors.primaryText)
+                        colors.textPrimary)
                     Text(name).font(m.font(.secondary)).lineLimit(2)
                 }
                 Spacer(minLength: 0)
@@ -65,7 +65,7 @@ struct RoomNotificationSettingsView: View {
                         HStack(spacing: m.sp8) {
                             ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
                             Text("Loading…").font(m.font(.secondary)).foregroundStyle(
-                                colors.muted)
+                                colors.textSecondary)
                         }.padding(.vertical, m.sp20)
                     } else if let snapshot, current {
                         Picker("Notify me about", selection: $choice) {
@@ -80,8 +80,10 @@ struct RoomNotificationSettingsView: View {
 
                     }
                     if let notice {
-                        Label(notice, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(colors.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Label(notice, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(
+                            colors.textSecondary
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                     if let error {
                         Text(error).font(m.font(.meta)).foregroundStyle(Color(nsColor: .systemRed)).fixedSize(
@@ -102,7 +104,7 @@ struct RoomNotificationSettingsView: View {
             HStack(spacing: m.sp12) {
                 if saving {
                     ProgressView().controlSize(.small)
-                    Text("Saving…").font(m.font(.meta)).foregroundStyle(colors.muted)
+                    Text("Saving…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
                 Spacer()
                 Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(saving)
@@ -111,7 +113,7 @@ struct RoomNotificationSettingsView: View {
                         !canSave)
             }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
         }.sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.text
+            colors.textBody
         )
         .task(id: context) {
             if owner == nil { owner = context }

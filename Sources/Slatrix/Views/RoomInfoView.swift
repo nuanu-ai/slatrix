@@ -56,10 +56,10 @@ struct RoomInfoView: View {
                     }
                     VStack(alignment: .leading, spacing: m.sp4) {
                         Text(currentRoom.name).font(m.font(.title, .bold)).foregroundStyle(
-                            colors.primaryText
+                            colors.textPrimary
                         ).lineLimit(2)
                         Text(currentRoom.isDirect ? "Direct message" : "Channel").font(m.font(.caption))
-                            .foregroundStyle(colors.muted)
+                            .foregroundStyle(colors.textSecondary)
                     }
                 }
                 Picker("Conversation details", selection: $tab) {
@@ -72,7 +72,7 @@ struct RoomInfoView: View {
             if tab == .about { aboutContent } else { membersContent }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(colors.canvas).foregroundStyle(colors.text)
+        .background(colors.canvas).foregroundStyle(colors.textBody)
         .task(id: room.id) {
             error = nil
             busy = false
@@ -107,7 +107,7 @@ struct RoomInfoView: View {
                 section("Description") {
                     Text(currentRoom.topic.isEmpty ? "No description" : currentRoom.topic)
                         .font(m.font(.secondary)).foregroundStyle(
-                            currentRoom.topic.isEmpty ? colors.muted : colors.text
+                            currentRoom.topic.isEmpty ? colors.textSecondary : colors.textBody
                         )
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     if !matrix.isPreview, currentRoom.membership == "join" {
@@ -130,7 +130,8 @@ struct RoomInfoView: View {
                                 Label("Notifications", systemImage: currentRoom.muted ? "bell.slash" : "bell").font(
                                     m.font(.secondary))
                                 Spacer()
-                                Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.muted)
+                                Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(
+                                    colors.textSecondary)
                             }
                         }.buttonStyle(.row).disabled(currentRoom.membership != "join")
                     }.disabled(busy || matrix.isPreview)
@@ -153,16 +154,16 @@ struct RoomInfoView: View {
                     VStack(alignment: .leading, spacing: m.sp12) {
                         let linked = matrix.workspaces.filter { currentRoom.spaceIDs.contains($0.id) }
                         if linked.isEmpty {
-                            Text("None").font(m.font(.meta)).foregroundStyle(colors.muted)
+                            Text("None").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                         } else {
                             ForEach(linked) { workspace in
                                 HStack(spacing: m.sp8) {
-                                    Image(systemName: "square.stack.3d.up").foregroundStyle(colors.muted)
+                                    Image(systemName: "square.stack.3d.up").foregroundStyle(colors.textSecondary)
                                     VStack(alignment: .leading, spacing: m.sp4) {
                                         Text(workspace.name).font(m.font(.secondary))
                                         if !currentRoom.directParentSpaceIDs.contains(workspace.id) {
                                             Text("Through another workspace").font(m.font(.caption))
-                                                .foregroundStyle(colors.muted)
+                                                .foregroundStyle(colors.textSecondary)
                                         }
                                     }
                                 }
@@ -198,8 +199,10 @@ struct RoomInfoView: View {
                 }
                 section(currentRoom.isDirect ? "Room ID" : "Channel ID") {
                     VStack(alignment: .leading, spacing: m.sp8) {
-                        Text(currentRoom.id).font(m.font(.caption, design: .monospaced)).foregroundStyle(colors.muted)
-                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        Text(currentRoom.id).font(m.font(.caption, design: .monospaced)).foregroundStyle(
+                            colors.textSecondary
+                        )
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         Button {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(currentRoom.id, forType: .string)
@@ -216,7 +219,8 @@ struct RoomInfoView: View {
                 }
                 Divider().overlay(colors.border)
                 if matrix.isPreview {
-                    Text("Sign in to manage this conversation.").font(m.font(.meta)).foregroundStyle(colors.muted)
+                    Text("Sign in to manage this conversation.").font(m.font(.meta)).foregroundStyle(
+                        colors.textSecondary)
                 }
                 Button(role: .destructive) {
                     confirmLeave = true
@@ -232,7 +236,7 @@ struct RoomInfoView: View {
     private var membersContent: some View {
         VStack(alignment: .leading, spacing: m.sp12) {
             HStack(spacing: m.sp8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(colors.muted)
+                Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
                 TextField("Find a member", text: $memberSearch).textFieldStyle(.plain).font(m.font(.meta))
             }.padding(m.sp8).background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius)).padding(
                 .horizontal, m.sp16)
@@ -253,7 +257,7 @@ struct RoomInfoView: View {
                 VStack(spacing: m.sp8) {
                     Text(memberSearch.isEmpty ? "No members to show" : "No matches").font(
                         m.font(.meta)
-                    ).foregroundStyle(colors.muted)
+                    ).foregroundStyle(colors.textSecondary)
                     if memberSearch.isEmpty {
                         Button("Reload members") {
                             Task {
@@ -277,13 +281,15 @@ struct RoomInfoView: View {
                                     HStack(spacing: m.sp4) {
                                         Text(member.name).font(m.font(.secondary, .medium)).lineLimit(1)
                                         if member.id == matrix.user?.id {
-                                            Text("(you)").font(m.font(.caption)).foregroundStyle(colors.muted)
+                                            Text("(you)").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                                         }
                                     }
-                                    Text(member.id).font(m.font(.caption)).foregroundStyle(colors.muted).lineLimit(1)
+                                    Text(member.id).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                                        .lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
-                                Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.muted)
+                                Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(
+                                    colors.textSecondary)
                             }.padding(.horizontal, m.sp16).padding(.vertical, m.sp8).contentShape(Rectangle())
                         }.buttonStyle(.row).help("View \(member.name)’s profile").accessibilityLabel(
                             "View profile, \(member.name), \(member.id)")
@@ -295,7 +301,7 @@ struct RoomInfoView: View {
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: m.sp12) {
-            Text(title).font(m.font(.meta, .semibold)).foregroundStyle(colors.primaryText)
+            Text(title).font(m.font(.meta, .semibold)).foregroundStyle(colors.textPrimary)
             content()
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -345,10 +351,10 @@ struct EncryptionRecoveryView: View {
             VStack(alignment: .leading, spacing: m.sp8) {
                 Text(recovered ? "History unlocked" : "Unlock encrypted history").font(
                     m.font(.header, .bold)
-                ).foregroundStyle(colors.primaryText)
+                ).foregroundStyle(colors.textPrimary)
                 if recovered {
                     Text("Older messages may take a moment to appear.").font(m.font(.secondary)).foregroundStyle(
-                        colors.muted)
+                        colors.textSecondary)
                 }
             }
             if !recovered {
@@ -357,23 +363,23 @@ struct EncryptionRecoveryView: View {
                     SecureField("", text: $recoveryKey)
                         .textFieldStyle(.plain).font(m.font(.body, design: .monospaced)).padding(m.sp12)
                         .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius))
-                        .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.muted.opacity(0.5)))
+                        .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.textSecondary.opacity(0.5)))
                         .focused($keyFocused).disabled(busy).accessibilityLabel("Recovery key")
                 }
             }
             if let error { InlineErrorView(message: error).clipShape(RoundedRectangle(cornerRadius: m.radius)) }
             if matrix.isPreview {
-                Text("Sign in first.").font(m.font(.meta)).foregroundStyle(colors.muted)
+                Text("Sign in first.").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
             }
             HStack(spacing: m.sp12) {
                 if busy {
                     ProgressView().controlSize(.small)
-                    Text("Unlocking…").font(m.font(.meta)).foregroundStyle(colors.muted)
+                    Text("Unlocking…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
                 Spacer()
                 if !recovered { Button("Cancel") { close() }.disabled(busy).keyboardShortcut(.cancelAction) }
                 Button(recovered ? "Done" : "Unlock") { if recovered { close() } else { recover() } }
-                    .buttonStyle(.borderedProminent).tint(colors.success).keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent).tint(colors.buttonPrimary).keyboardShortcut(.defaultAction)
                     .disabled(
                         busy
                             || (!recovered
@@ -382,7 +388,7 @@ struct EncryptionRecoveryView: View {
                     )
             }.padding(.top, m.sp4)
         }
-        .padding(m.sp32).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.text)
+        .padding(m.sp32).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)
         .interactiveDismissDisabled(busy)
         .onAppear { keyFocused = true }
         .onDisappear { recoveryKey = "" }

@@ -427,7 +427,8 @@ struct MessageRow: View {
                 if grouped || !appearance.showAvatars {
                     // One line: "12:00 AM" is wider than the gutter, and a wrap would grow the row on hover.
                     Text(hovered ? time : "").font(m.font(.caption)).lineLimit(1).fixedSize()
-                        .foregroundStyle(colors.muted).frame(width: m.avatar, alignment: .trailing).padding(.top, m.sp4)
+                        .foregroundStyle(colors.textSecondary).frame(width: m.avatar, alignment: .trailing).padding(
+                            .top, m.sp4)
                 } else {
                     Button {
                         actions.openProfile?()
@@ -440,23 +441,23 @@ struct MessageRow: View {
             VStack(alignment: .leading, spacing: m.sp4) {
                 if isPinned {
                     Label("Pinned", systemImage: "pin.fill").font(m.font(.caption))
-                        .foregroundStyle(colors.muted)
+                        .foregroundStyle(colors.textSecondary)
                 }
                 if !grouped || compact {
                     HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                         if compact {
                             Text(time).font(m.font(.caption))
-                                .foregroundStyle(colors.muted)
+                                .foregroundStyle(colors.textSecondary)
                         }
                         Button {
                             actions.openProfile?()
                         } label: {
                             Text(message.senderName).font(m.font(.body, .bold))
-                                .foregroundStyle(colors.primaryText)
+                                .foregroundStyle(colors.textPrimary)
                         }.buttonStyle(.row).disabled(actions.openProfile == nil).help("View profile")
                         if !compact {
                             Text(time).font(m.font(.caption))
-                                .foregroundStyle(colors.muted)
+                                .foregroundStyle(colors.textSecondary)
                         }
                         if own && message.sendState == "sending" { ProgressView().controlSize(.mini) }
                         if isSaved {
@@ -466,19 +467,21 @@ struct MessageRow: View {
                 }
                 if message.isRedacted {
                     Text("This message was deleted.").italic().font(m.font(.body)).foregroundStyle(
-                        colors.muted
+                        colors.textSecondary
                     )
                 } else {
                     if let replyPreview { replyPreview }
                     if message.kind == "m.room.encrypted" {
                         // One quiet line per message; the header offers the recovery key once for all of them.
                         Label(message.body, systemImage: "lock").font(m.font(.secondary)).italic()
-                            .foregroundStyle(colors.muted)
+                            .foregroundStyle(colors.textSecondary)
                     } else if message.showsMessageBody {
                         NativeMessageBody(
                             body: message.body, formattedBody: message.formattedBody, menuCommands: actions.menu)
                     }
-                    if message.isEdited { Text("(edited)").font(m.font(.caption)).foregroundStyle(colors.muted) }
+                    if message.isEdited {
+                        Text("(edited)").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                    }
                     // A reused cell shows another message: a download or preview in flight must not carry over.
                     if let attachment { attachment.padding(.vertical, m.sp4).id(message.id) }
                     if !message.reactions.isEmpty {
@@ -528,12 +531,12 @@ struct MessageRow: View {
                                         ).buttonStyle(.row).foregroundStyle(colors.accent).disabled(sendBusy)
                                     }
                                     Button("Cancel sending…", action: actions.cancelSend).buttonStyle(.row)
-                                        .foregroundStyle(colors.muted).disabled(sendBusy)
+                                        .foregroundStyle(colors.textSecondary).disabled(sendBusy)
                                     if sendBusy { ProgressView().controlSize(.mini) }
                                 }.font(m.font(.caption))
                             } else {
                                 Label("Sending…", systemImage: "clock").font(m.font(.caption)).foregroundStyle(
-                                    colors.muted)
+                                    colors.textSecondary)
                             }
                         }.padding(.top, m.sp2)
                     }

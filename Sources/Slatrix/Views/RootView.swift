@@ -672,7 +672,7 @@ struct RootView: View {
                     ).padding(.trailing, m.sp4).padding(.bottom, m.sp4)
                 }
             }
-        }.background(colors.frame).foregroundStyle(colors.text).ignoresSafeArea(.container, edges: .top)
+        }.background(colors.frame).foregroundStyle(colors.textBody).ignoresSafeArea(.container, edges: .top)
     }
 
     /// Connection, loading and error states, as toasts over the conversation.
@@ -701,7 +701,7 @@ struct RootView: View {
             if let request = pendingThreadOpen, isCurrentThreadOpen(request) {
                 HStack(spacing: m.sp8) {
                     if let threadOpenError {
-                        Text(threadOpenError).font(m.font(.meta)).foregroundStyle(colors.muted)
+                        Text(threadOpenError).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                         Button("Retry") {
                             if isCurrentThreadOpen(request) { openThread(request.message) }
                         }.buttonStyle(.link)
@@ -884,7 +884,7 @@ struct RootView: View {
                     Spacer()
                     Text("⌘ K").font(m.font(.caption)).opacity(0.65)
                 }.padding(.horizontal, m.sp12).frame(height: m.row).background(
-                    colors.primaryText.opacity(appearance.isDark ? 0.19 : 0.08),
+                    colors.textPrimary.opacity(appearance.isDark ? 0.19 : 0.08),
                     in: RoundedRectangle(cornerRadius: m.radius))
             }.buttonStyle(.row).frame(maxWidth: m(Self.searchWidth)).disabled(matrix.user == nil)
             Spacer(minLength: 0)
@@ -906,7 +906,7 @@ struct RootView: View {
                 handleMenu("shortcuts")
             }
             .padding(.trailing, m.sp12)
-        }.frame(height: m(Self.titleBarHeight)).background(WindowDragArea()).foregroundStyle(colors.text)
+        }.frame(height: m(Self.titleBarHeight)).background(WindowDragArea()).foregroundStyle(colors.textBody)
     }
 
     private func channelContent(_ room: ChatRoom) -> some View {
@@ -1039,7 +1039,7 @@ struct RootView: View {
                         Text(room.name).font(m.font(.title, .bold)).lineLimit(1)
                         Image(systemName: "chevron.down").font(m.font(.caption, .semibold))
                     }
-                }.buttonStyle(.row).foregroundStyle(colors.primaryText).layoutPriority(1)
+                }.buttonStyle(.row).foregroundStyle(colors.textPrimary).layoutPriority(1)
                 Spacer()
                 Button {
                     matrix.setMessageActionThread(rootID: nil)
@@ -1094,7 +1094,7 @@ struct RootView: View {
                     Label("Messages", systemImage: "bubble.left.fill").font(
                         m.font(.secondary, showPins ? .regular : .semibold)
                     ).fixedSize().padding(.vertical, m.sp12).overlay(alignment: .bottom) {
-                        if !showPins { Rectangle().fill(colors.text).frame(height: 2) }
+                        if !showPins { Rectangle().fill(colors.textBody).frame(height: 2) }
                     }
                 }.buttonStyle(.row)
                 Button {
@@ -1108,13 +1108,13 @@ struct RootView: View {
                     ).font(m.font(.secondary, showPins ? .semibold : .regular)).fixedSize().padding(.vertical, m.sp12)
                         .overlay(
                             alignment: .bottom
-                        ) { if showPins { Rectangle().fill(colors.text).frame(height: 2) } }
+                        ) { if showPins { Rectangle().fill(colors.textBody).frame(height: 2) } }
                 }.buttonStyle(.row).disabled(matrix.isPreview || room.membership != "join")
                 Button {
                     route = .files
                 } label: {
                     Label("Files & links", systemImage: "doc.on.doc").font(m.font(.secondary)).fixedSize()
-                }.buttonStyle(.row).foregroundStyle(colors.muted)
+                }.buttonStyle(.row).foregroundStyle(colors.textSecondary)
                 Spacer()
                 // In the tab row's reserved height, so it never covers or moves a message.
                 if matrix.hasLockedMessages {
@@ -1124,7 +1124,7 @@ struct RootView: View {
                         Label("Unlock messages", systemImage: "key").font(m.font(.meta, .medium))
                     }.buttonStyle(.row).foregroundStyle(colors.accent).disabled(matrix.isPreview)
                 } else if room.isEncrypted {
-                    Image(systemName: "lock.shield").font(m.font(.meta)).foregroundStyle(colors.muted).help(
+                    Image(systemName: "lock.shield").font(m.font(.meta)).foregroundStyle(colors.textSecondary).help(
                         "End-to-end encrypted")
                 }
             }.padding(.horizontal, m.sp24).frame(height: m.sp40)
@@ -1134,7 +1134,7 @@ struct RootView: View {
         VStack(spacing: 0) {
             HStack(spacing: m.sp8) {
                 Text("Thread").font(m.font(.title, .bold))
-                Text(room.name).font(m.font(.caption)).foregroundStyle(colors.muted).lineLimit(1)
+                Text(room.name).font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 Spacer()
                 IconButton(symbol: "xmark", label: "Close thread", role: .body, action: closeThread)
             }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
@@ -1231,7 +1231,11 @@ struct RootView: View {
                 Text(route.title).font(m.font(.title, .bold))
                 Spacer()
                 if route == .directMessages || route == .directory {
-                    ActionButton(title: "New message", symbol: "square.and.pencil") { creation = .directMessage }
+                    Button {
+                        creation = .directMessage
+                    } label: {
+                        Label("New message", systemImage: "square.and.pencil")
+                    }.buttonStyle(.secondary)
                 }
             }.padding(.horizontal, m.sp24).frame(height: m.paneHeader)
             Divider().overlay(colors.border)
@@ -1306,7 +1310,7 @@ struct RootView: View {
                 ProgressView().controlSize(.small)
                 Text("Restoring attachments…")
                 Spacer()
-            }.font(m.font(.meta)).foregroundStyle(colors.muted).padding(m.sp12).modifier(Toast(colors: colors))
+            }.font(m.font(.meta)).foregroundStyle(colors.textSecondary).padding(m.sp12).modifier(Toast(colors: colors))
                 .loadingInterval(.attachmentsLoading)
         }
         if localReady && attachmentDrafts.needsReview(address) {
@@ -1344,13 +1348,13 @@ struct RootView: View {
         VStack(alignment: .leading, spacing: m.sp8) {
             HStack(spacing: m.sp8) {
                 Image(systemName: thread ? "bubble.left.and.bubble.right" : "square.and.pencil").foregroundStyle(
-                    colors.muted)
+                    colors.textSecondary)
                 RoomName(matrix: matrix, roomID: roomID).font(m.font(.body, .semibold))
-                if thread { Text("Thread reply").font(m.font(.caption)).foregroundStyle(colors.muted) }
+                if thread { Text("Thread reply").font(m.font(.caption)).foregroundStyle(colors.textSecondary) }
                 Spacer()
-                Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.muted)
+                Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
             }
-            Text(body).font(m.font(.secondary)).foregroundStyle(colors.muted).lineLimit(3)
+            Text(body).font(m.font(.secondary)).foregroundStyle(colors.textSecondary).lineLimit(3)
         }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     }
     private func openThreadDraft(_ address: ThreadDraftAddress) {
@@ -1392,10 +1396,9 @@ struct RootView: View {
                 symbol: room.isSpace ? "square.stack.3d.up" : "envelope.open", title: "You’re invited to \(room.name)"
             ).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: m.sp12) {
-                ActionButton(title: "Decline") { respondToInvitation(room, accepting: false) }
-                ActionButton(title: room.isSpace ? "Join workspace" : "Join", prominent: true) {
-                    respondToInvitation(room, accepting: true)
-                }
+                Button("Decline") { respondToInvitation(room, accepting: false) }.buttonStyle(.secondary)
+                Button(room.isSpace ? "Join workspace" : "Join") { respondToInvitation(room, accepting: true) }
+                    .buttonStyle(.primary)
             }.disabled(busy || matrix.isPreview)
             // Reserved, so the buttons never move when the spinner comes and goes.
             ProgressView().controlSize(.small).opacity(busy ? 1 : 0)
@@ -1491,7 +1494,7 @@ struct RootView: View {
             }
             if !replyOpening, let replyError {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
-                    Text(replyError).foregroundStyle(colors.muted)
+                    Text(replyError).foregroundStyle(colors.textSecondary)
                     Button("Retry") { prepareReply(target) }.buttonStyle(.link)
                 }.font(m.font(.meta))
             }
@@ -2691,7 +2694,7 @@ private struct TypingLine: View {
         HStack {
             if !matrix.typingUsers.isEmpty { Text(label) }
             Spacer()
-        }.font(m.font(.caption)).foregroundStyle(appearance.colors.muted).padding(.horizontal, m.sp24)
+        }.font(m.font(.caption)).foregroundStyle(appearance.colors.textSecondary).padding(.horizontal, m.sp24)
             .layoutIsolated().frame(height: m.sp24)
     }
 }
@@ -2731,7 +2734,7 @@ private struct RoomDirectory: View {
                                 Text(
                                     room.topic.isEmpty
                                         ? room.isDirect ? "Direct message" : "\(room.memberCount) members" : room.topic
-                                ).font(m.font(.meta)).foregroundStyle(colors.muted).lineLimit(1)
+                                ).font(m.font(.meta)).foregroundStyle(colors.textSecondary).lineLimit(1)
                             }
                             Spacer()
                             if room.hasUnread {
@@ -2742,7 +2745,8 @@ private struct RoomDirectory: View {
                                     colors.selection, in: Circle()
                                 ).accessibilityLabel("Unread conversation")
                             }
-                            Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.muted)
+                            Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(
+                                colors.textSecondary)
                         }.padding(m.sp20).contentShape(Rectangle())
                     }.buttonStyle(.row)
                     Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)

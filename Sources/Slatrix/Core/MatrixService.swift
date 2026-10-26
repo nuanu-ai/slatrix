@@ -2048,7 +2048,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
 
-    func avatarThumbnail(_ source: String) async throws -> Data {
+    func avatarThumbnail(_ source: String, side: UInt64 = 128) async throws -> Data {
         guard source.utf8.count <= 2048, source.rangeOfCharacter(from: .controlCharacters) == nil,
             let url = URLComponents(string: source), url.scheme == "mxc", let host = url.host, !host.isEmpty,
             url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
@@ -2057,7 +2057,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let client = try requireClient()
         let token = sessionGeneration
         let data = try await client.getMediaThumbnail(
-            mediaSource: MediaSource.fromUrl(url: source), width: 128, height: 128)
+            mediaSource: MediaSource.fromUrl(url: source), width: side, height: side)
         guard token == sessionGeneration else { throw CancellationError() }
         guard data.count <= 2 * 1024 * 1024 else {
             throw MatrixServiceError.request("This avatar thumbnail is too large to display.")

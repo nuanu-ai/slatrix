@@ -35,7 +35,7 @@ struct NativeMessageBody: View {
             body: messageBody, formattedBody: formattedBody, revealSpoilers: revealed)
         VStack(alignment: .leading, spacing: m.sp4) {
             NativeSelectableMessageText(
-                runs: rendered.runs, fontSize: m.size(.body), textColor: NSColor(appearance.colors.text),
+                runs: rendered.runs, fontSize: m.size(.body), textColor: NSColor(appearance.colors.textBody),
                 linkColor: NSColor(appearance.colors.accent), menuCommands: menuCommands, onOpenURL: { openURL($0) })
             if showsSpoilerControl && rendered.containsSpoilers {
                 Button(revealed ? "Hide spoilers" : "Show spoilers") {

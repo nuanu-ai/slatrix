@@ -38,12 +38,12 @@ struct PersonProfileView: View {
                 IconButton(symbol: "xmark", label: "Close profile", role: .secondary, action: close).disabled(messaging)
             }
             VStack(alignment: .leading, spacing: m.sp8) {
-                Text(name).font(m.font(.display, .bold)).foregroundStyle(colors.primaryText).textSelection(
+                Text(name).font(m.font(.display, .bold)).foregroundStyle(colors.textPrimary).textSelection(
                     .enabled
                 ).fixedSize(horizontal: false, vertical: true)
-                if ownProfile { Text("You").font(m.font(.meta)).foregroundStyle(colors.muted) }
+                if ownProfile { Text("You").font(m.font(.meta)).foregroundStyle(colors.textSecondary) }
                 if people.statusSupported, let status = profile?.status, !status.isEmpty {
-                    Text(status).font(m.font(.body)).foregroundStyle(colors.text).textSelection(.enabled).fixedSize(
+                    Text(status).font(m.font(.body)).foregroundStyle(colors.textBody).textSelection(.enabled).fixedSize(
                         horizontal: false, vertical: true)
                 }
             }
@@ -51,7 +51,7 @@ struct PersonProfileView: View {
             VStack(alignment: .leading, spacing: m.sp8) {
                 Text("Matrix ID").font(m.font(.meta, .semibold))
                 HStack(alignment: .top, spacing: m.sp8) {
-                    Text(userID).font(m.font(.meta, design: .monospaced)).foregroundStyle(colors.muted)
+                    Text(userID).font(m.font(.meta, design: .monospaced)).foregroundStyle(colors.textSecondary)
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                     IconButton(
@@ -67,12 +67,12 @@ struct PersonProfileView: View {
             if people.profileState == "loading" {
                 HStack(spacing: m.sp8) {
                     ProgressView().controlSize(.small).loadingInterval(.profileLoading)
-                    Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.muted)
+                    Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
             } else if people.profileState == "error" || profile?.profileAvailable == false {
                 HStack(spacing: m.sp8) {
                     Text(people.profileErrorMessage ?? "No public profile").font(m.font(.meta)).foregroundStyle(
-                        colors.muted
+                        colors.textSecondary
                     ).fixedSize(horizontal: false, vertical: true)
                     Button("Retry") { loadProfile() }.buttonStyle(.link).font(m.font(.meta)).disabled(messaging)
                 }
@@ -89,13 +89,13 @@ struct PersonProfileView: View {
                         m.font(.secondary, .semibold)
                     ).padding(.horizontal, m.sp8).padding(.vertical, m.sp4)
                 }
-                .buttonStyle(.borderedProminent).tint(colors.success)
+                .buttonStyle(.borderedProminent).tint(colors.buttonPrimary)
                 .disabled(
                     messaging || matrix.isPreview || ownProfile || (try? PeopleMapping.validatedID(userID)) == nil
                 )
             }
         }
-        .padding(m.sp24).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.text)
+        .padding(m.sp24).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)
         .interactiveDismissDisabled(messaging)
         .task(id: Request(userID: userID, account: account, retry: retryRevision)) {
             await people.loadProfile(userID: userID, fallback: fallback)

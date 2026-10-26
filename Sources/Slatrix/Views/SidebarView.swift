@@ -43,7 +43,7 @@ struct SidebarView: View {
         HStack(spacing: 0) {
             rail
             if !listHidden { list }
-        }.foregroundStyle(colors.text)
+        }.foregroundStyle(colors.textBody)
     }
     private var list: some View {
         let visibleRooms = visibleRooms
@@ -75,7 +75,7 @@ struct SidebarView: View {
                         Label("Browse channels", systemImage: "magnifyingglass").font(m.font(.body)).frame(
                             maxWidth: .infinity, alignment: .leading
                         ).padding(.leading, m.sp32).frame(height: m.row)
-                    }.buttonStyle(.row).foregroundStyle(colors.muted).padding(.horizontal, m.sp8)
+                    }.buttonStyle(.row).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp8)
                     roomSection(
                         "Direct messages", symbol: "bubble.left.and.bubble.right",
                         rooms: visibleRooms.filter { $0.isDirect && !$0.favorite })
@@ -85,7 +85,7 @@ struct SidebarView: View {
                         Label("Add teammates", systemImage: "plus").font(m.font(.body)).frame(
                             maxWidth: .infinity, alignment: .leading
                         ).padding(.leading, m.sp32).frame(height: m.row)
-                    }.buttonStyle(.row).foregroundStyle(colors.muted).padding(.horizontal, m.sp8)
+                    }.buttonStyle(.row).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp8)
                 }.padding(.bottom, m.sp24)
             }.scrollIndicators(.hidden)
                 .loadingInterval(
@@ -100,7 +100,7 @@ struct SidebarView: View {
                     Circle().fill(.orange).frame(width: m(Self.dot), height: m(Self.dot))
                     Text(matrix.connectionDetail).font(m.font(.caption)).lineLimit(1)
                     Spacer()
-                }.foregroundStyle(colors.muted).padding(.horizontal, m.sp16).padding(.vertical, m.sp12)
+                }.foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp16).padding(.vertical, m.sp12)
             }
         }.frame(width: listWidth).background(colors.sidebar)
     }
@@ -131,7 +131,7 @@ struct SidebarView: View {
             Spacer(minLength: m.sp2)
             IconButton(symbol: "gearshape", label: "Preferences", action: onPreferences)
             IconButton(symbol: "square.and.pencil", label: "New message") { onCreate(.directMessage) }
-        }.foregroundStyle(colors.primaryText).padding(.horizontal, m.sp16).frame(height: m.paneHeader)
+        }.foregroundStyle(colors.textPrimary).padding(.horizontal, m.sp16).frame(height: m.paneHeader)
     }
     private var rail: some View {
         VStack(spacing: m.sp16) {
@@ -142,7 +142,7 @@ struct SidebarView: View {
                 ScrollView { railItems }.scrollIndicators(.hidden)
             }.frame(maxHeight: .infinity, alignment: .top)
             IconButton(symbol: appearance.mode == .dark ? "moon" : "sun.max", label: "Appearance") { onPreferences() }
-                .padding(m.sp4).background(colors.primaryText.opacity(0.1), in: Circle())
+                .padding(m.sp4).background(colors.textPrimary.opacity(0.1), in: Circle())
             Menu {
                 Text(matrix.user?.name ?? "Slatrix")
                 if let id = matrix.user?.id { Text(id) }
@@ -162,7 +162,7 @@ struct SidebarView: View {
                 }
                 IconButton(symbol: "plus", label: "Create a workspace", role: .header) {
                     onCreate(.workspace)
-                }.padding(m.sp4).background(colors.primaryText.opacity(0.1), in: Circle())
+                }.padding(m.sp4).background(colors.textPrimary.opacity(0.1), in: Circle())
             }
             Rectangle().fill(colors.border).frame(width: m.sp24, height: 1)
             ForEach([AppRoute.home, .directMessages, .activity, .files, .saved], id: \.self) { item in
@@ -173,7 +173,7 @@ struct SidebarView: View {
                         Image(systemName: item.symbol).font(
                             m.font(.header, route == item ? .semibold : .regular)
                         ).frame(width: m.sp40, height: m.control).background(
-                            route == item ? colors.primaryText.opacity(0.17) : .clear,
+                            route == item ? colors.textPrimary.opacity(0.17) : .clear,
                             in: RoundedRectangle(cornerRadius: m.radiusLarge)
                         ).overlay(alignment: .topTrailing) {
                             if item == .activity && hasUnreadActivity {
@@ -186,7 +186,7 @@ struct SidebarView: View {
                         }
                         Text(item.title).font(m.font(.caption, route == item ? .semibold : .medium))
                     }
-                    .foregroundStyle(route == item ? colors.primaryText : colors.muted).frame(
+                    .foregroundStyle(route == item ? colors.textPrimary : colors.textSecondary).frame(
                         maxWidth: .infinity)
                 }.buttonStyle(.row).accessibilityLabel(item.title)
             }
@@ -206,22 +206,22 @@ struct SidebarView: View {
                 if let space {
                     AvatarView(name: space.name, size: m.avatar, matrix: matrix, source: space.avatarURL)
                 } else {
-                    Image(systemName: "tray.2").font(m.font(.title)).foregroundStyle(colors.primaryText).frame(
+                    Image(systemName: "tray.2").font(m.font(.title)).foregroundStyle(colors.textPrimary).frame(
                         width: m.avatar, height: m.avatar
-                    ).background(colors.primaryText.opacity(0.12), in: RoundedRectangle(cornerRadius: corner))
+                    ).background(colors.textPrimary.opacity(0.12), in: RoundedRectangle(cornerRadius: corner))
                 }
             }
             .padding(m.sp4)
             .overlay(
                 RoundedRectangle(cornerRadius: corner + m.sp4).stroke(
-                    selected ? colors.primaryText : .clear, lineWidth: m.sp2)
+                    selected ? colors.textPrimary : .clear, lineWidth: m.sp2)
             )
             .overlay(alignment: .topTrailing) {
                 switch badge {
                 case .mentions(let count):
                     CountBadge(text: count > 99 ? "99+" : "\(count)")
                 case .unread:
-                    Circle().fill(colors.primaryText).frame(width: m(Self.dot) * 1.5, height: m(Self.dot) * 1.5)
+                    Circle().fill(colors.textPrimary).frame(width: m(Self.dot) * 1.5, height: m(Self.dot) * 1.5)
                         .overlay(Circle().stroke(colors.frame, lineWidth: m.sp2))
                 case .quiet: EmptyView()
                 }
@@ -281,8 +281,10 @@ struct SidebarView: View {
                         onCreate(title == "Channels" ? .channel : .directMessage)
                     }
                 }
-            }.foregroundStyle(colors.muted).padding(.leading, m.sp12).padding(.trailing, m.sp8).frame(height: m.control)
-                .padding(.top, m.sp8)
+            }.foregroundStyle(colors.textSecondary).padding(.leading, m.sp12).padding(.trailing, m.sp8).frame(
+                height: m.control
+            )
+            .padding(.top, m.sp8)
             if !collapsed.contains(title) {
                 ForEach(rooms) { room in
                     SidebarRoomRow(
@@ -329,20 +331,22 @@ private struct SidebarRoomRow: View, Equatable {
                     Image(systemName: room.isEncrypted ? "lock" : "number").font(m.font(.body)).frame(
                         width: m.avatarSmall
                     )
-                    .foregroundStyle(room.hasUnread ? colors.primaryText : colors.muted)
+                    .foregroundStyle(room.hasUnread ? colors.textPrimary : colors.textSecondary)
                 }
                 Text(room.name).font(m.font(.body, room.hasUnread ? .bold : .regular)).lineLimit(1)
                     .truncationMode(.tail)
-                if room.muted { Image(systemName: "bell.slash").font(m.font(.caption)).foregroundStyle(colors.muted) }
+                if room.muted {
+                    Image(systemName: "bell.slash").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                }
                 Spacer(minLength: m.sp2)
                 if hasDraft {
-                    Image(systemName: "pencil").font(m.font(.caption)).foregroundStyle(colors.muted)
+                    Image(systemName: "pencil").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                 }
                 switch UnreadBadge(room) {
                 case .mentions(let count): CountBadge(text: count)
                 case .messages(let count): CountBadge(text: count, mention: false)
                 case .marked:
-                    Circle().fill(colors.primaryText).frame(width: m(Self.dot), height: m(Self.dot)).accessibilityLabel(
+                    Circle().fill(colors.textPrimary).frame(width: m(Self.dot), height: m(Self.dot)).accessibilityLabel(
                         "Marked unread")
                 case .none: EmptyView()
                 }

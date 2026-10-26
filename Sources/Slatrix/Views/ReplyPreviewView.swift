@@ -11,7 +11,7 @@ struct ReplyPreviewView: View {
 
     var body: some View {
         HStack(spacing: m.sp8) {
-            RoundedRectangle(cornerRadius: 2).fill(appearance.colors.muted.opacity(0.4)).frame(width: 3)
+            RoundedRectangle(cornerRadius: 2).fill(appearance.colors.textSecondary.opacity(0.4)).frame(width: 3)
             // Every state takes the loaded preview's two lines, so the row keeps its height when the original lands.
             ZStack(alignment: .leading) {
                 lines(sender: " ", body: " ").hidden()
@@ -26,7 +26,7 @@ struct ReplyPreviewView: View {
                 } else if preview.state == .failed {
                     HStack(spacing: m.sp8) {
                         Text("Original message unavailable").font(m.font(.meta))
-                            .foregroundStyle(appearance.colors.muted)
+                            .foregroundStyle(appearance.colors.textSecondary)
                         Button("Retry") { [target = origin] in
                             guard let target else { return }
                             Task { await matrix.loadReplyPreview(for: target) }
@@ -48,7 +48,7 @@ struct ReplyPreviewView: View {
     private func lines(sender: String, body: String) -> some View {
         VStack(alignment: .leading, spacing: m.sp4) {
             Text(sender).font(m.font(.caption, .semibold)).lineLimit(1)
-            Text(body).font(m.font(.meta)).foregroundStyle(appearance.colors.muted).lineLimit(1)
+            Text(body).font(m.font(.meta)).foregroundStyle(appearance.colors.textSecondary).lineLimit(1)
         }
     }
 }

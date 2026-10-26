@@ -986,16 +986,16 @@ private struct TimelineWelcomeRow: View {
             .font(m.font(.display, .bold)).frame(width: m(Self.tile), height: m(Self.tile))
             .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusPanel))
             Text(welcome.isDirect || welcome.isEncrypted ? welcome.name : "# \(welcome.name)")
-                .font(m.font(.display, .bold)).foregroundStyle(colors.primaryText)
+                .font(m.font(.display, .bold)).foregroundStyle(colors.textPrimary)
             Text(
                 !welcome.topic.isEmpty
                     ? welcome.topic
                     : welcome.isDirect
                         ? "This is the beginning of your conversation with \(welcome.name)."
                         : "This is the beginning of the \(welcome.name) channel."
-            ).font(m.font(.body)).foregroundStyle(colors.muted).lineSpacing(m.size(.body) / 5)
+            ).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineSpacing(m.size(.body) / 5)
             if welcome.isEncrypted {
-                Image(systemName: "lock.shield").font(m.font(.caption)).foregroundStyle(colors.muted)
+                Image(systemName: "lock.shield").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                     .help("End-to-end encrypted").accessibilityLabel("End-to-end encrypted")
             }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(m.sp24)

@@ -52,7 +52,7 @@ struct MediaCaptionEditor: View {
                     if notice != nil {
                         VStack(alignment: .leading, spacing: m.sp4) {
                             Text("Current caption").font(m.font(.caption, .semibold)).foregroundStyle(
-                                colors.muted)
+                                colors.textSecondary)
                             Text(snapshot.caption ?? "No caption").font(m.font(.meta)).textSelection(.enabled)
                         }.padding(m.sp12).frame(maxWidth: .infinity, alignment: .leading).background(
                             colors.raised, in: RoundedRectangle(cornerRadius: m.radius))
@@ -81,7 +81,7 @@ struct MediaCaptionEditor: View {
                         !canSave)
                 }
             }
-        }.padding(m.sp24).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.text)
+        }.padding(m.sp24).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)
             .interactiveDismissDisabled(saving)
             .task(id: matrix.mediaCaptionSourceRevision(target)) { await load() }
             .onDisappear {

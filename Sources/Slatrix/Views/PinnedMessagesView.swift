@@ -19,7 +19,7 @@ struct PinnedMessagesView: View {
             HStack(spacing: m.sp8) {
                 Spacer()
                 Text("\(service.totalPinned) \(service.totalPinned == 1 ? "pin" : "pins")").font(m.font(.caption))
-                    .foregroundStyle(colors.muted)
+                    .foregroundStyle(colors.textSecondary)
                 IconButton(symbol: "arrow.clockwise", label: "Refresh", role: .body) {
                     Task { await service.retry() }
                 }.disabled(service.state == "loading")
@@ -35,7 +35,7 @@ struct PinnedMessagesView: View {
                 if service.state == "loading" {
                     VStack(spacing: m.sp12) {
                         ProgressView().loadingInterval(.pinsLoading)
-                        Text("Loading…").font(m.font(.secondary)).foregroundStyle(colors.muted)
+                        Text("Loading…").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if service.state != "error" {
                     EmptyStateView(
@@ -60,7 +60,7 @@ struct PinnedMessagesView: View {
                     Image(systemName: "info.circle")
                     Text(coverage)
                     Spacer()
-                }.font(m.font(.caption)).foregroundStyle(colors.muted).padding(.horizontal, m.sp24).padding(
+                }.font(m.font(.caption)).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24).padding(
                     .vertical, m.sp12
                 )
                 .background(colors.raised)
@@ -87,20 +87,22 @@ struct PinnedMessagesView: View {
                         }.buttonStyle(.row)
                         Text(message.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
                             m.font(.caption)
-                        ).foregroundStyle(colors.muted)
-                        if message.isEdited { Text("edited").font(m.font(.caption)).foregroundStyle(colors.muted) }
+                        ).foregroundStyle(colors.textSecondary)
+                        if message.isEdited {
+                            Text("edited").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                        }
                         Spacer(minLength: 0)
-                        Image(systemName: "pin.fill").font(m.font(.caption)).foregroundStyle(colors.muted)
+                        Image(systemName: "pin.fill").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                     }
                     if message.isRedacted {
-                        Text("This message was deleted.").italic().foregroundStyle(colors.muted)
+                        Text("This message was deleted.").italic().foregroundStyle(colors.textSecondary)
                     } else {
                         NativeMessageBody(
                             body: message.body, formattedBody: message.formattedBody, showsSpoilerControl: false
                         ).lineLimit(8)
                         if let attachment = message.attachment {
                             Label(attachment.name, systemImage: "paperclip").font(m.font(.meta)).foregroundStyle(
-                                colors.muted
+                                colors.textSecondary
                             ).lineLimit(1)
                         }
                     }
@@ -109,7 +111,7 @@ struct PinnedMessagesView: View {
             HStack {
                 if service.canPinUnpin {
                     Button("Unpin") { unpin(message) }.buttonStyle(.row).font(m.font(.caption)).foregroundStyle(
-                        colors.muted
+                        colors.textSecondary
                     ).disabled(service.isUpdating)
                 }
                 Spacer()

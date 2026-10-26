@@ -77,7 +77,7 @@ struct SharedFilesView: View {
             } else if service.state == "loading" && service.items.isEmpty {
                 VStack(spacing: m.sp12) {
                     ProgressView()
-                    Text("Loading…").font(m.font(.secondary)).foregroundStyle(colors.muted)
+                    Text("Loading…").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
@@ -113,7 +113,7 @@ struct SharedFilesView: View {
                     HStack {
                         Label("\(service.unavailableEncryptedCount) locked", systemImage: "lock")
                         Spacer(minLength: 0)
-                    }.font(m.font(.caption)).foregroundStyle(colors.muted).padding(.horizontal, m.sp24).padding(
+                    }.font(m.font(.caption)).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24).padding(
                         .vertical, m.sp12
                     )
                     .background(colors.raised)
@@ -133,7 +133,7 @@ struct SharedFilesView: View {
     private var filters: some View {
         VStack(spacing: m.sp16) {
             HStack(spacing: m.sp12) {
-                Text("Conversation").font(m.font(.meta)).foregroundStyle(colors.muted)
+                Text("Conversation").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 Picker("Conversation", selection: Binding(get: { roomID ?? "" }, set: { selectedRoomID = $0 })) {
                     ForEach(rooms) { room in Text(room.name).tag(room.id) }
                 }.labelsHidden().frame(maxWidth: m(Self.roomPickerMaxWidth), alignment: .leading).disabled(
@@ -148,14 +148,14 @@ struct SharedFilesView: View {
                     ForEach(ContentFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }.pickerStyle(.segmented).labelsHidden().frame(width: m(Self.typePickerWidth))
                 HStack(spacing: m.sp8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(colors.muted)
+                    Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
                     TextField("Search files and links", text: $query).textFieldStyle(.plain).font(
                         m.font(.meta))
                     if !query.isEmpty {
                         Button {
                             query = ""
                         } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(colors.muted)
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(colors.textSecondary)
                         }.buttonStyle(.row).help("Clear filter")
                     }
                 }.padding(.horizontal, m.sp12).frame(height: m.row).background(
@@ -211,7 +211,7 @@ private struct SharedContentCard: View {
                     if let image {
                         Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
                     } else {
-                        Image(systemName: symbol).font(m.font(.header)).foregroundStyle(colors.muted)
+                        Image(systemName: symbol).font(m.font(.header)).foregroundStyle(colors.textSecondary)
                     }
                 }.frame(width: m(Self.thumbnail), height: m(Self.thumbnail)).background(
                     colors.canvas, in: RoundedRectangle(cornerRadius: m.radiusLarge)
@@ -220,7 +220,7 @@ private struct SharedContentCard: View {
                 VStack(alignment: .leading, spacing: m.sp8) {
                     Text(message.attachment?.name ?? item.links.first?.host ?? "Shared link").font(
                         m.font(.body, .semibold)
-                    ).foregroundStyle(colors.primaryText).lineLimit(2).textSelection(.enabled)
+                    ).foregroundStyle(colors.textPrimary).lineLimit(2).textSelection(.enabled)
                     HStack(spacing: m.sp8) {
                         Button(message.senderName) {
                             onOpenProfile(
@@ -236,7 +236,7 @@ private struct SharedContentCard: View {
                         if message.threadRootID != nil {
                             Label("Thread reply", systemImage: "bubble.left.and.bubble.right")
                         }
-                    }.font(m.font(.caption)).foregroundStyle(colors.muted).lineLimit(1)
+                    }.font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if message.attachment != nil {
                     Button(action: preview) {

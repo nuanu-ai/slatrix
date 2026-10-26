@@ -28,7 +28,7 @@ struct LoginView: View {
                 )
                 .frame(width: m(Self.heroTile), height: m(Self.heroTile)).background(
                     colors.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: m(Self.heroRadius)))
-                Text("Sign in to Slatrix").font(m.font(.display, .bold)).foregroundStyle(colors.primaryText)
+                Text("Sign in to Slatrix").font(m.font(.display, .bold)).foregroundStyle(colors.textPrimary)
                 VStack(alignment: .leading, spacing: m.sp16) {
                     field("Homeserver") {
                         TextField("https://matrix.example.org", text: $homeserver).textContentType(.URL)

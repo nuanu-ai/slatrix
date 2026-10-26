@@ -15,7 +15,7 @@ struct SavedMessagesView: View {
             HStack(spacing: m.sp8) {
                 Spacer()
                 Text("\(saved.count) \(saved.count == 1 ? "message" : "messages")").font(m.font(.caption))
-                    .foregroundStyle(appearance.colors.muted)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 IconButton(symbol: "arrow.clockwise", label: "Refresh", role: .body) { refresh = UUID() }
             }.padding(.horizontal, m.sp24).frame(height: m.control + m.sp16)
             Divider().overlay(appearance.colors.border)
@@ -60,7 +60,7 @@ private struct SavedMessageCard: View {
                 Text(room?.name ?? "Conversation unavailable").font(m.font(.meta, .semibold)).lineLimit(1)
                 Spacer()
                 IconButton(symbol: "bookmark.fill", label: "Remove from Later", role: .body, action: onRemove)
-            }.foregroundStyle(colors.muted)
+            }.foregroundStyle(colors.textSecondary)
             if let message {
                 HStack(alignment: .top, spacing: m.sp12) {
                     Button {
@@ -77,18 +77,20 @@ private struct SavedMessageCard: View {
                             }.buttonStyle(.row)
                             Text(message.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
                                 m.font(.caption)
-                            ).foregroundStyle(colors.muted)
-                            if message.isEdited { Text("edited").font(m.font(.caption)).foregroundStyle(colors.muted) }
+                            ).foregroundStyle(colors.textSecondary)
+                            if message.isEdited {
+                                Text("edited").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                            }
                         }
                         if message.isRedacted {
-                            Text("This message was deleted.").italic().foregroundStyle(colors.muted)
+                            Text("This message was deleted.").italic().foregroundStyle(colors.textSecondary)
                         } else {
                             NativeMessageBody(
                                 body: message.body, formattedBody: message.formattedBody, showsSpoilerControl: false
                             ).lineLimit(6)
                             if let attachment = message.attachment {
                                 Label(attachment.name, systemImage: "paperclip").font(m.font(.meta))
-                                    .foregroundStyle(colors.muted).lineLimit(1)
+                                    .foregroundStyle(colors.textSecondary).lineLimit(1)
                             }
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
@@ -96,11 +98,11 @@ private struct SavedMessageCard: View {
             } else if loading {
                 HStack(spacing: m.sp8) {
                     ProgressView().controlSize(.small)
-                    Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.muted)
+                    Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }.padding(.vertical, m.sp12)
             } else {
                 HStack(alignment: .top, spacing: m.sp8) {
-                    Image(systemName: "exclamationmark.bubble").foregroundStyle(colors.muted)
+                    Image(systemName: "exclamationmark.bubble").foregroundStyle(colors.textSecondary)
                     VStack(alignment: .leading, spacing: m.sp4) {
                         Text(error ?? "Preview unavailable").font(m.font(.secondary, .medium))
                         Button("Retry") { retry = UUID() }.buttonStyle(.link).font(m.font(.caption))
@@ -110,7 +112,7 @@ private struct SavedMessageCard: View {
             HStack {
                 Text("Saved \(reference.savedAt.formatted(.dateTime.month(.abbreviated).day()))").font(
                     m.font(.caption)
-                ).foregroundStyle(colors.muted)
+                ).foregroundStyle(colors.textSecondary)
                 Spacer()
                 Button(action: onOpen) {
                     HStack(spacing: m.sp8) {

@@ -56,7 +56,7 @@ struct PublicRoomDirectoryView: View {
             Divider().overlay(colors.border)
             directoryContent.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.text
+            colors.textBody
         )
         .onAppear {
             owner = context
@@ -83,8 +83,8 @@ struct PublicRoomDirectoryView: View {
             HStack(alignment: .top, spacing: m.sp16) {
                 VStack(alignment: .leading, spacing: m.sp8) {
                     Text("Browse channels").font(m.font(.header, .bold)).foregroundStyle(
-                        colors.primaryText)
-                    Text(workspace?.name ?? serverName).font(m.font(.meta)).foregroundStyle(colors.muted)
+                        colors.textPrimary)
+                    Text(workspace?.name ?? serverName).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                         .lineLimit(2).textSelection(.enabled)
                 }
                 Spacer()
@@ -92,7 +92,7 @@ struct PublicRoomDirectoryView: View {
                     .keyboardShortcut(.cancelAction)
             }
             HStack(spacing: m.sp8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(colors.muted)
+                Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
                 TextField("Search by channel name or topic", text: $query).textFieldStyle(.plain).font(
                     m.font(.body)
                 ).focused($searchFocused)
@@ -121,7 +121,7 @@ struct PublicRoomDirectoryView: View {
         } else if entries.isEmpty && searching {
             VStack(spacing: m.sp12) {
                 ProgressView()
-                Text("Loading…").font(m.font(.secondary)).foregroundStyle(colors.muted)
+                Text("Loading…").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
             }
         } else if entries.isEmpty {
             EmptyStateView(
@@ -164,15 +164,16 @@ struct PublicRoomDirectoryView: View {
         return HStack(alignment: .top, spacing: m.sp12) {
             AvatarView(name: entry.displayName, size: m.avatar, matrix: matrix, source: entry.avatarURL)
             VStack(alignment: .leading, spacing: m.sp8) {
-                Text(entry.displayName).font(m.font(.body, .semibold)).foregroundStyle(colors.primaryText)
+                Text(entry.displayName).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
                     .lineLimit(2).help(entry.displayName)
                 // A workspace's own channels need no address unless they have a readable one.
                 if workspace == nil || entry.alias != nil {
-                    Text(entry.alias ?? entry.id).font(m.font(.caption)).foregroundStyle(colors.muted).lineLimit(1)
+                    Text(entry.alias ?? entry.id).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                        .lineLimit(1)
                         .help(entry.alias ?? entry.id)
                 }
                 if let topic = entry.topic, !topic.isEmpty {
-                    Text(topic).font(m.font(.meta)).foregroundStyle(colors.muted).lineLimit(2)
+                    Text(topic).font(m.font(.meta)).foregroundStyle(colors.textSecondary).lineLimit(2)
                 }
                 HStack(spacing: m.sp12) {
                     Label(
@@ -183,7 +184,7 @@ struct PublicRoomDirectoryView: View {
                     } else if workspace == nil || !entry.canJoin {
                         Text(ruleLabel(entry.joinRule))
                     }
-                }.font(m.font(.caption)).foregroundStyle(colors.muted)
+                }.font(m.font(.caption)).foregroundStyle(colors.textSecondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
             if joined || entry.canJoin {
                 Button {
