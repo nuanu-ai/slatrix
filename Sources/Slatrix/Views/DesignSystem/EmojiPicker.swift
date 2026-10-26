@@ -179,8 +179,28 @@ private struct EmojiSearchField: NSViewRepresentable {
     let onMove: (EmojiGrid.Direction) -> Void
     let onSubmit: () -> Void
 
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
+    /// Gives the keyboard back to where it was, such as the composer, when the picker closes without a pick.
+    final class Field: NSTextField {
+        private weak var previousResponder: NSResponder?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            previousResponder = window?.firstResponder
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            // SwiftUI may have let the search go already; then focus is nowhere, and goes back too.
+            if newWindow == nil, let window,
+                window.firstResponder === window || window.firstResponder === currentEditor()
+            {
+                window.makeFirstResponder(previousResponder)
+            }
+            super.viewWillMove(toWindow: newWindow)
+        }
+    }
+
+    func makeNSView(context: Context) -> Field {
+        let field = Field()
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
@@ -190,7 +210,7 @@ private struct EmojiSearchField: NSViewRepresentable {
         return field
     }
 
-    func updateNSView(_ field: NSTextField, context: Context) {
+    func updateNSView(_ field: Field, context: Context) {
         context.coordinator.parent = self
         if field.stringValue != text { field.stringValue = text }
         field.font = font
