@@ -142,6 +142,8 @@ final class ActionRoom: Room, @unchecked Sendable {
 final class ActionClient: Client, @unchecked Sendable {
     let entries: [String: ActionRoom]
     let mediaReads = Recorder<String>()
+    let recentEmoji = Recorder<String>()
+    var storedRecentEmoji: [RecentEmoji] = []
     init(_ rooms: [ActionRoom]) {
         entries = Dictionary(uniqueKeysWithValues: rooms.map { ($0.identifier, $0) })
         super.init(noHandle: .init())
@@ -150,6 +152,8 @@ final class ActionClient: Client, @unchecked Sendable {
     override func getRoom(roomId: String) throws -> Room? { entries[roomId] }
     override func rooms() -> [Room] { Array(entries.values) }
     override func spaceService() async -> SpaceService { FakeSpaceService() }
+    override func addRecentEmoji(emoji: String) async throws { recentEmoji.append(emoji) }
+    override func getRecentEmojis() async throws -> [RecentEmoji] { storedRecentEmoji }
     override func getMediaContent(mediaSource: MediaSource) async throws -> Data {
         mediaReads.append(mediaSource.url())
         throw MatrixServiceError.request("Fixture media unavailable")

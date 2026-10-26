@@ -94,7 +94,11 @@ struct MatrixMappingTests {
             canBeRepliedTo: true, lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
         let message = MatrixMapping.message(item, roomID: "!room:example.org", ownUserID: "@alice:example.org")
         #expect(message?.id == "local" && message?.sendState == "sending")
-        #expect(message?.reactions == [MessageReaction(key: "👍", count: 2, mine: true)])
+        #expect(
+            message?.reactions == [
+                MessageReaction(
+                    key: "👍", count: 2, mine: true, senders: ["@alice:example.org", "@bob:example.org"])
+            ])
         #expect(message?.senderName == "@alice:example.org")
     }
 

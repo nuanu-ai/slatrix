@@ -115,6 +115,7 @@ final class FakeClient: Client, @unchecked Sendable {
     }
     override func getRoom(roomId: String) throws -> Room? { roomList.first { $0.id() == roomId } }
     override func spaceService() async -> SpaceService { spaces }
+    override func addRecentEmoji(emoji: String) async throws {}
 
     private var downloadCount = 0
     var downloads: Int { lock.withLock { downloadCount } }

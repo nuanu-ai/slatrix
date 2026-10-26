@@ -19,6 +19,8 @@ extension EnvironmentValues {
 struct NativeMessageBody: View {
     private var messageBody: String
     var formattedBody: String?
+    /// Ends the text with Slack's inline "(edited)".
+    private var edited: Bool
     private var showsSpoilerControl: Bool
     private var menuCommands: () -> [MessageMenuCommand]
     @EnvironmentObject private var appearance: AppearanceStore
@@ -32,11 +34,12 @@ struct NativeMessageBody: View {
         var html: String?
     }
     init(
-        body: String, formattedBody: String?, showsSpoilerControl: Bool = true,
+        body: String, formattedBody: String?, edited: Bool = false, showsSpoilerControl: Bool = true,
         menuCommands: @escaping () -> [MessageMenuCommand] = { [] }
     ) {
         messageBody = body
         self.formattedBody = formattedBody
+        self.edited = edited
         self.showsSpoilerControl = showsSpoilerControl
         self.menuCommands = menuCommands
     }
@@ -57,6 +60,12 @@ struct NativeMessageBody: View {
                 mentions: MentionPalette(
                     me: mentions.me, text: NSColor(colors.mentionText), fill: NSColor(colors.mentionFill),
                     ownText: NSColor(colors.mentionYouText), ownFill: NSColor(colors.mentionYouFill)),
+                suffix: edited
+                    ? NSAttributedString(
+                        string: " (edited)",
+                        attributes: [
+                            .font: m.nsFont(.caption), .foregroundColor: NSColor(colors.textSecondary),
+                        ]) : nil,
                 menuCommands: menuCommands, onOpenURL: { openURL($0) })
             if showsSpoilerControl && rendered.containsSpoilers {
                 Button(revealed ? "Hide spoilers" : "Show spoilers") {

@@ -13,7 +13,12 @@ extension Tag {
 /// whether that was the oldest page.
 private final class HistoryTimeline: Timeline, @unchecked Sendable {
     let gate = Gate()
+    let reactions = Recorder<String>()
     var onPage: (@MainActor () -> Bool)?
+    override func toggleReaction(itemId: EventOrTransactionId, key: String) async throws -> Bool {
+        reactions.append("\(key) \(MatrixMapping.identifier(itemId))")
+        return true
+    }
     override func paginateBackwards(numEvents: UInt16) async throws -> Bool {
         await gate.wait()
         return await onPage?() ?? false
@@ -34,6 +39,7 @@ struct TimelineHostedTests {
         let service: MatrixService
         let room: ChatRoom
         let appearance: AppearanceStore
+        let popovers: Popovers
         let atBottom: (Bool) -> Void
         var zoom: CGFloat = 1
         var body: some View {
@@ -42,7 +48,7 @@ struct TimelineHostedTests {
                 onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onBottomVisibilityChange: atBottom
             )
             .id(room.id)
-            .environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom))
+            .environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom)).environment(popovers)
         }
     }
 
@@ -51,6 +57,7 @@ struct TimelineHostedTests {
         let timeline = HistoryTimeline(noHandle: .init())
         let appearance = AppearanceStore()
         let client: FakeClient
+        let popovers = Popovers()
         let window: NSWindow
         let hosting: NSHostingView<Fixture>
         var bottomReports: [Bool] = []
@@ -70,14 +77,14 @@ struct TimelineHostedTests {
             window.isReleasedWhenClosed = false
             hosting = NSHostingView(
                 rootView: Fixture(
-                    service: service, room: room, appearance: appearance, atBottom: { _ in }))
+                    service: service, room: room, appearance: appearance, popovers: popovers, atBottom: { _ in }))
             hosting.rootView = fixture(room)
             window.contentView = hosting
         }
 
         func fixture(_ room: ChatRoom) -> Fixture {
             Fixture(
-                service: service, room: room, appearance: appearance,
+                service: service, room: room, appearance: appearance, popovers: popovers,
                 atBottom: { [weak self] in self?.bottomReports.append($0) })
         }
 
@@ -316,7 +323,7 @@ struct TimelineHostedTests {
         #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
     }
 
-    @Test("A message at rest offers its whole menu, its VoiceOver actions and the reaction picker")
+    @Test("A message at rest offers its whole menu, its VoiceOver actions and the emoji picker")
     func restingRowActions() async throws {
         let harness = Harness(
             messages: Self.messages(0..<5).map {
@@ -346,47 +353,99 @@ struct TimelineHostedTests {
             host.accessibilityCustomActions()?.map(\.name) == ["Reply in thread", "Add reaction", "Save for later"])
         // The text's own menu carries the same commands under its copy item.
         #expect(text.menu(for: event)?.items.map(\.title).contains("Reply in thread") == true)
-        // A popover shows only from a window on screen.
-        harness.window.orderFrontRegardless()
-        let windows = Set(NSApp.windows.map(ObjectIdentifier.init))
         let reaction = try #require(menu.items.first { $0.title == "Add reaction…" })
         _ = reaction.target?.perform(reaction.action, with: reaction)
-        #expect(
-            await eventually {
-                NSApp.windows.contains { !windows.contains(ObjectIdentifier($0)) && $0.isVisible }
-            })
+        guard case .emoji(let pick) = harness.popovers.current?.kind else {
+            Issue.record("No emoji picker")
+            return
+        }
+        pick.action("🎉")
+        #expect(await eventually { harness.timeline.reactions.all == ["🎉 $Message-4"] })
     }
 }
 
 extension TimelineHostedTests {
-    @Test("The pointer is an I-beam over message text and an arrow over the hover toolbar on top of it")
-    func toolbarCursor() throws {
-        _ = NSApplication.shared
-        let appearance = AppearanceStore()
-        let message = ChatMessage(
-            id: "$one", roomID: Self.room.id, senderID: Self.user, senderName: "Reader",
-            body: String(repeating: "word ", count: 30), timestamp: Date(timeIntervalSince1970: 0))
-        let hosting = NSHostingView(
-            rootView: MessageRow(message: message, grouped: true, own: false, hovered: true, timeLabel: "12:00 AM")
-                .environmentObject(appearance).frame(width: 400))
-        let window = NSWindow(
-            contentRect: NSRect(x: -20_000, y: -20_000, width: 400, height: 200), styleMask: .borderless,
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = hosting
-        defer {
-            window.contentView = nil
-            window.close()
+    private static func actionable(_ range: Range<Int>) -> [ChatMessage] {
+        messages(range).map {
+            var message = $0
+            message.id = "$" + message.id
+            return message
         }
-        hosting.layoutSubtreeIfNeeded()
-        let text = try #require(Harness.views(in: hosting).compactMap { $0 as? MessageTextView }.first)
+    }
+
+    /// Hovers the middle of a message's text, as the pointer would, and returns the text view.
+    private func hover(_ harness: Harness, _ body: String) throws -> MessageTextView {
+        let text = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? MessageTextView }.first {
+                $0.string.hasPrefix(body) && $0.window != nil
+            })
         let frame = text.convert(text.bounds, to: nil)
-        // The toolbar's More button, at the trailing end of the text's first line.
-        let more = try #require(Harness.views(in: hosting).first { $0 is NSPopUpButton })
-        let button = more.convert(more.bounds, to: nil)
-        let toolbar = NSPoint(x: button.midX, y: button.midY)
+        harness.scrollView?.onPointer?(NSPoint(x: frame.midX, y: frame.midY))
+        harness.layout()
+        return text
+    }
+
+    private func toolbar(_ harness: Harness) -> NSView? {
+        harness.scrollView?.subviews.first { $0 is TimelineToolbarView && !$0.isHidden }
+    }
+
+    @Test("Hovering a message floats the toolbar over its top edge, and no row moves or changes height")
+    func hoverKeepsRowsStill() async throws {
+        var messages = Self.actionable(0..<30)
+        messages[27].reactions = [MessageReaction(key: "👍", count: 2, mine: true, senders: [Self.user, "@b:x"])]
+        messages[27].replyCount = 3
+        messages[28].isEdited = true
+        let harness = Harness(messages: messages)
+        defer { harness.close() }
+        await settle(harness) { harness.top(of: "Message 29") != nil }
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        // The newest rows, on screen and so measured.
+        func heights() -> [CGFloat] {
+            (table.numberOfRows - 7..<table.numberOfRows).map { table.rect(ofRow: $0).height }
+        }
+        let bodies = ["Message 27", "Message 28", "Message 29"]
+        let before = heights()
+        let tops = bodies.map(harness.top)
+        for body in bodies {
+            var cell: NSView? = try hover(harness, body)
+            while let view = cell, !(view is TimelineCell) { cell = view.superview }
+            let row = try #require(cell as? TimelineCell)
+            let frame = row.convert(row.bounds, to: nil)
+            let shown = try #require(toolbar(harness))
+            let bar = shown.convert(shown.bounds, to: nil)
+            #expect(abs(bar.midY - frame.maxY) < 1, "\(body)")
+            #expect(bar.maxX < frame.maxX && bar.height >= MessageToolbar.button)
+            // The hovered row lays out at the height it was measured at without hover.
+            #expect(abs(row.height(width: row.bounds.width) - row.bounds.height) < 0.5, "\(body)")
+        }
+        await drainMainActor()
+        harness.layout()
+        #expect(heights() == before)
+        #expect(bodies.map(harness.top) == tops)
+        // Leaving the timeline takes the toolbar with it.
+        harness.scrollView?.onPointer?(nil)
+        #expect(toolbar(harness) == nil)
+    }
+
+    @Test("The pointer is an I-beam over message text and an arrow over the hover toolbar on top of it")
+    func toolbarCursor() async throws {
+        var messages = Self.actionable(0..<6)
+        // Grouped under the message before it, so the toolbar over its top edge covers its first line of text.
+        messages[5].timestamp = messages[4].timestamp.addingTimeInterval(30)
+        messages[5].body = String(repeating: "word ", count: 60)
+        let harness = Harness(messages: messages)
+        defer { harness.close() }
+        await settle(harness) { harness.top(of: messages[5].body) != nil }
+        let text = try hover(harness, "word word")
+        let frame = text.convert(text.bounds, to: nil)
+        let shown = try #require(toolbar(harness))
+        let bar = shown.convert(shown.bounds, to: nil)
+        let overToolbar = NSPoint(x: bar.midX, y: bar.minY + 3)
         let body = NSPoint(x: frame.minX + 10, y: frame.minY + 6)
-        #expect(frame.contains(toolbar))
+        #expect(frame.contains(overToolbar))
+        // The toolbar never takes the click that would drag the window.
+        #expect(!shown.mouseDownCanMoveWindow)
+        let window = harness.window
 
         // AppKit sends the text view these for its whole visible rect, wherever the pointer enters or moves.
         func entered(at point: NSPoint) throws -> NSCursor {
@@ -408,9 +467,9 @@ extension TimelineHostedTests {
             return NSCursor.current
         }
         #expect(try entered(at: body) == .iBeam)
-        #expect(try entered(at: toolbar) == .arrow)
+        #expect(try entered(at: overToolbar) == .arrow)
         #expect(try moved(to: body) == .iBeam)
-        #expect(try moved(to: toolbar) == .arrow)
+        #expect(try moved(to: overToolbar) == .arrow)
         #expect(try moved(to: body) == .iBeam)
     }
 }
@@ -554,14 +613,14 @@ extension TimelineHostedTests {
 @MainActor
 struct MessageRowLayoutTests {
     @Test(
-        "Hovering a one-line message shows its time and toolbar without changing its height",
+        "Hovering a message shows its time and add-reaction chip without changing its height",
         arguments: [CGFloat(360), 800], [MessageDensity.comfortable, .compact])
-    func toolbarOverlays(width: CGFloat, density: MessageDensity) throws {
+    func hoverKeepsHeight(width: CGFloat, density: MessageDensity) throws {
         let appearance = AppearanceStore()
         let saved = appearance.density
         defer { appearance.density = saved }
         appearance.density = density
-        let message = ChatMessage(
+        var message = ChatMessage(
             id: "$one", roomID: "!timeline:example.org", senderID: "@reader:example.org", senderName: "Reader",
             body: "One line", timestamp: Date(timeIntervalSince1970: 0))
         func height(hovered: Bool) -> CGFloat {
@@ -571,9 +630,16 @@ struct MessageRowLayoutTests {
         }
         let resting = height(hovered: false)
         #expect(height(hovered: true) == resting)
-        // The toolbar fits inside the row, and a comfortable row stays under 36 pt.
-        #expect(resting >= MessageRow.toolbarButton)
+        // A comfortable one-line row stays under 36 pt.
         if density == .comfortable { #expect(resting < 36) }
+        message.isEdited = true
+        #expect(height(hovered: false) == resting, "(edited) sits on the last line")
+        message.reactions = [MessageReaction(key: "👍", count: 1, mine: true)]
+        message.replyCount = 2
+        message.lastReply = ThreadReply(
+            senderID: "@julia:example.org", senderName: "Julia", timestamp: Date(timeIntervalSince1970: 0))
+        let decorated = height(hovered: false)
+        #expect(height(hovered: true) == decorated)
     }
 }
 

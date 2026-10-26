@@ -78,8 +78,8 @@ struct TimelineMessageEntry: Hashable {
     var onCopyLink: (MessagePermalinkTarget) -> Void = { _ in }
     /// Whether a link to this event is being copied.
     var isCopyingLink: (String) -> Bool = { _ in false }
-    /// Shows the one reaction picker over a row, by row ID; the table owns it.
-    var onPickReaction: (String, MessageActionTarget, @escaping (String) -> Void) -> Void = { _, _, _ in }
+    /// Opens the emoji picker for a reaction.
+    var onPickEmoji: (EmojiPick) -> Void = { _ in }
     /// A displayed row whose height no longer matches its measurement, after state of its own changed.
     var onHeight: (String, CGFloat) -> Void = { _, _ in }
 }
@@ -125,7 +125,6 @@ struct TimelineTable: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ view: TimelineScrollView, coordinator: TimelineTableCoordinator) {
-        coordinator.closePicker()
         coordinator.remember()
         coordinator.stopLoading()
         coordinator.recycleCells()
@@ -178,6 +177,8 @@ struct TimelineTable: NSViewRepresentable {
     private var opened = false
     private var pendingFocus: String?
     private var hoveredID: String?
+    private let toolbar = TimelineToolbarView(rootView: nil)
+    private var toolbarEntry: TimelineEntry?
     /// Heights of this table's rows the table has been given, by row ID; the rest are estimates.
     private var known: [String: CGFloat] = [:]
     private var prefetching = false
@@ -187,8 +188,6 @@ struct TimelineTable: NSViewRepresentable {
     private var reported: (Bool, Bool)?
     /// While the table waits for its first rows.
     private var loading: Performance.Interval?
-    /// The reaction picker, over the row it was opened for.
-    private var picker: (popover: NSPopover, rowID: String, target: MessageActionTarget)?
 
     func makeView() -> TimelineScrollView {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("row"))
@@ -226,10 +225,6 @@ struct TimelineTable: NSViewRepresentable {
             loading = Performance.begin(configuration.context.isThread ? .threadLoading : .timelineLoading)
         }
         configuration.context.onHeight = { [weak self] id, height in self?.reported(height, for: id) }
-        configuration.context.onPickReaction = { [weak self] id, target, pick in
-            self?.showPicker(over: id, target: target, onPick: pick)
-        }
-        if let picker, configuration.context.matrix?.isCurrentMessageAction(picker.target) != true { closePicker() }
         configuration.scroller.bottom = { [weak self] in self?.scrollToBottom(animated: true) }
         if previous?.focusedEventID != configuration.focusedEventID { pendingFocus = configuration.focusedEventID }
         apply(configuration.entries)
@@ -279,7 +274,10 @@ struct TimelineTable: NSViewRepresentable {
                 reindex()
             }
             var changed = IndexSet()
-            if settingsChanged { known = [:] }
+            if settingsChanged {
+                known = [:]
+                toolbarEntry = nil
+            }
             for row in rows.indices where rows[row] != next[row] || settingsChanged {
                 rows[row] = next[row]
                 known[rows[row].id] = nil
@@ -310,11 +308,11 @@ struct TimelineTable: NSViewRepresentable {
         guard row != cell.row else { return }
         let commands: ((Bool) -> [MessageMenuCommand])? =
             if case .message(let row) = entry.kind, let context = configuration?.context {
-                { [id = entry.id] accessibility in
+                { accessibility in
                     let target = context.actionTarget(for: row.message)
                     return accessibility
-                        ? context.accessibilityCommands(for: id, row, target: target)
-                        : context.actions(for: id, row, target: target).menu()
+                        ? context.accessibilityCommands(for: row, target: target)
+                        : context.actions(for: row, target: target).menu()
                 }
             } else { nil }
         cell.show(row, commands: commands)
@@ -365,35 +363,6 @@ struct TimelineTable: NSViewRepresentable {
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
-
-    /// The picker follows its row off screen, as a popover attached to the row itself would.
-    func tableView(_ tableView: NSTableView, didRemove rowView: NSTableRowView, forRow row: Int) {
-        if let picker, row < 0 || index[picker.rowID] == row || index[picker.rowID] == nil { closePicker() }
-    }
-
-    // MARK: Reaction picker
-
-    private func showPicker(over id: String, target: MessageActionTarget, onPick: @escaping (String) -> Void) {
-        closePicker()
-        guard let row = index[id], let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false),
-            let configuration
-        else { return }
-        let m = configuration.context.metrics
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentViewController = NSHostingController(
-            rootView: ReactionPicker { [weak self] key in
-                onPick(key)
-                self?.closePicker()
-            }.padding(m.sp12).environment(\.metrics, m))
-        picker = (popover, id, target)
-        popover.show(relativeTo: cell.bounds, of: cell, preferredEdge: .maxY)
-    }
-
-    func closePicker() {
-        picker?.popover.close()
-        picker = nil
-    }
 
     // MARK: Heights
 
@@ -722,13 +691,13 @@ struct TimelineTable: NSViewRepresentable {
         settle(keeping: nil)
         applying = false
         noteJump(from: reading)
-        updateHover()
         afterScroll()
     }
 
-    /// Reports the viewport's state and loads history ahead of the reader.
+    /// Reports the viewport's state, keeps the hover with the pointer and loads history ahead of the reader.
     private func afterScroll() {
         guard let configuration else { return }
+        updateHover()
         let viewport = viewport
         let state = (viewport.isAtBottom, opened && Policy.showsJumpToLatest(viewport, live: configuration.live))
         if reported.map({ $0 != state }) ?? true {
@@ -777,6 +746,8 @@ struct TimelineTable: NSViewRepresentable {
     // MARK: Hover
 
     private func pointerMoved(_ point: NSPoint?) {
+        // The toolbar hangs over the row above its own; the pointer on it still means its row.
+        if let point, !toolbar.isHidden, toolbar.frame.contains(scrollView.convert(point, from: nil)) { return }
         let row = point.map { table.row(at: table.convert($0, from: nil)) } ?? -1
         let id: String? =
             if row >= 0, row < rows.count, case .message = rows[row].kind { rows[row].id } else { nil }
@@ -785,13 +756,41 @@ struct TimelineTable: NSViewRepresentable {
         hoveredID = id
         if let previous { refresh(previous) }
         if let id, let row = index[id] { refresh(row) }
+        placeToolbar()
     }
 
+    /// Follows the pointer as rows move under it, and the hovered row as it changes.
     private func updateHover() {
         guard let window = scrollView.window else { return }
         let point = window.mouseLocationOutsideOfEventStream
         let inside = scrollView.bounds.contains(scrollView.convert(point, from: nil))
         pointerMoved(inside ? point : nil)
+        placeToolbar()
+    }
+
+    /// The one hover toolbar, centered on the hovered row's top edge as Slack's is, and kept inside the viewport.
+    private func placeToolbar() {
+        guard let id = hoveredID, let row = index[id], case .message(let entry) = rows[row].kind,
+            !entry.message.isRedacted, let context = configuration?.context
+        else {
+            toolbar.isHidden = true
+            return
+        }
+        if toolbarEntry != rows[row] {
+            toolbarEntry = rows[row]
+            toolbar.rootView = HoveredMessageToolbar(entry: entry, context: context)
+            toolbar.frame.size = toolbar.fittingSize
+        }
+        if toolbar.superview == nil { scrollView.addSubview(toolbar) }
+        let m = context.metrics
+        let size = toolbar.frame.size
+        let rect = table.rect(ofRow: row)
+        let top = scrollView.convert(NSPoint(x: rect.maxX, y: rect.minY), from: table)
+        // In the scroll view's flipped coordinates, from the viewport's top down.
+        let visible = scrollView.contentView.frame
+        let y = min(max(top.y - size.height / 2, visible.minY + m.sp4), visible.maxY - size.height)
+        toolbar.frame.origin = NSPoint(x: top.x - m.sp16 - size.width, y: y)
+        toolbar.isHidden = false
     }
 }
 
@@ -835,6 +834,11 @@ final class TimelineScrollView: NSScrollView {
         super.mouseExited(with: event)
         onPointer?(nil)
     }
+}
+
+final class TimelineToolbarView: NSHostingView<HoveredMessageToolbar?> {
+    // Clicks between its buttons stay with the toolbar; the window moves by its background.
+    override var mouseDownCanMoveWindow: Bool { false }
 }
 
 final class TimelineTableView: NSTableView {
@@ -955,6 +959,10 @@ struct TimelineRow: View, Equatable {
                     avatar: AvatarView(
                         name: message.senderName, size: metrics.avatar, matrix: matrix,
                         source: message.avatarURL),
+                    replierAvatar: message.lastReply.map {
+                        AvatarView(
+                            name: $0.senderName, size: metrics.avatarMedium, matrix: matrix, source: $0.avatarURL)
+                    },
                     replyPreview: message.replyPreview.map {
                         ReplyPreviewView(
                             matrix: matrix, message: message, preview: $0, origin: target, onOpen: context.onShowReply)
@@ -964,7 +972,7 @@ struct TimelineRow: View, Equatable {
                             matrix: matrix, message: message, attachment: $0, collapsed: row.mediaCollapsed,
                             actions: context.attachmentActions(for: message, target: target))
                     },
-                    actions: context.actions(for: entry.id, row, target: target))
+                    actions: context.actions(for: row, target: target))
             }
         }
     }
@@ -1026,15 +1034,16 @@ private struct TimelineDayDivider: View {
     }
 }
 
+/// Slack's red rule over the first unread message, with "New" at its right end.
 private struct TimelineUnreadDivider: View {
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
-        let accent = appearance.colors.accent
-        HStack(spacing: m.sp12) {
-            Rectangle().fill(accent).frame(height: 1)
-            Text("New messages").font(m.font(.caption, .semibold)).foregroundStyle(accent)
-            Rectangle().fill(accent).frame(height: 1)
-        }.padding(.horizontal, m.sp20).padding(.vertical, m.sp12).accessibilityLabel("New messages begin here")
+        let colors = appearance.colors
+        HStack(spacing: m.sp4) {
+            Rectangle().fill(colors.destructive).frame(height: 1)
+            Text("New").font(m.font(.caption, .bold)).foregroundStyle(colors.destructive)
+        }.padding(.leading, m.sp20).padding(.trailing, m.sp16).padding(.vertical, m.sp8)
+            .accessibilityElement(children: .ignore).accessibilityLabel("New messages begin here")
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import MatrixRustSDK
 import SwiftUI
 import Testing
 
@@ -6,6 +7,13 @@ import Testing
 
 extension Tag {
     @Tag static var snapshots: Tag
+}
+
+/// A conversation with nothing older, so the timeline starts at its welcome and asks for no history.
+private final class StartOfTimeline: Timeline, @unchecked Sendable {
+    init() { super.init(noHandle: .init()) }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func paginateBackwards(numEvents: UInt16) async throws -> Bool { true }
 }
 
 /// Renders the sample workspace in-process and writes PNGs to `.build/snapshots/` for a person to look at.
@@ -292,6 +300,95 @@ struct Snapshots {
         prepare()
         try write(await settledImage(hosting), "\(name)-\(theme.rawValue)")
     }
+
+    @Test("Emoji picker, empty and searching", arguments: Theme.allCases)
+    func emojiPicker(theme: Theme) async throws {
+        let (window, hosting) = try themedWindow(
+            PopoverSurface { EmojiPicker(recent: ["👍", "🎉", "✅", "👀", "🙌", "🔥", "🚀", "❤️", "😂", "🙏"]) { _ in } }
+                .padding(24),
+            theme: theme)
+        defer { window.close() }
+        try write(await settledImage(hosting), "emoji-picker-\(theme.rawValue)")
+        let field = try #require(Self.views(in: hosting).compactMap { $0 as? NSTextField }.first { $0.isEditable })
+        window.makeFirstResponder(field)
+        let editor = try #require(window.firstResponder as? NSTextView)
+        editor.insertText("heart", replacementRange: editor.selectedRange())
+        try write(await settledImage(hosting), "emoji-search-\(theme.rawValue)")
+    }
+
+    @Test("A hovered message's toolbar, reactions, replies and (edited)", arguments: Theme.allCases)
+    func hoveredRow(theme: Theme) async throws {
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let room = try #require(matrix.selectedRoom)
+        // Signed in rather than sampled, so the toolbar offers reactions.
+        matrix.isPreview = false
+        matrix.configureMessageActionsForChecks(
+            client: FakeClient(rooms: [FakeRoom(roomInfo(id: room.id))]), main: StartOfTimeline(), thread: nil,
+            rootID: nil,
+            sessionID: UUID(), selectionID: UUID(), threadID: UUID())
+        matrix.messages = matrix.messages.map {
+            var message = $0
+            message.id = "$" + message.id
+            return message
+        }
+        let (window, hosting) = try themedWindow(
+            TimelineView(
+                matrix: matrix, room: room, savedIDs: [], onThread: { _ in }, onReply: { _ in }, onEdit: { _ in },
+                onSave: { _ in }, onForward: { _ in }
+            ).environment(Popovers()).frame(width: 760, height: 720),
+            theme: theme)
+        defer { window.close() }
+        _ = try await settledImage(hosting)
+        let scroll = try #require(Self.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
+        let text = try #require(
+            Self.views(in: hosting).compactMap { $0 as? MessageTextView }.first { $0.string.hasPrefix("The details") })
+        let frame = text.convert(text.bounds, to: nil)
+        scroll.onPointer?(NSPoint(x: frame.midX, y: frame.midY))
+        try write(await settledImage(hosting), "hovered-row-\(theme.rawValue)")
+    }
+
+    @Test("The New line over the first unread message", arguments: Theme.allCases)
+    func newLine(theme: Theme) async throws {
+        let appearance = AppearanceStore()
+        let context = TimelineRowContext()
+        context.appearance = appearance
+        let message = ChatMessage(
+            id: "$new", roomID: "!room:example.org", senderID: "@julia:example.org", senderName: "Julia",
+            body: "Pushed the new build, give it a spin", timestamp: Date(timeIntervalSince1970: 1_800_000_000))
+        let (window, hosting) = try themedWindow(
+            VStack(spacing: 0) {
+                TimelineRow(entry: TimelineEntry(id: "unread", kind: .unread), hovered: false, context: context)
+                MessageRow(message: message, timeLabel: "10:42 AM")
+            }.frame(width: 560),
+            theme: theme, appearance: appearance)
+        defer { window.close() }
+        try write(await settledImage(hosting), "new-line-\(theme.rawValue)")
+    }
+
+    /// `view` on the canvas in an offscreen window that the window server composites.
+    private func themedWindow(_ view: some View, theme: Theme, appearance: AppearanceStore = AppearanceStore())
+        throws -> (NSWindow, NSView)
+    {
+        _ = NSApplication.shared
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        UserDefaults.standard.set(savedMode, forKey: "appearance.mode")
+        let hosting = NSHostingView(
+            rootView: view.background(appearance.colors.canvas).environmentObject(appearance)
+                .environment(\.colorScheme, theme == .dark ? .dark : .light))
+        let window = NSWindow(
+            contentRect: NSRect(origin: CGPoint(x: -20000, y: -20000), size: hosting.fittingSize),
+            styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        return (window, hosting)
+    }
+
+    private static func views(in view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
 
     /// Captures until the frame stops changing for 300 ms, so async text, symbols and layout have arrived.
     ///

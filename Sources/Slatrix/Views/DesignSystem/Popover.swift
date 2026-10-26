@@ -5,6 +5,7 @@ import SwiftUI
 @Observable @MainActor final class Popovers {
     enum Kind: Equatable {
         case profile(userID: String, fallback: ChatUser?)
+        case emoji(EmojiPick)
     }
     struct Shown: Equatable {
         let id = UUID()
@@ -29,6 +30,13 @@ import SwiftUI
         let point = content.convert(event.locationInWindow, from: nil)
         return content.isFlipped ? point : CGPoint(x: point.x, y: content.bounds.height - point.y)
     }
+}
+
+/// What picking an emoji does: insert it, or react with it. Two picks are the same only when they are one request.
+struct EmojiPick: Equatable {
+    let id = UUID()
+    let action: (String) -> Void
+    static func == (a: Self, b: Self) -> Bool { a.id == b.id }
 }
 
 /// Slack's anchored card: 320 pt on the popover surface, beside the click, kept inside the window. It fades in over

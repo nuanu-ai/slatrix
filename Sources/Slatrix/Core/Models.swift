@@ -57,6 +57,8 @@ struct ChatMessage: Identifiable, Hashable {
     var kind: String = "m.text"
     var reactions: [MessageReaction] = []
     var replyCount = 0
+    /// Who replied last in this message's thread, and when, from the thread summary.
+    var lastReply: ThreadReply? = nil
     var threadRootID: String? = nil
     var isEdited = false
     var isRedacted = false
@@ -95,6 +97,24 @@ struct MessageReaction: Hashable {
     var key: String
     var count: Int
     var mine: Bool
+    /// User IDs, in the order they reacted.
+    var senders: [String] = []
+}
+
+struct ThreadReply: Hashable {
+    var senderID: String
+    var senderName: String
+    var avatarURL: String?
+    var timestamp: Date
+
+    /// "Last reply 2 hours ago", as Slack's replies bar puts it.
+    static func lastReplyText(_ date: Date, now: Date, locale: Locale = .current) -> String {
+        guard now.timeIntervalSince(date) >= 60 else { return "Last reply just now" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = locale
+        formatter.unitsStyle = .full
+        return "Last reply " + formatter.localizedString(for: date, relativeTo: now)
+    }
 }
 
 struct MessageAttachment: Hashable {
