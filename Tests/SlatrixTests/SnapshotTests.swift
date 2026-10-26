@@ -226,6 +226,73 @@ struct Snapshots {
             }, size: CGSize(width: 1440, height: 900), "viewer")
     }
 
+    @Test("Modals and tab bars", arguments: Theme.allCases)
+    func modals(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let room = try #require(matrix.selectedRoom)
+        func details(_ tab: RoomInfoView.Tab) -> some View {
+            RoomInfoView(
+                matrix: matrix, room: room, tab: tab, onClose: {}, onInvite: {}, onRecovery: {},
+                onOpenProfile: { _, _ in }, onEditDetails: {}, onNotifications: {})
+        }
+        let modals: [(String, AnyView)] = [
+            (
+                "modal-form",
+                AnyView(CreationSheet(matrix: matrix, kind: .channel, onCreated: { _, _, _ in }, onClose: {}))
+            ),
+            (
+                "modal-confirm",
+                AnyView(
+                    ConfirmModal(
+                        title: "Leave \(room.name)?", message: "You may need an invitation to rejoin.",
+                        action: "Leave", onConfirm: {}, onCancel: {}))
+            ),
+            ("details-about", AnyView(details(.about))),
+            ("details-members", AnyView(details(.members))),
+        ]
+        for (name, modal) in modals {
+            try await render(
+                ModalHost { RootView(matrix: matrix).modal(isPresented: .constant(true)) { modal } }, theme: theme,
+                name: name
+            ) {
+                // The sample workspace can't load members and says so in a toast, which would cover the tabs.
+                matrix.errorMessage = nil
+            }
+        }
+        try await render(RootView(matrix: matrix), theme: theme, name: "activity") {
+            matrix.errorMessage = nil
+            NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "activity"])
+        }
+    }
+
+    /// The window at 1440 × 900 and 100% with `view` as its content, after `prepare`.
+    private func render(
+        _ view: some View, theme: Theme, name: String, prepare: () -> Void = {}
+    ) async throws {
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(rootView: view.environmentObject(appearance))
+        let window = NSWindow(
+            contentRect: NSRect(x: -20000, y: -20000, width: 1440, height: 900), styleMask: .borderless,
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        _ = try await settledImage(hosting)
+        prepare()
+        try write(await settledImage(hosting), "\(name)-\(theme.rawValue)")
+    }
+
     /// Captures until the frame stops changing for 300 ms, so async text, symbols and layout have arrived.
     ///
     /// The window server's composite, not `cacheDisplay`: that draws through `CALayer.render(in:)`, which skips layer

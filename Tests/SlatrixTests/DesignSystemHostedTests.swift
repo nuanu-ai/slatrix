@@ -15,6 +15,9 @@ struct DesignSystemHostedTests {
 
         init(_ view: some View, size: CGSize) {
             _ = NSApplication.shared
+            // A focused field brings up AutoFill in a remote view, whose replies crash a process that never ran
+            // NSApp's run loop.
+            UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
             hosting = NSHostingView(rootView: view.environmentObject(AppearanceStore()))
             window = NSWindow(
                 contentRect: NSRect(origin: CGPoint(x: -20_000, y: -20_000), size: size), styleMask: .titled,
@@ -61,12 +64,40 @@ struct DesignSystemHostedTests {
             }
         }
 
-        func pressEscape() {
-            window.sendEvent(
-                NSEvent.keyEvent(
-                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                    windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
-                    charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!)
+        func pressEscape() { press(53, "\u{1b}") }
+
+        /// A key press as the app delivers it: key equivalents such as a default button first, then the focused view.
+        func press(_ keyCode: UInt16, _ characters: String) {
+            for type in [NSEvent.EventType.keyDown, .keyUp] {
+                let event = NSEvent.keyEvent(
+                    with: type, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, characters: characters,
+                    charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode)!
+                if type == .keyDown, window.performKeyEquivalent(with: event) { continue }
+                window.sendEvent(event)
+            }
+        }
+
+        /// The text field holding the cursor, through the field editor that stands in for it.
+        var editingField: NSTextField? { (window.firstResponder as? NSTextView)?.delegate as? NSTextField }
+
+        /// Where the destructive red is drawn, in the window's top-left coordinates; SwiftUI draws buttons without views
+        /// to find.
+        func redFrame() -> CGRect? {
+            hosting.layoutSubtreeIfNeeded()
+            guard let image = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { return nil }
+            hosting.cacheDisplay(in: hosting.bounds, to: image)
+            let scale = CGFloat(image.pixelsWide) / hosting.bounds.width
+            var found = CGRect.null
+            for x in stride(from: 0, to: image.pixelsWide, by: 2) {
+                for y in stride(from: 0, to: image.pixelsHigh, by: 2) {
+                    guard let pixel = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    if pixel.redComponent > 0.7 && pixel.redComponent - pixel.greenComponent > 0.4 {
+                        found = found.union(CGRect(x: CGFloat(x) / scale, y: CGFloat(y) / scale, width: 1, height: 1))
+                    }
+                }
+            }
+            return found.isNull ? nil : found
         }
     }
 
@@ -142,5 +173,175 @@ struct DesignSystemHostedTests {
         #expect(popovers.current != nil)
         await host.click(CGPoint(x: 700, y: 500))
         #expect(await eventually { popovers.current == nil })
+    }
+
+    // MARK: Modals
+
+    @Observable @MainActor final class Probe {
+        var shown = true
+        var confirmed = false
+        var name = ""
+        var tab = 0
+    }
+
+    /// A form in a modal over a window that has a field and a text view of its own.
+    private struct FormModal: View {
+        @Bindable var probe: Probe
+        var closesOnClickOutside = false
+        var body: some View {
+            ModalHost {
+                VStack {
+                    TextField("Behind", text: .constant("")).textFieldStyle(.field)
+                    BehindText()
+                }.padding(16).frame(width: 800, height: 600, alignment: .top).background(Color.white)
+                    .modal(isPresented: $probe.shown, closesOnClickOutside: closesOnClickOutside) {
+                        Modal(
+                            title: "Create a channel", onClose: { probe.shown = false },
+                            secondary: ModalAction("Cancel") { probe.shown = false },
+                            primary: ModalAction("Create channel") { probe.confirmed = true }
+                        ) {
+                            TextField("Topic", text: $probe.name).textFieldStyle(.field)
+                            TextField("Purpose", text: .constant("")).textFieldStyle(.field)
+                        }
+                    }
+            }
+        }
+    }
+
+    /// Selectable text under the modal, like a message, which AppKit could otherwise tab into.
+    private struct BehindText: NSViewRepresentable {
+        func makeNSView(context: Context) -> NSTextView {
+            let view = NSTextView()
+            view.string = "A message"
+            view.isEditable = false
+            return view
+        }
+        func updateNSView(_ view: NSTextView, context: Context) {}
+    }
+
+    private func formHost(_ probe: Probe, closesOnClickOutside: Bool = false) async -> Host {
+        let host = Host(
+            FormModal(probe: probe, closesOnClickOutside: closesOnClickOutside), size: CGSize(width: 800, height: 600))
+        #expect(await eventually { host.editingField != nil })
+        return host
+    }
+
+    @Test("A modal opens with the cursor in its first field")
+    func modalFocusesFirstField() async {
+        let host = await formHost(Probe())
+        defer { host.close() }
+        #expect(host.editingField?.placeholderString == "Topic")
+    }
+
+    @Test("Tab moves between the modal's fields and never behind it")
+    func modalKeepsFocus() async {
+        let host = await formHost(Probe())
+        defer { host.close() }
+        var visited: [String?] = []
+        for _ in 0..<4 {
+            host.press(48, "\t")
+            await drainMainActor()
+            visited.append(host.editingField?.placeholderString)
+        }
+        #expect(visited == ["Purpose", "Topic", "Purpose", "Topic"])
+    }
+
+    @Test("Esc closes a modal without its action")
+    func modalEscapeCancels() async {
+        let probe = Probe()
+        let host = await formHost(probe)
+        defer { host.close() }
+        host.pressEscape()
+        #expect(await eventually { !probe.shown })
+        #expect(!probe.confirmed)
+    }
+
+    @Test("Return runs a modal's primary action")
+    func modalReturnConfirms() async {
+        let probe = Probe()
+        let host = await formHost(probe)
+        defer { host.close() }
+        host.press(36, "\r")
+        #expect(await eventually { probe.confirmed })
+    }
+
+    @Test("A click outside a form keeps it open with what was typed")
+    func modalKeepsInputOnOutsideClick() async {
+        let probe = Probe()
+        let host = await formHost(probe)
+        defer { host.close() }
+        host.window.firstResponder?.insertText("design-team")
+        await host.click(CGPoint(x: 20, y: 580))
+        await drainMainActor()
+        #expect(probe.shown)
+        #expect(probe.name == "design-team")
+    }
+
+    @Test("A click outside closes a modal that asks for it")
+    func modalClosesOnOutsideClick() async {
+        let probe = Probe()
+        let host = await formHost(probe, closesOnClickOutside: true)
+        defer { host.close() }
+        await host.click(CGPoint(x: 20, y: 580))
+        #expect(await eventually { !probe.shown })
+    }
+
+    private struct Confirmation: View {
+        @Bindable var probe: Probe
+        var body: some View {
+            ModalHost {
+                Color.white.frame(width: 600, height: 400)
+                    .modal(isPresented: $probe.shown) {
+                        ConfirmModal(
+                            title: "Delete message?", message: "This can’t be undone.", action: "Delete",
+                            onConfirm: {
+                                probe.confirmed = true
+                                probe.shown = false
+                            }, onCancel: { probe.shown = false })
+                    }
+            }
+        }
+    }
+
+    @Test("A confirmation runs its action from its red button only", arguments: [true, false])
+    func confirmation(confirm: Bool) async throws {
+        let probe = Probe()
+        let host = Host(Confirmation(probe: probe), size: CGSize(width: 600, height: 400))
+        defer { host.close() }
+        _ = await eventually { host.redFrame() != nil }
+        let button = try #require(host.redFrame())
+        // Cancel sits just left of it.
+        await host.click(CGPoint(x: confirm ? button.midX : button.minX - 32, y: button.midY))
+        #expect(await eventually { !probe.shown })
+        #expect(probe.confirmed == confirm)
+    }
+
+    private struct Tabs: View {
+        @Bindable var probe: Probe
+        var body: some View {
+            TabBar(
+                tabs: [
+                    .init(value: 0, title: "About"), .init(value: 1, title: "Members", count: 4),
+                    .init(value: 2, title: "Settings"),
+                ], selection: $probe.tab
+            ).padding(16).frame(width: 400, height: 100).background(Color.white)
+        }
+    }
+
+    @Test("Arrow keys move between tabs once the tab bar has focus")
+    func tabBarArrows() async {
+        let probe = Probe()
+        let host = Host(Tabs(probe: probe), size: CGSize(width: 400, height: 100))
+        defer { host.close() }
+        // A click on "About", the first tab, focuses the bar.
+        await host.click(CGPoint(x: 32, y: 50))
+        #expect(await eventually { host.window.firstResponder !== host.window })
+        var visited: [Int] = []
+        for (code, key) in [(124, "\u{F703}"), (124, "\u{F703}"), (123, "\u{F702}")] {
+            host.press(UInt16(code), key)
+            await drainMainActor()
+            visited.append(probe.tab)
+        }
+        #expect(visited == [1, 2, 1])
     }
 }
