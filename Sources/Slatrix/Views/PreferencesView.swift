@@ -411,7 +411,7 @@ private struct AppMiniature: View {
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: m.sp4) {
                     Capsule().fill(colors.textSecondary.opacity(0.55)).frame(width: m(29), height: m(4))
-                    RoundedRectangle(cornerRadius: m(2)).fill(colors.selection).frame(height: m(8))
+                    RoundedRectangle(cornerRadius: m(2)).fill(colors.selectionStrong).frame(height: m(8))
                     Capsule().fill(colors.textSecondary.opacity(0.25)).frame(width: m(25), height: m(3))
                     Capsule().fill(colors.textSecondary.opacity(0.25)).frame(width: m(31), height: m(3))
                     Spacer(minLength: 0)

@@ -70,6 +70,42 @@ struct Snapshots {
         try write(await settledImage(hosting), "profile-\(name)")
     }
 
+    @Test("Sidebar", arguments: SidebarPalette.allCases, Theme.allCases)
+    func sidebar(palette: SidebarPalette, theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        let savedPalette = UserDefaults.standard.object(forKey: "appearance.palette")
+        defer {
+            UserDefaults.standard.set(savedMode, forKey: "appearance.mode")
+            UserDefaults.standard.set(savedPalette, forKey: "appearance.palette")
+        }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        appearance.palette = palette
+        let sidebar = SidebarView(
+            matrix: matrix, route: .constant(.home), workspaceID: .constant("preview.workspace"),
+            search: .constant(""), draftRoomIDs: ["preview.room.3"], onSelect: { _ in }, onCreate: { _ in },
+            onPreferences: {}, onProfile: {}, onSignOut: {}, onMarkUnread: { _ in }, onMarkRead: { _ in },
+            onInviteWorkspace: { _ in }, onEditWorkspace: { _ in }, onNotifications: { _ in }, onBrowseChannels: {})
+        let hosting = NSHostingView(
+            rootView: sidebar.frame(width: 68 + 280, height: 760).environmentObject(appearance))
+        let window = NSWindow(
+            contentRect: NSRect(x: -20000, y: -20000, width: 68 + 280, height: 760), styleMask: .borderless,
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        try write(await settledImage(hosting), "sidebar-\(palette.rawValue)-\(theme.rawValue)")
+    }
+
     @Test("Component gallery", arguments: Theme.allCases)
     func gallery(theme: Theme) async throws {
         _ = NSApplication.shared

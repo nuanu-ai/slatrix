@@ -28,6 +28,11 @@ struct ComponentGallery: View {
                     section("Buttons") { buttons }
                     section("Fields") { fields }
                     section("Avatars, badges and tags") { identity }
+                    section("Section header") {
+                        SectionHeader(title: "Channels", collapsed: false, onToggle: {}, addLabel: "Add channels") {
+                            EmptyView()
+                        }.frame(width: m(280)).background(appearance.colors.sidebar)
+                    }
                     section("Loading") { loading }
                 }
             }
@@ -71,7 +76,8 @@ struct ComponentGallery: View {
                 "Line and state",
                 [
                     ("border", c.border), ("border strong", c.borderStrong), ("hover", c.hover),
-                    ("pressed", c.pressed), ("selection", c.selection), ("focus ring", c.focusRing),
+                    ("pressed", c.pressed), ("selection", c.selection),
+                    ("selection strong", c.selectionStrong), ("focus ring", c.focusRing),
                 ]
             ),
             (
