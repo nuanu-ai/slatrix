@@ -15,8 +15,9 @@ enum ComposerMentions {
         for token in tokens.sorted(by: { $0.range.location < $1.range.location })
         where token.range.location >= cursor && NSMaxRange(token.range) <= text.length {
             result += text.substring(with: NSRange(location: cursor, length: token.range.location - cursor))
+            // Only what Markdown acts on inside link text, so "J. Smith" stays readable in the plain body.
             let name = text.substring(with: token.range).dropFirst().map {
-                $0.isASCII && ($0.isPunctuation || $0.isSymbol) ? "\\\($0)" : String($0)
+                "\\`*_[]<>~&".contains($0) ? "\\\($0)" : String($0)
             }
             result += "[\(name.joined())](\(MatrixID.permalink(token.userID)))"
             cursor = NSMaxRange(token.range)
