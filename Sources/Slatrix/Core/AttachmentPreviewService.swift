@@ -5,11 +5,12 @@ import MatrixRustSDK
 @MainActor
 final class AttachmentPreviewLease {
     let url: URL
-    private let handle: MediaFileHandle
+    /// Keeps the SDK's temporary file alive; nil for the sample workspace's files.
+    private let handle: MediaFileHandle?
     private let validator: @MainActor () -> Bool
     var isCurrent: Bool { validator() }
 
-    init(url: URL, handle: MediaFileHandle, isCurrent: @escaping @MainActor () -> Bool) {
+    init(url: URL, handle: MediaFileHandle?, isCurrent: @escaping @MainActor () -> Bool) {
         self.url = url
         self.handle = handle
         validator = isCurrent

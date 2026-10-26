@@ -32,6 +32,7 @@ struct ComponentGallery: View {
                 }
             }
             section("Profile") { profile }
+            section("Files") { files }
         }
         .padding(m.sp40).frame(width: m(Self.width), alignment: .leading)
         .background(colors.canvas).foregroundStyle(colors.textBody)
@@ -201,6 +202,27 @@ struct ComponentGallery: View {
             TagLabel(text: "You")
             TagLabel(text: "Invited")
             Circle().fill(c.mention).frame(width: m(9), height: m(9))
+        }
+    }
+
+    /// Type tiles for every kind, and a card as a row shows it. Inline images and the viewer are in the snapshots.
+    private var files: some View {
+        let attachment = MessageAttachment(
+            name: "Brand guidelines.pdf", url: "mxc://harbor.example/guidelines", mimeType: "application/pdf",
+            size: 2_400_000)
+        let message = ChatMessage(
+            id: "$guidelines", roomID: "!design:harbor.example", senderID: "@julia:harbor.example",
+            senderName: "Julia Park", body: attachment.name, timestamp: .now, kind: "m.file", attachment: attachment)
+        return HStack(alignment: .top, spacing: m.sp40) {
+            HStack(alignment: .top, spacing: m.sp16) {
+                ForEach(FileKind.allCases, id: \.self) { kind in
+                    VStack(spacing: m.sp4) {
+                        FileTypeIcon(kind: kind)
+                        caption(kind.label)
+                    }
+                }
+            }
+            AttachmentView(matrix: matrix, message: message, attachment: attachment).frame(width: m(420))
         }
     }
 

@@ -105,4 +105,8 @@ struct MessageAttachment: Hashable {
     /// Pixel dimensions from the event, so the image's box is reserved before its thumbnail loads.
     var width: UInt64? = nil
     var height: UInt64? = nil
+    /// A GIF or another animated image, which plays inline.
+    var animated = false
+    /// A video's length.
+    var duration: TimeInterval? = nil
 }

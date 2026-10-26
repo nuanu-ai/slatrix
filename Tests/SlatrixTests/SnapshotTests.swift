@@ -93,6 +93,57 @@ struct Snapshots {
         try write(await settledImage(hosting), "gallery-\(theme.rawValue)")
     }
 
+    @Test("Attachments and the media viewer", arguments: Theme.allCases)
+    func attachments(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        matrix.selectPreviewRoom(PreviewMedia.roomID)
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+
+        func capture(_ view: some View, size: CGSize, _ name: String) async throws {
+            let hosting = NSHostingView(
+                rootView: view.environmentObject(appearance).environment(\.metrics, Metrics()))
+            let window = NSWindow(
+                contentRect: NSRect(origin: CGPoint(x: -20000, y: -20000), size: size), styleMask: .borderless,
+                backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+            window.contentView = hosting
+            window.orderFrontRegardless()
+            defer {
+                window.contentView = nil
+                window.close()
+            }
+            try write(await settledImage(hosting), "\(name)-\(theme.rawValue)")
+        }
+
+        let names = [
+            "preview.photo": "image", "preview.gif": "gif", "preview.video": "video", "preview.pdf": "pdf",
+            "preview.zip": "zip",
+        ]
+        for message in matrix.messages {
+            let row = MessageRow(
+                message: message, timeLabel: "10:42 AM", avatar: AvatarView(name: message.senderName),
+                attachment: message.attachment.map { AttachmentView(matrix: matrix, message: message, attachment: $0) }
+            ).frame(width: 720).fixedSize().background(appearance.colors.canvas)
+            let size = NSHostingView(rootView: row.environmentObject(appearance)).fittingSize
+            try await capture(row, size: size, "attachment-\(try #require(names[message.id]))")
+        }
+
+        let viewer = MediaViewerState()
+        viewer.open(matrix.messages[0], surface: .conversation)
+        try await capture(
+            ZStack {
+                RootView(matrix: matrix)
+                MediaViewer(matrix: matrix, viewer: viewer, onForward: { _ in })
+            }, size: CGSize(width: 1440, height: 900), "viewer")
+    }
+
     /// Captures until the frame stops changing for 300 ms, so async text, symbols and layout have arrived.
     ///
     /// The window server's composite, not `cacheDisplay`: that draws through `CALayer.render(in:)`, which skips layer

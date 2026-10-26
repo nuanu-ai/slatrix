@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import MatrixRustSDK
 import Observation
@@ -252,7 +253,8 @@ enum MatrixMapping {
                 message.formattedBody = htmlBody(file.formattedCaption)
                 message.attachment = MessageAttachment(
                     name: file.filename, url: file.source.url(), mimeType: file.info?.mimetype, size: file.info?.size,
-                    width: file.info?.width, height: file.info?.height)
+                    width: file.info?.width, height: file.info?.height,
+                    animated: file.info?.isAnimated ?? (file.info?.mimetype == "image/gif"))
             case .file(let file):
                 message.kind = "m.file"
                 message.mediaCaption = file.caption
@@ -263,7 +265,7 @@ enum MatrixMapping {
                 message.kind = "m.video"
                 message.attachment = MessageAttachment(
                     name: file.filename, url: file.source.url(), mimeType: file.info?.mimetype, size: file.info?.size,
-                    width: file.info?.width, height: file.info?.height)
+                    width: file.info?.width, height: file.info?.height, duration: file.info?.duration)
             case .audio(let file):
                 message.kind = "m.audio"
                 message.attachment = MessageAttachment(
@@ -470,6 +472,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     let pinnedMessages = PinnedMessagesService()
     let sharedFiles = SharedFilesService()
     let avatarImages = AvatarImageCache()
+    /// Decoded inline images and posters by event and source, so a row that comes back draws its picture at once.
+    let mediaImages: NSCache<NSString, CGImage> = {
+        let cache = NSCache<NSString, CGImage>()
+        cache.totalCostLimit = 128 * 1_024 * 1_024
+        return cache
+    }()
     private let roomSubscriptions = RoomSubscriptionCoordinator()
     private let readDelivery = ReadStateDelivery()
     private(set) var pendingInvitationRoomIDs = Set<String>()
@@ -539,6 +547,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
     var typingUsers: [String] = []
     var isPreview = false
+    /// Inline images and videos the reader collapsed, by event ID; they stay collapsed until the app quits.
+    var collapsedMedia = Set<String>()
     var searchResults: [ChatMessage] = []
     var searchState = "idle"
     var searchErrorMessage: String?
@@ -1038,6 +1048,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         activity.clear()
         roomSubscriptions.attach(nil)
         avatarImages.clear()
+        mediaImages.removeAllObjects()
         replyPreviewLoads.removeAll()
         verificationAttachTask?.cancel()
         verificationAttachTask = nil
@@ -2038,9 +2049,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         return nil
     }
     func attachmentSourceRevision(_ message: ChatMessage) -> Data? {
-        shownMedia(message).map { Data($0.media.identity.utf8) }
+        if isPreview { return message.attachment.map { Data($0.url.utf8) } }
+        return shownMedia(message).map { Data($0.media.identity.utf8) }
     }
     func prepareAttachmentPreview(_ message: ChatMessage) async throws -> AttachmentPreviewLease {
+        if isPreview {
+            guard let url = message.attachment.flatMap(PreviewMedia.file) else { throw MatrixServiceError.preview }
+            return AttachmentPreviewLease(url: url, handle: nil) { true }
+        }
         let client = try requireClient()
         guard connectionStopTask == nil, let shown = shownMedia(message),
             let room = try client.getRoom(roomId: message.roomID), room.membership() == .joined
@@ -2105,8 +2121,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     func thumbnailData(_ message: ChatMessage, width: UInt64 = 840, height: UInt64 = 520) async throws -> Data {
+        if isPreview {
+            guard let data = message.attachment.flatMap(PreviewMedia.thumbnail) else {
+                throw MatrixServiceError.preview
+            }
+            return data
+        }
         let client = try requireClient()
         guard let original = mediaSources[message.eventID] else { throw MatrixServiceError.noRoom }
+        // A video's own file is no picture, so it has a poster only when the sender attached one.
+        guard message.kind != "m.video" || thumbnailSources[message.eventID] != nil else {
+            throw MatrixServiceError.request("This video has no poster.")
+        }
         let limit = MatrixMapping.maximumAutomaticPreviewBytes
         let source: MediaSource
         if let thumbnail = thumbnailSources[message.eventID], thumbnail.source.url() != original.url() {

@@ -1,5 +1,4 @@
 import AppKit
-import ImageIO
 import SwiftUI
 
 struct TimelineView: View {
@@ -7,7 +6,6 @@ struct TimelineView: View {
     @Environment(\.openURL) private var openURL
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
-    @EnvironmentObject private var previews: AttachmentPreviewController
     let room: ChatRoom
     var thread = false
     var threadRootID: String? = nil
@@ -25,6 +23,7 @@ struct TimelineView: View {
     var startsAtUnread = false
     var onForward: ((MessageActionTarget) -> Void)? = nil
     var onEditCaption: ((MessageActionTarget) -> Void)? = nil
+    var onOpenMedia: ((ChatMessage) -> Void)? = nil
     @State private var loadingHistory = false
     @State private var deleting: MessageActionTarget?
     @State private var cancelling: ChatMessage?
@@ -150,7 +149,7 @@ struct TimelineView: View {
             pinned: room.pinnedEventIDs,
             canPin: canPinMessages, savedIDs: savedIDs, highlighted: thread ? nil : matrix.focusedEventID,
             sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
-            context: context)
+            context: context, collapsedMedia: matrix.collapsedMedia)
         return layout.entries(for: inputs) { buildEntries(rows, context: context, failures: failures) }
     }
 
@@ -176,6 +175,7 @@ struct TimelineView: View {
         let pinned = Set(room.pinnedEventIDs)
         let highlighted = thread ? nil : matrix.focusedEventID
         let pending = matrix.pendingSendActions
+        let collapsed = matrix.collapsedMedia
         for row in rows {
             switch row.kind {
             case .day(let label): entries.append(TimelineEntry(id: row.id, kind: .day(label)))
@@ -195,6 +195,7 @@ struct TimelineView: View {
                                 highlighted: highlighted == message.eventID,
                                 sendFailure: failures.isEmpty ? nil : failures[key],
                                 sendBusy: !pending.isEmpty && pending.contains(key) || sendActions.contains(message.id),
+                                mediaCollapsed: !collapsed.isEmpty && collapsed.contains(message.eventID),
                                 context: context))))
             }
         }
@@ -209,7 +210,6 @@ struct TimelineView: View {
         context.threadRootID = threadRootID
         context.metrics = m
         context.appearance = appearance
-        context.previews = previews
         context.openURL = openURL
         context.onThread = onThread
         context.onReply = onReply
@@ -226,6 +226,7 @@ struct TimelineView: View {
         context.onTogglePin = onTogglePin
         context.onForward = onForward
         context.onEditCaption = onEditCaption
+        context.onOpenMedia = { onOpenMedia?($0) }
         return context
     }
 
@@ -348,6 +349,7 @@ struct TimelineView: View {
         var pendingSendActions: Set<SendQueueMessageKey>
         var sendActions: Set<String>
         var context: MessageActionTarget.Context
+        var collapsedMedia: Set<String>
     }
     private var entryInputs: EntryInputs?
     private var entries: [TimelineEntry] = []
@@ -718,6 +720,14 @@ extension TimelineRowContext {
         return commands
     }
 
+    func attachmentActions(for message: ChatMessage, target: MessageActionTarget?) -> AttachmentActions {
+        AttachmentActions(
+            open: { self.onOpenMedia(message) },
+            forward: ForwardMessageContent.supports(message)
+                ? target.flatMap { target in self.onForward.map { forward in { forward(target) } } } : nil,
+            copyLink: { if let link = self.permalinkTarget(for: message) { self.onCopyLink(link) } })
+    }
+
     private func permalinkTarget(for message: ChatMessage) -> MessagePermalinkTarget? {
         guard let matrix else { return nil }
         let surface: MessageActionTarget.Surface
@@ -755,224 +765,5 @@ struct ReactionPicker: View {
                 }
             }
         }.fixedSize()
-    }
-}
-
-struct AttachmentView: View {
-    private static let imageMaxWidth: CGFloat = 420
-    private static let imageMaxHeight: CGFloat = 260
-    private static let fileCardWidth: CGFloat = 392
-    @Environment(\.metrics) private var m
-    let matrix: MatrixService
-    let message: ChatMessage
-    let attachment: MessageAttachment
-    @EnvironmentObject private var previews: AttachmentPreviewController
-    @EnvironmentObject private var appearance: AppearanceStore
-    private var colors: AppColors { appearance.colors }
-    @State private var image: NSImage?
-    @State private var busy = false
-    @State private var error: String?
-    @State private var previewBusy = false
-    @State private var previewError: String?
-    @State private var previewTask: Task<Void, Never>?
-    @State private var previewRequest = UUID()
-    private struct AttachmentContext: Hashable {
-        let session: UUID
-        let roomID: String
-        let eventID: String
-        let attachment: MessageAttachment
-        let redacted: Bool
-        let mediaRevision: Data?
-    }
-    private var attachmentContext: AttachmentContext {
-        AttachmentContext(
-            session: matrix.notificationSessionID, roomID: message.roomID, eventID: message.eventID,
-            attachment: attachment,
-            redacted: message.isRedacted, mediaRevision: matrix.attachmentSourceRevision(message))
-    }
-    private var canPreview: Bool {
-        !matrix.isPreview && !busy && !previewBusy && !previews.isLoading && !message.isRedacted
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: m.sp8) {
-            if isImage {
-                let box = imageBox
-                Button(action: preview) {
-                    RoundedRectangle(cornerRadius: m.radiusLarge).fill(colors.sunken)
-                        .overlay {
-                            if let image { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill) }
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
-                        .aspectRatio(box.width / box.height, contentMode: .fit)
-                        .frame(maxWidth: box.width, maxHeight: box.height, alignment: .leading)
-                }.buttonStyle(.row).disabled(!canPreview).help("Preview \(attachment.name)")
-                    .accessibilityLabel("Preview \(attachment.name)")
-            }
-            VStack(alignment: .leading, spacing: m.sp12) {
-                HStack(spacing: m.sp12) {
-                    Image(systemName: attachment.mimeType?.hasPrefix("image/") == true ? "photo" : "doc.text").font(
-                        m.font(.header)
-                    ).foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: m.sp4) {
-                        Text(attachment.name).font(m.font(.secondary, .semibold)).lineLimit(2)
-                        Text(sizeLabel).font(m.font(.caption)).foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: m.sp16)
-                }
-                HStack(spacing: m.sp16) {
-                    Button(action: preview) {
-                        HStack(spacing: m.sp8) {
-                            if previewBusy { DelayedProgress() } else { Image(systemName: "eye") }
-                            Text(previewBusy ? "Opening…" : "Preview")
-                        }
-                    }.disabled(!canPreview).help("Open in Quick Look")
-                    Button(action: download) {
-                        HStack(spacing: m.sp8) {
-                            if busy {
-                                DelayedProgress()
-                            } else {
-                                Image(systemName: "arrow.down.to.line")
-                            }
-                            Text(busy ? "Downloading…" : "Download")
-                        }
-                    }.disabled(busy || previewBusy || matrix.isPreview).help("Download")
-                }.buttonStyle(.row).font(m.font(.meta, .medium))
-            }.padding(m.sp12).frame(maxWidth: m(Self.fileCardWidth)).background(
-                colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge)
-            )
-            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
-            if let previewError {
-                HStack(alignment: .top, spacing: m.sp8) {
-                    Text(previewError).font(m.font(.caption)).foregroundStyle(colors.warning)
-                    Button("Retry", action: preview).buttonStyle(.textLink).font(m.font(.caption)).disabled(
-                        !canPreview)
-                }
-            }
-            if let error { Text(error).font(m.font(.caption)).foregroundStyle(colors.warning) }
-        }
-        .task(id: attachmentContext) {
-            image = nil
-            let session = matrix.notificationSessionID
-            guard isImage, !matrix.isPreview,
-                let revision = matrix.attachmentSourceRevision(message)
-            else { return }
-            do {
-                let data = try await matrix.thumbnailData(message)
-                let thumbnail = await Task.detached(priority: .utility) { () -> CGImage? in
-                    guard
-                        let source = CGImageSourceCreateWithData(
-                            data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
-                    else { return nil }
-                    return CGImageSourceCreateThumbnailAtIndex(
-                        source, 0,
-                        [
-                            kCGImageSourceCreateThumbnailFromImageAlways: true,
-                            kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 840,
-                            kCGImageSourceShouldCacheImmediately: true,
-                        ] as CFDictionary)
-                }.value
-                guard !Task.isCancelled, matrix.notificationSessionID == session,
-                    matrix.attachmentSourceRevision(message) == revision
-                else { return }
-                if let thumbnail { image = NSImage(cgImage: thumbnail, size: .zero) }
-            } catch {
-                // Optional; keep any Preview or Download error in place.
-            }
-        }
-        .onChange(of: attachmentContext) { _, _ in
-            cancelPreview()
-            image = nil
-            previewError = nil
-            error = nil
-        }
-        .onDisappear { cancelPreview() }
-    }
-    private var isImage: Bool { attachment.mimeType?.hasPrefix("image/") == true }
-    /// The image's largest size on screen, from the event's dimensions, so the row never grows when it loads.
-    /// Without dimensions it reserves a 4:3 box.
-    private var imageBox: CGSize {
-        let maxWidth = m(Self.imageMaxWidth)
-        let maxHeight = m(Self.imageMaxHeight)
-        guard let width = attachment.width, let height = attachment.height, width > 0, height > 0 else {
-            return CGSize(width: maxHeight * 4 / 3, height: maxHeight)
-        }
-        let scale = min(1, maxWidth / CGFloat(width), maxHeight / CGFloat(height))
-        return CGSize(width: max(1, CGFloat(width) * scale), height: max(1, CGFloat(height) * scale))
-    }
-    private var sizeLabel: String {
-        attachment.size.map { ByteCountFormatter.string(fromByteCount: Int64(clamping: $0), countStyle: .file) }
-            ?? "Attachment"
-    }
-
-    private func preview() {
-        guard canPreview else { return }
-        let session = matrix.notificationSessionID
-        let target = message
-        let token = UUID()
-        previewRequest = token
-        previewBusy = true
-        previewError = nil
-        previewTask = Task { @MainActor in
-            defer {
-                if previewRequest == token {
-                    previewBusy = false
-                    previewTask = nil
-                }
-            }
-            do {
-                try await previews.show(sessionID: session) { try await matrix.prepareAttachmentPreview(target) }
-            } catch is CancellationError {} catch {
-                guard !Task.isCancelled, previewRequest == token, matrix.notificationSessionID == session else {
-                    return
-                }
-                previewError = MatrixService.safeError(error)
-            }
-        }
-    }
-    private func cancelPreview() {
-        previewTask?.cancel()
-        previewTask = nil
-        previewRequest = UUID()
-        previewBusy = false
-    }
-
-    private func download() {
-        guard !busy, !matrix.isPreview else { return }
-        let session = matrix.notificationSessionID
-        let target = message
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = SharedContentMapping.safeFilename(attachment.name)
-        panel.title = "Save attachment"
-        guard panel.runModal() == .OK, let destination = panel.url, matrix.notificationSessionID == session else {
-            return
-        }
-        busy = true
-        error = nil
-        Task { @MainActor in
-            defer { busy = false }
-            do {
-                let lease = try await matrix.prepareAttachmentPreview(target)
-                defer { withExtendedLifetime(lease) {} }
-                guard matrix.notificationSessionID == session, lease.isCurrent else { throw CancellationError() }
-                let temporary = lease.url
-                try await Task.detached(priority: .userInitiated) {
-                    let staging = destination.deletingLastPathComponent().appendingPathComponent(
-                        ".slatrix-" + UUID().uuidString)
-                    defer { try? FileManager.default.removeItem(at: staging) }
-                    try FileManager.default.copyItem(at: temporary, to: staging)
-                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: staging.path)
-                    if FileManager.default.fileExists(atPath: destination.path) {
-                        _ = try FileManager.default.replaceItemAt(destination, withItemAt: staging)
-                    } else {
-                        try FileManager.default.moveItem(at: staging, to: destination)
-                    }
-                }.value
-                guard matrix.notificationSessionID == session, lease.isCurrent else { return }
-                NSWorkspace.shared.activateFileViewerSelecting([destination])
-            } catch is CancellationError {} catch {
-                if matrix.notificationSessionID == session { self.error = MatrixService.safeError(error) }
-            }
-        }
     }
 }

@@ -50,6 +50,10 @@ import Foundation
                 body: body, formattedBody: html, timestamp: now.addingTimeInterval(-minutes * 60),
                 reactions: reactions, replyCount: replies)
         }
+        if id == PreviewMedia.roomID {
+            messages = PreviewMedia.messages(roomID: id, members: members, now: now)
+            return
+        }
         messages = [
             sample(
                 "preview.welcome", 0,

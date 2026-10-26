@@ -47,6 +47,8 @@ struct TimelineMessageEntry: Hashable {
     var highlighted: Bool
     var sendFailure: MessageSendFailure?
     var sendBusy: Bool
+    /// The reader collapsed this message's image or video.
+    var mediaCollapsed = false
     /// Rows capture their action target from it, so a new context redraws them.
     var context: MessageActionTarget.Context?
 }
@@ -58,7 +60,6 @@ struct TimelineMessageEntry: Hashable {
     var threadRootID: String?
     var metrics = Metrics()
     var appearance: AppearanceStore?
-    var previews: AttachmentPreviewController?
     var openURL = OpenURLAction { _ in .systemAction }
     var onThread: (ChatMessage) -> Void = { _ in }
     var onReply: (ChatMessage) -> Void = { _ in }
@@ -70,6 +71,7 @@ struct TimelineMessageEntry: Hashable {
     var onTogglePin: ((ChatMessage) -> Void)?
     var onForward: ((MessageActionTarget) -> Void)?
     var onEditCaption: ((MessageActionTarget) -> Void)?
+    var onOpenMedia: (ChatMessage) -> Void = { _ in }
     var onReact: (MessageActionTarget, String) -> Void = { _, _ in }
     var onRetrySend: (ChatMessage) -> Void = { _ in }
     var onCancelSend: (ChatMessage) -> Void = { _ in }
@@ -916,7 +918,7 @@ struct TimelineRow: View, Equatable {
     }
 
     var body: some View {
-        if let appearance = context.appearance, let previews = context.previews {
+        if let appearance = context.appearance {
             content.frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                 .frame(maxHeight: .infinity, alignment: .top)
                 .background {
@@ -926,7 +928,7 @@ struct TimelineRow: View, Equatable {
                         }
                     }
                 }
-                .environment(\.metrics, metrics).environmentObject(appearance).environmentObject(previews)
+                .environment(\.metrics, metrics).environmentObject(appearance)
                 .environment(\.openURL, context.openURL)
         }
     }
@@ -956,7 +958,9 @@ struct TimelineRow: View, Equatable {
                             matrix: matrix, message: message, preview: $0, origin: target, onOpen: context.onShowReply)
                     },
                     attachment: message.attachment.map {
-                        AttachmentView(matrix: matrix, message: message, attachment: $0)
+                        AttachmentView(
+                            matrix: matrix, message: message, attachment: $0, collapsed: row.mediaCollapsed,
+                            actions: context.attachmentActions(for: message, target: target))
                     },
                     actions: context.actions(for: entry.id, row, target: target))
             }

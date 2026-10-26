@@ -94,6 +94,7 @@ struct RootView: View {
     @State private var editText = ""
     @State private var drafts = ComposerDrafts()
     @StateObject private var previews = AttachmentPreviewController()
+    @State private var viewer = MediaViewerState()
     @StateObject private var attachmentDrafts = AttachmentDraftController()
     @State private var invitationResponseID: String?
     @State private var navigationNotice: String?
@@ -254,6 +255,11 @@ struct RootView: View {
         } modal: { kind in
             modal(kind).environmentObject(appearance)
         }
+        .overlay {
+            MediaViewer(matrix: matrix, viewer: viewer) { target in
+                startForward(target)
+            }
+        }
     }
 
     @ViewBuilder private func modal(_ kind: InWindowModal.Kind) -> some View {
@@ -328,7 +334,7 @@ struct RootView: View {
             }
             .environmentObject(previews)
             .quickLookPreview(Binding(get: { previews.url }, set: previews.presentationChanged))
-            .background(PreviewInvalidation(matrix: matrix, previews: previews))
+            .background(PreviewInvalidation(matrix: matrix, previews: previews, viewer: viewer))
             .environment(\.openURL, OpenURLAction(handler: handleOpenURL))
             .background(layoutMeasurement)
     }
@@ -975,7 +981,8 @@ struct RootView: View {
                             visibleBottomRoomID = nil
                         }
                     }, onJumpToLatest: { selectRoom(room.id) }, startsAtUnread: isResumingUnread,
-                    onForward: startForward, onEditCaption: startCaption
+                    onForward: startForward, onEditCaption: startCaption,
+                    onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) }
                 ).id("\(room.id):\(matrix.timelineSelectionID)")
                 VStack(spacing: 0) {
                     if let target = editTarget, target.surface == .conversation, target.message.roomID == room.id {
@@ -1187,7 +1194,8 @@ struct RootView: View {
                 canPinMessages: canPin(room), onTogglePin: togglePin,
                 onBottomVisibilityChange: { [identity = matrix.threadReadIdentity] visible in
                     threadReadViewport.record(visible, from: identity, current: matrix.threadReadIdentity)
-                }, onForward: startForward, onEditCaption: startCaption
+                }, onForward: startForward, onEditCaption: startCaption,
+                onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) }
             ).id(root.eventID)
             VStack(spacing: 0) {
                 if let target = editTarget, target.surface == .thread(rootID: root.eventID),
@@ -2451,6 +2459,7 @@ struct RootView: View {
         matrixJoin = nil
         previews.close()
         previews.setSession(matrix.notificationSessionID)
+        viewer.close()
         clearComposerState()
         workspaceID = nil
         workspaceInitialized = false
@@ -2498,6 +2507,11 @@ struct RootView: View {
         return true
     }
     private func handleMenu(_ action: String) {
+        // The media viewer covers the window: Esc closes it, and nothing else reaches what is under it.
+        if viewer.message != nil {
+            if action == "mark-read" { viewer.close() }
+            return
+        }
         // Esc reaches here when nothing in the modal took it: it closes the modal, as in Slack.
         if modals.current != nil, action == "mark-read" { return closeModal() }
         guard !hasModal, !hasNativeModal, !matrix.verification.isPresented else { return }
@@ -2807,14 +2821,22 @@ private struct BindingScope<Value, Content: View>: View {
     var body: some View { content(binding()) }
 }
 
-/// Closes Quick Look once its message leaves what is shown; on its own, so new messages do not redraw the window.
+/// Closes Quick Look and the media viewer once their message leaves what is shown; on its own, so new messages do
+/// not redraw the window.
 private struct PreviewInvalidation: View {
     let matrix: MatrixService
     let previews: AttachmentPreviewController
+    let viewer: MediaViewerState
     var body: some View {
         Color.clear
-            .onChange(of: matrix.messages) { previews.invalidateIfNeeded() }
-            .onChange(of: matrix.threadMessages) { previews.invalidateIfNeeded() }
+            .onChange(of: matrix.messages) {
+                previews.invalidateIfNeeded()
+                if viewer.surface == .conversation { viewer.update(from: matrix.messages) }
+            }
+            .onChange(of: matrix.threadMessages) {
+                previews.invalidateIfNeeded()
+                if viewer.surface != .conversation { viewer.update(from: matrix.threadMessages) }
+            }
             .onChange(of: matrix.sharedFiles.items) { previews.invalidateIfNeeded() }
             .onChange(of: matrix.rooms) { previews.invalidateIfNeeded() }
     }

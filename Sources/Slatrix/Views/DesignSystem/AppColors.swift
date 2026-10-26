@@ -100,6 +100,30 @@ struct AppColors {
     var mention: Color { destructive }
     var presenceActive: Color { Color(hex: 0x2bac76) }
     var presenceAway: Color { Color(hex: dark ? 0xabadb1 : 0x616061) }
+
+    // MARK: Media
+
+    /// Behind the media viewer: near black in either theme, as in Slack, and opaque so nothing ghosts through.
+    var mediaBackdrop: Color { Color(hex: 0x1a1b1e) }
+    /// Chips over a photo or video: play, duration and the GIF tag.
+    var mediaControl: Color { Color.black.opacity(0.6) }
+    /// Text and icons over media and in the media viewer.
+    var onMedia: Color { .white }
+    /// A file card's type tile, under a white glyph in either theme.
+    func file(_ kind: FileKind) -> Color {
+        switch kind {
+        case .pdf: Color(hex: 0xd93a3a)
+        case .document: Color(hex: 0x2f6fde)
+        case .spreadsheet: Color(hex: 0x1f8f55)
+        case .presentation: Color(hex: 0xe8771e)
+        case .archive: Color(hex: 0x7d8086)
+        case .code: Color(hex: 0x5b55c9)
+        case .audio: Color(hex: 0xc23d84)
+        case .video: Color(hex: 0x8a4fd1)
+        case .image: Color(hex: 0x1b93a8)
+        case .generic: Color(hex: 0x5c6878)
+        }
+    }
 }
 
 extension Color {

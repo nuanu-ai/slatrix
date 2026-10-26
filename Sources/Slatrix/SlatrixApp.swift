@@ -131,6 +131,8 @@ struct SlatrixApp: App {
     }
     /// Keys a menu item cannot hold. Returns nil for a key it handled.
     private static func route(_ event: NSEvent) -> NSEvent? {
+        // The media viewer zooms its picture with the keys that zoom the window.
+        if let stage = NSApp.keyWindow?.firstResponder as? MediaStageView, stage.zoom(event) { return nil }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // A menu item holds one shortcut, so unshifted ⌘= reaches Zoom In (⌘+) here, as in Slack.
         if modifiers == .command, event.charactersIgnoringModifiers == "=",
