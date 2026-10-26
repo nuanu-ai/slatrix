@@ -40,10 +40,7 @@ struct MediaViewerHostedTests {
         let hosting = NSHostingView(
             rootView: MediaViewer(matrix: matrix, viewer: viewer, onForward: { _ in })
                 .environmentObject(AppearanceStore()))
-        let window = NSWindow(
-            contentRect: NSRect(x: -20_000, y: -20_000, width: 900, height: 600), styleMask: .titled,
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(NSSize(width: 900, height: 600))
         window.contentView = hosting
         window.makeKeyAndOrderFront(nil)
         defer {

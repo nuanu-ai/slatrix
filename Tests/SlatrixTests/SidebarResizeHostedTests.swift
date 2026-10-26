@@ -18,10 +18,7 @@ struct SidebarResizeHostedTests {
         UserDefaults.standard.set(280, forKey: "layout.sidebarWidth")
         defer { UserDefaults.standard.set(savedWidth, forKey: "layout.sidebarWidth") }
         let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(AppearanceStore()))
-        let window = NSWindow(
-            contentRect: NSRect(x: -20_000, y: -20_000, width: 1_440, height: 900),
-            styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(NSSize(width: 1_440, height: 900))
         window.contentView = hosting
         window.orderFrontRegardless()
         defer {
@@ -124,10 +121,7 @@ struct SidebarResizeHostedTests {
         UserDefaults.standard.removeObject(forKey: "layout.paneWidth")
         defer { for (key, value) in saved { UserDefaults.standard.set(value, forKey: key) } }
         let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(AppearanceStore()))
-        let window = NSWindow(
-            contentRect: NSRect(x: -20_000, y: -20_000, width: 1_440, height: 900),
-            styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(NSSize(width: 1_440, height: 900))
         window.contentView = hosting
         window.orderFrontRegardless()
         defer {

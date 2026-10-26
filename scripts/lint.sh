@@ -28,4 +28,9 @@ offsystem "use .textFieldStyle(.field)" 'textFieldStyle\(\.roundedBorder\)'
 offsystem "use .modal with Modal or ConfirmModal" '\.sheet\(|\.alert\(|confirmationDialog\('
 # The search modal gets its own tab bar next; until then it keeps its picker.
 offsystem "use TabBar" 'pickerStyle\(\.segmented\)' --exclude=ConversationSheets.swift
+# Tests must never show a window on the screen of whoever runs them.
+if grep -rn 'NSWindow(' Tests --exclude-dir=Support; then
+    echo "error: open test windows with offscreenWindow(_:)" >&2
+    failed=1
+fi
 exit $failed

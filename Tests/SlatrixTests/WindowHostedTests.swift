@@ -27,10 +27,7 @@ struct WindowHostedTests {
                     id: "!busy\($0):example.org", name: "Busy \($0)", unread: $0 % 3, spaceIDs: ["preview.workspace"])
             }
             hosting = NSHostingView(rootView: AnyView(RootView(matrix: matrix).environmentObject(AppearanceStore())))
-            window = NSWindow(
-                contentRect: NSRect(x: -20_000, y: -20_000, width: 1_440, height: 900), styleMask: .borderless,
-                backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
+            window = offscreenWindow(NSSize(width: 1_440, height: 900))
             window.contentView = hosting
             window.orderFrontRegardless()
         }
