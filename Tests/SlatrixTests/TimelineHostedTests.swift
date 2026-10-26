@@ -71,10 +71,7 @@ struct TimelineHostedTests {
                 client: client, main: timeline, thread: nil,
                 rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
             service.messages = messages
-            window = NSWindow(
-                contentRect: NSRect(x: -20_000, y: -20_000, width: 620, height: height), styleMask: .borderless,
-                backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
+            window = offscreenWindow(NSSize(width: 620, height: height))
             hosting = NSHostingView(
                 rootView: Fixture(
                     service: service, room: room, appearance: appearance, popovers: popovers, atBottom: { _ in }))

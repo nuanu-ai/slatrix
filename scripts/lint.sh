@@ -27,4 +27,9 @@ offsystem "use Motion for animation" '(withAnimation|\.animation)\(\.(easeIn|eas
 offsystem "use .textFieldStyle(.field)" 'textFieldStyle\(\.roundedBorder\)'
 offsystem "use .modal with Modal or ConfirmModal" '\.sheet\(|\.alert\(|confirmationDialog\('
 offsystem "use TabBar" 'pickerStyle\(\.segmented\)'
+# Tests must never show a window on the screen of whoever runs them.
+if grep -rn 'NSWindow(' Tests --exclude-dir=Support; then
+    echo "error: open test windows with offscreenWindow(_:)" >&2
+    failed=1
+fi
 exit $failed

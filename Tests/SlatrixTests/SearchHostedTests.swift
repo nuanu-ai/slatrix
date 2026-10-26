@@ -21,10 +21,7 @@ struct SearchHostedTests {
             UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
             matrix.enterPreview()
             hosting = NSHostingView(rootView: AnyView(RootView(matrix: matrix).environmentObject(AppearanceStore())))
-            window = NSWindow(
-                contentRect: NSRect(x: -20_000, y: -20_000, width: 1_440, height: 900), styleMask: .titled,
-                backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
+            window = offscreenWindow(NSSize(width: 1_440, height: 900))
             window.contentView = hosting
             window.makeKeyAndOrderFront(nil)
         }

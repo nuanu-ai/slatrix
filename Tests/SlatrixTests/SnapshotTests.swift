@@ -37,10 +37,7 @@ struct Snapshots {
         let hosting = NSHostingView(
             rootView: RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom))
         )
-        let window = NSWindow(
-            contentRect: NSRect(x: -20000, y: -20000, width: 1440, height: 900), styleMask: .borderless,
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(NSSize(width: 1440, height: 900))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
         // Still off screen, but ordered in, so the window server composites it for `settledImage`.
@@ -100,10 +97,7 @@ struct Snapshots {
             onInviteWorkspace: { _ in }, onEditWorkspace: { _ in }, onNotifications: { _ in }, onBrowseChannels: {})
         let hosting = NSHostingView(
             rootView: sidebar.frame(width: 68 + 280, height: 760).environmentObject(appearance))
-        let window = NSWindow(
-            contentRect: NSRect(x: -20000, y: -20000, width: 68 + 280, height: 760), styleMask: .borderless,
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(NSSize(width: 68 + 280, height: 760))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
         window.orderFrontRegardless()
@@ -123,10 +117,7 @@ struct Snapshots {
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
         let hosting = NSHostingView(rootView: ComponentGallery().environmentObject(appearance))
-        let window = NSWindow(
-            contentRect: NSRect(origin: CGPoint(x: -20000, y: -20000), size: hosting.fittingSize),
-            styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(hosting.fittingSize)
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
         window.orderFrontRegardless()
@@ -169,10 +160,7 @@ struct Snapshots {
         )
         .environmentObject(appearance)
         let hosting = NSHostingView(rootView: view)
-        let window = NSWindow(
-            contentRect: NSRect(origin: CGPoint(x: -20000, y: -20000), size: hosting.fittingSize),
-            styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(hosting.fittingSize)
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
         window.orderFrontRegardless()
@@ -198,10 +186,7 @@ struct Snapshots {
         func capture(_ view: some View, size: CGSize, _ name: String) async throws {
             let hosting = NSHostingView(
                 rootView: view.environmentObject(appearance).environment(\.metrics, Metrics()))
-            let window = NSWindow(
-                contentRect: NSRect(origin: CGPoint(x: -20000, y: -20000), size: size), styleMask: .borderless,
-                backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
+            let window = offscreenWindow(size)
             window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
             window.contentView = hosting
             window.orderFrontRegardless()
@@ -275,11 +260,6 @@ struct Snapshots {
         }
     }
 
-    /// Borderless, like the other snapshots, but able to take the keyboard.
-    private final class KeyWindow: NSWindow {
-        override var canBecomeKey: Bool { true }
-    }
-
     @Test("Jump to, the search menu, search results and People", arguments: Theme.allCases)
     func search(theme: Theme) async throws {
         _ = NSApplication.shared
@@ -292,10 +272,7 @@ struct Snapshots {
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
         let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
-        let window = KeyWindow(
-            contentRect: NSRect(x: -20000, y: -20000, width: 1440, height: 900), styleMask: .borderless,
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(NSSize(width: 1440, height: 900))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
         window.makeKeyAndOrderFront(nil)
@@ -365,10 +342,7 @@ struct Snapshots {
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
         let hosting = NSHostingView(rootView: view.environmentObject(appearance))
-        let window = NSWindow(
-            contentRect: NSRect(x: -20000, y: -20000, width: 1440, height: 900), styleMask: .borderless,
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(NSSize(width: 1440, height: 900))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
         window.orderFrontRegardless()
@@ -419,10 +393,7 @@ struct Snapshots {
             let hosting = NSHostingView(
                 rootView: view.frame(width: size.width).background(appearance.colors.canvas)
                     .environmentObject(appearance))
-            let window = NSWindow(
-                contentRect: NSRect(origin: CGPoint(x: -20000, y: -20000), size: size), styleMask: .borderless,
-                backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
+            let window = offscreenWindow(size)
             window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
             window.contentView = hosting
             window.orderFrontRegardless()
@@ -511,10 +482,7 @@ struct Snapshots {
         let hosting = NSHostingView(
             rootView: view.background(appearance.colors.canvas).environmentObject(appearance)
                 .environment(\.colorScheme, theme == .dark ? .dark : .light))
-        let window = NSWindow(
-            contentRect: NSRect(origin: CGPoint(x: -20000, y: -20000), size: hosting.fittingSize),
-            styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(hosting.fittingSize)
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
         window.orderFrontRegardless()

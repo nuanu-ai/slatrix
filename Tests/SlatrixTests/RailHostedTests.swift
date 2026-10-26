@@ -17,10 +17,7 @@ struct RailHostedTests {
         let metrics = Metrics(zoom: zoom)
         let hosting = NSHostingView(
             rootView: RootView(matrix: matrix).environmentObject(AppearanceStore()).environment(\.metrics, metrics))
-        let window = NSWindow(
-            contentRect: NSRect(x: -20_000, y: -20_000, width: 1_440, height: 900),
-            styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = offscreenWindow(NSSize(width: 1_440, height: 900))
         window.contentView = hosting
         defer {
             window.contentView = nil
