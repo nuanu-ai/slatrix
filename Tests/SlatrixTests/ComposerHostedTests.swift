@@ -20,7 +20,7 @@ struct ComposerHostedTests {
 
     @Test("A line that wraps grows the composer in the same layout pass")
     func growsWithoutDelay() throws {
-        let hosting = NSHostingView(rootView: Fixture())
+        let hosting = NSHostingView(rootView: Fixture().environmentObject(AppearanceStore()))
         let window = NSWindow(
             contentRect: NSRect(x: -20_000, y: -20_000, width: 400, height: 400), styleMask: .borderless,
             backing: .buffered, defer: false)

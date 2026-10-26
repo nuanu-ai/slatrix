@@ -97,7 +97,7 @@ struct SidebarView: View {
             // Silent while connected, like Slack; only trouble earns a line.
             if !matrix.isPreview && matrix.status != .ready {
                 HStack(spacing: m.sp8) {
-                    Circle().fill(.orange).frame(width: m(Self.dot), height: m(Self.dot))
+                    Circle().fill(colors.warning).frame(width: m(Self.dot), height: m(Self.dot))
                     Text(matrix.connectionDetail).font(m.font(.caption)).lineLimit(1)
                     Spacer()
                 }.foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp16).padding(.vertical, m.sp12)

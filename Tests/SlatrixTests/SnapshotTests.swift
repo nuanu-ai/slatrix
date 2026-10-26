@@ -63,6 +63,11 @@ struct Snapshots {
             editor.insertText("Replying in the thread", replacementRange: editor.selectedRange())
         }
         try write(await settledImage(hosting), "thread-\(name)")
+
+        // The profile card, from the same message's "View profile" item.
+        let profile = try #require(thread.menu(for: event)?.items.first { $0.identifier?.rawValue == "profile" })
+        _ = profile.target?.perform(profile.action, with: profile)
+        try write(await settledImage(hosting), "profile-\(name)")
     }
 
     @Test("Component gallery", arguments: Theme.allCases)

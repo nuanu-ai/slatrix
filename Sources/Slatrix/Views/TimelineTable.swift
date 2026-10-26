@@ -934,7 +934,8 @@ struct TimelineRow: View, Equatable {
     @ViewBuilder private var content: some View {
         switch entry.kind {
         case .spacer, .end: Color.clear
-        case .loading(let loading): TimelineLoadingRow(loading: loading)
+        case .loading(let loading):
+            TimelineLoadingRow(loading: loading, offline: context.matrix?.connectionState == .offline)
         case .welcome(let welcome): TimelineWelcomeRow(welcome: welcome)
         case .day(let label): TimelineDayDivider(label: label)
         case .unread: TimelineUnreadDivider()
@@ -966,8 +967,10 @@ struct TimelineRow: View, Equatable {
 private struct TimelineLoadingRow: View {
     @Environment(\.metrics) private var m
     let loading: Bool
+    let offline: Bool
     var body: some View {
-        DelayedProgress(active: loading, interval: .historyLoading).frame(maxWidth: .infinity).frame(height: m.sp40)
+        DelayedProgress(active: loading, offline: offline, interval: .historyLoading).frame(maxWidth: .infinity).frame(
+            height: m.sp40)
     }
 }
 

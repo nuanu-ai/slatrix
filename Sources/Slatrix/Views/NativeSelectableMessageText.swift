@@ -143,6 +143,26 @@ final class MessageTextView: NSTextView {
         NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
     }
 
+    // AppKit hands the text view the pointer across its whole visible rect, including where SwiftUI draws a control
+    // on top of it (the hover toolbar, a toast), so the I-beam applies only where the text is the view under it.
+    private var pointerOverText: Bool?
+    override func cursorUpdate(with event: NSEvent) {
+        pointerOverText = isUnderPointer(event)
+        if pointerOverText == true { super.cursorUpdate(with: event) } else { NSCursor.arrow.set() }
+    }
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let over = isUnderPointer(event)
+        guard over != pointerOverText else { return }
+        pointerOverText = over
+        (over ? NSCursor.iBeam : NSCursor.arrow).set()
+    }
+    private func isUnderPointer(_ event: NSEvent) -> Bool {
+        guard let content = window?.contentView else { return false }
+        let point = content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow
+        return content.hitTest(point)?.isDescendant(of: self) == true
+    }
+
     override func menu(for event: NSEvent) -> NSMenu? {
         var commands = menuCommands()
         let proposedRange = selectedRange()

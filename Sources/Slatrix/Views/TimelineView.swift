@@ -143,20 +143,25 @@ struct TimelineView: View {
             messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
             groups: appearance.density != .compact)
         let context = matrix.messageActionContext
+        let offline = matrix.connectionState == .offline
+        let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
         let inputs = TimelineLayoutCache.EntryInputs(
             rows: rows, hasOlder: hasOlder, hasNewer: hasNewer, loadingHistory: loadingHistory, welcome: welcome,
             pinned: room.pinnedEventIDs,
             canPin: canPinMessages, savedIDs: savedIDs, highlighted: thread ? nil : matrix.focusedEventID,
-            sendFailures: matrix.sendFailures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
+            sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
             context: context)
-        return layout.entries(for: inputs) { buildEntries(rows, context: context) }
+        return layout.entries(for: inputs) { buildEntries(rows, context: context, failures: failures) }
     }
 
     private var welcome: TimelineWelcome {
         TimelineWelcome(name: room.name, topic: room.topic, isDirect: room.isDirect, isEncrypted: room.isEncrypted)
     }
 
-    private func buildEntries(_ rows: [TimelineLayout.Row], context: MessageActionTarget.Context) -> [TimelineEntry] {
+    private func buildEntries(
+        _ rows: [TimelineLayout.Row], context: MessageActionTarget.Context,
+        failures: [SendQueueMessageKey: MessageSendFailure]
+    ) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
         entries.reserveCapacity(rows.count + 2)
         if hasOlder {
@@ -170,7 +175,6 @@ struct TimelineView: View {
         // Read once: each read of a published property costs more than the lookups below.
         let pinned = Set(room.pinnedEventIDs)
         let highlighted = thread ? nil : matrix.focusedEventID
-        let failures = matrix.sendFailures
         let pending = matrix.pendingSendActions
         for row in rows {
             switch row.kind {
@@ -459,7 +463,7 @@ struct MessageRow: View {
                             Text(time).font(m.font(.caption))
                                 .foregroundStyle(colors.textSecondary)
                         }
-                        if own && message.sendState == "sending" { ProgressView().controlSize(.mini) }
+                        if own && message.sendState == "sending" { DelayedProgress() }
                         if isSaved {
                             Image(systemName: "bookmark.fill").font(m.font(.caption)).foregroundStyle(colors.accent)
                         }
@@ -522,7 +526,7 @@ struct MessageRow: View {
                         VStack(alignment: .leading, spacing: m.sp8) {
                             if let failure = sendFailure {
                                 Label(failure.message, systemImage: "exclamationmark.circle").font(m.font(.caption))
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(colors.warning)
                                 HStack(spacing: m.sp12) {
                                     if failure.canRetry {
                                         Button(
@@ -532,7 +536,7 @@ struct MessageRow: View {
                                     }
                                     Button("Cancel sending…", action: actions.cancelSend).buttonStyle(.row)
                                         .foregroundStyle(colors.textSecondary).disabled(sendBusy)
-                                    if sendBusy { ProgressView().controlSize(.mini) }
+                                    if sendBusy { DelayedProgress() }
                                 }.font(m.font(.caption))
                             } else {
                                 Label("Sending…", systemImage: "clock").font(m.font(.caption)).foregroundStyle(
@@ -577,11 +581,9 @@ struct MessageRow: View {
                     width: m(Self.toolbarButton), height: m(Self.toolbarButton))
             }.menuStyle(.borderlessButton).frame(width: m(Self.toolbarButton))
         }.padding(.horizontal, m.sp2).frame(height: m(Self.toolbarButton)).background(
-            colors.canvas, in: RoundedRectangle(cornerRadius: m.radius)
+            colors.overlay, in: RoundedRectangle(cornerRadius: m.radius)
         )
-        .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border)).shadow(
-            color: .black.opacity(0.12), radius: 3, y: 2
-        )
+        .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border)).elevation(.e1, cornerRadius: m.radius)
     }
 }
 

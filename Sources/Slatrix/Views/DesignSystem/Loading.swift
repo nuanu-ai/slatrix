@@ -5,10 +5,12 @@ import SwiftUI
 struct DelayedProgress: View {
     var active = true
     var hasContent = false
+    /// Offline, the connection notice speaks for the wait instead.
+    var offline = false
     /// Logs the whole wait, shown or not.
     var interval: Performance.Name? = nil
     var body: some View {
-        AfterLoadingDelay(active: active, hasContent: hasContent, interval: interval) {
+        AfterLoadingDelay(active: active, hasContent: hasContent, offline: offline, interval: interval) {
             ProgressView().controlSize(.small)
         }
     }
@@ -21,7 +23,7 @@ struct SkeletonRows: View {
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
-        AfterLoadingDelay(active: true, hasContent: false, interval: interval) {
+        AfterLoadingDelay(active: true, hasContent: false, offline: false, interval: interval) {
             let fill = appearance.colors.sunken
             VStack(alignment: .leading, spacing: m.sp20) {
                 ForEach(0..<count, id: \.self) { index in
@@ -46,19 +48,21 @@ struct SkeletonRows: View {
 private struct AfterLoadingDelay<Content: View>: View {
     let active: Bool
     let hasContent: Bool
+    let offline: Bool
     let interval: Performance.Name?
     @ViewBuilder let content: Content
     @State private var shown = false
     var body: some View {
         ZStack { if shown { content } }
             .loadingInterval(interval, while: active && !hasContent)
-            .task(id: active && !hasContent) {
+            .task(id: [active && !hasContent, offline]) {
                 shown = false
                 guard active, !hasContent else { return }
                 let start = ContinuousClock.now
                 try? await Task.sleep(for: LoadingPresentation.indicatorDelay)
                 guard !Task.isCancelled else { return }
-                shown = LoadingPresentation.showsIndicator(waited: .now - start, hasContent: hasContent)
+                shown = LoadingPresentation.showsIndicator(
+                    waited: .now - start, hasContent: hasContent, offline: offline)
             }
     }
 }
