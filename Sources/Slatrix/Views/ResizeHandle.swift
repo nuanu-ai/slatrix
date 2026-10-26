@@ -15,7 +15,6 @@ struct ResizeHandle: View {
     @Environment(\.metrics) private var m
     @State private var dragging = false
     @State private var hovering = false
-    @FocusState private var focused: Bool
 
     var body: some View {
         ZStack {
@@ -23,22 +22,13 @@ struct ResizeHandle: View {
             Rectangle().fill(dragging ? appearance.colors.accent : appearance.colors.border).frame(width: 1)
             if hovering { appearance.colors.hover }
             ResizePointerSurface(
-                direction: direction, currentWidth: currentWidth, onFocus: { focused = true },
-                onDragging: { dragging = $0 },
+                direction: direction, currentWidth: currentWidth,
+                onDragging: { dragging = $0 }, onArrow: { adjust(by: m.sp16 * direction * $0) },
                 onChange: onChange, onCommit: onCommit, onReset: onReset)
         }
         .frame(width: m(SidebarLayout.handleWidth)).frame(maxHeight: .infinity)
         .contentShape(Rectangle())
-        .focusable().focused($focused)
         .onHover { hovering = $0 }
-        .onKeyPress(.leftArrow) {
-            adjust(by: -m.sp16 * direction)
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            adjust(by: m.sp16 * direction)
-            return .handled
-        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
         .accessibilityValue("\(Int(currentWidth)) points")
@@ -71,8 +61,8 @@ struct ResizeHandle: View {
 private struct ResizePointerSurface: NSViewRepresentable {
     var direction: CGFloat
     var currentWidth: CGFloat
-    var onFocus: () -> Void
     var onDragging: (Bool) -> Void
+    var onArrow: (CGFloat) -> Void
     var onChange: (CGFloat) -> Void
     var onCommit: () -> Void
     var onReset: () -> Void
@@ -81,13 +71,15 @@ private struct ResizePointerSurface: NSViewRepresentable {
         let view = ResizePointerView()
         view.setAccessibilityElement(false)
         view.setAccessibilityHidden(true)
+        // Slack's dividers take the arrow keys without a focus ring.
+        view.focusRingType = .none
         return view
     }
     func updateNSView(_ view: ResizePointerView, context: Context) {
         view.direction = direction
         view.currentWidth = currentWidth
-        view.onFocus = onFocus
         view.onDragging = onDragging
+        view.onArrow = onArrow
         view.onChange = onChange
         view.onCommit = onCommit
         view.onReset = onReset
@@ -97,8 +89,9 @@ private struct ResizePointerSurface: NSViewRepresentable {
 private final class ResizePointerView: NSView {
     var direction: CGFloat = 1
     var currentWidth: CGFloat = SidebarLayout.defaultWidth
-    var onFocus: () -> Void = {}
     var onDragging: (Bool) -> Void = { _ in }
+    /// -1 for the left arrow, 1 for the right.
+    var onArrow: (CGFloat) -> Void = { _ in }
     var onChange: (CGFloat) -> Void = { _ in }
     var onCommit: () -> Void = {}
     var onReset: () -> Void = {}
@@ -107,9 +100,17 @@ private final class ResizePointerView: NSView {
     // The window moves by its background; without this the window server takes the drag and no mouseDragged arrives.
     override var mouseDownCanMoveWindow: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+    override func keyDown(with event: NSEvent) {
+        switch event.specialKey {
+        case .leftArrow?: onArrow(-1)
+        case .rightArrow?: onArrow(1)
+        default: super.keyDown(with: event)
+        }
+    }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
     override func mouseDown(with event: NSEvent) {
-        onFocus()
+        window?.makeFirstResponder(self)
         onDragging(false)
         if interaction.begin(width: currentWidth, x: x(event), clickCount: event.clickCount) {
             onDragging(false)
