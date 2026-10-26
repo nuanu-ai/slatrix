@@ -235,7 +235,16 @@ enum MatrixMapping {
         if let reply = content.inReplyTo {
             message.replyPreview = replyPreview(eventID: reply.eventId(), details: reply.event())
         }
-        message.replyCount = Int(content.threadSummary?.numReplies() ?? 0)
+        if let summary = content.threadSummary {
+            message.replyCount = Int(summary.numReplies())
+            if case .ready(_, let sender, let profile, let timestamp, _) = summary.latestEvent() {
+                var avatar: String?
+                if case .ready(_, _, let url, _, _) = profile { avatar = url }
+                message.lastReply = ThreadReply(
+                    senderID: sender, senderName: profileName(profile, fallback: sender), avatarURL: avatar,
+                    timestamp: Date(timeIntervalSince1970: Double(timestamp) / 1000))
+            }
+        }
         switch content.kind {
         case .message(let value):
             message.body = value.body
@@ -309,7 +318,8 @@ enum MatrixMapping {
         if uniqueID != nil { result.timelineEventID = eventID }
         result.reactions = item.reactions.map {
             MessageReaction(
-                key: $0.key, count: $0.senders.count, mine: $0.senders.contains { $0.senderId == ownUserID })
+                key: $0.key, count: $0.senders.count, mine: $0.senders.contains { $0.senderId == ownUserID },
+                senders: $0.senders.map(\.senderId))
         }
         if case .ready(_, _, let avatar, _, _) = item.senderProfile { result.avatarURL = avatar }
         if let state = item.localSendState {
@@ -533,6 +543,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var hasMoreThreadHistory = true
     var members: [ChatUser] = []
     var user: ChatUser?
+    /// Emoji this account reacted with, newest first, kept in its account data so Element shares them.
+    private(set) var recentEmoji: [String] = []
     var selectedRoomID: String? { didSet { updateSelectedRoom() } }
     /// The open conversation's entry in `rooms`, apart so its readers are not redrawn by changes to other rooms.
     /// Without its unread state, which changes with every message in it; the sidebar shows that from `rooms`.
@@ -990,6 +1002,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         // Cached rooms and sync can become usable without waiting on profile
         // HTTP requests. A late profile response belongs only to this account.
         let loadedProfileRevision = profileRevision
+        Task { [weak self] in await self?.loadRecentEmoji() }
         profileLoadTask = Task { [weak self] in
             do {
                 let name = try await newClient.displayName()
@@ -1080,6 +1093,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         hasMoreForwardHistory = false
         isLoadingForwardHistory = false
         forwardLoadID = nil
+        recentEmoji = []
         await connectionRecovery.stop()
         mainSendFailures = [:]
         threadSendFailures = [:]
@@ -1991,7 +2005,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func toggleReaction(_ target: MessageActionTarget, key: String) async throws {
-        let (timeline, _) = try actionTimeline(target)
+        let (timeline, current) = try actionTimeline(target)
         do {
             _ = try await timeline.toggleReaction(itemId: .eventId(eventId: target.message.eventID), key: key)
             try validateMessageAction(target)
@@ -1999,6 +2013,22 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             try validateMessageAction(target)
             throw error
         }
+        if !current.reactions.contains(where: { $0.key == key && $0.mine }) { useEmoji(key) }
+    }
+
+    func loadRecentEmoji() async {
+        let generation = sessionGeneration
+        guard let client, let recent = try? await client.getRecentEmojis(), sessionGeneration == generation else {
+            return
+        }
+        recentEmoji = recent.map(\.emoji)
+    }
+
+    /// Shown at once; the account data follows, and losing that write only loses the order elsewhere.
+    private func useEmoji(_ emoji: String) {
+        recentEmoji = EmojiRecents.adding(emoji, to: recentEmoji)
+        guard let client else { return }
+        Task { try? await client.addRecentEmoji(emoji: emoji) }
     }
 
     func uploadFile(_ url: URL, threadRootID: String? = nil, roomID: String? = nil) async throws {

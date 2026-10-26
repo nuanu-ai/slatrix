@@ -55,6 +55,8 @@ struct NativeSelectableMessageText: NSViewRepresentable {
     var textColor: NSColor
     var linkColor: NSColor
     var mentions: MentionPalette? = nil
+    /// Muted text after the last word, such as "(edited)".
+    var suffix: NSAttributedString? = nil
     var menuCommands: () -> [MessageMenuCommand]
     var onOpenURL: (URL) -> Void
     @Environment(\.lineLimit) private var lineLimit
@@ -98,10 +100,12 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         view.linkTextAttributes = [.cursor: NSCursor.pointingHand]
         if context.coordinator.runs != runs || context.coordinator.fontSize != fontSize
             || context.coordinator.textColor != textColor || context.coordinator.linkColor != linkColor
-            || context.coordinator.mentions != mentions
+            || context.coordinator.mentions != mentions || context.coordinator.suffix != suffix
         {
-            let attributed = Self.attributed(
-                runs, fontSize: fontSize, textColor: textColor, linkColor: linkColor, mentions: mentions)
+            let attributed = NSMutableAttributedString(
+                attributedString: Self.attributed(
+                    runs, fontSize: fontSize, textColor: textColor, linkColor: linkColor, mentions: mentions))
+            if let suffix { attributed.append(suffix) }
             let selection =
                 view.string == attributed.string
                 ? view.selectedRanges : [NSValue(range: NSRange(location: 0, length: 0))]
@@ -112,6 +116,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             context.coordinator.textColor = textColor
             context.coordinator.linkColor = linkColor
             context.coordinator.mentions = mentions
+            context.coordinator.suffix = suffix
         }
     }
 
@@ -141,6 +146,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         var textColor: NSColor?
         var linkColor: NSColor?
         var mentions: MentionPalette?
+        var suffix: NSAttributedString?
         /// Laid-out sizes by width for the current text; a timeline row is measured at one or two widths, many times.
         var sizes: [CGFloat: CGSize] = [:]
         var onOpenURL: (URL) -> Void

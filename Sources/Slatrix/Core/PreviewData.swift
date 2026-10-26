@@ -68,7 +68,10 @@ import Foundation
                 html:
                     "<p>A little structure for the week:</p><ul><li><strong>#team</strong> — updates and everyday conversations</li><li><strong>#planning-and-demos</strong> — what we’re building next</li><li><strong>#platform-and-tools</strong> — questions, tips, and discoveries</li></ul><p>Keep a conversation focused by replying in a thread.</p>",
                 150, replies: 2,
-                reactions: [.init(key: "🙌", count: 2, mine: true), .init(key: "✨", count: 1, mine: false)]),
+                reactions: [
+                    .init(key: "🙌", count: 2, mine: true, senders: ["preview.you", "preview.sam"]),
+                    .init(key: "✨", count: 1, mine: false, senders: ["preview.alex"]),
+                ]),
             sample(
                 "preview.share", 2,
                 "The details make the difference. A familiar space, room to focus, and everything right where you expect it.",
@@ -84,6 +87,10 @@ import Foundation
                 "preview.answer", 1, "Perfect. Use ⌘ K to jump to a conversation. See you in the channels 🚀",
                 html: "Perfect. Use <code>⌘ K</code> to jump to a conversation. See you in the channels 🚀", 29),
         ]
+        // The same replies `openPreviewThread` shows.
+        messages[1].lastReply = ThreadReply(
+            senderID: "preview.julia", senderName: "Julia", timestamp: messages[1].timestamp.addingTimeInterval(240))
+        messages[2].isEdited = true
     }
     func openPreviewThread(_ root: ChatMessage) {
         threadMessages = [

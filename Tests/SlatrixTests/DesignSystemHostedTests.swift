@@ -160,6 +160,76 @@ struct DesignSystemHostedTests {
         #expect(await eventually { popovers.current == nil })
     }
 
+    @Test("The emoji picker opens ready to search; arrows move, Return picks and Esc closes")
+    func emojiPickerKeyboard() async throws {
+        let popovers = Popovers()
+        let picked = Recorder<String>()
+        let host = Host(
+            PopoverHost(popovers: popovers) {
+                Color.white.frame(width: 800, height: 600)
+            } card: { kind in
+                if case .emoji(let pick) = kind {
+                    EmojiPicker(recent: ["🎉"]) { emoji in
+                        popovers.close()
+                        pick.action(emoji)
+                    }
+                }
+            },
+            size: CGSize(width: 800, height: 600))
+        defer { host.close() }
+        popovers.show(.emoji(EmojiPick { picked.append($0) }), at: CGPoint(x: 100, y: 100))
+        // Typing goes straight to the search field.
+        #expect(await eventually { host.window.firstResponder is NSTextView })
+        let field = try #require(host.window.firstResponder as? NSTextView)
+        field.insertText("heart", replacementRange: field.selectedRange())
+        await drainMainActor()
+        let results = EmojiCatalog.search("heart").map(\.value)
+        // Each key acts on what the last one left on screen.
+        for (key, code) in [(NSRightArrowFunctionKey, 124), (NSDownArrowFunctionKey, 125), (13, 36)] {
+            host.hosting.layoutSubtreeIfNeeded()
+            await drainMainActor()
+            host.press(UInt16(code), String(UnicodeScalar(key)!))
+        }
+        // One right and one row of nine down from the top result.
+        #expect(await eventually { picked.all == [results[10]] })
+        #expect(popovers.current == nil)
+
+        popovers.show(.emoji(EmojiPick { picked.append($0) }), at: CGPoint(x: 100, y: 100))
+        #expect(await eventually { host.window.firstResponder is NSTextView })
+        host.pressEscape()
+        #expect(await eventually { popovers.current == nil })
+        #expect(picked.all.count == 1)
+    }
+
+    /// A plain text view, as the composer is.
+    private struct Editor: NSViewRepresentable {
+        let view: NSTextView
+        func makeNSView(context: Context) -> NSTextView { view }
+        func updateNSView(_ view: NSTextView, context: Context) {}
+    }
+
+    @Test("Closing the emoji picker with Esc puts focus back where it was")
+    func escapeRestoresFocus() async {
+        let popovers = Popovers()
+        let composer = NSTextView()
+        let host = Host(
+            PopoverHost(popovers: popovers) {
+                Editor(view: composer).frame(width: 800, height: 600)
+            } card: { _ in
+                EmojiPicker(recent: []) { _ in }
+            },
+            size: CGSize(width: 800, height: 600))
+        defer { host.close() }
+        host.hosting.layoutSubtreeIfNeeded()
+        host.window.makeFirstResponder(composer)
+        #expect(host.window.firstResponder === composer)
+        popovers.show(.emoji(EmojiPick { _ in }), at: CGPoint(x: 100, y: 100))
+        #expect(await eventually { (host.window.firstResponder as? NSTextView)?.isFieldEditor == true })
+        host.pressEscape()
+        #expect(await eventually { popovers.current == nil })
+        #expect(await eventually { host.window.firstResponder === composer })
+    }
+
     @Test("A click outside the card closes it; a click on it doesn't")
     func clickOutsideCloses() async {
         let popovers = Popovers()

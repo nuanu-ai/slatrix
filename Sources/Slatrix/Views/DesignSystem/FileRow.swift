@@ -64,7 +64,7 @@ struct FileRow<Menu: View>: View {
 
     private var actions: some View {
         let colors = appearance.colors
-        let side = MessageRow.toolbarButton
+        let side = MessageToolbar.button
         return HStack(spacing: 0) {
             if downloading {
                 DelayedProgress().frame(width: m(side), height: m(side))

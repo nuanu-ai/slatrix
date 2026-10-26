@@ -2,8 +2,6 @@ import AppKit
 import SwiftUI
 
 struct MessageComposer: View {
-    private static let emojiCell: CGFloat = 32
-    private static let emojiColumns = 8
     @Binding var text: String
     var placeholder: String
     var members: [ChatUser]
@@ -34,13 +32,12 @@ struct MessageComposer: View {
     @State private var importGeneration = UUID()
     @State private var isActive = true
     @State private var showFormatting = true
-    @State private var showEmoji = false
-    @State private var emojiQuery = ""
     @State private var mentionQuery: String?
     @State private var mentionRange: NSRange?
     @State private var mentionIndex = 0
     @State private var typingTask: Task<Void, Never>?
     @EnvironmentObject private var appearance: AppearanceStore
+    @Environment(Popovers.self) private var popovers: Popovers?
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.metrics) private var m
 
@@ -121,8 +118,9 @@ struct MessageComposer: View {
                         .frame(width: m.iconButton, height: m.iconButton).contentShape(Rectangle())
                 }.buttonStyle(.icon).foregroundStyle(muted).help(showFormatting ? "Hide formatting" : "Show formatting")
                     .accessibilityLabel(showFormatting ? "Hide formatting" : "Show formatting")
-                iconButton("face.smiling", label: "Emoji") { showEmoji.toggle() }
-                    .popover(isPresented: $showEmoji, arrowEdge: .bottom) { emojiPicker }
+                iconButton("face.smiling", label: "Emoji") {
+                    popovers?.show(.emoji(EmojiPick { [editor] in editor.insert($0) }))
+                }
                 iconButton("at", label: "Mention someone") {
                     editor.insert("@")
                     editor.focus()
@@ -201,8 +199,6 @@ struct MessageComposer: View {
             if mentionQuery != nil {
                 mentionQuery = nil
                 mentionRange = nil
-            } else if showEmoji {
-                showEmoji = false
             } else if isEditing {
                 onCancelEdit?()
             }
@@ -321,50 +317,6 @@ struct MessageComposer: View {
         }.padding(.vertical, m.sp4).background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
             .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
             .elevation(.e2, cornerRadius: m.radiusLarge)
-    }
-
-    private var emojiPicker: some View {
-        VStack(alignment: .leading, spacing: m.sp12) {
-            TextField("Search emoji", text: $emojiQuery).textFieldStyle(.field).accessibilityLabel(
-                "Search emoji"
-            )
-            .onSubmit {
-                if let emoji = Self.emojis.first(where: {
-                    emojiQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(emojiQuery)
-                }) {
-                    editor.insert(emoji.symbol)
-                    showEmoji = false
-                    emojiQuery = ""
-                    editor.focus()
-                }
-            }
-            ScrollView {
-                LazyVGrid(
-                    columns: Array(
-                        repeating: GridItem(.fixed(m(Self.emojiCell)), spacing: m.sp4), count: Self.emojiColumns),
-                    spacing: m.sp4
-                ) {
-                    ForEach(
-                        Self.emojis.filter {
-                            emojiQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(emojiQuery)
-                        }, id: \.symbol
-                    ) { emoji in
-                        Button {
-                            editor.insert(emoji.symbol)
-                            showEmoji = false
-                            emojiQuery = ""
-                            editor.focus()
-                        } label: {
-                            Text(emoji.symbol).font(m.font(.header)).frame(
-                                width: m(Self.emojiCell), height: m(Self.emojiCell)
-                            ).contentShape(
-                                Rectangle())
-                        }.buttonStyle(.icon).foregroundStyle(muted).help(emoji.name).accessibilityLabel(emoji.name)
-                    }
-                }
-            }.frame(height: (m(Self.emojiCell) + m.sp4) * 6)
-        }.padding(m.sp16).frame(
-            width: m(Self.emojiCell) * CGFloat(Self.emojiColumns) + m.sp4 * CGFloat(Self.emojiColumns - 1) + m.sp16 * 2)
     }
 
     private func changed(_ value: String, _ range: NSRange) {
@@ -559,21 +511,6 @@ struct MessageComposer: View {
             Task.detached { ComposerAttachmentImporter.discard(urls) }
         }
     }
-
-    private static let emojis: [(symbol: String, name: String)] = [
-        ("😀", "grinning happy"), ("😄", "smile happy"), ("😁", "grin"), ("😅", "sweat smile"), ("😂", "laughing joy"),
-        ("🤣", "laughing rofl"), ("😊", "blush smile"), ("😉", "wink"),
-        ("😍", "love heart eyes"), ("🥰", "love hearts"), ("😎", "cool sunglasses"), ("🤔", "thinking"), ("🫡", "salute"),
-        ("🫠", "melting"), ("😭", "cry sad"), ("🤯", "mind blown"),
-        ("👍", "thumbs up yes"), ("👎", "thumbs down no"), ("👏", "clap applause"), ("🙌", "hooray raised hands"),
-        ("👋", "hello wave"), ("🙏", "thanks please"), ("💪", "strong muscle"), ("🤝", "handshake"),
-        ("❤️", "heart love"), ("💜", "purple heart"), ("💚", "green heart"), ("🫶", "heart hands"), ("🔥", "fire"),
-        ("✨", "sparkles"), ("🎉", "party celebrate"), ("🎊", "confetti"),
-        ("🚀", "rocket launch"), ("✅", "done check"), ("👀", "eyes looking"), ("💯", "hundred perfect"), ("💡", "idea"),
-        ("⭐", "star"), ("🏆", "trophy winner"), ("🎯", "target goal"),
-        ("☕", "coffee"), ("🍵", "tea"), ("🍕", "pizza"), ("🍰", "cake"), ("🌴", "palm bali"), ("🌊", "ocean wave"),
-        ("🌞", "sun"), ("🌱", "growth seedling"),
-    ]
 }
 
 @MainActor private final class ComposerEditorState: ObservableObject {

@@ -98,6 +98,8 @@ struct AppColors {
 
     /// Links, selected tabs, mine.
     var accent: Color { Color(hex: dark ? 0x8195ff : 0x334ec9) }
+    /// The fill behind something of yours, such as your reaction.
+    var accentTint: Color { accent.opacity(dark ? 0.2 : 0.1) }
     /// Text and icons on a filled button.
     var onAccent: Color { .white }
     /// Slack's green: the one primary action on a screen.
