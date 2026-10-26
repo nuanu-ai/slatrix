@@ -172,6 +172,35 @@ struct DesignSystemHostedTests {
         #expect(picked.all.count == 1)
     }
 
+    /// A plain text view, as the composer is.
+    private struct Editor: NSViewRepresentable {
+        let view: NSTextView
+        func makeNSView(context: Context) -> NSTextView { view }
+        func updateNSView(_ view: NSTextView, context: Context) {}
+    }
+
+    @Test("Closing the emoji picker with Esc puts focus back where it was")
+    func escapeRestoresFocus() async {
+        let popovers = Popovers()
+        let composer = NSTextView()
+        let host = Host(
+            PopoverHost(popovers: popovers) {
+                Editor(view: composer).frame(width: 800, height: 600)
+            } card: { _ in
+                EmojiPicker(recent: []) { _ in }
+            },
+            size: CGSize(width: 800, height: 600))
+        defer { host.close() }
+        host.hosting.layoutSubtreeIfNeeded()
+        host.window.makeFirstResponder(composer)
+        #expect(host.window.firstResponder === composer)
+        popovers.show(.emoji(EmojiPick { _ in }), at: CGPoint(x: 100, y: 100))
+        #expect(await eventually { (host.window.firstResponder as? NSTextView)?.isFieldEditor == true })
+        host.pressEscape()
+        #expect(await eventually { popovers.current == nil })
+        #expect(await eventually { host.window.firstResponder === composer })
+    }
+
     @Test("A click outside the card closes it; a click on it doesn't")
     func clickOutsideCloses() async {
         let popovers = Popovers()
