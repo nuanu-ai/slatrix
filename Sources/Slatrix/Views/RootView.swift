@@ -60,7 +60,10 @@ struct RootView: View {
     @State private var showRecovery = false
     @State private var creation: CreationKind?
     @State private var inviteTargetRoomID: String?
-    @State private var person: ProfileSelection?
+    /// Anchored cards such as the profile card; like `modals`, read only by its host.
+    @State private var popovers = Popovers()
+    /// The full profile in the right-hand pane, over the thread or details until closed.
+    @State private var profilePane: ProfileSelection?
     @State private var roomDetails: DetailsSelection?
     @State private var roomNotifications: DetailsSelection?
     @State private var forwarding: ForwardSelection?
@@ -121,10 +124,10 @@ struct RootView: View {
     private static let infoPaneWidth: CGFloat = 336
     /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
     private var inspectorWidth: CGFloat? {
-        guard room != nil, threadRoot != nil || infoOpen else { return nil }
+        guard profilePane != nil || (room != nil && (threadRoot != nil || infoOpen)) else { return nil }
         return SidebarLayout.paneWidth(
             preferred: resizingPaneWidth ?? CGFloat(preferredPaneWidth),
-            ideal: threadRoot != nil ? Self.threadPaneWidth : Self.infoPaneWidth,
+            ideal: threadRoot != nil && profilePane == nil ? Self.threadPaneWidth : Self.infoPaneWidth,
             availableWidth: availableContentWidth / m.zoom)
     }
     /// Pane width plus its divider, at 100% zoom.
@@ -232,7 +235,7 @@ struct RootView: View {
     }
     private var hasPresentedSheet: Bool {
         publicDirectory != nil || showRecovery || creation != nil
-            || person != nil || roomDetails != nil || roomNotifications != nil || forwarding != nil
+            || roomDetails != nil || roomNotifications != nil || forwarding != nil
             || mediaCaption != nil || matrixJoin != nil || previews.url != nil || logoutConfirmation
             || logoutRecovery.request != nil || logoutRecovery.isBusy
     }
@@ -243,7 +246,11 @@ struct RootView: View {
 
     var body: some View {
         ModalHost(modals: modals, onClose: closeModal) {
-            windowContent
+            PopoverHost(popovers: popovers) {
+                windowContent
+            } card: { kind in
+                popoverCard(kind)
+            }
         } modal: { kind in
             modal(kind).environmentObject(appearance)
         }
@@ -277,6 +284,22 @@ struct RootView: View {
                 }, initiallyMessages: messages, initialRoomID: roomID, onMatrixLink: enqueueMatrixLink
             ).onAppear { Performance.finishOnScreen(.searchOpen) }
         case .shortcuts: KeyboardShortcutsView(onClose: closeModal)
+        }
+    }
+
+    @ViewBuilder private func popoverCard(_ kind: Popovers.Kind) -> some View {
+        switch kind {
+        case .profile(let userID, let fallback):
+            ProfileCard(
+                matrix: matrix, people: matrix.people, userID: userID, fallback: fallback,
+                onOpenConversation: { id in
+                    popovers.close()
+                    selectRoom(id)
+                },
+                onViewProfile: {
+                    popovers.close()
+                    profilePane = ProfileSelection(id: userID, fallback: fallback)
+                })
         }
     }
 
@@ -405,15 +428,22 @@ struct RootView: View {
                     openingThreadID = nil
                 }
             }
-            .onChange(of: threadRoot?.eventID) { _, _ in updateActionThreadVisibility() }
+            .onChange(of: threadRoot?.eventID) { _, id in
+                updateActionThreadVisibility()
+                if id != nil { profilePane = nil }
+            }
             .onChange(of: threadReadyID) { _, _ in updateActionThreadVisibility() }
             .onChange(of: navigationGeneration) { _, _ in
+                popovers.close()
                 cancelStaleThreadOpen()
                 cancelStaleForward()
                 cancelStaleCaption()
             }
             .onChange(of: matrix.timelineSelectionID) { _, _ in cancelStaleThreadOpen() }
-            .onChange(of: infoOpen) { _, _ in cancelStaleThreadOpen() }
+            .onChange(of: infoOpen) { _, open in
+                cancelStaleThreadOpen()
+                if open { profilePane = nil }
+            }
             .onChange(of: matrix.messageActionContext) { _, _ in
                 if let editActionTarget, !matrix.isCurrentMessageAction(editActionTarget) { cancelCurrentEdit() }
                 cancelStaleForward()
@@ -495,15 +525,6 @@ struct RootView: View {
             }
             .sheet(isPresented: $showRecovery) {
                 EncryptionRecoveryView(matrix: matrix, onClose: { showRecovery = false }).environmentObject(appearance)
-            }
-            .sheet(item: $person) { selection in
-                PersonProfileView(
-                    matrix: matrix, people: matrix.people, userID: selection.id, fallback: selection.fallback,
-                    onOpenConversation: { id in
-                        person = nil
-                        selectRoom(id)
-                    }, onClose: { person = nil }
-                ).environmentObject(appearance)
             }
             .sheet(item: $roomDetails) { selection in
                 RoomDetailsEditor(matrix: matrix, roomID: selection.id, onClose: { roomDetails = nil })
@@ -651,10 +672,12 @@ struct RootView: View {
                                         (route == .home && room != nil ? m.paneHeader + m.sp40 : m.paneHeader) + 1
                                             + m.sp8)
                             }
-                            .overlay { if inspectorWidth == nil, let room { inspector(room) } }
-                            if let width = inspectorWidth, let room {
+                            .overlay { if inspectorWidth == nil { inspector(room) } }
+                            if let width = inspectorWidth {
                                 ResizeHandle(
-                                    pane: .trailing, label: threadRoot != nil ? "Thread width" : "Details width",
+                                    pane: .trailing,
+                                    label: profilePane != nil
+                                        ? "Profile width" : threadRoot != nil ? "Thread width" : "Details width",
                                     currentWidth: m(width), onChange: resizePane, onCommit: commitPaneWidth,
                                     onReset: {
                                         resizingPaneWidth = nil
@@ -748,10 +771,17 @@ struct RootView: View {
         .font(m.font(.meta))
     }
 
-    @ViewBuilder private func inspector(_ room: ChatRoom) -> some View {
-        if let root = threadRoot {
+    @ViewBuilder private func inspector(_ room: ChatRoom?) -> some View {
+        if let profilePane {
+            ProfilePane(
+                matrix: matrix, people: matrix.people, userID: profilePane.id, fallback: profilePane.fallback,
+                onOpenConversation: { id in
+                    self.profilePane = nil
+                    selectRoom(id)
+                }, onClose: { self.profilePane = nil })
+        } else if let room, let root = threadRoot {
             threadPanel(root: root, room: room)
-        } else if infoOpen {
+        } else if let room, infoOpen {
             RoomInfoView(
                 matrix: matrix, room: room, onClose: { infoOpen = false },
                 onInvite: { presentCreation(.invite) }, onRecovery: { showRecovery = true },
@@ -2201,9 +2231,10 @@ struct RootView: View {
             }
         }
     }
+    /// Slack's profile card beside the click, with the name and photo the room already knows.
     private func openProfile(_ userID: String, fallback: ChatUser?) {
-        guard matrix.user != nil, !matrix.isPreview else { return }
-        person = ProfileSelection(id: userID, fallback: fallback)
+        guard matrix.user != nil else { return }
+        popovers.show(.profile(userID: userID, fallback: fallback ?? matrix.members.first { $0.id == userID }))
     }
     private func toggleSave(_ message: ChatMessage) {
         guard localReady else { return }
@@ -2433,7 +2464,8 @@ struct RootView: View {
         showRecovery = false
         creation = nil
         inviteTargetRoomID = nil
-        person = nil
+        popovers.close()
+        profilePane = nil
         roomDetails = nil
         roomNotifications = nil
         loadLocalData()
@@ -2503,6 +2535,10 @@ struct RootView: View {
             route = .home
         case "toggle-sidebar": sidebarHidden.toggle()
         case "toggle-pane":
+            if profilePane != nil {
+                profilePane = nil
+                return
+            }
             guard route == .home, room != nil else { return }
             if threadRoot != nil {
                 closeThread()

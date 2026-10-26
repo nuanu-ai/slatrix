@@ -41,7 +41,7 @@ Agreed seams, where tests belong:
 - **Services against SDK fakes**: subclasses of the generated SDK classes. Catches races, stale completions and error handling; misses real server behavior.
 - **Local storage**: encrypted drafts, saved messages, attachment staging, credentials. Catches format, permission and corruption handling.
 - **Pure policies**: read state, navigation order, sidebar layout, link parsing, search query grammar, timeline grouping and scroll anchoring. Catches rule regressions directly.
-- **Hosted timeline and window**: the real timeline, or the whole window, in an offscreen window, opt-in with `SLATRIX_HOSTED_UI_CHECKS=1` because it needs an awake display. Catches scroll jumps, row geometry and what an update costs the main thread; misses real pointer input and WindowServer timing.
+- **Hosted timeline and window**: the real timeline, the whole window, or a design system component, in an offscreen window, opt-in with `SLATRIX_HOSTED_UI_CHECKS=1` because it needs an awake display. Catches scroll jumps, row geometry and what an update costs the main thread; misses real pointer input and WindowServer timing.
 - **Performance log**: what the app writes to unified logging, read back through `OSLogStore`. Catches lost hang reports and names the report cannot parse; misses real WindowServer timing.
 - **Release scripts**: run as a process with real arguments. Catches a tag that would ship a version Sparkle cannot order; misses signing, notarization and the appcast.
 

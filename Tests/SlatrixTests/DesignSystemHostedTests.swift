@@ -17,7 +17,7 @@ struct DesignSystemHostedTests {
             _ = NSApplication.shared
             hosting = NSHostingView(rootView: view.environmentObject(AppearanceStore()))
             window = NSWindow(
-                contentRect: NSRect(origin: CGPoint(x: -20_000, y: -20_000), size: size), styleMask: .borderless,
+                contentRect: NSRect(origin: CGPoint(x: -20_000, y: -20_000), size: size), styleMask: .titled,
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.contentView = hosting
@@ -29,7 +29,8 @@ struct DesignSystemHostedTests {
             window.close()
         }
 
-        /// Whether any pixel has the focus ring's blue; nothing else in these windows is that color.
+        /// Whether any pixel has the focus ring's cyan blue, whose green stands well above its red; the accent's blue
+        /// in link text doesn't.
         func showsFocusRing() -> Bool {
             hosting.layoutSubtreeIfNeeded()
             guard let image = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { return false }
@@ -37,8 +38,8 @@ struct DesignSystemHostedTests {
             for x in 0..<image.pixelsWide {
                 for y in 0..<image.pixelsHigh {
                     guard let color = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
-                    if color.blueComponent > 0.6 && color.greenComponent > 0.4
-                        && color.blueComponent - color.redComponent > 0.5
+                    if color.blueComponent - color.redComponent > 0.3
+                        && color.greenComponent - color.redComponent > 0.15
                     {
                         return true
                     }
@@ -48,9 +49,10 @@ struct DesignSystemHostedTests {
         }
 
         /// A click at `point`, in the window's top-left coordinates.
-        func click(_ point: CGPoint) {
+        func click(_ point: CGPoint) async {
             let location = CGPoint(x: point.x, y: hosting.bounds.height - point.y)
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                await drainMainActor()
                 window.sendEvent(
                     NSEvent.mouseEvent(
                         with: type, location: location, modifierFlags: [],
@@ -112,10 +114,10 @@ struct DesignSystemHostedTests {
         // The card sits right of and a little above the anchor: about x 112–432, y 76–228.
         popovers.show(.profile(userID: "@alice:example.org", fallback: nil), at: CGPoint(x: 100, y: 100))
         #expect(await eventually { host.window.firstResponder !== host.window })
-        host.click(CGPoint(x: 250, y: 150))
+        await host.click(CGPoint(x: 250, y: 150))
         await drainMainActor()
         #expect(popovers.current != nil)
-        host.click(CGPoint(x: 700, y: 500))
+        await host.click(CGPoint(x: 700, y: 500))
         #expect(await eventually { popovers.current == nil })
     }
 }

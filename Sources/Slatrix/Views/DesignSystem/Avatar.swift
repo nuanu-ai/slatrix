@@ -15,6 +15,8 @@ struct AvatarView: View {
     var presence: Presence? = nil
     /// The surface the avatar sits on, for the ring that separates the presence dot from the photo.
     var surface: Color? = nil
+    /// The tile's rounding; large photos use a panel radius rather than a fifth of their side.
+    var cornerRadius: CGFloat? = nil
     var matrix: MatrixService? = nil
     var source: String? = nil
     @State private var loaded: Loaded?
@@ -28,6 +30,7 @@ struct AvatarView: View {
         let request: RequestID
         let image: CGImage
     }
+    private var radius: CGFloat { cornerRadius ?? size * 0.19 }
     private var large: Bool { size > Self.largeSide }
     private var requestID: RequestID { RequestID(userID: matrix?.user?.id, source: source, large: large) }
     private var largeKey: String? { source.map { "\($0)#large" } }
@@ -39,7 +42,7 @@ struct AvatarView: View {
     var body: some View {
         let image = loaded?.request == requestID ? loaded?.image : cached
         ZStack(alignment: .bottomTrailing) {
-            RoundedRectangle(cornerRadius: size * 0.19).fill(avatarColor(name))
+            RoundedRectangle(cornerRadius: radius).fill(avatarColor(name))
                 .overlay(
                     // Initials scale with the tile, not with a text role.
                     Text(initials(name)).font(Font(NSFont.systemFont(ofSize: size * 0.35, weight: .semibold) as CTFont))
@@ -50,7 +53,7 @@ struct AvatarView: View {
                         Image(decorative: image, scale: 1).resizable().scaledToFill()
                             .frame(width: size, height: size).clipped().transition(.opacity)
                     }
-                }.clipShape(RoundedRectangle(cornerRadius: size * 0.19))
+                }.clipShape(RoundedRectangle(cornerRadius: radius))
             if let presence {
                 let colors = appearance.colors
                 let ring = surface ?? colors.canvas

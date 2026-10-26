@@ -65,6 +65,29 @@ struct Snapshots {
         try write(await settledImage(hosting), "thread-\(name)")
     }
 
+    @Test("Component gallery", arguments: Theme.allCases)
+    func gallery(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(rootView: ComponentGallery().environmentObject(appearance))
+        let window = NSWindow(
+            contentRect: NSRect(origin: CGPoint(x: -20000, y: -20000), size: hosting.fittingSize),
+            styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        try write(await settledImage(hosting), "gallery-\(theme.rawValue)")
+    }
+
     /// Captures until the frame stops changing for 300 ms, so async text, symbols and layout have arrived.
     ///
     /// The window server's composite, not `cacheDisplay`: that draws through `CALayer.render(in:)`, which skips layer

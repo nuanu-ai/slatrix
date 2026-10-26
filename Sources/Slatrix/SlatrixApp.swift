@@ -97,6 +97,12 @@ struct SlatrixApp: App {
                 Button("Keyboard shortcuts…") { menuAction("shortcuts") }.keyboardShortcut("/")
             }
         }
+        #if DEBUG
+        Window("Component Gallery", id: "gallery") {
+            ScrollView([.vertical, .horizontal]) { ComponentGallery() }.environmentObject(appearance)
+                .environment(\.metrics, Metrics()).preferredColorScheme(appearance.preferredColorScheme)
+        }
+        #endif
     }
     private var metrics: Metrics { Metrics(zoom: appearance.zoom) }
     /// Scales with zoom but never past the screen, so 200% still fits a laptop.
