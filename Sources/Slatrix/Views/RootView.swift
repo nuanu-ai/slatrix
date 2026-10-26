@@ -631,6 +631,10 @@ struct RootView: View {
                             draftCount: draftAddresses.count,
                             onSelect: selectRoom, onCreate: presentCreation,
                             onPreferences: { handleMenu("preferences") },
+                            onProfile: {
+                                if let me = matrix.user { profilePane = ProfileSelection(id: me.id, fallback: me) }
+                            },
+                            onSignOut: { logoutConfirmation = true },
                             onMarkUnread: { markReadState($0, unread: true) },
                             onMarkRead: { markReadState($0, unread: false) },
                             onInviteWorkspace: { id in
