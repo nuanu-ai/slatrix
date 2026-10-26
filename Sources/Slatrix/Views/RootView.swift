@@ -4,7 +4,7 @@ import QuickLook
 import SwiftUI
 
 enum AppRoute: String, CaseIterable {
-    case home, directMessages, activity, files, saved, threads, drafts, directory
+    case home, directMessages, activity, files, saved, threads, drafts, directory, search
     var title: String {
         switch self {
         case .home: "Home"
@@ -15,6 +15,7 @@ enum AppRoute: String, CaseIterable {
         case .threads: "Threads"
         case .drafts: "Drafts"
         case .directory: "People"
+        case .search: "Search"
         }
     }
     var symbol: String {
@@ -27,6 +28,7 @@ enum AppRoute: String, CaseIterable {
         case .threads: "bubble.left"
         case .drafts: "paperplane"
         case .directory: "person.crop.square"
+        case .search: "magnifyingglass"
         }
     }
 }
@@ -55,6 +57,8 @@ struct RootView: View {
     /// Preferences, ⌘K and the shortcuts list, shown in the window like Slack's. Not read by this body, so opening
     /// one re-renders only the modal host, not the whole window.
     @State private var modals = InWindowModal()
+    @State private var searchBar = SearchBar()
+    @State private var recentSearches: [String] = []
     /// Any modal at all, such as a confirmation the timeline opened; read outside the body only.
     @State private var modalShown = false
     @State private var publicDirectory: PublicDirectorySelection?
@@ -287,17 +291,13 @@ struct RootView: View {
                     showRecovery = true
                 }
             ).onAppear { Performance.finishOnScreen(.preferencesOpen) }
-        case .search(let messages, let roomID):
+        case .switcher:
             QuickSwitcherView(
-                matrix: matrix,
+                matrix: matrix, visited: history,
                 onSelect: {
                     selectRoom($0)
                     closeModal()
-                }, onClose: closeModal,
-                onMessageSelect: { message in
-                    closeModal()
-                    selectRoom(message.roomID, record: true, eventID: message.eventID)
-                }, initiallyMessages: messages, initialRoomID: roomID, onMatrixLink: enqueueMatrixLink
+                }, onMatrixLink: enqueueMatrixLink, onClose: closeModal
             ).onAppear { Performance.finishOnScreen(.searchOpen) }
                 // Slack's switcher hangs below the title bar, not centered.
                 .modalSurface().frame(maxHeight: .infinity, alignment: .top).padding(.top, m.paneHeader + m.sp24)
@@ -720,7 +720,14 @@ struct RootView: View {
                     ).padding(.trailing, m.sp4).padding(.bottom, m.sp4)
                 }
             }
-        }.background(colors.frame).foregroundStyle(colors.textBody).ignoresSafeArea(.container, edges: .top)
+        }
+        .coordinateSpace(.named(SearchBar.space))
+        .overlay(alignment: .topLeading) {
+            SearchMenu(
+                bar: searchBar, matrix: matrix, recents: recentSearches, visited: history,
+                top: m(Self.titleBarHeight), onPick: pickSearch)
+        }
+        .background(colors.frame).foregroundStyle(colors.textBody).ignoresSafeArea(.container, edges: .top)
     }
 
     /// Connection, loading and error states, as toasts over the conversation.
@@ -913,18 +920,10 @@ struct RootView: View {
                     selectRoom(history[index], record: false)
                 }
             }
-            Button {
-                if matrix.user != nil { handleMenu("search") }
-            } label: {
-                HStack(spacing: m.sp8) {
-                    Image(systemName: "magnifyingglass").font(m.font(.body))
-                    Text("Search \(currentWorkspaceName)").font(m.font(.secondary))
-                    Spacer()
-                    Text("⌘ K").font(m.font(.caption)).opacity(0.65)
-                }.padding(.horizontal, m.sp12).frame(height: m.row).background(
-                    colors.textPrimary.opacity(appearance.isDark ? 0.19 : 0.08),
-                    in: RoundedRectangle(cornerRadius: m.radius))
-            }.buttonStyle(.row).frame(maxWidth: m(Self.searchWidth)).disabled(matrix.user == nil)
+            SearchBarField(
+                bar: searchBar, prompt: "Search \(currentWorkspaceName)", matrix: matrix, recents: recentSearches,
+                visited: history, onPick: pickSearch
+            ).frame(maxWidth: m(Self.searchWidth)).disabled(matrix.user == nil)
             // An overlay, so the notice coming and going never moves the search field.
             Spacer(minLength: 0).overlay(alignment: .trailing) {
                 ConnectionNotice(matrix: matrix, onRetry: retryConnection).padding(.trailing, m.sp8)
@@ -1246,18 +1245,21 @@ struct RootView: View {
     }
     private var collectionContent: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(route.title).font(m.font(.title, .bold))
-                Spacer()
-                if route == .directMessages || route == .directory {
-                    Button {
-                        creation = .directMessage
-                    } label: {
-                        Label("New message", systemImage: "square.and.pencil")
-                    }.buttonStyle(.secondary)
-                }
-            }.padding(.horizontal, m.sp24).frame(height: m.paneHeader)
-            Divider().overlay(colors.border)
+            // Search results title themselves with the query.
+            if route != .search {
+                HStack {
+                    Text(route.title).font(m.font(.title, .bold))
+                    Spacer()
+                    if route == .directMessages || route == .directory {
+                        Button {
+                            creation = .directMessage
+                        } label: {
+                            Label("New message", systemImage: "square.and.pencil")
+                        }.buttonStyle(.secondary)
+                    }
+                }.padding(.horizontal, m.sp24).frame(height: m.paneHeader)
+                Divider().overlay(colors.border)
+            }
             switch route {
             case .directMessages: RoomDirectory(matrix: matrix, onSelect: selectRoom)
             case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
@@ -1275,6 +1277,11 @@ struct RootView: View {
                 ActivityFeedView(
                     matrix: matrix, activity: matrix.activity, workspaceID: $workspaceID, onOpenMessage: openActivity,
                     onOpenRoom: selectRoom)
+            case .search:
+                SearchResultsView(
+                    matrix: matrix, bar: searchBar,
+                    onOpenMessage: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
+                    onOpenRoom: selectRoom, onOpenProfile: openProfile)
             case .home: EmptyView()
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2295,7 +2302,8 @@ struct RootView: View {
     }
     private var storageKey: String { matrix.isPreview ? "preview" : matrix.user?.id ?? "signed-out" }
     private var localState: ProtectedLocalState {
-        ProtectedLocalState(drafts: drafts.conversations, threadDrafts: drafts.threads, saved: saved)
+        ProtectedLocalState(
+            drafts: drafts.conversations, threadDrafts: drafts.threads, saved: saved, recentSearches: recentSearches)
     }
     private func loadLocalData(retry: Bool = false) {
         if composerStateIdentity != composerIdentity { clearComposerState() }
@@ -2330,6 +2338,7 @@ struct RootView: View {
                 drafts.conversations = access.state.drafts
                 drafts.threads = access.state.threadDrafts
                 saved = access.state.saved
+                recentSearches = access.state.recentSearches ?? []
                 localReady = true
                 localError = nil
                 await attachmentDrafts.open(accountID: accountID)
@@ -2416,6 +2425,10 @@ struct RootView: View {
         localError = nil
         drafts.conversations = [:]
         saved = []
+        recentSearches = []
+        searchBar.text = ""
+        searchBar.submitted = nil
+        searchBar.close()
         composerGeneration = UUID()
         composerStateIdentity = composerIdentity
         drafts.threads = [:]
@@ -2490,6 +2503,20 @@ struct RootView: View {
         }
         return true
     }
+    private func pickSearch(_ item: SearchSuggestion) {
+        searchBar.close()
+        switch item {
+        case .search(let text), .recent(let text):
+            searchBar.text = text
+            recentSearches = RecentSearches.adding(text, to: recentSearches)
+            saveLocalData()
+            searchBar.submitted = MessageSearchQuery.parse(text, rooms: matrix.rooms, me: matrix.user?.id)
+            route = .search
+        case .conversation(let room):
+            searchBar.text = ""
+            selectRoom(room.id)
+        }
+    }
     private func handleMenu(_ action: String) {
         // The media viewer covers the window: Esc closes it, and nothing else reaches what is under it.
         if viewer.message != nil {
@@ -2509,12 +2536,14 @@ struct RootView: View {
             return
         }
         guard matrix.user != nil else { return }
-        if action.hasPrefix("search") { Performance.start(.searchOpen) }
+        if action == "search" { Performance.start(.searchOpen) }
         switch action {
-        case "search": modals.current = .search(messages: false, roomID: nil)
-        case "search-messages": modals.current = .search(messages: true, roomID: nil)
+        case "search": modals.current = .switcher
+        case "search-messages": searchBar.focus()
         case "search-conversation":
-            modals.current = .search(messages: true, roomID: route == .home ? room?.id : nil)
+            // Slack's ⌘F: the bar, already narrowed to the open conversation.
+            let name = room.map { $0.name.contains(" ") ? "\"\($0.name)\"" : ($0.isDirect ? "@" : "#") + $0.name }
+            searchBar.focus(text: route == .home ? name.map { "in:\($0) " } : nil)
         case "new-message": creation = .directMessage
         case "new-channel": creation = .channel
         case "back": navigateHistory(-1)

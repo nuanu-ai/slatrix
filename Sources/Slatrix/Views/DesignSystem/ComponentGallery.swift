@@ -294,6 +294,21 @@ struct ComponentGallery: View {
                         .init(value: 0, title: "About"), .init(value: 1, title: "Members", count: 12),
                         .init(value: 2, title: "Settings"),
                     ], selection: .constant(1))
+                HStack(spacing: m.sp8) {
+                    FilterChip(title: "From", active: false)
+                    FilterChip(title: "In: design", active: true)
+                    FilterChip(title: "Exact phrase", active: false, menu: false)
+                }
+                VStack(spacing: 0) {
+                    MenuRow(title: "Search for “launch”", selected: true) {
+                    } icon: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    MenuRow(title: "design", detail: "Harbor", selected: false) {
+                    } icon: {
+                        Image(systemName: "number")
+                    }
+                }.frame(width: m(400))
                 VStack(spacing: 0) {
                     PersonRow(name: "Julia Park", userID: "@julia:harbor.example", presence: .active) {}
                     PersonRow(name: "Sam Ortiz", userID: "@sam:harbor.example", isYou: true, presence: .away) {}

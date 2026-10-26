@@ -140,23 +140,3 @@ struct SearchIndexingControllerTests {
         #expect(states.all == [.running, .stopping] && controller.state == .idle)
     }
 }
-
-struct SearchRequestOwnerTests {
-    private static let session = UUID()
-    private static let owner = SearchRequestOwner(sessionID: session, revision: 2)
-
-    @Test("Only an unchanged request in a visible search is current")
-    func unchanged() {
-        #expect(Self.owner.isCurrent(Self.owner, isPresented: true))
-    }
-
-    @Test(
-        "A dismissed search, another account or a newer request makes a queued refresh stale",
-        arguments: [
-            (owner, false), (SearchRequestOwner(sessionID: UUID(), revision: 2), true),
-            (SearchRequestOwner(sessionID: session, revision: 3), true),
-        ])
-    func stale(now: SearchRequestOwner, presented: Bool) {
-        #expect(!Self.owner.isCurrent(now, isPresented: presented))
-    }
-}

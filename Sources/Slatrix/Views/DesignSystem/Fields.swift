@@ -43,11 +43,13 @@ extension TextFieldStyle where Self == HouseTextFieldStyle {
     static var field: Self { HouseTextFieldStyle() }
 }
 
-/// A search field: a magnifier, the query, ✕ once there is text, and an optional shortcut hint while empty.
+/// A search field: a magnifier, the query, ✕ once there is text, and an optional shortcut hint while empty. Esc
+/// clears it, or runs `onEscape` instead when the field belongs to something Esc closes.
 struct SearchField: View {
     let prompt: String
     @Binding var text: String
     var hint: String? = nil
+    var onEscape: (() -> Void)? = nil
     @FocusState private var focused: Bool
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
@@ -57,7 +59,9 @@ struct SearchField: View {
         FieldChrome(focused: focused) {
             HStack(spacing: m.sp8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary).accessibilityHidden(true)
-                TextField(prompt, text: $text).focused($focused).onExitCommand { text = "" }
+                TextField(prompt, text: $text).focused($focused).onExitCommand {
+                    if let onEscape { onEscape() } else { text = "" }
+                }
                 if !text.isEmpty {
                     IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .secondary, side: 20) {
                         text = ""

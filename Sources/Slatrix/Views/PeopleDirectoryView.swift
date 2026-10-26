@@ -76,7 +76,7 @@ struct PeopleDirectoryView: View {
 
     @ViewBuilder private var directoryResults: some View {
         if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            EmptyStateView(symbol: "person.2", title: matrix.isPreview ? "Sign in to find people" : "Search for people")
+            EmptyStateView(symbol: "person.2", title: "Search for people")
         } else if (people.searchState == "loading" || activeRequest != request) && results.isEmpty {
             SkeletonRows(interval: .peopleLoading)
         } else if people.searchState == "error" && results.isEmpty {
@@ -103,22 +103,17 @@ struct PeopleDirectoryView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        HStack {
-                            Text("PEOPLE").font(m.font(.caption, .semibold)).tracking(0.7)
-                            Spacer()
-                            if people.limited { Text("Showing top results").font(m.font(.caption)) }
-                        }.foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24).padding(.top, m.sp20)
-                            .padding(
-                                .bottom, m.sp12)
                         ForEach(results) { person in
-                            Button {
-                                open(person)
-                            } label: {
-                                PersonDirectoryRow(matrix: matrix, person: person, selected: selection == person.id)
-                            }.buttonStyle(.row).id(person.id)
-                            Divider().overlay(colors.border).padding(.leading, m.sp24 + m.avatar + m.sp12)
+                            PersonRow(
+                                name: person.name, userID: person.id, isYou: person.id == matrix.user?.id,
+                                matrix: matrix, avatarSource: person.avatarURL, selected: selection == person.id
+                            ) { open(person) }.id(person.id)
                         }
-                    }.padding(.bottom, m.sp16)
+                        if people.limited {
+                            Text("Showing top results").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                                .padding(.horizontal, m.sp12).padding(.top, m.sp12)
+                        }
+                    }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
                 }
                 .onChange(of: selection) { _, id in
                     if let id { withAnimation(Motion.content) { proxy.scrollTo(id, anchor: .center) } }
@@ -146,34 +141,6 @@ struct PeopleDirectoryView: View {
         return .handled
     }
     private func retry() { retryRevision += 1 }
-}
-
-private struct PersonDirectoryRow: View {
-    @Environment(\.metrics) private var m
-    let matrix: MatrixService
-    var person: PersonProfile
-    var selected = false
-    @EnvironmentObject private var appearance: AppearanceStore
-    private var colors: AppColors { appearance.colors }
-    var body: some View {
-        HStack(spacing: m.sp12) {
-            AvatarView(name: person.name, size: m.avatar, matrix: matrix, source: person.avatarURL)
-            VStack(alignment: .leading, spacing: m.sp4) {
-                Text(person.name).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
-                    .lineLimit(1)
-                Text(person.id).font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
-                if !person.profileAvailable {
-                    Text("No public profile").font(m.font(.caption)).foregroundStyle(
-                        colors.textSecondary)
-                }
-            }
-            Spacer()
-            Image(systemName: selected ? "return" : "chevron.right").font(m.font(.caption)).foregroundStyle(
-                colors.textSecondary)
-        }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? colors.selection.opacity(0.4) : .clear).contentShape(Rectangle())
-            .accessibilityElement(children: .combine).accessibilityLabel("View profile, \(person.name), \(person.id)")
-    }
 }
 
 struct PersonRecipientPicker: View {

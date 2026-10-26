@@ -2630,6 +2630,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         cancelSearch()
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { return }
+        if isPreview {
+            searchResults = previewSearch(term, roomID: roomID)
+            searchState = "ready"
+            return
+        }
         let client: Client
         do { client = try requireClient() } catch {
             failSearch(error)
