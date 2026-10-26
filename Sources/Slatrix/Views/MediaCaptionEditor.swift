@@ -44,7 +44,7 @@ struct MediaCaptionEditor: View {
                     .font(m.font(.secondary, .semibold)).textSelection(.enabled)
                 if loading {
                     HStack {
-                        ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
+                        DelayedProgress(interval: .sheetLoading)
                         Text("Loading…").font(m.font(.meta))
                     }
                 }
@@ -52,7 +52,7 @@ struct MediaCaptionEditor: View {
                     if notice != nil {
                         VStack(alignment: .leading, spacing: m.sp4) {
                             Text("Current caption").font(m.font(.caption, .semibold)).foregroundStyle(
-                                colors.muted)
+                                colors.textSecondary)
                             Text(snapshot.caption ?? "No caption").font(m.font(.meta)).textSelection(.enabled)
                         }.padding(m.sp12).frame(maxWidth: .infinity, alignment: .leading).background(
                             colors.raised, in: RoundedRectangle(cornerRadius: m.radius))
@@ -61,7 +61,7 @@ struct MediaCaptionEditor: View {
                         .font(m.font(.body)).frame(height: m(Self.editorHeight)).padding(m.sp8)
                         .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border))
                         .accessibilityLabel("Attachment caption").disabled(loading || saving || !current)
-                    Button("Remove caption") { draft = nil }.buttonStyle(.link)
+                    Button("Remove caption") { draft = nil }.buttonStyle(.textLink)
                         .disabled(saving || loading || !current || (draft == nil && snapshot.caption == nil))
                 }
                 if let notice {
@@ -70,18 +70,18 @@ struct MediaCaptionEditor: View {
                 }
                 if let error { InlineErrorView(message: error).clipShape(RoundedRectangle(cornerRadius: m.radius)) }
                 if snapshot == nil && !loading {
-                    Button("Reload") { Task { await load() } }.buttonStyle(.link).disabled(
+                    Button("Reload") { Task { await load() } }.buttonStyle(.textLink).disabled(
                         saving || !current)
                 }
                 HStack {
                     Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(saving)
                     Spacer()
-                    if saving { ProgressView().controlSize(.small) }
-                    Button(saving ? "Saving…" : "Save", action: save).buttonStyle(.borderedProminent).disabled(
+                    if saving { DelayedProgress() }
+                    Button(saving ? "Saving…" : "Save", action: save).buttonStyle(.primary).disabled(
                         !canSave)
                 }
             }
-        }.padding(m.sp24).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.text)
+        }.padding(m.sp24).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)
             .interactiveDismissDisabled(saving)
             .task(id: matrix.mediaCaptionSourceRevision(target)) { await load() }
             .onDisappear {

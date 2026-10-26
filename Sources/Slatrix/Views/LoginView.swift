@@ -5,7 +5,6 @@ struct LoginView: View {
     private static let heroRadius: CGFloat = 24
     private static let formWidth: CGFloat = 360
     private static let fieldHeight: CGFloat = 40
-    private static let buttonHeight: CGFloat = 44
     @Environment(\.metrics) private var m
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
@@ -28,7 +27,7 @@ struct LoginView: View {
                 )
                 .frame(width: m(Self.heroTile), height: m(Self.heroTile)).background(
                     colors.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: m(Self.heroRadius)))
-                Text("Sign in to Slatrix").font(m.font(.display, .bold)).foregroundStyle(colors.primaryText)
+                Text("Sign in to Slatrix").font(m.font(.display, .bold)).foregroundStyle(colors.textPrimary)
                 VStack(alignment: .leading, spacing: m.sp16) {
                     field("Homeserver") {
                         TextField("https://matrix.example.org", text: $homeserver).textContentType(.URL)
@@ -50,18 +49,15 @@ struct LoginView: View {
                             clearingSavedSession ? "Signing out…" : "Finish signing out",
                             action: clearSavedSession
                         )
-                        .buttonStyle(.bordered).disabled(clearingSavedSession || busy)
+                        .buttonStyle(.secondary).disabled(clearingSavedSession || busy)
                     }
                     Button(action: signIn) {
                         HStack(spacing: m.sp8) {
-                            if busy { ProgressView().controlSize(.small).tint(.white) }
-                            Text(busy ? "Connecting…" : "Sign in").fontWeight(.semibold)
+                            if busy { DelayedProgress() }
+                            Text(busy ? "Connecting…" : "Sign in")
                             if !busy { Image(systemName: "arrow.right") }
-                        }
-                        .frame(maxWidth: .infinity).frame(height: m(Self.buttonHeight)).background(
-                            Color(hex: 0x228369), in: RoundedRectangle(cornerRadius: m.radiusLarge)
-                        ).foregroundStyle(.white)
-                    }.buttonStyle(.row).disabled(
+                        }.frame(maxWidth: .infinity)
+                    }.buttonStyle(.primary).controlSize(.large).disabled(
                         busy || clearingSavedSession || !matrix.canChangeAuthentication
                             || username.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
                 }.frame(width: m(Self.formWidth)).padding(m.sp24).background(

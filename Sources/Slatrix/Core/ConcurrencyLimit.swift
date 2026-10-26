@@ -35,3 +35,29 @@ actor ConcurrencyLimit {
         if !waiting.isEmpty { waiting.removeFirst().1.resume() } else { active -= 1 }
     }
 }
+
+/// What `operation` returns, or nil once `limit` passes first. The operation keeps running; a late answer is dropped.
+func value<T: Sendable>(within limit: Duration, _ operation: @escaping @Sendable () async -> T?) async -> T? {
+    let first = FirstAnswer<T>()
+    return await withCheckedContinuation { continuation in
+        first.wait(continuation)
+        Task { first.answer(await operation()) }
+        Task {
+            try? await Task.sleep(for: limit)
+            first.answer(nil)
+        }
+    }
+}
+
+private final class FirstAnswer<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T?, Never>?
+    func wait(_ continuation: CheckedContinuation<T?, Never>) { lock.withLock { self.continuation = continuation } }
+    func answer(_ value: T?) {
+        let waiting = lock.withLock {
+            defer { continuation = nil }
+            return continuation
+        }
+        waiting?.resume(returning: value)
+    }
+}

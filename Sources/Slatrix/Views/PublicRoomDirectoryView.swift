@@ -56,7 +56,7 @@ struct PublicRoomDirectoryView: View {
             Divider().overlay(colors.border)
             directoryContent.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.text
+            colors.textBody
         )
         .onAppear {
             owner = context
@@ -83,8 +83,8 @@ struct PublicRoomDirectoryView: View {
             HStack(alignment: .top, spacing: m.sp16) {
                 VStack(alignment: .leading, spacing: m.sp8) {
                     Text("Browse channels").font(m.font(.header, .bold)).foregroundStyle(
-                        colors.primaryText)
-                    Text(workspace?.name ?? serverName).font(m.font(.meta)).foregroundStyle(colors.muted)
+                        colors.textPrimary)
+                    Text(workspace?.name ?? serverName).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                         .lineLimit(2).textSelection(.enabled)
                 }
                 Spacer()
@@ -92,12 +92,12 @@ struct PublicRoomDirectoryView: View {
                     .keyboardShortcut(.cancelAction)
             }
             HStack(spacing: m.sp8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(colors.muted)
+                Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
                 TextField("Search by channel name or topic", text: $query).textFieldStyle(.plain).font(
                     m.font(.body)
                 ).focused($searchFocused)
                     .accessibilityLabel("Search channels")
-                if searching { ProgressView().controlSize(.small).accessibilityLabel("Searching") }
+                if searching { DelayedProgress().accessibilityLabel("Searching") }
                 if !query.isEmpty {
                     IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .secondary) {
                         query = ""
@@ -119,10 +119,7 @@ struct PublicRoomDirectoryView: View {
                 Button("Try again", action: retry).disabled(searching)
             }
         } else if entries.isEmpty && searching {
-            VStack(spacing: m.sp12) {
-                ProgressView()
-                Text("Loading…").font(m.font(.secondary)).foregroundStyle(colors.muted)
-            }
+            SkeletonRows()
         } else if entries.isEmpty {
             EmptyStateView(
                 symbol: workspace == nil ? "globe" : "number",
@@ -139,7 +136,7 @@ struct PublicRoomDirectoryView: View {
                             InlineErrorView(message: displayedError)
                             if !reviewFailed {
                                 Button(failedLoadingMore ? "Retry loading more" : "Try again", action: retry)
-                                    .buttonStyle(.link).disabled(searching)
+                                    .buttonStyle(.textLink).disabled(searching)
                             }
                         }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
                     }
@@ -164,15 +161,16 @@ struct PublicRoomDirectoryView: View {
         return HStack(alignment: .top, spacing: m.sp12) {
             AvatarView(name: entry.displayName, size: m.avatar, matrix: matrix, source: entry.avatarURL)
             VStack(alignment: .leading, spacing: m.sp8) {
-                Text(entry.displayName).font(m.font(.body, .semibold)).foregroundStyle(colors.primaryText)
+                Text(entry.displayName).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
                     .lineLimit(2).help(entry.displayName)
                 // A workspace's own channels need no address unless they have a readable one.
                 if workspace == nil || entry.alias != nil {
-                    Text(entry.alias ?? entry.id).font(m.font(.caption)).foregroundStyle(colors.muted).lineLimit(1)
+                    Text(entry.alias ?? entry.id).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                        .lineLimit(1)
                         .help(entry.alias ?? entry.id)
                 }
                 if let topic = entry.topic, !topic.isEmpty {
-                    Text(topic).font(m.font(.meta)).foregroundStyle(colors.muted).lineLimit(2)
+                    Text(topic).font(m.font(.meta)).foregroundStyle(colors.textSecondary).lineLimit(2)
                 }
                 HStack(spacing: m.sp12) {
                     Label(
@@ -183,17 +181,17 @@ struct PublicRoomDirectoryView: View {
                     } else if workspace == nil || !entry.canJoin {
                         Text(ruleLabel(entry.joinRule))
                     }
-                }.font(m.font(.caption)).foregroundStyle(colors.muted)
+                }.font(m.font(.caption)).foregroundStyle(colors.textSecondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
             if joined || entry.canJoin {
                 Button {
                     review(entry)
                 } label: {
                     HStack(spacing: m.sp8) {
-                        if resolvingID == entry.id { ProgressView().controlSize(.small) }
+                        if resolvingID == entry.id { DelayedProgress() }
                         Text(joined ? "Open" : "Join")
                     }.font(m.font(.meta, .medium))
-                }.buttonStyle(.bordered).disabled(!current || searching || resolvingID != nil)
+                }.buttonStyle(.secondary).disabled(!current || searching || resolvingID != nil)
                     .accessibilityLabel("\(joined ? "Open" : "Join") \(entry.displayName)")
             }
         }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)
@@ -202,10 +200,10 @@ struct PublicRoomDirectoryView: View {
     private var loadMoreButton: some View {
         Button(action: loadMore) {
             HStack(spacing: m.sp8) {
-                if service.isLoading { ProgressView().controlSize(.small) }
+                if service.isLoading { DelayedProgress() }
                 Text(service.isLoading ? "Loading…" : "Load more")
             }.font(m.font(.meta, .medium))
-        }.buttonStyle(.link).disabled(!current || searching || resolvingID != nil)
+        }.buttonStyle(.textLink).disabled(!current || searching || resolvingID != nil)
     }
 
     private func isJoined(_ roomID: String) -> Bool {

@@ -115,11 +115,11 @@ struct QuickSwitcherView: View {
                 Text("to open")
                 Spacer()
                 Text("esc to close")
-            }.font(m.font(.caption)).foregroundStyle(colors.muted).padding(.horizontal, m.sp24).padding(
+            }.font(m.font(.caption)).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24).padding(
                 .vertical, m.sp12)
         }
         .sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.text
+            colors.textBody
         )
         .onAppear {
             searchPresented = true
@@ -148,7 +148,7 @@ struct QuickSwitcherView: View {
 
     private var searchHeader: some View {
         HStack(spacing: m.sp12) {
-            Image(systemName: "magnifyingglass").font(m.font(.title)).foregroundStyle(colors.muted)
+            Image(systemName: "magnifyingglass").font(m.font(.title)).foregroundStyle(colors.textSecondary)
             TextField(mode == .conversations ? "Jump to a conversation" : "Search messages", text: $query)
                 .font(m.font(.title)).textFieldStyle(.plain).focused($searchFocused)
                 .onSubmit(activateSelected)
@@ -179,7 +179,7 @@ struct QuickSwitcherView: View {
                 }.pickerStyle(.segmented).labelsHidden().frame(width: m(Self.modeWidth))
                 Spacer()
                 if searchBusy {
-                    ProgressView().controlSize(.small).accessibilityLabel("Searching").loadingInterval(.searchLoading)
+                    DelayedProgress().accessibilityLabel("Searching").loadingInterval(.searchLoading)
                 }
             }
             if mode == .messages {
@@ -203,11 +203,13 @@ struct QuickSwitcherView: View {
     @ViewBuilder private var results: some View {
         if let matrixLink {
             VStack(spacing: m.sp16) {
-                Image(systemName: "link").font(m.font(.display)).foregroundStyle(colors.muted)
+                Image(systemName: "link").font(m.font(.display)).foregroundStyle(colors.textSecondary)
                 Text("Open link").font(m.font(.body, .semibold))
-                Text(matrixLink.absoluteString).font(m.font(.caption)).foregroundStyle(colors.muted).lineLimit(3)
-                    .padding(.horizontal, m.sp32)
-                Button("Open", action: activateSelected).buttonStyle(.borderedProminent).tint(colors.accent)
+                Text(matrixLink.absoluteString).font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(
+                    3
+                )
+                .padding(.horizontal, m.sp32)
+                Button("Open", action: activateSelected).buttonStyle(.primary)
             }
         } else if let searchError, mode == .messages && count == 0 {
             EmptyStateView(symbol: "exclamationmark.circle", title: searchError) {
@@ -217,8 +219,8 @@ struct QuickSwitcherView: View {
             EmptyStateView(symbol: "text.magnifyingglass", title: "Search your messages")
         } else if count == 0 && searchBusy {
             VStack(spacing: m.sp12) {
-                ProgressView().controlSize(.small).loadingInterval(.searchLoading)
-                Text("Searching…").font(m.font(.secondary)).foregroundStyle(colors.muted)
+                DelayedProgress(interval: .searchLoading)
+                Text("Searching…").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
             }
         } else if count == 0 {
             emptyResults
@@ -251,14 +253,14 @@ struct QuickSwitcherView: View {
                         VStack(alignment: .leading, spacing: m.sp8) {
                             InlineErrorView(message: searchError)
                             Button("Try search again") { queueSearch() }
-                                .buttonStyle(.link).disabled(searchBusy || paging)
+                                .buttonStyle(.textLink).disabled(searchBusy || paging)
                         }.padding(.horizontal, m.sp12).padding(.top, m.sp12)
                     }
                     Text(
                         mode == .conversations
                             ? "CONVERSATIONS" : "MESSAGES"
                     )
-                    .font(m.font(.caption, .semibold)).tracking(m(0.8)).foregroundStyle(colors.muted)
+                    .font(m.font(.caption, .semibold)).tracking(m(0.8)).foregroundStyle(colors.textSecondary)
                     .padding(.horizontal, m.sp20).padding(.top, m.sp16).padding(.bottom, m.sp8)
                     if mode == .conversations {
                         ForEach(roomResults) { room in
@@ -289,7 +291,7 @@ struct QuickSwitcherView: View {
             }
             .onChange(of: selectedResultID) { _, id in
                 guard let id else { return }
-                withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id, anchor: .center) }
+                withAnimation(Motion.content) { proxy.scrollTo(id, anchor: .center) }
             }
         }
     }
@@ -301,21 +303,21 @@ struct QuickSwitcherView: View {
             } else {
                 Image(systemName: room.isEncrypted ? "lock" : "number").font(m.font(.title)).frame(
                     width: m.avatar, height: m.avatar
-                ).foregroundStyle(colors.muted)
+                ).foregroundStyle(colors.textSecondary)
             }
             VStack(alignment: .leading, spacing: m.sp4) {
                 Text(room.name).font(m.font(.body, .semibold)).lineLimit(1)
                 if !room.topic.isEmpty {
-                    Text(room.topic).font(m.font(.caption)).foregroundStyle(colors.muted).lineLimit(1)
+                    Text(room.topic).font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 }
             }
             Spacer()
             if room.unread > 0 {
                 Text("\(room.unread)").font(m.font(.caption, .semibold)).padding(.horizontal, m.sp8).padding(
                     .vertical, m.sp4
-                ).background(colors.muted.opacity(0.12), in: Capsule())
+                ).background(colors.textSecondary.opacity(0.12), in: Capsule())
             }
-            if selected { Image(systemName: "return").font(m.font(.caption)).foregroundStyle(colors.muted) }
+            if selected { Image(systemName: "return").font(m.font(.caption)).foregroundStyle(colors.textSecondary) }
         }
     }
 
@@ -324,10 +326,10 @@ struct QuickSwitcherView: View {
             loadMore()
         } label: {
             HStack(spacing: m.sp8) {
-                if paging { ProgressView().controlSize(.small).loadingInterval(.searchLoading) }
+                if paging { DelayedProgress(interval: .searchLoading) }
                 Text(paging ? "Loading…" : "Load more").font(m.font(.meta, .medium))
             }
-        }.buttonStyle(.link).disabled(paging || searchBusy)
+        }.buttonStyle(.textLink).disabled(paging || searchBusy)
     }
 
     private var indexingTitle: String {
@@ -343,7 +345,7 @@ struct QuickSwitcherView: View {
         HStack(alignment: .center, spacing: m.sp12) {
             Text(indexingTitle).font(m.font(.caption, .medium))
             Spacer(minLength: 0)
-            if indexBusy { ProgressView().controlSize(.small).accessibilityLabel(indexingTitle) }
+            if indexBusy { DelayedProgress().accessibilityLabel(indexingTitle) }
             if matrix.searchIndexingState.isBusy {
                 Button(matrix.searchIndexingState == .stopping ? "Stopping…" : "Stop") {
                     [session = presentationSession] in
@@ -515,7 +517,7 @@ private struct SearchMessageResultRow: View {
                 if let message = currentMessage {
                     AvatarView(name: message.senderName, size: m.avatar, matrix: matrix, source: message.avatarURL)
                 } else {
-                    Image(systemName: "text.bubble").font(m.font(.body)).foregroundStyle(colors.muted).frame(
+                    Image(systemName: "text.bubble").font(m.font(.body)).foregroundStyle(colors.textSecondary).frame(
                         width: m.avatar, height: m.avatar)
                 }
                 VStack(alignment: .leading, spacing: m.sp4) {
@@ -524,11 +526,11 @@ private struct SearchMessageResultRow: View {
                             Text(message.senderName).font(m.font(.meta, .semibold))
                         }
                         Text(currentMessage == nil ? roomName : "in \(roomName)").font(m.font(.caption))
-                            .foregroundStyle(colors.muted).lineLimit(1)
+                            .foregroundStyle(colors.textSecondary).lineLimit(1)
                         Spacer()
                         if let message = currentMessage {
                             Text(message.timestamp, style: .date).font(m.font(.caption)).foregroundStyle(
-                                colors.muted)
+                                colors.textSecondary)
                         }
                     }
                     if let message = currentMessage {
@@ -538,7 +540,7 @@ private struct SearchMessageResultRow: View {
                         .lineLimit(2).multilineTextAlignment(.leading).allowsHitTesting(false)
                     } else {
                         Text("Preview unavailable")
-                            .font(m.font(.meta)).foregroundStyle(colors.muted).lineLimit(2)
+                            .font(m.font(.meta)).foregroundStyle(colors.textSecondary).lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
                 }
@@ -635,7 +637,7 @@ struct CreationSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
-                Text(kind.title).font(m.font(.header, .bold)).foregroundStyle(colors.primaryText)
+                Text(kind.title).font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
                 Spacer(minLength: m.sp12)
                 IconButton(symbol: "xmark", label: "Close", role: .secondary) { if !busy { onClose() } }.disabled(busy)
             }.padding(.bottom, m.sp24)
@@ -647,22 +649,22 @@ struct CreationSheet: View {
                         VStack(alignment: .leading, spacing: m.sp8) {
                             Label("To \(workspace.name)", systemImage: "square.stack.3d.up").font(
                                 m.font(.meta))
-                        }.foregroundStyle(colors.muted)
+                        }.foregroundStyle(colors.textSecondary)
                     } else if kind == .invite, let room = inviteRoom {
                         HStack(spacing: m.sp8) {
                             Image(systemName: room.isDirect ? "bubble.left.and.bubble.right" : "number")
                             Text("To \(room.name)")
-                        }.font(m.font(.meta)).foregroundStyle(colors.muted)
+                        }.font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                     } else if kind == .invite, let roomID {
                         Label("To \(roomID)", systemImage: "person.badge.plus").font(m.font(.meta))
-                            .foregroundStyle(colors.muted)
+                            .foregroundStyle(colors.textSecondary)
                     } else if kind == .invite && roomID == nil {
                         Text("Open a conversation first.").font(m.font(.meta)).foregroundStyle(
-                            .orange)
+                            colors.warning)
                     }
                     if kind == .invite && invitePermission == false {
                         Text("You can’t invite people here.").font(m.font(.meta))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(colors.warning)
                     }
                 case .channel, .workspace:
                     field(
@@ -690,7 +692,7 @@ struct CreationSheet: View {
                             {
                                 Text("You can’t add channels to this workspace.").font(
                                     m.font(.meta)
-                                ).foregroundStyle(.orange)
+                                ).foregroundStyle(colors.warning)
                             }
                         }
                     }
@@ -706,19 +708,19 @@ struct CreationSheet: View {
             }
             HStack(spacing: m.sp12) {
                 if busy {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                 }
                 Spacer()
                 Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(busy)
                 Button(action: submit) {
                     Text(kind.action).font(m.font(.secondary, .semibold)).padding(.horizontal, m.sp12).padding(
                         .vertical, m.sp4)
-                }.buttonStyle(.borderedProminent).tint(colors.success)
+                }.buttonStyle(.primary)
                     .keyboardShortcut(kind == .directMessage || kind == .invite ? nil : KeyboardShortcut.defaultAction)
                     .disabled(!valid)
             }.padding(.top, m.sp24)
         }
-        .padding(m.sp32).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.text)
+        .padding(m.sp32).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)
         .interactiveDismissDisabled(busy)
         .onAppear {
             selectedWorkspaceID = workspaceID ?? ""
@@ -746,11 +748,11 @@ struct CreationSheet: View {
         VStack(alignment: .leading, spacing: m.sp8) {
             HStack(spacing: m.sp4) {
                 Text(title).font(m.font(.secondary, .semibold))
-                if optional { Text("(optional)").font(m.font(.meta)).foregroundStyle(colors.muted) }
+                if optional { Text("(optional)").font(m.font(.meta)).foregroundStyle(colors.textSecondary) }
             }
             content().textFieldStyle(.plain).font(m.font(.body)).padding(m.sp12)
                 .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius))
-                .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.muted.opacity(0.5)))
+                .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.textSecondary.opacity(0.5)))
                 .accessibilityLabel(title)
         }
     }

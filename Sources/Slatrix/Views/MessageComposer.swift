@@ -41,7 +41,7 @@ struct MessageComposer: View {
     @State private var mentionRange: NSRange?
     @State private var mentionIndex = 0
     @State private var typingTask: Task<Void, Never>?
-    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var appearance: AppearanceStore
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.metrics) private var m
 
@@ -64,10 +64,8 @@ struct MessageComposer: View {
             && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || (!requiresTextForSend && !isEditing && !attachments.isEmpty))
     }
-    private var panelColor: Color {
-        colorScheme == .dark ? Color(red: 0.133, green: 0.145, blue: 0.161) : Color(nsColor: .textBackgroundColor)
-    }
-    private var muted: Color { Color(nsColor: .secondaryLabelColor) }
+    private var colors: AppColors { appearance.colors }
+    private var muted: Color { colors.textSecondary }
     private var mentionMatches: [ChatUser] {
         guard let query = mentionQuery else { return [] }
         return Array(
@@ -81,7 +79,7 @@ struct MessageComposer: View {
         VStack(alignment: .leading, spacing: 0) {
             if isEditing {
                 HStack(spacing: m.sp8) {
-                    RoundedRectangle(cornerRadius: 2).fill(Color.accentColor).frame(width: 3, height: m.sp16)
+                    RoundedRectangle(cornerRadius: m.sp2).fill(colors.accent).frame(width: m(3), height: m.sp16)
                     Text("Editing message").font(m.font(.meta, .medium))
                     Spacer()
                     Button {
@@ -121,7 +119,7 @@ struct MessageComposer: View {
                 } label: {
                     Text("Aa").font(m.font(.body)).underline(showFormatting, color: muted)
                         .frame(width: m.iconButton, height: m.iconButton).contentShape(Rectangle())
-                }.buttonStyle(ComposerToolStyle()).help(showFormatting ? "Hide formatting" : "Show formatting")
+                }.buttonStyle(.icon).foregroundStyle(muted).help(showFormatting ? "Hide formatting" : "Show formatting")
                     .accessibilityLabel(showFormatting ? "Hide formatting" : "Show formatting")
                 iconButton("face.smiling", label: "Emoji") { showEmoji.toggle() }
                     .popover(isPresented: $showEmoji, arrowEdge: .bottom) { emojiPicker }
@@ -131,7 +129,7 @@ struct MessageComposer: View {
                 }.disabled(members.isEmpty)
                 Spacer(minLength: m.sp4)
                 if sending || preparingAttachments {
-                    ProgressView().controlSize(.small).accessibilityLabel(
+                    DelayedProgress().accessibilityLabel(
                         preparingAttachments ? "Preparing attachments" : "Sending message")
                     if preparingAttachments {
                         Text("Preparing attachments…").font(m.font(.caption)).foregroundStyle(muted)
@@ -148,12 +146,12 @@ struct MessageComposer: View {
                 Button(action: send) {
                     HStack(spacing: m.sp8) {
                         Image(systemName: "paperplane.fill").font(m.font(.secondary))
-                        Rectangle().fill(.white.opacity(0.22)).frame(width: 1, height: m.sp16)
+                        Rectangle().fill(colors.onAccent.opacity(0.22)).frame(width: 1, height: m.sp16)
                         Text(isEditing ? "Save" : "↵").font(m.font(.meta, .medium))
-                    }.foregroundStyle(canSend ? .white : muted)
+                    }.foregroundStyle(canSend ? colors.onAccent : muted)
                         .padding(.horizontal, m.sp12).frame(height: m.row)
                         .background(
-                            canSend ? Color(red: 0, green: 0.48, blue: 0.35) : muted.opacity(0.12),
+                            canSend ? colors.buttonPrimary : muted.opacity(0.12),
                             in: RoundedRectangle(cornerRadius: m.radiusSmall)
                         )
                         .contentShape(Rectangle())
@@ -162,10 +160,10 @@ struct MessageComposer: View {
                     .accessibilityLabel(isEditing ? "Save changes" : "Send message")
             }.padding(.horizontal, m.sp12).padding(.bottom, m.sp8).disabled(sending)
         }
-        .background(panelColor, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+        .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
         .overlay(
             RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(
-                editor.isFocused ? muted.opacity(0.85) : muted.opacity(0.45), lineWidth: 1)
+                editor.isFocused ? colors.textSecondary : colors.borderStrong, lineWidth: 1)
         )
         // Suggestions, errors and hints float above the composer instead of growing it.
         .overlay(alignment: .topLeading) {
@@ -220,8 +218,8 @@ struct MessageComposer: View {
                         Image(systemName: "exclamationmark.circle").accessibilityHidden(true)
                         Text(errorMessage).textSelection(.enabled)
                         Spacer(minLength: m.sp4)
-                        Button("Try again", action: send).buttonStyle(.link).disabled(!canSend)
-                    }.font(m.font(.meta)).foregroundStyle(Color(nsColor: .systemRed))
+                        Button("Try again", action: send).buttonStyle(.textLink).disabled(!canSend)
+                    }.font(m.font(.meta)).foregroundStyle(colors.destructive)
                         .accessibilityElement(children: .combine)
                 }
                 if let attachmentError {
@@ -234,7 +232,7 @@ struct MessageComposer: View {
                         } label: {
                             Image(systemName: "xmark")
                         }.buttonStyle(.row).accessibilityLabel("Dismiss attachment error")
-                    }.font(m.font(.meta)).foregroundStyle(Color(nsColor: .systemRed)).accessibilityElement(
+                    }.font(m.font(.meta)).foregroundStyle(colors.destructive).accessibilityElement(
                         children: .combine)
                 }
                 if requiresTextForSend && !attachments.isEmpty {
@@ -242,7 +240,7 @@ struct MessageComposer: View {
                 }
             }
             .padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
-            .background(panelColor, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+            .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
         }
     }
 
@@ -273,7 +271,7 @@ struct MessageComposer: View {
             Image(systemName: icon).font(m.font(.secondary)).frame(width: m.iconButton, height: m.iconButton)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(ComposerToolStyle()).help(label).accessibilityLabel(label)
+        .buttonStyle(.icon).foregroundStyle(muted).help(label).accessibilityLabel(label)
     }
 
     private func iconButton(_ icon: String, label: String, circular: Bool = false, action: @escaping () -> Void)
@@ -282,7 +280,7 @@ struct MessageComposer: View {
         Button(action: action) {
             Image(systemName: icon).font(m.font(.body)).frame(width: m.iconButton, height: m.iconButton)
                 .background(circular ? muted.opacity(0.12) : Color.clear, in: Circle()).contentShape(Rectangle())
-        }.buttonStyle(ComposerToolStyle()).help(label).accessibilityLabel(label)
+        }.buttonStyle(.icon).foregroundStyle(muted).help(label).accessibilityLabel(label)
     }
 
     private var attachmentStrip: some View {
@@ -324,31 +322,29 @@ struct MessageComposer: View {
                     chooseMention(member)
                 } label: {
                     HStack(spacing: m.sp8) {
-                        Text(String(member.name.prefix(1)).uppercased()).font(m.font(.secondary, .semibold))
-                            .frame(width: m.iconButton, height: m.iconButton).background(
-                                Color.accentColor.opacity(0.25), in: RoundedRectangle(cornerRadius: m.radius))
+                        AvatarView(name: member.name, size: m.avatarMedium)
                         Text(member.name).font(m.font(.secondary, .medium))
                         // The ID tells apart people who share a name; otherwise it is noise.
                         if mentionMatches.filter({ $0.name == member.name }).count > 1 {
                             Text(member.id).font(m.font(.caption)).foregroundStyle(
-                                index == mentionIndex ? Color.white.opacity(0.8) : muted
+                                index == mentionIndex ? colors.onAccent.opacity(0.8) : muted
                             ).lineLimit(1)
                         }
                         Spacer()
                         if index == mentionIndex { Image(systemName: "return").font(m.font(.caption)) }
                     }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8).contentShape(Rectangle())
-                        .background(index == mentionIndex ? Color.accentColor : .clear)
-                        .foregroundStyle(index == mentionIndex ? Color.white : Color(nsColor: .labelColor))
+                        .background(index == mentionIndex ? colors.accent : .clear)
+                        .foregroundStyle(index == mentionIndex ? colors.onAccent : colors.textPrimary)
                 }.buttonStyle(.row).accessibilityLabel("Mention \(member.name), \(member.id)")
             }
-        }.padding(.vertical, m.sp4).background(panelColor, in: RoundedRectangle(cornerRadius: m.radiusLarge))
-            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(muted.opacity(0.4)))
-            .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
+        }.padding(.vertical, m.sp4).background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
+            .elevation(.e2, cornerRadius: m.radiusLarge)
     }
 
     private var emojiPicker: some View {
         VStack(alignment: .leading, spacing: m.sp12) {
-            TextField("Search emoji", text: $emojiQuery).textFieldStyle(.roundedBorder).accessibilityLabel(
+            TextField("Search emoji", text: $emojiQuery).textFieldStyle(.field).accessibilityLabel(
                 "Search emoji"
             )
             .onSubmit {
@@ -382,7 +378,7 @@ struct MessageComposer: View {
                                 width: m(Self.emojiCell), height: m(Self.emojiCell)
                             ).contentShape(
                                 Rectangle())
-                        }.buttonStyle(ComposerToolStyle()).help(emoji.name).accessibilityLabel(emoji.name)
+                        }.buttonStyle(.icon).foregroundStyle(muted).help(emoji.name).accessibilityLabel(emoji.name)
                     }
                 }
             }.frame(height: (m(Self.emojiCell) + m.sp4) * 6)
@@ -596,19 +592,6 @@ struct MessageComposer: View {
         ("☕", "coffee"), ("🍵", "tea"), ("🍕", "pizza"), ("🍰", "cake"), ("🌴", "palm bali"), ("🌊", "ocean wave"),
         ("🌞", "sun"), ("🌱", "growth seedling"),
     ]
-}
-
-private struct ComposerToolStyle: ButtonStyle {
-    @Environment(\.metrics) private var m
-    @State private var hovered = false
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.foregroundStyle(Color(nsColor: .secondaryLabelColor))
-            .background(
-                Color(nsColor: .labelColor).opacity(configuration.isPressed ? 0.16 : hovered ? 0.09 : 0),
-                in: RoundedRectangle(cornerRadius: m.radiusSmall)
-            )
-            .onHover { hovered = $0 }
-    }
 }
 
 @MainActor private final class ComposerEditorState: ObservableObject {

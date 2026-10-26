@@ -40,40 +40,43 @@ struct MatrixNotificationDefaultsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: m.sp20) {
             HStack(alignment: .top, spacing: m.sp12) {
-                Text("Notify me about").font(m.font(.body, .semibold)).foregroundStyle(colors.primaryText)
+                Text("Notify me about").font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
                 Spacer(minLength: 0)
                 if current {
-                    Button("Reload") { Task { await load() } }.buttonStyle(.link).font(m.font(.meta)).disabled(busy)
+                    Button("Reload") { Task { await load() } }.buttonStyle(.textLink).font(m.font(.meta)).disabled(busy)
                         .accessibilityLabel("Reload notification defaults")
                 }
             }
             if context.preview || context.accountID == nil {
-                Text("Sign in to change these.").font(m.font(.meta)).foregroundStyle(colors.muted)
+                Text("Sign in to change these.").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
             } else if loading {
                 HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
-                    Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.muted)
+                    DelayedProgress(interval: .sheetLoading)
+                    Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
             } else if snapshot != nil && current {
                 categoryGroup("Encrypted conversations", encrypted: true)
                 categoryGroup("Unencrypted conversations", encrypted: false)
             }
             if retries.isWriting && savingCategory == nil {
-                ProgressView("Saving…").controlSize(.small).font(m.font(.meta))
+                HStack(spacing: m.sp8) {
+                    DelayedProgress()
+                    Text("Saving…")
+                }.font(m.font(.meta))
             }
             if let notice {
-                Label(notice, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(colors.muted)
+                Label(notice, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let error {
-                Text(error).font(m.font(.meta)).foregroundStyle(Color(nsColor: .systemRed)).fixedSize(
+                Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive).fixedSize(
                     horizontal: false, vertical: true
                 )
                 .textSelection(.enabled)
             }
             if needsReload, current {
                 Text("Reload, then try again.")
-                    .font(m.font(.meta)).foregroundStyle(colors.muted)
+                    .font(m.font(.meta)).foregroundStyle(colors.textSecondary)
             }
         }
         .task(id: context) {
@@ -109,7 +112,7 @@ struct MatrixNotificationDefaultsSection: View {
     private func categoryGroup(_ title: String, encrypted: Bool) -> some View {
         VStack(alignment: .leading, spacing: m.sp12) {
             Label(title, systemImage: encrypted ? "lock" : "lock.open").font(m.font(.meta, .semibold))
-                .foregroundStyle(colors.primaryText)
+                .foregroundStyle(colors.textPrimary)
             ForEach(AccountNotificationCategory.allCases.filter { $0.isEncrypted == encrypted }) { category in
                 HStack(spacing: m.sp12) {
                     Text(category.isOneToOne ? "Direct messages" : "Group conversations")

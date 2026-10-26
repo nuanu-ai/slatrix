@@ -12,7 +12,7 @@ struct KeyboardShortcutsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: m.sp12) {
-                Text("Keyboard shortcuts").font(m.font(.title, .semibold)).foregroundStyle(colors.primaryText)
+                Text("Keyboard shortcuts").font(m.font(.title, .semibold)).foregroundStyle(colors.textPrimary)
                 Spacer()
             }.padding(m.sp24)
             Divider().overlay(colors.border)
@@ -66,10 +66,10 @@ struct KeyboardShortcutsView: View {
             HStack {
                 Spacer()
                 Button("Close", action: onClose).keyboardShortcut(.cancelAction).focused($closeFocused)
-                    .buttonStyle(.bordered).controlSize(.regular)
+                    .buttonStyle(.secondary).controlSize(.regular)
             }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
         }
-        .sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.text)
+        .sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)
         .onAppear { closeFocused = true }
         .onExitCommand(perform: onClose)
     }
@@ -77,7 +77,7 @@ struct KeyboardShortcutsView: View {
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: m.sp8) {
             Text(title.uppercased()).font(m.font(.caption, .semibold)).tracking(m(0.6)).foregroundStyle(
-                colors.muted
+                colors.textSecondary
             ).padding(.bottom, m.sp4)
             content()
         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -87,7 +87,7 @@ struct KeyboardShortcutsView: View {
         HStack(spacing: m.sp12) {
             Text(title).font(m.font(.meta)).lineLimit(1)
             Spacer(minLength: m.sp4)
-            Text(keys).font(m.font(.meta, .medium, design: .monospaced)).foregroundStyle(colors.primaryText)
+            Text(keys).font(m.font(.meta, .medium, design: .monospaced)).foregroundStyle(colors.textPrimary)
                 .padding(.horizontal, m.sp8).frame(minWidth: m(Self.keyCapWidth), minHeight: m.sp24)
                 .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusSmall))
                 .overlay(RoundedRectangle(cornerRadius: m.radiusSmall).stroke(colors.border))

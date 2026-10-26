@@ -19,9 +19,10 @@ Use the `ponytail` skill on every change: the smallest change that fully solves 
 - `Sources/Slatrix/Views` holds SwiftUI and AppKit views. Rows and leaf views take plain values and closures, not services.
 - `MatrixService` is `@Observable`, so a view redraws only for what its body reads. Keep fast-changing state (messages, typing, the room list, drafts) out of `RootView`'s body, and place a view that redraws often with `layoutIsolated()` so its changes never lay out the whole window.
 - Matrix work goes through the official SDK (`MatrixRustSDK`). Patches to it live in `Support/MatrixSDK/patches` and `scripts/build-sdk.sh` applies them. Send each patch upstream and drop it once a release includes it.
+- Views build from `Views/DesignSystem`: color roles in `AppColors`, `Elevation` and `Motion` tokens, the `.primary`, `.secondary`, `.destructive`, `.textLink` and `.icon` button styles, `.field` and `SearchField`, `DelayedProgress` and `SkeletonRows`, and `PopoverHost` for anchored cards. The debug build's Window ▸ Component Gallery shows them all.
 - Borderless buttons use `.buttonStyle(.row)`, which makes the whole frame clickable; `scripts/lint.sh` rejects `.plain`.
 - A custom `NSView` that handles the mouse returns `false` from `mouseDownCanMoveWindow`. The window moves by its background, so otherwise the window server takes the drag.
-- `scripts/lint.sh` runs swift format and the `.plain` check. It runs in CI; run it before committing too.
+- `scripts/lint.sh` runs swift format, the `.plain` check, and rejects raw colors, off-system button styles, spinners, shadows, literal animations and rounded-border fields outside `Views/DesignSystem`. It runs in CI; run it before committing too.
 
 ## Testing
 
@@ -41,7 +42,7 @@ Agreed seams, where tests belong:
 - **Services against SDK fakes**: subclasses of the generated SDK classes. Catches races, stale completions and error handling; misses real server behavior.
 - **Local storage**: encrypted drafts, saved messages, attachment staging, credentials. Catches format, permission and corruption handling.
 - **Pure policies**: read state, navigation order, sidebar layout, link parsing, search query grammar, timeline grouping and scroll anchoring. Catches rule regressions directly.
-- **Hosted timeline and window**: the real timeline, or the whole window, in an offscreen window, opt-in with `SLATRIX_HOSTED_UI_CHECKS=1` because it needs an awake display. Catches scroll jumps, row geometry and what an update costs the main thread; misses real pointer input and WindowServer timing.
+- **Hosted timeline and window**: the real timeline, the whole window, or a design system component, in an offscreen window, opt-in with `SLATRIX_HOSTED_UI_CHECKS=1` because it needs an awake display. Catches scroll jumps, row geometry and what an update costs the main thread; misses real pointer input and WindowServer timing.
 - **Performance log**: what the app writes to unified logging, read back through `OSLogStore`. Catches lost hang reports and names the report cannot parse; misses real WindowServer timing.
 - **Release scripts**: run as a process with real arguments. Catches a tag that would ship a version Sparkle cannot order; misses signing, notarization and the appcast.
 

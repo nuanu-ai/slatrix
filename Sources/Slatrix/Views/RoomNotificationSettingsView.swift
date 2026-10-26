@@ -50,7 +50,7 @@ struct RoomNotificationSettingsView: View {
             HStack(alignment: .top, spacing: m.sp16) {
                 VStack(alignment: .leading, spacing: m.sp8) {
                     Text("Notifications").font(m.font(.header, .bold)).foregroundStyle(
-                        colors.primaryText)
+                        colors.textPrimary)
                     Text(name).font(m.font(.secondary)).lineLimit(2)
                 }
                 Spacer(minLength: 0)
@@ -63,9 +63,9 @@ struct RoomNotificationSettingsView: View {
                 VStack(alignment: .leading, spacing: m.sp20) {
                     if loading {
                         HStack(spacing: m.sp8) {
-                            ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
+                            DelayedProgress(interval: .sheetLoading)
                             Text("Loading…").font(m.font(.secondary)).foregroundStyle(
-                                colors.muted)
+                                colors.textSecondary)
                         }.padding(.vertical, m.sp20)
                     } else if let snapshot, current {
                         Picker("Notify me about", selection: $choice) {
@@ -80,38 +80,42 @@ struct RoomNotificationSettingsView: View {
 
                     }
                     if let notice {
-                        Label(notice, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(colors.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Label(notice, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(
+                            colors.textSecondary
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                     if let error {
-                        Text(error).font(m.font(.meta)).foregroundStyle(Color(nsColor: .systemRed)).fixedSize(
+                        Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive).fixedSize(
                             horizontal: false, vertical: true
                         ).textSelection(.enabled)
                     }
                     if retries.isWriting && !saving {
-                        ProgressView("Saving…").controlSize(.small).font(
-                            m.font(.meta))
+                        HStack(spacing: m.sp8) {
+                            DelayedProgress()
+                            Text("Saving…")
+                        }.font(m.font(.meta))
                     }
                     if current && !loading && !saving && !retries.isWriting {
                         Button(snapshot == nil ? "Try again" : "Reload") { Task { await load() } }
-                            .buttonStyle(.link).font(m.font(.meta))
+                            .buttonStyle(.textLink).font(m.font(.meta))
                     }
                 }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading)
             }
             Divider().overlay(colors.border)
             HStack(spacing: m.sp12) {
                 if saving {
-                    ProgressView().controlSize(.small)
-                    Text("Saving…").font(m.font(.meta)).foregroundStyle(colors.muted)
+                    DelayedProgress()
+                    Text("Saving…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
                 Spacer()
                 Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(saving)
                 Button(retryingFailedUpdate ? "Retry update" : "Save changes", action: save)
-                    .buttonStyle(.borderedProminent).tint(colors.accent).keyboardShortcut(.defaultAction).disabled(
+                    .buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(
                         !canSave)
             }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
         }.sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.text
+            colors.textBody
         )
         .task(id: context) {
             if owner == nil { owner = context }

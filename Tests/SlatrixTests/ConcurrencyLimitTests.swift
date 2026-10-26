@@ -58,3 +58,22 @@ struct ConcurrencyLimitTests {
         #expect(await ran.peak == 0)
     }
 }
+
+struct DeadlineTests {
+    @Test("Work that never finishes is given up once the limit passes")
+    func givesUp() async {
+        let gate = Gate()
+        gate.arm()
+        defer { gate.release() }
+        let value = await value(within: .milliseconds(50)) { () -> Int? in
+            await gate.wait()
+            return 1
+        }
+        #expect(value == nil)
+    }
+
+    @Test("Work that finishes in time keeps its answer")
+    func keepsAnswer() async {
+        #expect(await value(within: .seconds(5)) { 7 } == 7)
+    }
+}

@@ -44,7 +44,7 @@ struct MatrixRoomJoinView: View {
                         .font(m.font(.display)).foregroundStyle(
                             accepted == nil ? colors.accent : colors.success)
                     Text(title)
-                        .font(m.font(.header, .bold)).foregroundStyle(colors.primaryText)
+                        .font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
                 }
                 Spacer(minLength: 0)
                 IconButton(symbol: "xmark", label: "Close", role: .secondary, action: onClose)
@@ -61,7 +61,7 @@ struct MatrixRoomJoinView: View {
                     if !request.via.isEmpty {
                         VStack(alignment: .leading, spacing: m.sp8) {
                             Text("Via").font(m.font(.meta, .semibold)).foregroundStyle(
-                                colors.primaryText)
+                                colors.textPrimary)
                             ForEach(Array(request.via.enumerated()), id: \.offset) { _, server in
                                 Text(server).font(m.font(.meta, design: .monospaced)).textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -74,7 +74,7 @@ struct MatrixRoomJoinView: View {
                     VStack(alignment: .leading, spacing: m.sp8) {
                         Label("Joining as", systemImage: "person.crop.circle").font(
                             m.font(.meta, .semibold)
-                        ).foregroundStyle(colors.primaryText)
+                        ).foregroundStyle(colors.textPrimary)
                         Text(request.accountID).font(m.font(.meta, design: .monospaced)).textSelection(.enabled)
                     }.padding(m.sp12).frame(maxWidth: .infinity, alignment: .leading).background(
                         colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
@@ -84,11 +84,13 @@ struct MatrixRoomJoinView: View {
                                 ? "It’ll appear in your sidebar in a moment."
                                 : nil)
                     {
-                        Label(warning, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(colors.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Label(warning, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(
+                            colors.textSecondary
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                     if let error {
-                        Text(error).font(m.font(.meta)).foregroundStyle(Color(nsColor: .systemRed))
+                        Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive)
                             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }
                 }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading)
@@ -96,8 +98,8 @@ struct MatrixRoomJoinView: View {
             Divider().overlay(colors.border)
             HStack(spacing: m.sp12) {
                 if joining {
-                    ProgressView().controlSize(.small)
-                    Text("Joining…").font(m.font(.meta)).foregroundStyle(colors.muted)
+                    DelayedProgress()
+                    Text("Joining…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
                 Spacer()
                 Button(accepted == nil ? "Cancel" : "Done", action: onClose).keyboardShortcut(.cancelAction).disabled(
@@ -108,12 +110,12 @@ struct MatrixRoomJoinView: View {
                         error == nil ? "Join" : "Try again",
                         action: join
                     )
-                    .buttonStyle(.borderedProminent).tint(colors.accent).disabled(!current || joining)
+                    .buttonStyle(.primary).disabled(!current || joining)
                 }
             }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
         }
         .sheetSize(width: Self.size.width, height: Self.size.height).background(colors.canvas).foregroundStyle(
-            colors.text
+            colors.textBody
         )
         .interactiveDismissDisabled(joining)
         .task(id: context) {
@@ -131,7 +133,7 @@ struct MatrixRoomJoinView: View {
 
     private func detail(_ title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: m.sp8) {
-            Text(title).font(m.font(.meta, .semibold)).foregroundStyle(colors.primaryText)
+            Text(title).font(m.font(.meta, .semibold)).foregroundStyle(colors.textPrimary)
             Text(value).font(m.font(.meta, design: .monospaced)).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }.frame(maxWidth: .infinity, alignment: .leading)

@@ -63,6 +63,34 @@ struct Snapshots {
             editor.insertText("Replying in the thread", replacementRange: editor.selectedRange())
         }
         try write(await settledImage(hosting), "thread-\(name)")
+
+        // The profile card, from the same message's "View profile" item.
+        let profile = try #require(thread.menu(for: event)?.items.first { $0.identifier?.rawValue == "profile" })
+        _ = profile.target?.perform(profile.action, with: profile)
+        try write(await settledImage(hosting), "profile-\(name)")
+    }
+
+    @Test("Component gallery", arguments: Theme.allCases)
+    func gallery(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(rootView: ComponentGallery().environmentObject(appearance))
+        let window = NSWindow(
+            contentRect: NSRect(origin: CGPoint(x: -20000, y: -20000), size: hosting.fittingSize),
+            styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        try write(await settledImage(hosting), "gallery-\(theme.rawValue)")
     }
 
     /// Captures until the frame stops changing for 300 ms, so async text, symbols and layout have arrived.

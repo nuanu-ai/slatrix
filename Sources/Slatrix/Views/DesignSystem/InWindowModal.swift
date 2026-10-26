@@ -18,7 +18,7 @@ struct ModalHost<Content: View, Modal: View>: View {
     @ViewBuilder let content: Content
     @ViewBuilder let modal: (InWindowModal.Kind) -> Modal
     @Environment(\.metrics) private var m
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @EnvironmentObject private var appearance: AppearanceStore
 
     var body: some View {
         let current = modals.current
@@ -26,10 +26,10 @@ struct ModalHost<Content: View, Modal: View>: View {
             .overlay {
                 if let current {
                     ZStack(alignment: current.isSearch ? .top : .center) {
-                        Color.black.opacity(0.32).contentShape(Rectangle()).onTapGesture(perform: onClose)
+                        appearance.colors.scrim.contentShape(Rectangle()).onTapGesture(perform: onClose)
                             .accessibilityHidden(true)
                         modal(current).clipShape(RoundedRectangle(cornerRadius: m.radiusPanel))
-                            .shadow(color: .black.opacity(0.25), radius: m.sp24, y: m.sp8)
+                            .elevation(.e3, cornerRadius: m.radiusPanel)
                             .padding(.top, current.isSearch ? m.paneHeader + m.sp24 : 0)
                             .onExitCommand(perform: onClose)
                             .accessibilityAddTraits(.isModal)
@@ -37,7 +37,7 @@ struct ModalHost<Content: View, Modal: View>: View {
                     .transition(.opacity)
                 }
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: current)
+            .animation(Motion.overlay, value: current)
     }
 }
 

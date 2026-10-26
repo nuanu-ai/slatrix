@@ -60,7 +60,10 @@ struct RootView: View {
     @State private var showRecovery = false
     @State private var creation: CreationKind?
     @State private var inviteTargetRoomID: String?
-    @State private var person: ProfileSelection?
+    /// Anchored cards such as the profile card; like `modals`, read only by its host.
+    @State private var popovers = Popovers()
+    /// The full profile in the right-hand pane, over the thread or details until closed.
+    @State private var profilePane: ProfileSelection?
     @State private var roomDetails: DetailsSelection?
     @State private var roomNotifications: DetailsSelection?
     @State private var forwarding: ForwardSelection?
@@ -121,10 +124,10 @@ struct RootView: View {
     private static let infoPaneWidth: CGFloat = 336
     /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
     private var inspectorWidth: CGFloat? {
-        guard room != nil, threadRoot != nil || infoOpen else { return nil }
+        guard profilePane != nil || (room != nil && (threadRoot != nil || infoOpen)) else { return nil }
         return SidebarLayout.paneWidth(
             preferred: resizingPaneWidth ?? CGFloat(preferredPaneWidth),
-            ideal: threadRoot != nil ? Self.threadPaneWidth : Self.infoPaneWidth,
+            ideal: threadRoot != nil && profilePane == nil ? Self.threadPaneWidth : Self.infoPaneWidth,
             availableWidth: availableContentWidth / m.zoom)
     }
     /// Pane width plus its divider, at 100% zoom.
@@ -232,7 +235,7 @@ struct RootView: View {
     }
     private var hasPresentedSheet: Bool {
         publicDirectory != nil || showRecovery || creation != nil
-            || person != nil || roomDetails != nil || roomNotifications != nil || forwarding != nil
+            || roomDetails != nil || roomNotifications != nil || forwarding != nil
             || mediaCaption != nil || matrixJoin != nil || previews.url != nil || logoutConfirmation
             || logoutRecovery.request != nil || logoutRecovery.isBusy
     }
@@ -243,7 +246,11 @@ struct RootView: View {
 
     var body: some View {
         ModalHost(modals: modals, onClose: closeModal) {
-            windowContent
+            PopoverHost(popovers: popovers) {
+                windowContent
+            } card: { kind in
+                popoverCard(kind)
+            }
         } modal: { kind in
             modal(kind).environmentObject(appearance)
         }
@@ -280,6 +287,22 @@ struct RootView: View {
         }
     }
 
+    @ViewBuilder private func popoverCard(_ kind: Popovers.Kind) -> some View {
+        switch kind {
+        case .profile(let userID, let fallback):
+            ProfileCard(
+                matrix: matrix, people: matrix.people, userID: userID, fallback: fallback,
+                onOpenConversation: { id in
+                    popovers.close()
+                    selectRoom(id)
+                },
+                onViewProfile: {
+                    popovers.close()
+                    profilePane = ProfileSelection(id: userID, fallback: fallback)
+                })
+        }
+    }
+
     private func closeModal() {
         guard modals.current != nil else { return }
         modals.current = nil
@@ -297,7 +320,7 @@ struct RootView: View {
             .overlay {
                 if logoutRecovery.isBusy {
                     VStack(spacing: m.sp12) {
-                        ProgressView()
+                        DelayedProgress()
                         Text("Signing out…").font(m.font(.secondary))
                     }
                     .padding(m.sp24).background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
@@ -405,15 +428,22 @@ struct RootView: View {
                     openingThreadID = nil
                 }
             }
-            .onChange(of: threadRoot?.eventID) { _, _ in updateActionThreadVisibility() }
+            .onChange(of: threadRoot?.eventID) { _, id in
+                updateActionThreadVisibility()
+                if id != nil { profilePane = nil }
+            }
             .onChange(of: threadReadyID) { _, _ in updateActionThreadVisibility() }
             .onChange(of: navigationGeneration) { _, _ in
+                popovers.close()
                 cancelStaleThreadOpen()
                 cancelStaleForward()
                 cancelStaleCaption()
             }
             .onChange(of: matrix.timelineSelectionID) { _, _ in cancelStaleThreadOpen() }
-            .onChange(of: infoOpen) { _, _ in cancelStaleThreadOpen() }
+            .onChange(of: infoOpen) { _, open in
+                cancelStaleThreadOpen()
+                if open { profilePane = nil }
+            }
             .onChange(of: matrix.messageActionContext) { _, _ in
                 if let editActionTarget, !matrix.isCurrentMessageAction(editActionTarget) { cancelCurrentEdit() }
                 cancelStaleForward()
@@ -496,15 +526,6 @@ struct RootView: View {
             .sheet(isPresented: $showRecovery) {
                 EncryptionRecoveryView(matrix: matrix, onClose: { showRecovery = false }).environmentObject(appearance)
             }
-            .sheet(item: $person) { selection in
-                PersonProfileView(
-                    matrix: matrix, people: matrix.people, userID: selection.id, fallback: selection.fallback,
-                    onOpenConversation: { id in
-                        person = nil
-                        selectRoom(id)
-                    }, onClose: { person = nil }
-                ).environmentObject(appearance)
-            }
             .sheet(item: $roomDetails) { selection in
                 RoomDetailsEditor(matrix: matrix, roomID: selection.id, onClose: { roomDetails = nil })
                     .environmentObject(appearance)
@@ -582,8 +603,8 @@ struct RootView: View {
         VStack(spacing: 0) {
             titleBar
             if bootstrapping {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(colors.canvas)
-                    .loadingInterval(.appLoading)
+                DelayedProgress(interval: .appLoading).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(colors.canvas)
             } else if matrix.user == nil && !matrix.isPreview {
                 LoginView(matrix: matrix) {
                     matrix.enterPreview()
@@ -651,10 +672,12 @@ struct RootView: View {
                                         (route == .home && room != nil ? m.paneHeader + m.sp40 : m.paneHeader) + 1
                                             + m.sp8)
                             }
-                            .overlay { if inspectorWidth == nil, let room { inspector(room) } }
-                            if let width = inspectorWidth, let room {
+                            .overlay { if inspectorWidth == nil { inspector(room) } }
+                            if let width = inspectorWidth {
                                 ResizeHandle(
-                                    pane: .trailing, label: threadRoot != nil ? "Thread width" : "Details width",
+                                    pane: .trailing,
+                                    label: profilePane != nil
+                                        ? "Profile width" : threadRoot != nil ? "Thread width" : "Details width",
                                     currentWidth: m(width), onChange: resizePane, onCommit: commitPaneWidth,
                                     onReset: {
                                         resizingPaneWidth = nil
@@ -672,7 +695,7 @@ struct RootView: View {
                     ).padding(.trailing, m.sp4).padding(.bottom, m.sp4)
                 }
             }
-        }.background(colors.frame).foregroundStyle(colors.text).ignoresSafeArea(.container, edges: .top)
+        }.background(colors.frame).foregroundStyle(colors.textBody).ignoresSafeArea(.container, edges: .top)
     }
 
     /// Connection, loading and error states, as toasts over the conversation.
@@ -680,38 +703,38 @@ struct RootView: View {
         VStack(spacing: m.sp8) {
             if pendingMatrixLink != nil {
                 HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                     Text("Opening…").font(m.font(.meta))
                     Spacer()
                     Button("Cancel") {
                         cancelMatrixLink()
                         openPendingNotification()
-                    }.buttonStyle(.link)
+                    }.buttonStyle(.textLink)
                 }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.linkLoading)
             }
             if previews.isLoading {
                 HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                     Text("Opening preview…").font(m.font(.meta))
                     Spacer()
-                    Button("Cancel") { previews.close() }.buttonStyle(.link)
+                    Button("Cancel") { previews.close() }.buttonStyle(.textLink)
                 }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.previewLoading)
             }
             if let request = pendingThreadOpen, isCurrentThreadOpen(request) {
                 HStack(spacing: m.sp8) {
                     if let threadOpenError {
-                        Text(threadOpenError).font(m.font(.meta)).foregroundStyle(colors.muted)
+                        Text(threadOpenError).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                         Button("Retry") {
                             if isCurrentThreadOpen(request) { openThread(request.message) }
-                        }.buttonStyle(.link)
+                        }.buttonStyle(.textLink)
                     } else {
-                        ProgressView().controlSize(.small).loadingInterval(.threadLoading)
+                        DelayedProgress(interval: .threadLoading)
                         Text("Opening thread…").font(m.font(.meta))
                     }
                     Spacer()
                     Button("Cancel") {
                         if pendingThreadOpen?.id == request.id { cancelThreadOpen() }
-                    }.buttonStyle(.link)
+                    }.buttonStyle(.textLink)
                 }.padding(m.sp12).modifier(Toast(colors: colors))
             }
             ErrorToast(matrix: matrix)
@@ -721,11 +744,11 @@ struct RootView: View {
             }
             if let target = platform.pendingNotification, target.accountID == matrix.user?.id {
                 HStack(spacing: m.sp8) {
-                    ProgressView().controlSize(.small)
+                    DelayedProgress()
                     Text("Opening…").font(m.font(.meta))
                     Spacer()
                     Button("Cancel") { PlatformIntegration.shared.consumeNotification(target) }
-                        .buttonStyle(.link).font(m.font(.meta))
+                        .buttonStyle(.textLink).font(m.font(.meta))
                 }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.linkLoading)
             }
             if let localError {
@@ -733,13 +756,13 @@ struct RootView: View {
                     InlineErrorView(message: localError)
                     Button("Retry") {
                         if localAccess == nil { loadLocalData(retry: true) } else { saveLocalData() }
-                    }.buttonStyle(.link).padding(.trailing, m.sp16)
+                    }.buttonStyle(.textLink).padding(.trailing, m.sp16)
                 }.modifier(Toast(colors: colors))
             }
             if let error = attachmentDrafts.errorMessage {
                 HStack {
                     InlineErrorView(message: error)
-                    Button("Retry saving") { retryAttachmentDrafts() }.buttonStyle(.link).padding(
+                    Button("Retry saving") { retryAttachmentDrafts() }.buttonStyle(.textLink).padding(
                         .trailing, m.sp16)
                 }.modifier(Toast(colors: colors))
             }
@@ -747,10 +770,17 @@ struct RootView: View {
         .font(m.font(.meta))
     }
 
-    @ViewBuilder private func inspector(_ room: ChatRoom) -> some View {
-        if let root = threadRoot {
+    @ViewBuilder private func inspector(_ room: ChatRoom?) -> some View {
+        if let profilePane {
+            ProfilePane(
+                matrix: matrix, people: matrix.people, userID: profilePane.id, fallback: profilePane.fallback,
+                onOpenConversation: { id in
+                    self.profilePane = nil
+                    selectRoom(id)
+                }, onClose: { self.profilePane = nil })
+        } else if let room, let root = threadRoot {
             threadPanel(root: root, room: room)
-        } else if infoOpen {
+        } else if let room, infoOpen {
             RoomInfoView(
                 matrix: matrix, room: room, onClose: { infoOpen = false },
                 onInvite: { presentCreation(.invite) }, onRecovery: { showRecovery = true },
@@ -883,7 +913,7 @@ struct RootView: View {
                     Spacer()
                     Text("⌘ K").font(m.font(.caption)).opacity(0.65)
                 }.padding(.horizontal, m.sp12).frame(height: m.row).background(
-                    colors.primaryText.opacity(appearance.isDark ? 0.19 : 0.08),
+                    colors.textPrimary.opacity(appearance.isDark ? 0.19 : 0.08),
                     in: RoundedRectangle(cornerRadius: m.radius))
             }.buttonStyle(.row).frame(maxWidth: m(Self.searchWidth)).disabled(matrix.user == nil)
             // An overlay, so the notice coming and going never moves the search field.
@@ -895,9 +925,7 @@ struct RootView: View {
                 Button("Sign in") {
                     matrix.exitPreview()
                     resetUI()
-                }.buttonStyle(.row).font(m.font(.secondary, .semibold)).foregroundStyle(.white)
-                    .padding(.horizontal, m.sp12).frame(height: m.row)
-                    .background(colors.accent, in: RoundedRectangle(cornerRadius: m.radius))
+                }.buttonStyle(.primary).controlSize(.small)
             }
             if updater.updateAvailable {
                 Button("Update") { updater.checkForUpdates() }.buttonStyle(.row).font(m.font(.caption, .semibold))
@@ -908,7 +936,7 @@ struct RootView: View {
                 handleMenu("shortcuts")
             }
             .padding(.trailing, m.sp12)
-        }.frame(height: m(Self.titleBarHeight)).background(WindowDragArea()).foregroundStyle(colors.text)
+        }.frame(height: m(Self.titleBarHeight)).background(WindowDragArea()).foregroundStyle(colors.textBody)
     }
 
     private func channelContent(_ room: ChatRoom) -> some View {
@@ -953,7 +981,7 @@ struct RootView: View {
                     if let target = editTarget, target.surface == .conversation, target.message.roomID == room.id {
                         editComposer(target, room: room).padding(.horizontal, m.sp20).padding(.vertical, m.sp4)
                     } else if matrix.focusedEventID != nil {
-                        Button("Jump to recent") { selectRoom(room.id) }.buttonStyle(.link).font(m.font(.meta))
+                        Button("Jump to recent") { selectRoom(room.id) }.buttonStyle(.textLink).font(m.font(.meta))
                             .padding(m.sp20)
                     } else {
                         BindingScope({ draftBinding(room.id) }) { text in
@@ -1041,7 +1069,7 @@ struct RootView: View {
                         Text(room.name).font(m.font(.title, .bold)).lineLimit(1)
                         Image(systemName: "chevron.down").font(m.font(.caption, .semibold))
                     }
-                }.buttonStyle(.row).foregroundStyle(colors.primaryText).layoutPriority(1)
+                }.buttonStyle(.row).foregroundStyle(colors.textPrimary).layoutPriority(1)
                 Spacer()
                 Button {
                     matrix.setMessageActionThread(rootID: nil)
@@ -1096,7 +1124,7 @@ struct RootView: View {
                     Label("Messages", systemImage: "bubble.left.fill").font(
                         m.font(.secondary, showPins ? .regular : .semibold)
                     ).fixedSize().padding(.vertical, m.sp12).overlay(alignment: .bottom) {
-                        if !showPins { Rectangle().fill(colors.text).frame(height: 2) }
+                        if !showPins { Rectangle().fill(colors.textBody).frame(height: 2) }
                     }
                 }.buttonStyle(.row)
                 Button {
@@ -1110,13 +1138,13 @@ struct RootView: View {
                     ).font(m.font(.secondary, showPins ? .semibold : .regular)).fixedSize().padding(.vertical, m.sp12)
                         .overlay(
                             alignment: .bottom
-                        ) { if showPins { Rectangle().fill(colors.text).frame(height: 2) } }
+                        ) { if showPins { Rectangle().fill(colors.textBody).frame(height: 2) } }
                 }.buttonStyle(.row).disabled(matrix.isPreview || room.membership != "join")
                 Button {
                     route = .files
                 } label: {
                     Label("Files & links", systemImage: "doc.on.doc").font(m.font(.secondary)).fixedSize()
-                }.buttonStyle(.row).foregroundStyle(colors.muted)
+                }.buttonStyle(.row).foregroundStyle(colors.textSecondary)
                 Spacer()
                 // In the tab row's reserved height, so it never covers or moves a message.
                 if matrix.hasLockedMessages {
@@ -1126,7 +1154,7 @@ struct RootView: View {
                         Label("Unlock messages", systemImage: "key").font(m.font(.meta, .medium))
                     }.buttonStyle(.row).foregroundStyle(colors.accent).disabled(matrix.isPreview)
                 } else if room.isEncrypted {
-                    Image(systemName: "lock.shield").font(m.font(.meta)).foregroundStyle(colors.muted).help(
+                    Image(systemName: "lock.shield").font(m.font(.meta)).foregroundStyle(colors.textSecondary).help(
                         "End-to-end encrypted")
                 }
             }.padding(.horizontal, m.sp24).frame(height: m.sp40)
@@ -1136,7 +1164,7 @@ struct RootView: View {
         VStack(spacing: 0) {
             HStack(spacing: m.sp8) {
                 Text("Thread").font(m.font(.title, .bold))
-                Text(room.name).font(m.font(.caption)).foregroundStyle(colors.muted).lineLimit(1)
+                Text(room.name).font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 Spacer()
                 IconButton(symbol: "xmark", label: "Close thread", role: .body, action: closeThread)
             }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
@@ -1144,7 +1172,7 @@ struct RootView: View {
             if let threadLoadError {
                 HStack {
                     InlineErrorView(message: threadLoadError)
-                    Button("Retry") { [open = openThreadAction] in open(root) }.buttonStyle(.link).font(
+                    Button("Retry") { [open = openThreadAction] in open(root) }.buttonStyle(.textLink).font(
                         m.font(.meta)
                     ).padding(.trailing, m.sp12)
                 }
@@ -1232,7 +1260,11 @@ struct RootView: View {
                 Text(route.title).font(m.font(.title, .bold))
                 Spacer()
                 if route == .directMessages || route == .directory {
-                    ActionButton(title: "New message", symbol: "square.and.pencil") { creation = .directMessage }
+                    Button {
+                        creation = .directMessage
+                    } label: {
+                        Label("New message", systemImage: "square.and.pencil")
+                    }.buttonStyle(.secondary)
                 }
             }.padding(.horizontal, m.sp24).frame(height: m.paneHeader)
             Divider().overlay(colors.border)
@@ -1304,10 +1336,10 @@ struct RootView: View {
     @ViewBuilder private func attachmentDraftStatus(_ address: AttachmentDraftAddress) -> some View {
         if !attachmentDrafts.ready {
             HStack(spacing: m.sp8) {
-                ProgressView().controlSize(.small)
+                DelayedProgress()
                 Text("Restoring attachments…")
                 Spacer()
-            }.font(m.font(.meta)).foregroundStyle(colors.muted).padding(m.sp12).modifier(Toast(colors: colors))
+            }.font(m.font(.meta)).foregroundStyle(colors.textSecondary).padding(m.sp12).modifier(Toast(colors: colors))
                 .loadingInterval(.attachmentsLoading)
         }
         if localReady && attachmentDrafts.needsReview(address) {
@@ -1315,7 +1347,7 @@ struct RootView: View {
                 Image(systemName: "exclamationmark.triangle")
                 Text("Upload interrupted; it may have sent.")
                 Spacer()
-                Button("Send anyway") { attachmentDrafts.allowResend(address) }.buttonStyle(.link)
+                Button("Send anyway") { attachmentDrafts.allowResend(address) }.buttonStyle(.textLink)
             }.font(m.font(.meta)).padding(m.sp12).modifier(Toast(colors: colors))
         }
         ForEach(localReady ? attachmentDrafts.files[address, default: []].filter { $0.url == nil } : []) { file in
@@ -1326,7 +1358,7 @@ struct RootView: View {
                     Text(file.errorMessage ?? "Saved attachment unavailable")
                 }
                 Spacer()
-                Button("Remove") { attachmentDrafts.removeUnavailable(file, at: address) }.buttonStyle(.link)
+                Button("Remove") { attachmentDrafts.removeUnavailable(file, at: address) }.buttonStyle(.textLink)
             }.font(m.font(.meta)).padding(m.sp12).modifier(Toast(colors: colors))
         }
     }
@@ -1345,13 +1377,13 @@ struct RootView: View {
         VStack(alignment: .leading, spacing: m.sp8) {
             HStack(spacing: m.sp8) {
                 Image(systemName: thread ? "bubble.left.and.bubble.right" : "square.and.pencil").foregroundStyle(
-                    colors.muted)
+                    colors.textSecondary)
                 RoomName(matrix: matrix, roomID: roomID).font(m.font(.body, .semibold))
-                if thread { Text("Thread reply").font(m.font(.caption)).foregroundStyle(colors.muted) }
+                if thread { Text("Thread reply").font(m.font(.caption)).foregroundStyle(colors.textSecondary) }
                 Spacer()
-                Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.muted)
+                Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
             }
-            Text(body).font(m.font(.secondary)).foregroundStyle(colors.muted).lineLimit(3)
+            Text(body).font(m.font(.secondary)).foregroundStyle(colors.textSecondary).lineLimit(3)
         }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     }
     private func openThreadDraft(_ address: ThreadDraftAddress) {
@@ -1370,7 +1402,7 @@ struct RootView: View {
         }
     }
     private var syncingView: some View {
-        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).loadingInterval(.conversationLoading)
+        DelayedProgress(interval: .conversationLoading).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private var noRoomsView: some View {
         let workspace = matrix.workspaces.first { $0.id == workspaceID }
@@ -1393,13 +1425,12 @@ struct RootView: View {
                 symbol: room.isSpace ? "square.stack.3d.up" : "envelope.open", title: "You’re invited to \(room.name)"
             ).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: m.sp12) {
-                ActionButton(title: "Decline") { respondToInvitation(room, accepting: false) }
-                ActionButton(title: room.isSpace ? "Join workspace" : "Join", prominent: true) {
-                    respondToInvitation(room, accepting: true)
-                }
+                Button("Decline") { respondToInvitation(room, accepting: false) }.buttonStyle(.secondary)
+                Button(room.isSpace ? "Join workspace" : "Join") { respondToInvitation(room, accepting: true) }
+                    .buttonStyle(.primary)
             }.disabled(busy || matrix.isPreview)
             // Reserved, so the buttons never move when the spinner comes and goes.
-            ProgressView().controlSize(.small).opacity(busy ? 1 : 0)
+            DelayedProgress().opacity(busy ? 1 : 0)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private func respondToInvitation(_ room: ChatRoom, accepting: Bool) {
@@ -1494,8 +1525,8 @@ struct RootView: View {
             }
             if !replyOpening, let replyError {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
-                    Text(replyError).foregroundStyle(colors.muted)
-                    Button("Retry") { prepareReply(target) }.buttonStyle(.link)
+                    Text(replyError).foregroundStyle(colors.textSecondary)
+                    Button("Retry") { prepareReply(target) }.buttonStyle(.textLink)
                 }.font(m.font(.meta))
             }
         }.padding(.horizontal, m.sp16).padding(.vertical, m.sp8).frame(maxWidth: .infinity, alignment: .leading)
@@ -2203,9 +2234,10 @@ struct RootView: View {
             }
         }
     }
+    /// Slack's profile card beside the click, with the name and photo the room already knows.
     private func openProfile(_ userID: String, fallback: ChatUser?) {
-        guard matrix.user != nil, !matrix.isPreview else { return }
-        person = ProfileSelection(id: userID, fallback: fallback)
+        guard matrix.user != nil else { return }
+        popovers.show(.profile(userID: userID, fallback: fallback ?? matrix.members.first { $0.id == userID }))
     }
     private func toggleSave(_ message: ChatMessage) {
         guard localReady else { return }
@@ -2435,7 +2467,8 @@ struct RootView: View {
         showRecovery = false
         creation = nil
         inviteTargetRoomID = nil
-        person = nil
+        popovers.close()
+        profilePane = nil
         roomDetails = nil
         roomNotifications = nil
         loadLocalData()
@@ -2505,6 +2538,10 @@ struct RootView: View {
             route = .home
         case "toggle-sidebar": sidebarHidden.toggle()
         case "toggle-pane":
+            if profilePane != nil {
+                profilePane = nil
+                return
+            }
             guard route == .home, room != nil else { return }
             if threadRoot != nil {
                 closeThread()
@@ -2656,16 +2693,17 @@ private struct ConnectionNotice: View {
         ZStack {
             if shown, let message {
                 HStack(spacing: m.sp8) {
-                    Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
+                    Image(systemName: "wifi.exclamationmark").foregroundStyle(appearance.colors.warning)
                     Text(message).lineLimit(1)
                     if matrix.canRetryConnection || matrix.isRetryingConnection {
                         Button(matrix.isRetryingConnection ? "Reconnecting…" : "Retry", action: onRetry)
-                            .buttonStyle(.link).disabled(matrix.isRetryingConnection)
+                            .buttonStyle(.textLink).disabled(matrix.isRetryingConnection)
                     }
-                }.font(m.font(.caption)).foregroundStyle(appearance.colors.muted).fixedSize().transition(.opacity)
+                }.font(m.font(.caption)).foregroundStyle(appearance.colors.textSecondary).fixedSize().transition(
+                    .opacity)
             }
         }
-        .animation(.easeOut(duration: 0.15), value: shown)
+        .animation(Motion.overlay, value: shown)
         .task(id: message != nil) {
             shown = false
             guard message != nil else { return }
@@ -2703,7 +2741,7 @@ private struct TypingLine: View {
         HStack {
             if !matrix.typingUsers.isEmpty { Text(label) }
             Spacer()
-        }.font(m.font(.caption)).foregroundStyle(appearance.colors.muted).padding(.horizontal, m.sp24)
+        }.font(m.font(.caption)).foregroundStyle(appearance.colors.textSecondary).padding(.horizontal, m.sp24)
             .layoutIsolated().frame(height: m.sp24)
     }
 }
@@ -2735,7 +2773,7 @@ private struct RoomDirectory: View {
                                 Text(
                                     room.topic.isEmpty
                                         ? room.isDirect ? "Direct message" : "\(room.memberCount) members" : room.topic
-                                ).font(m.font(.meta)).foregroundStyle(colors.muted).lineLimit(1)
+                                ).font(m.font(.meta)).foregroundStyle(colors.textSecondary).lineLimit(1)
                             }
                             Spacer()
                             if room.hasUnread {
@@ -2746,7 +2784,8 @@ private struct RoomDirectory: View {
                                     colors.selection, in: Circle()
                                 ).accessibilityLabel("Unread conversation")
                             }
-                            Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.muted)
+                            Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(
+                                colors.textSecondary)
                         }.padding(m.sp20).contentShape(Rectangle())
                     }.buttonStyle(.row)
                     Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)
@@ -2788,6 +2827,6 @@ private struct Toast: ViewModifier {
     func body(content: Content) -> some View {
         content.background(colors.raised).clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
             .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
-            .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+            .elevation(.e2, cornerRadius: m.radiusLarge)
     }
 }

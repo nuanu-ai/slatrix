@@ -30,7 +30,7 @@ struct DeviceVerificationSettings: View {
             Label(
                 status, systemImage: service.deviceStatus == .verified ? "checkmark.shield" : "shield.lefthalf.filled"
             )
-            .font(m.font(.secondary)).foregroundStyle(appearance.colors.muted)
+            .font(m.font(.secondary)).foregroundStyle(appearance.colors.textSecondary)
             // The same two ways in as the sign-in step; the recovery key also unlocks older messages.
             HStack(spacing: m.sp12) {
                 if service.deviceStatus != .verified {
@@ -61,9 +61,9 @@ struct VerificationView: View {
                 IconButton(symbol: "xmark", label: "Close", role: .body) { close() }
             }
             VStack(alignment: .leading, spacing: m.sp8) {
-                Text(title).font(m.font(.header, .bold)).foregroundStyle(colors.primaryText)
+                Text(title).font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
                 if !detail.isEmpty {
-                    Text(detail).font(m.font(.body)).foregroundStyle(colors.muted).fixedSize(
+                    Text(detail).font(m.font(.body)).foregroundStyle(colors.textSecondary).fixedSize(
                         horizontal: false, vertical: true)
                 }
             }
@@ -74,8 +74,8 @@ struct VerificationView: View {
             }
             if waiting {
                 HStack(spacing: m.sp12) {
-                    ProgressView().controlSize(.small)
-                    Text(waitingText).font(m.font(.meta)).foregroundStyle(colors.muted)
+                    DelayedProgress()
+                    Text(waitingText).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
                 .padding(.vertical, m.sp4).accessibilityElement(children: .combine)
             }
@@ -83,13 +83,13 @@ struct VerificationView: View {
                 HStack(spacing: m.sp8) {
                     Image(systemName: "desktopcomputer")
                     Text("This device: \(id)").textSelection(.enabled)
-                }.font(m.font(.caption, design: .monospaced)).foregroundStyle(colors.muted)
+                }.font(m.font(.caption, design: .monospaced)).foregroundStyle(colors.textSecondary)
             }
             actions
         }.padding(m.sp32).sheetSize(
             width: service.phase == .comparison && !service.emojis.isEmpty ? Self.comparisonWidth : Self.width
         )
-        .background(colors.canvas).foregroundStyle(colors.text)
+        .background(colors.canvas).foregroundStyle(colors.textBody)
         .interactiveDismissDisabled(service.phase.isActive || service.isWorking)
         .onExitCommand { close() }
     }
@@ -143,7 +143,7 @@ struct VerificationView: View {
                 .textSelection(.enabled)
             Text("First seen \(request.firstSeen.formatted(date: .abbreviated, time: .shortened))").font(
                 m.font(.caption)
-            ).foregroundStyle(colors.muted)
+            ).foregroundStyle(colors.textSecondary)
         }.padding(m.sp16).frame(maxWidth: .infinity, alignment: .leading).background(
             colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
     }
@@ -171,7 +171,7 @@ struct VerificationView: View {
             }
             Label("A mismatch means you should stop and try again.", systemImage: "exclamationmark.shield").font(
                 m.font(.meta)
-            ).foregroundStyle(colors.muted)
+            ).foregroundStyle(colors.textSecondary)
         }.padding(m.sp20).frame(maxWidth: .infinity).background(
             colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
     }
@@ -180,35 +180,33 @@ struct VerificationView: View {
         HStack(spacing: m.sp12) {
             if service.phase == .comparison {
                 Button("They don’t match", role: .destructive) { Task { await service.rejectMismatch() } }.buttonStyle(
-                    .bordered)
+                    .destructive)
                 Spacer()
                 // Deliberately no default/Return shortcut for a trust decision.
-                Button("They match") { Task { await service.confirmMatch() } }.buttonStyle(.borderedProminent).tint(
-                    colors.success
-                ).disabled(service.isWorking)
+                Button("They match") { Task { await service.confirmMatch() } }.buttonStyle(.primary).disabled(
+                    service.isWorking)
             } else if service.phase == .incoming {
-                Button("Decline") { Task { await service.cancel() } }.buttonStyle(.bordered)
+                Button("Decline") { Task { await service.cancel() } }.buttonStyle(.secondary)
                 Spacer()
-                Button("Accept request") { Task { await service.accept() } }.buttonStyle(.borderedProminent).tint(
-                    colors.success
-                ).disabled(service.isWorking)
+                Button("Accept request") { Task { await service.accept() } }.buttonStyle(.primary).disabled(
+                    service.isWorking)
             } else if service.phase == .ready {
-                Button("Cancel") { Task { await service.cancel() } }.buttonStyle(.bordered)
+                Button("Cancel") { Task { await service.cancel() } }.buttonStyle(.secondary)
                 Spacer()
-                Button("Compare codes") { Task { await service.startComparison() } }.buttonStyle(.borderedProminent)
-                    .tint(colors.success).disabled(service.isWorking)
+                Button("Compare codes") { Task { await service.startComparison() } }.buttonStyle(.primary)
+                    .disabled(service.isWorking)
             } else if service.phase == .cancelling {
                 Spacer()
-                Button("Close") { close() }.buttonStyle(.bordered)
+                Button("Close") { close() }.buttonStyle(.secondary)
             } else if service.phase.isActive || service.phase == .preparing {
                 Spacer()
-                Button("Cancel verification") { Task { await service.cancel() } }.buttonStyle(.bordered)
+                Button("Cancel verification") { Task { await service.cancel() } }.buttonStyle(.secondary)
             } else {
                 Spacer()
                 Button(service.phase == .finished ? "Done" : "Close") {
                     service.dismiss()
                     onClose()
-                }.buttonStyle(.borderedProminent).tint(colors.success)
+                }.buttonStyle(.primary)
             }
         }
     }

@@ -29,12 +29,13 @@ struct ThreadsFeedView: View {
             if let error = feed.errorMessage {
                 HStack {
                     InlineErrorView(message: error)
-                    Button("Retry", action: refresh).buttonStyle(.link).font(m.font(.meta)).padding(.trailing, m.sp20)
+                    Button("Retry", action: refresh).buttonStyle(.textLink).font(m.font(.meta)).padding(
+                        .trailing, m.sp20)
                 }.disabled(feed.isLoading)
             }
             if items.isEmpty {
                 if feed.isLoading {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).loadingInterval(.threadsLoading)
+                    SkeletonRows(interval: .threadsLoading)
                 } else {
                     EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No threads yet") {
                         if feed.canCheckMore { Button("Look further") { Task { await matrix.checkMoreThreads() } } }
@@ -60,7 +61,7 @@ struct ThreadsFeedView: View {
                             Divider().overlay(colors.border).padding(.leading, m.sp24 + m.avatar + m.sp12)
                         }
                         if feed.isLoading {
-                            ProgressView().controlSize(.small).padding(m.sp20).accessibilityLabel(
+                            DelayedProgress().padding(m.sp20).accessibilityLabel(
                                 "Checking more threads"
                             ).loadingInterval(.threadsLoading)
                         }
@@ -84,16 +85,16 @@ struct ThreadsFeedView: View {
                 Spacer()
                 Text(item.lastActivityAt, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
                     m.font(.caption)
-                ).foregroundStyle(colors.muted)
-            }.foregroundStyle(colors.muted)
+                ).foregroundStyle(colors.textSecondary)
+            }.foregroundStyle(colors.textSecondary)
             HStack(alignment: .top, spacing: m.sp12) {
                 AvatarView(name: item.root.senderName, size: m.avatar, matrix: matrix, source: item.root.avatarURL)
                 VStack(alignment: .leading, spacing: m.sp4) {
                     Text(item.root.senderName).font(m.font(.secondary, .semibold)).foregroundStyle(
-                        colors.primaryText)
+                        colors.textPrimary)
                     previewBody(item.root, state: item.rootPreviewState).font(
                         m.font(.body)
-                    ).foregroundStyle(colors.text).lineLimit(3).multilineTextAlignment(.leading)
+                    ).foregroundStyle(colors.textBody).lineLimit(3).multilineTextAlignment(.leading)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             if let latest = item.latest, latest.eventID != item.root.eventID {
@@ -103,10 +104,10 @@ struct ThreadsFeedView: View {
                     VStack(alignment: .leading, spacing: m.sp4) {
                         HStack(spacing: m.sp8) {
                             Text(latest.senderName).font(m.font(.meta, .semibold))
-                            Text("Latest reply").font(m.font(.caption)).foregroundStyle(colors.muted)
+                            Text("Latest reply").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                         }
                         previewBody(latest, state: item.latestPreviewState).font(m.font(.meta)).foregroundStyle(
-                            colors.muted
+                            colors.textSecondary
                         ).lineLimit(2).multilineTextAlignment(.leading)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }.fixedSize(horizontal: false, vertical: true)
@@ -121,7 +122,7 @@ struct ThreadsFeedView: View {
                 Image(systemName: "chevron.right").font(m.font(.caption, .semibold))
             }.foregroundStyle(colors.accent).padding(.leading, m.avatar + m.sp12)
             if item.rootPreviewState == .failed || item.latestPreviewState == .failed {
-                Text("Preview unavailable").font(m.font(.caption)).foregroundStyle(colors.muted)
+                Text("Preview unavailable").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                     .padding(.leading, m.avatar + m.sp12).help(item.previewError ?? "Right-click to retry")
             }
         }.padding(.horizontal, m.sp24).padding(.vertical, m.sp20).frame(maxWidth: .infinity, alignment: .leading)
@@ -137,7 +138,7 @@ struct ThreadsFeedView: View {
         VStack(alignment: .leading, spacing: m.sp12) {
             HStack(alignment: .center) {
                 if failedRoomCount > 0 {
-                    Button("\(failedRoomCount) couldn’t load") { coverageExpanded = true }.buttonStyle(.link).font(
+                    Button("\(failedRoomCount) couldn’t load") { coverageExpanded = true }.buttonStyle(.textLink).font(
                         m.font(.caption))
                 }
                 Spacer()
@@ -154,18 +155,18 @@ struct ThreadsFeedView: View {
                                 Text(state.name).font(m.font(.caption)).lineLimit(1)
                                 Spacer()
                                 if state.state == .loading {
-                                    ProgressView().controlSize(.mini)
+                                    DelayedProgress()
                                 } else if state.state == .error {
                                     Button("Retry") { Task { await matrix.retryThreads(roomID: state.id) } }
-                                        .buttonStyle(.link).font(m.font(.caption)).help(
+                                        .buttonStyle(.textLink).font(m.font(.caption)).help(
                                             state.errorMessage ?? "Retry this conversation")
                                 } else if state.state == .unloaded {
-                                    Text("Not loaded").font(m.font(.caption)).foregroundStyle(colors.muted)
+                                    Text("Not loaded").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                                 } else if state.hasMore {
                                     Button("Load older") { Task { await matrix.loadOlderThreads(roomID: state.id) } }
-                                        .buttonStyle(.link).font(m.font(.caption)).disabled(feed.isLoading)
+                                        .buttonStyle(.textLink).font(m.font(.caption)).disabled(feed.isLoading)
                                 } else {
-                                    Text("Done").font(m.font(.caption)).foregroundStyle(colors.muted)
+                                    Text("Done").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                                 }
                             }
                         }
@@ -173,7 +174,7 @@ struct ThreadsFeedView: View {
                 }.frame(maxHeight: m(Self.historyMaxHeight))
             } label: {
                 Text("\(feed.checkedRoomCount) of \(feed.totalRoomCount) conversations").font(m.font(.caption))
-                    .foregroundStyle(colors.muted)
+                    .foregroundStyle(colors.textSecondary)
             }
         }.padding(.horizontal, m.sp24).padding(.vertical, m.sp12).background(colors.raised)
     }

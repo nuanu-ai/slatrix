@@ -190,16 +190,15 @@ enum PeopleMapping {
                 guard value.userId == id else {
                     throw MatrixServiceError.request("Couldn’t load this profile. Try again.")
                 }
-                var support = self.knownStatusSupport
-                if support == nil {
-                    // Optional status discovery must not prevent reading the core name/avatar profile.
-                    support = try? await client.isUserStatusSupported()
-                }
-                guard self.generation == session, self.profileGeneration == request, !Task.isCancelled else { return }
-                self.knownStatusSupport = support
-                self.statusSupported = self.knownStatusSupport == true
                 self.profile = PeopleMapping.profile(value, statusSupported: self.statusSupported)
                 self.profileState = "ready"
+                guard self.knownStatusSupport == nil else { return }
+                // Status is optional: the profile is already shown, and a server that never answers gets dropped.
+                let support = await Slatrix.value(within: .seconds(5)) { try? await client.isUserStatusSupported() }
+                guard self.generation == session, self.profileGeneration == request, !Task.isCancelled else { return }
+                self.knownStatusSupport = support
+                self.statusSupported = support == true
+                if support == true { self.profile = PeopleMapping.profile(value, statusSupported: true) }
             } catch {
                 guard self.generation == session, self.profileGeneration == request, !Task.isCancelled else { return }
                 self.profileState = "error"

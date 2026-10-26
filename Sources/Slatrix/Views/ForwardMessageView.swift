@@ -51,7 +51,7 @@ struct ForwardMessageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: m.sp20) {
             HStack(alignment: .top) {
-                Text("Forward message").font(m.font(.header, .bold)).foregroundStyle(colors.primaryText)
+                Text("Forward message").font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
                 Spacer(minLength: m.sp8)
                 IconButton(symbol: "xmark", label: "Close forwarding", role: .body, action: onClose).disabled(sending)
             }
@@ -67,7 +67,7 @@ struct ForwardMessageView: View {
             } else {
                 if loading {
                     HStack(spacing: m.sp8) {
-                        ProgressView().controlSize(.small).loadingInterval(.sheetLoading)
+                        DelayedProgress(interval: .sheetLoading)
                         Text("Loading…").font(m.font(.meta))
                     }
                 }
@@ -76,7 +76,7 @@ struct ForwardMessageView: View {
                         Text(
                             "From \(matrix.rooms.first(where: { $0.id == review.message.roomID })?.name ?? review.message.roomID)"
                         )
-                        .font(m.font(.meta, .semibold)).foregroundStyle(colors.muted)
+                        .font(m.font(.meta, .semibold)).foregroundStyle(colors.textSecondary)
                         Text(review.message.senderName).font(m.font(.meta, .semibold))
                         ScrollView { messagePreview(review).frame(maxWidth: .infinity, alignment: .leading) }
                             .frame(
@@ -91,7 +91,7 @@ struct ForwardMessageView: View {
                 }
                 if let error { InlineErrorView(message: error).clipShape(RoundedRectangle(cornerRadius: m.radius)) }
                 if review == nil && !loading && error != nil {
-                    Button("Reload") { Task { await loadReview() } }.buttonStyle(.link).disabled(
+                    Button("Reload") { Task { await loadReview() } }.buttonStyle(.textLink).disabled(
                         sending || !current)
                 }
                 Picker("Destination", selection: $destinationID) {
@@ -99,17 +99,17 @@ struct ForwardMessageView: View {
                     ForEach(destinations) { room in Text(room.name).tag(room.id) }
                 }.disabled(sending || loading || !current)
                 if destinations.isEmpty {
-                    Text("No conversations to forward to.").font(m.font(.meta)).foregroundStyle(colors.muted)
+                    Text("No conversations to forward to.").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                 }
                 HStack {
                     Button("Cancel", action: onClose).keyboardShortcut(.cancelAction).disabled(sending)
                     Spacer()
-                    if sending { ProgressView().controlSize(.small) }
-                    Button(sending ? "Forwarding…" : "Forward", action: send).buttonStyle(.borderedProminent)
+                    if sending { DelayedProgress() }
+                    Button(sending ? "Forwarding…" : "Forward", action: send).buttonStyle(.primary)
                         .disabled(!canSend)
                 }
             }
-        }.padding(m.sp24).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.text)
+        }.padding(m.sp24).sheetSize(width: Self.width).background(colors.canvas).foregroundStyle(colors.textBody)
             .interactiveDismissDisabled(sending)
             .task(id: matrix.forwardMessageSourceRevision(target)) { await loadReview() }
             .task(id: thumbnailContext) { await loadThumbnail() }
@@ -162,7 +162,7 @@ struct ForwardMessageView: View {
                 .background(colors.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: m.radiusLarge))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: m.sp4) {
-                Text(filename).font(m.font(.body, .semibold)).foregroundStyle(colors.primaryText)
+                Text(filename).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
                     .lineLimit(2).textSelection(.enabled).help(filename)
                 HStack(spacing: m.sp8) {
                     Text(attachmentType(filename: filename, mimeType: mimeType, image: image))
@@ -170,7 +170,7 @@ struct ForwardMessageView: View {
                         Text("·")
                         Text(ByteCountFormatter.string(fromByteCount: Int64(clamping: size), countStyle: .file))
                     }
-                }.font(m.font(.caption)).foregroundStyle(colors.muted)
+                }.font(m.font(.caption)).foregroundStyle(colors.textSecondary)
             }
             Spacer(minLength: 0)
         }.padding(m.sp12).frame(maxWidth: .infinity, alignment: .leading)

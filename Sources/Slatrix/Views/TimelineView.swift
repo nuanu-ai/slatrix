@@ -74,11 +74,11 @@ struct TimelineView: View {
                     Label("Jump to recent", systemImage: "arrow.down").font(m.font(.meta, .semibold))
                         .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
                         .background(colors.raised, in: Capsule()).overlay(Capsule().stroke(colors.border))
-                        .shadow(color: .black.opacity(0.16), radius: 8, y: 3)
+                        .elevation(.e2, cornerRadius: m.sp20)
                 }.buttonStyle(.row).padding(m.sp16).transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.12), value: jumpVisible)
+        .animation(Motion.overlay, value: jumpVisible)
         .background(colors.canvas)
         // Every message redraws the timeline; it fills what it is given, so that never lays out the window.
         .layoutIsolated()
@@ -431,7 +431,8 @@ struct MessageRow: View {
                 if grouped || !appearance.showAvatars {
                     // One line: "12:00 AM" is wider than the gutter, and a wrap would grow the row on hover.
                     Text(hovered ? time : "").font(m.font(.caption)).lineLimit(1).fixedSize()
-                        .foregroundStyle(colors.muted).frame(width: m.avatar, alignment: .trailing).padding(.top, m.sp4)
+                        .foregroundStyle(colors.textSecondary).frame(width: m.avatar, alignment: .trailing).padding(
+                            .top, m.sp4)
                 } else {
                     Button {
                         actions.openProfile?()
@@ -444,25 +445,25 @@ struct MessageRow: View {
             VStack(alignment: .leading, spacing: m.sp4) {
                 if isPinned {
                     Label("Pinned", systemImage: "pin.fill").font(m.font(.caption))
-                        .foregroundStyle(colors.muted)
+                        .foregroundStyle(colors.textSecondary)
                 }
                 if !grouped || compact {
                     HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                         if compact {
                             Text(time).font(m.font(.caption))
-                                .foregroundStyle(colors.muted)
+                                .foregroundStyle(colors.textSecondary)
                         }
                         Button {
                             actions.openProfile?()
                         } label: {
                             Text(message.senderName).font(m.font(.body, .bold))
-                                .foregroundStyle(colors.primaryText)
+                                .foregroundStyle(colors.textPrimary)
                         }.buttonStyle(.row).disabled(actions.openProfile == nil).help("View profile")
                         if !compact {
                             Text(time).font(m.font(.caption))
-                                .foregroundStyle(colors.muted)
+                                .foregroundStyle(colors.textSecondary)
                         }
-                        if own && message.sendState == "sending" { ProgressView().controlSize(.mini) }
+                        if own && message.sendState == "sending" { DelayedProgress() }
                         if isSaved {
                             Image(systemName: "bookmark.fill").font(m.font(.caption)).foregroundStyle(colors.accent)
                         }
@@ -470,19 +471,21 @@ struct MessageRow: View {
                 }
                 if message.isRedacted {
                     Text("This message was deleted.").italic().font(m.font(.body)).foregroundStyle(
-                        colors.muted
+                        colors.textSecondary
                     )
                 } else {
                     if let replyPreview { replyPreview }
                     if message.kind == "m.room.encrypted" {
                         // One quiet line per message; the header offers the recovery key once for all of them.
                         Label(message.body, systemImage: "lock").font(m.font(.secondary)).italic()
-                            .foregroundStyle(colors.muted)
+                            .foregroundStyle(colors.textSecondary)
                     } else if message.showsMessageBody {
                         NativeMessageBody(
                             body: message.body, formattedBody: message.formattedBody, menuCommands: actions.menu)
                     }
-                    if message.isEdited { Text("(edited)").font(m.font(.caption)).foregroundStyle(colors.muted) }
+                    if message.isEdited {
+                        Text("(edited)").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                    }
                     // A reused cell shows another message: a download or preview in flight must not carry over.
                     if let attachment { attachment.padding(.vertical, m.sp4).id(message.id) }
                     if !message.reactions.isEmpty {
@@ -523,7 +526,7 @@ struct MessageRow: View {
                         VStack(alignment: .leading, spacing: m.sp8) {
                             if let failure = sendFailure {
                                 Label(failure.message, systemImage: "exclamationmark.circle").font(m.font(.caption))
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(colors.warning)
                                 HStack(spacing: m.sp12) {
                                     if failure.canRetry {
                                         Button(
@@ -532,12 +535,12 @@ struct MessageRow: View {
                                         ).buttonStyle(.row).foregroundStyle(colors.accent).disabled(sendBusy)
                                     }
                                     Button("Cancel sending…", action: actions.cancelSend).buttonStyle(.row)
-                                        .foregroundStyle(colors.muted).disabled(sendBusy)
-                                    if sendBusy { ProgressView().controlSize(.mini) }
+                                        .foregroundStyle(colors.textSecondary).disabled(sendBusy)
+                                    if sendBusy { DelayedProgress() }
                                 }.font(m.font(.caption))
                             } else {
                                 Label("Sending…", systemImage: "clock").font(m.font(.caption)).foregroundStyle(
-                                    colors.muted)
+                                    colors.textSecondary)
                             }
                         }.padding(.top, m.sp2)
                     }
@@ -578,11 +581,9 @@ struct MessageRow: View {
                     width: m(Self.toolbarButton), height: m(Self.toolbarButton))
             }.menuStyle(.borderlessButton).frame(width: m(Self.toolbarButton))
         }.padding(.horizontal, m.sp2).frame(height: m(Self.toolbarButton)).background(
-            colors.canvas, in: RoundedRectangle(cornerRadius: m.radius)
+            colors.overlay, in: RoundedRectangle(cornerRadius: m.radius)
         )
-        .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border)).shadow(
-            color: .black.opacity(0.12), radius: 3, y: 2
-        )
+        .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border)).elevation(.e1, cornerRadius: m.radius)
     }
 }
 
@@ -766,6 +767,8 @@ struct AttachmentView: View {
     let message: ChatMessage
     let attachment: MessageAttachment
     @EnvironmentObject private var previews: AttachmentPreviewController
+    @EnvironmentObject private var appearance: AppearanceStore
+    private var colors: AppColors { appearance.colors }
     @State private var image: NSImage?
     @State private var busy = false
     @State private var error: String?
@@ -796,7 +799,7 @@ struct AttachmentView: View {
             if isImage {
                 let box = imageBox
                 Button(action: preview) {
-                    RoundedRectangle(cornerRadius: m.radiusLarge).fill(Color.primary.opacity(0.04))
+                    RoundedRectangle(cornerRadius: m.radiusLarge).fill(colors.sunken)
                         .overlay {
                             if let image { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill) }
                         }
@@ -820,14 +823,14 @@ struct AttachmentView: View {
                 HStack(spacing: m.sp16) {
                     Button(action: preview) {
                         HStack(spacing: m.sp8) {
-                            if previewBusy { ProgressView().controlSize(.mini) } else { Image(systemName: "eye") }
+                            if previewBusy { DelayedProgress() } else { Image(systemName: "eye") }
                             Text(previewBusy ? "Opening…" : "Preview")
                         }
                     }.disabled(!canPreview).help("Open in Quick Look")
                     Button(action: download) {
                         HStack(spacing: m.sp8) {
                             if busy {
-                                ProgressView().controlSize(.mini)
+                                DelayedProgress()
                             } else {
                                 Image(systemName: "arrow.down.to.line")
                             }
@@ -836,17 +839,17 @@ struct AttachmentView: View {
                     }.disabled(busy || previewBusy || matrix.isPreview).help("Download")
                 }.buttonStyle(.row).font(m.font(.meta, .medium))
             }.padding(m.sp12).frame(maxWidth: m(Self.fileCardWidth)).background(
-                Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: m.radiusLarge)
+                colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge)
             )
-            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(Color.primary.opacity(0.14)))
+            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
             if let previewError {
                 HStack(alignment: .top, spacing: m.sp8) {
-                    Text(previewError).font(m.font(.caption)).foregroundStyle(.orange)
-                    Button("Retry", action: preview).buttonStyle(.link).font(m.font(.caption)).disabled(
+                    Text(previewError).font(m.font(.caption)).foregroundStyle(colors.warning)
+                    Button("Retry", action: preview).buttonStyle(.textLink).font(m.font(.caption)).disabled(
                         !canPreview)
                 }
             }
-            if let error { Text(error).font(m.font(.caption)).foregroundStyle(.orange) }
+            if let error { Text(error).font(m.font(.caption)).foregroundStyle(colors.warning) }
         }
         .task(id: attachmentContext) {
             image = nil
