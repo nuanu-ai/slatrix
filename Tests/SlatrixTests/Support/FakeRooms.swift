@@ -99,7 +99,8 @@ final class FakeClient: Client, @unchecked Sendable {
     private let lock = NSLock()
     private var list: [Room] = []
     let spaces = FakeSpaceService()
-    let roomsGate = BlockingGate()
+    /// Whether each `rooms()` call ran on the main thread.
+    let roomsOnMainThread = Recorder<Bool>()
     init(rooms: [Room] = []) {
         list = rooms
         super.init(noHandle: .init())
@@ -110,7 +111,7 @@ final class FakeClient: Client, @unchecked Sendable {
         set { lock.withLock { list = newValue } }
     }
     override func rooms() -> [Room] {
-        roomsGate.wait()
+        roomsOnMainThread.append(Thread.isMainThread)
         return roomList
     }
     override func getRoom(roomId: String) throws -> Room? { roomList.first { $0.id() == roomId } }
