@@ -61,12 +61,14 @@ struct DesignSystemHostedTests {
             }
         }
 
-        func pressEscape() {
+        func pressEscape() { press("\u{1b}", keyCode: 53) }
+
+        func press(_ characters: String, keyCode: UInt16) {
             window.sendEvent(
                 NSEvent.keyEvent(
                     with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                    windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
-                    charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!)
+                    windowNumber: window.windowNumber, context: nil, characters: characters,
+                    charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode)!)
         }
     }
 
@@ -127,6 +129,47 @@ struct DesignSystemHostedTests {
         #expect(await eventually { host.window.firstResponder !== host.window })
         host.pressEscape()
         #expect(await eventually { popovers.current == nil })
+    }
+
+    @Test("The emoji picker opens ready to search; arrows move, Return picks and Esc closes")
+    func emojiPickerKeyboard() async throws {
+        let popovers = Popovers()
+        let picked = Recorder<String>()
+        let host = Host(
+            PopoverHost(popovers: popovers) {
+                Color.white.frame(width: 800, height: 600)
+            } card: { kind in
+                if case .emoji(let pick) = kind {
+                    EmojiPicker(recent: ["🎉"]) { emoji in
+                        popovers.close()
+                        pick.action(emoji)
+                    }
+                }
+            },
+            size: CGSize(width: 800, height: 600))
+        defer { host.close() }
+        popovers.show(.emoji(EmojiPick { picked.append($0) }), at: CGPoint(x: 100, y: 100))
+        // Typing goes straight to the search field.
+        #expect(await eventually { host.window.firstResponder is NSTextView })
+        let field = try #require(host.window.firstResponder as? NSTextView)
+        field.insertText("heart", replacementRange: field.selectedRange())
+        await drainMainActor()
+        let results = EmojiCatalog.search("heart").map(\.value)
+        // Each key acts on what the last one left on screen.
+        for (key, code) in [(NSRightArrowFunctionKey, 124), (NSDownArrowFunctionKey, 125), (13, 36)] {
+            host.hosting.layoutSubtreeIfNeeded()
+            await drainMainActor()
+            host.press(String(UnicodeScalar(key)!), keyCode: UInt16(code))
+        }
+        // One right and one row of nine down from the top result.
+        #expect(await eventually { picked.all == [results[10]] })
+        #expect(popovers.current == nil)
+
+        popovers.show(.emoji(EmojiPick { picked.append($0) }), at: CGPoint(x: 100, y: 100))
+        #expect(await eventually { host.window.firstResponder is NSTextView })
+        host.pressEscape()
+        #expect(await eventually { popovers.current == nil })
+        #expect(picked.all.count == 1)
     }
 
     @Test("A click outside the card closes it; a click on it doesn't")
