@@ -174,10 +174,11 @@ struct RoomIcon: View {
     }
 }
 
-/// Slack's search results in the main pane: the query, tabs for messages, channels and people, and filters for
-/// messages. A message opens where it was said; a channel opens, or shows its invitation; a person opens their profile.
+/// Slack's search results in the main pane: the query, tabs for messages, files, channels and people, and filters for
+/// messages and files. A message or file opens where it was shared; a channel opens, or shows its invitation; a person
+/// opens their profile.
 struct SearchResultsView: View {
-    enum Tab { case messages, channels, people }
+    enum Tab { case messages, files, channels, people }
     let matrix: MatrixService
     let bar: SearchBar
     var onOpenMessage: (ChatMessage) -> Void
@@ -220,13 +221,14 @@ struct SearchResultsView: View {
             }.padding(.horizontal, m.sp24).frame(height: m.paneHeader)
             TabBar(
                 tabs: [
-                    .init(value: Tab.messages, title: "Messages"), .init(value: Tab.channels, title: "Channels"),
-                    .init(value: Tab.people, title: "People"),
+                    .init(value: Tab.messages, title: "Messages"), .init(value: Tab.files, title: "Files"),
+                    .init(value: Tab.channels, title: "Channels"), .init(value: Tab.people, title: "People"),
                 ], selection: $tab
             ).padding(.horizontal, m.sp24)
             Divider().overlay(colors.border)
             switch tab {
             case .messages: messagesTab
+            case .files: filesTab
             case .channels: channelsTab
             case .people: peopleTab
             }
@@ -423,6 +425,41 @@ struct SearchResultsView: View {
             do { try await matrix.startSearchBackfill() } catch {
                 guard matrix.notificationSessionID == session else { return }
                 self.error = MatrixService.safeError(error)
+            }
+        }
+    }
+
+    /// The hits that share a file: the index holds a file message's name as its text.
+    private var filesTab: some View {
+        let files = messages.filter { $0.attachment != nil }
+        return VStack(spacing: 0) {
+            filters.padding(.horizontal, m.sp24).padding(.vertical, m.sp12)
+            if files.isEmpty && query.sdkQuery() != nil && (searchBusy || activeRun != run) {
+                SkeletonRows(interval: .searchLoading)
+            } else if files.isEmpty {
+                EmptyStateView(symbol: "doc", title: "No files found") {
+                    if matrix.searchHasMore { loadMoreButton }
+                }
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(files) { message in
+                            let name = message.attachment?.name ?? message.body
+                            FileRow(
+                                tile: .file(FileKind(name: name, mimeType: message.attachment?.mimeType)), name: name,
+                                caption: SharedContentMapping.caption(
+                                    sender: message.senderName, room: matrix.rooms.first { $0.id == message.roomID },
+                                    date: message.timestamp),
+                                onOpen: { onOpenMessage(message) }
+                            ) {
+                                Button("View in conversation") { onOpenMessage(message) }
+                            }
+                        }
+                        if matrix.searchHasMore {
+                            loadMoreButton.frame(maxWidth: .infinity).padding(.vertical, m.sp16)
+                        }
+                    }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
+                }
             }
         }
     }

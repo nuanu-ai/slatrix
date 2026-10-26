@@ -339,8 +339,8 @@ struct Snapshots {
         try await search("a")
         press(36, "\r")
         _ = try await settledImage(hosting)
-        // The People tab, third in the results' tab bar.
-        let tab = CGPoint(x: 570, y: 900 - 116)
+        // The People tab, last in the results' tab bar.
+        let tab = CGPoint(x: 617, y: 900 - 116)
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             window.sendEvent(
                 NSEvent.mouseEvent(
