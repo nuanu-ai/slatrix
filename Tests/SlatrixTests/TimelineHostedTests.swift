@@ -440,9 +440,9 @@ extension TimelineHostedTests {
         let frame = text.convert(text.bounds, to: nil)
         let shown = try #require(toolbar(harness))
         let bar = shown.convert(shown.bounds, to: nil)
-        let toolbar = NSPoint(x: bar.midX, y: bar.minY + 3)
+        let overToolbar = NSPoint(x: bar.midX, y: bar.minY + 3)
         let body = NSPoint(x: frame.minX + 10, y: frame.minY + 6)
-        #expect(frame.contains(toolbar))
+        #expect(frame.contains(overToolbar))
         // The toolbar never takes the click that would drag the window.
         #expect(!shown.mouseDownCanMoveWindow)
         let window = harness.window
@@ -467,9 +467,9 @@ extension TimelineHostedTests {
             return NSCursor.current
         }
         #expect(try entered(at: body) == .iBeam)
-        #expect(try entered(at: toolbar) == .arrow)
+        #expect(try entered(at: overToolbar) == .arrow)
         #expect(try moved(to: body) == .iBeam)
-        #expect(try moved(to: toolbar) == .arrow)
+        #expect(try moved(to: overToolbar) == .arrow)
         #expect(try moved(to: body) == .iBeam)
     }
 }
