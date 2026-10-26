@@ -3,8 +3,6 @@ import SwiftUI
 
 struct SharedFilesView: View {
     private static let emptyMinHeight: CGFloat = 260
-    private static let roomPickerMaxWidth: CGFloat = 300
-    private static let typePickerWidth: CGFloat = 280
     private static let filterMaxWidth: CGFloat = 420
     @Environment(\.metrics) private var m
     let matrix: MatrixService
@@ -140,27 +138,38 @@ struct SharedFilesView: View {
             .onDisappear { service.close() }
     }
     private var filters: some View {
-        VStack(spacing: m.sp16) {
+        VStack(spacing: 0) {
             HStack(spacing: m.sp12) {
-                Text("Conversation").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
-                Picker("Conversation", selection: Binding(get: { roomID ?? "" }, set: { selectedRoomID = $0 })) {
-                    ForEach(rooms) { room in Text(room.name).tag(room.id) }
-                }.labelsHidden().frame(maxWidth: m(Self.roomPickerMaxWidth), alignment: .leading).disabled(
-                    rooms.isEmpty)
+                SearchField(prompt: "Search files and links", text: $query).frame(maxWidth: m(Self.filterMaxWidth))
+                conversationMenu
                 Spacer()
                 IconButton(symbol: "arrow.clockwise", label: "Refresh shared files and links", role: .body) {
                     if let id = roomID { Task { await service.open(roomID: id) } }
                 }.disabled(service.state == "loading" || service.isLoadingMore || matrix.isPreview || roomID == nil)
-            }
-            HStack(spacing: m.sp20) {
-                Picker("Shared content type", selection: $filter) {
-                    ForEach(ContentFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden().frame(width: m(Self.typePickerWidth))
-                SearchField(prompt: "Search files and links", text: $query).frame(maxWidth: m(Self.filterMaxWidth))
-                Spacer(minLength: 0)
-            }
-        }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
+            }.padding(.vertical, m.sp16)
+            TabBar(tabs: ContentFilter.allCases.map { .init(value: $0, title: $0.rawValue) }, selection: $filter)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }.padding(.horizontal, m.sp24)
     }
+
+    /// Slack's "In: #design" filter: which conversation's files the list shows.
+    private var conversationMenu: some View {
+        let room = rooms.first { $0.id == roomID }
+        return Menu {
+            Picker("Conversation", selection: Binding(get: { roomID ?? "" }, set: { selectedRoomID = $0 })) {
+                ForEach(rooms) { Text(Self.title($0)).tag($0.id) }
+            }.pickerStyle(.inline).labelsHidden()
+        } label: {
+            HStack(spacing: m.sp4) {
+                Text("In: \(room.map(Self.title) ?? "")").lineLimit(1)
+                Image(systemName: "chevron.down").font(m.font(.caption, .semibold))
+            }.font(m.font(.secondary, .medium))
+        }
+        .menuStyle(.button).buttonStyle(.secondary).menuIndicator(.hidden).fixedSize()
+        .disabled(rooms.isEmpty).accessibilityLabel("Conversation")
+    }
+
+    private static func title(_ room: ChatRoom) -> String { room.isDirect ? room.name : "#" + room.name }
 }
 
 /// A row of the Files list: a file, image or video opens in the viewer, a link in the browser.

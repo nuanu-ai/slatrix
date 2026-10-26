@@ -26,6 +26,6 @@ offsystem "use .elevation(_:cornerRadius:)" '\.shadow\('
 offsystem "use Motion for animation" '(withAnimation|\.animation)\(\.(easeIn|easeOut|easeInOut|linear|spring)'
 offsystem "use .textFieldStyle(.field)" 'textFieldStyle\(\.roundedBorder\)'
 offsystem "use .modal with Modal or ConfirmModal" '\.sheet\(|\.alert\(|confirmationDialog\('
-# The search modal and Files get their own tab bars next; until then they keep their pickers.
-offsystem "use TabBar" 'pickerStyle\(\.segmented\)' --exclude=ConversationSheets.swift --exclude=SharedFilesView.swift
+# The search modal gets its own tab bar next; until then it keeps its picker.
+offsystem "use TabBar" 'pickerStyle\(\.segmented\)' --exclude=ConversationSheets.swift
 exit $failed
