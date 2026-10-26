@@ -622,16 +622,19 @@ struct MessageToolbar: View {
         let shape = RoundedRectangle(cornerRadius: m.radiusLarge)
         HStack(spacing: 0) {
             if !pending {
-                ForEach(quick, id: \.self) { emoji in
-                    Button {
-                        actions.react?(emoji)
-                    } label: {
-                        Text(emoji).font(m.font(.body)).frame(width: m(Self.button), height: m(Self.button))
-                    }.buttonStyle(.icon).disabled(actions.react == nil)
-                        .help("React with \(EmojiCatalog.shortcode(for: emoji))")
+                // Left out, not dimmed, while the message can't take a reaction: a faded emoji looks broken.
+                if let react = actions.react {
+                    ForEach(quick, id: \.self) { emoji in
+                        Button {
+                            react(emoji)
+                        } label: {
+                            Text(emoji).font(m.font(.body)).frame(width: m(Self.button), height: m(Self.button))
+                        }.buttonStyle(.icon).help("React with \(EmojiCatalog.shortcode(for: emoji))")
+                    }
                 }
-                button("face.smiling", "Find another reaction") { actions.openReactions?() }
-                    .disabled(actions.openReactions == nil)
+                if let openReactions = actions.openReactions {
+                    button("face.smiling", "Find another reaction", action: openReactions)
+                }
                 if !isThread { button("text.bubble", "Reply in thread", action: actions.thread) }
                 if let forward = actions.forward {
                     button("arrowshape.turn.up.right", "Forward message", action: forward)

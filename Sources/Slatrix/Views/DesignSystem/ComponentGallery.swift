@@ -250,7 +250,7 @@ struct ComponentGallery: View {
                 caption("Hover toolbar, over a message's top edge")
                 MessageToolbar(
                     quick: EmojiRecents.quick([]), isThread: false, isSaved: false, pending: false,
-                    actions: MessageRowActions(forward: {}))
+                    actions: MessageRowActions(react: { _ in }, openReactions: {}, forward: {}))
             }
         }
     }

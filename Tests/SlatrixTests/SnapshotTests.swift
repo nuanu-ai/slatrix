@@ -1,4 +1,5 @@
 import AppKit
+import MatrixRustSDK
 import SwiftUI
 import Testing
 
@@ -6,6 +7,13 @@ import Testing
 
 extension Tag {
     @Tag static var snapshots: Tag
+}
+
+/// A conversation with nothing older, so the timeline starts at its welcome and asks for no history.
+private final class StartOfTimeline: Timeline, @unchecked Sendable {
+    init() { super.init(noHandle: .init()) }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func paginateBackwards(numEvents: UInt16) async throws -> Bool { true }
 }
 
 /// Renders the sample workspace in-process and writes PNGs to `.build/snapshots/` for a person to look at.
@@ -246,6 +254,17 @@ struct Snapshots {
         let matrix = MatrixService()
         matrix.enterPreview()
         let room = try #require(matrix.selectedRoom)
+        // Signed in rather than sampled, so the toolbar offers reactions.
+        matrix.isPreview = false
+        matrix.configureMessageActionsForChecks(
+            client: FakeClient(rooms: [FakeRoom(roomInfo(id: room.id))]), main: StartOfTimeline(), thread: nil,
+            rootID: nil,
+            sessionID: UUID(), selectionID: UUID(), threadID: UUID())
+        matrix.messages = matrix.messages.map {
+            var message = $0
+            message.id = "$" + message.id
+            return message
+        }
         let (window, hosting) = try themedWindow(
             TimelineView(
                 matrix: matrix, room: room, savedIDs: [], onThread: { _ in }, onReply: { _ in }, onEdit: { _ in },
