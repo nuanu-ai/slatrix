@@ -1,4 +1,5 @@
 import Foundation
+import MatrixRustSDK
 import Testing
 
 @testable import Slatrix
@@ -30,6 +31,22 @@ struct MessageActionTests {
         try await f.service.deleteMessage(target)
         #expect(f.main.writes.all == ["reaction:✅:$reply", "delete:$reply"])
         #expect(f.thread.writes.all.isEmpty)
+    }
+
+    @Test("Adding a reaction makes its emoji the most recent and saves it to the account; taking one back does not")
+    func reactionsUpdateRecentEmoji() async throws {
+        let f = ActionFixture()
+        f.client.storedRecentEmoji = [RecentEmoji(emoji: "🔥", count: 2), RecentEmoji(emoji: "👍", count: 1)]
+        await f.service.loadRecentEmoji()
+        #expect(f.service.recentEmoji == ["🔥", "👍"])
+        var message = f.message("$one")
+        message.reactions = [MessageReaction(key: "🎉", count: 1, mine: true, senders: [f.userID])]
+        f.service.messages = [message]
+        let target = try f.target(message, .conversation)
+        try await f.service.toggleReaction(target, key: "👍")
+        try await f.service.toggleReaction(target, key: "🎉")
+        #expect(f.service.recentEmoji == ["👍", "🔥"])
+        #expect(await eventually { f.client.recentEmoji.all == ["👍"] })
     }
 
     @Test("A thread that has not loaded offers no actions")

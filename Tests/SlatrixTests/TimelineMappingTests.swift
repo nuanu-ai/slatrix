@@ -44,6 +44,35 @@ struct TimelineMappingTests {
         #expect(message.id == "$found" && message.eventID == "$found")
     }
 
+    @Test("A thread root carries its reply count and who replied last, and when")
+    func threadSummary() throws {
+        final class Summary: ThreadSummary, @unchecked Sendable {
+            override func numReplies() -> UInt64 { 4 }
+            override func latestEvent() -> EmbeddedEventDetails {
+                .ready(
+                    content: .msgLike(
+                        content: MsgLikeContent(kind: .redacted, inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
+                    sender: "@julia:example.org",
+                    senderProfile: .ready(
+                        displayName: "Julia", displayNameAmbiguous: false, avatarUrl: "mxc://example.org/julia",
+                        status: nil, call: nil),
+                    timestamp: 1_800_000_000_000, eventOrTransactionId: .eventId(eventId: "$last"))
+            }
+        }
+        var item = event(.eventId(eventId: "$root"), remote: true, kind: text)
+        item.content = .msgLike(
+            content: MsgLikeContent(
+                kind: text, inReplyTo: nil, threadRoot: nil, threadSummary: Summary(noHandle: .init())))
+        let message = try #require(
+            MatrixMapping.message(item, roomID: "!r:example.org", ownUserID: "@me:example.org"))
+        #expect(message.replyCount == 4)
+        #expect(
+            message.lastReply
+                == ThreadReply(
+                    senderID: "@julia:example.org", senderName: "Julia", avatarURL: "mxc://example.org/julia",
+                    timestamp: Date(timeIntervalSince1970: 1_800_000_000)))
+    }
+
     @Test("An image carries its pixel size, so its box is reserved before the thumbnail loads")
     func imageDimensions() throws {
         let image = ImageMessageContent(
