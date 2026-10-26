@@ -19,9 +19,10 @@ Use the `ponytail` skill on every change: the smallest change that fully solves 
 - `Sources/Slatrix/Views` holds SwiftUI and AppKit views. Rows and leaf views take plain values and closures, not services.
 - `MatrixService` is `@Observable`, so a view redraws only for what its body reads. Keep fast-changing state (messages, typing, the room list, drafts) out of `RootView`'s body, and place a view that redraws often with `layoutIsolated()` so its changes never lay out the whole window.
 - Matrix work goes through the official SDK (`MatrixRustSDK`). Patches to it live in `Support/MatrixSDK/patches` and `scripts/build-sdk.sh` applies them. Send each patch upstream and drop it once a release includes it.
+- Views build from `Views/DesignSystem`: color roles in `AppColors`, `Elevation` and `Motion` tokens, the `.primary`, `.secondary`, `.destructive`, `.textLink` and `.icon` button styles, `.field` and `SearchField`, `DelayedProgress` and `SkeletonRows`, and `PopoverHost` for anchored cards. The debug build's Window ▸ Component Gallery shows them all.
 - Borderless buttons use `.buttonStyle(.row)`, which makes the whole frame clickable; `scripts/lint.sh` rejects `.plain`.
 - A custom `NSView` that handles the mouse returns `false` from `mouseDownCanMoveWindow`. The window moves by its background, so otherwise the window server takes the drag.
-- `scripts/lint.sh` runs swift format and the `.plain` check. It runs in CI; run it before committing too.
+- `scripts/lint.sh` runs swift format, the `.plain` check, and rejects raw colors, off-system button styles, spinners, shadows, literal animations and rounded-border fields outside `Views/DesignSystem`. It runs in CI; run it before committing too.
 
 ## Testing
 
