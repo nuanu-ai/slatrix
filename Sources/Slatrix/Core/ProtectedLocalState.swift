@@ -18,11 +18,14 @@ struct ProtectedLocalState: Codable, Equatable {
     var drafts: [String: String] = [:]
     var threadDrafts: [String: String] = [:]
     var saved: [SavedMessageReference] = []
+    /// Optional, so a vault written before it existed still opens.
+    var recentSearches: [String]?
 
     func validate() throws {
-        guard drafts.count <= 4_096, threadDrafts.count <= 4_096, saved.count <= 10_000 else {
-            throw ProtectedLocalStateError.invalidData
-        }
+        guard drafts.count <= 4_096, threadDrafts.count <= 4_096, saved.count <= 10_000,
+            (recentSearches ?? []).count <= RecentSearches.limit,
+            (recentSearches ?? []).allSatisfy({ $0.utf8.count <= 1_024 })
+        else { throw ProtectedLocalStateError.invalidData }
         for (id, text) in drafts {
             guard Self.validID(id), text.utf8.count <= 131_072 else { throw ProtectedLocalStateError.invalidData }
         }

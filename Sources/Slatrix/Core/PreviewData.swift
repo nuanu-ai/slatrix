@@ -38,7 +38,15 @@ import Foundation
             ChatUser(id: "preview.julia", name: "Julia"), ChatUser(id: "preview.sam", name: "Sam"),
             user!,
         ]
+        people.preview = members.map { PersonProfile(id: $0.id, name: $0.name) }
         selectPreviewRoom(rooms[0].id)
+    }
+    /// The open sample conversation's messages that share a word with the query.
+    func previewSearch(_ query: String, roomID: String?) -> [ChatMessage] {
+        messages.filter {
+            (roomID == nil || $0.roomID == roomID) && !MessageSearchQuery(query).highlights(in: $0.body).isEmpty
+        }
+        .reversed()
     }
     func selectPreviewRoom(_ id: String) {
         selectedRoomID = id
@@ -114,6 +122,7 @@ import Foundation
         messages = []
         threadMessages = []
         members = []
+        people.preview = nil
         selectedRoomID = nil
         status = .signedOut
     }

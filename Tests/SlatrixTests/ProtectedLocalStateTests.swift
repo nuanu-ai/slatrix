@@ -167,6 +167,15 @@ struct ProtectedLocalStateStoreTests {
         #expect(throws: (any Error).self) { try ProtectedLocalStateCodec.read(url, key: vaultKey, accountID: account) }
     }
 
+    @Test("Recent searches are kept with the account's other private state")
+    func recentSearchesPersist() async throws {
+        let access = try await store.open(accountID: account)
+        var state = original
+        state.recentSearches = ["budget", "launch plan"]
+        try await store.save(state, access: access, revision: 1)
+        #expect(try await store.open(accountID: account).state.recentSearches == ["budget", "launch plan"])
+    }
+
     @Test("An older save that finishes late does not replace a newer one")
     func newestSaveWins() async throws {
         let access = try await store.open(accountID: account)

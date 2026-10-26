@@ -48,6 +48,8 @@ enum PeopleMapping {
     private(set) var profileState = "idle"
     private(set) var profileErrorMessage: String?
     private(set) var statusSupported = false
+    /// The sample workspace's people, searched instead of a server.
+    var preview: [PersonProfile]?
     private var client: Client?
     private var generation = UUID()
     private var searchGeneration = UUID()
@@ -87,6 +89,11 @@ enum PeopleMapping {
         guard query.utf8.count <= 1024 else {
             searchState = "error"
             searchErrorMessage = "Use a shorter name or Matrix ID."
+            return
+        }
+        if let preview {
+            results = preview.filter { $0.name.localizedCaseInsensitiveContains(query) }
+            searchState = "ready"
             return
         }
         guard let client else {

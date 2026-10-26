@@ -5,9 +5,7 @@ import SwiftUI
 /// update with it.
 @Observable @MainActor final class InWindowModal {
     enum Kind: Hashable, Identifiable {
-        case preferences, shortcuts
-        /// ⌘K and message search; `roomID` scopes a search to one conversation.
-        case search(messages: Bool, roomID: String?)
+        case preferences, shortcuts, switcher
         var id: Self { self }
     }
     var current: Kind?
@@ -192,7 +190,6 @@ struct Modal<Content: View>: View {
         }
         .frame(maxWidth: width, maxHeight: height.map(m.callAsFunction))
         .background(colors.canvas).foregroundStyle(colors.textBody)
-        .background(ModalFocus())
         .modalSurface()
         // Keeps the modal off the window's edges at any zoom.
         .padding(m.sp40)
@@ -213,14 +210,15 @@ struct Modal<Content: View>: View {
 }
 
 extension View {
-    /// A modal's rounded corners and shadow, for one drawn without `Modal`.
+    /// A modal's rounded corners and shadow, and its hold on the keyboard, for one drawn without `Modal`.
     func modalSurface() -> some View { modifier(ModalSurface()) }
 }
 
 private struct ModalSurface: ViewModifier {
     @Environment(\.metrics) private var m
     func body(content: Content) -> some View {
-        content.clipShape(RoundedRectangle(cornerRadius: m.radiusPanel)).elevation(.e3, cornerRadius: m.radiusPanel)
+        content.background(ModalFocus()).clipShape(RoundedRectangle(cornerRadius: m.radiusPanel))
+            .elevation(.e3, cornerRadius: m.radiusPanel)
     }
 }
 

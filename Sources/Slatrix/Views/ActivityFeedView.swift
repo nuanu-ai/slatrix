@@ -54,7 +54,7 @@ struct ActivityFeedView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if !summaryRooms.isEmpty {
-                            sectionLabel(filter == .mentions ? "MENTIONS" : "UNREAD")
+                            sectionLabel(filter == .mentions ? "Mentions" : "Unread")
                             ForEach(summaryRooms) { room in
                                 Button {
                                     onOpenRoom(room.id)
@@ -65,7 +65,7 @@ struct ActivityFeedView: View {
                             }
                         }
                         if !items.isEmpty {
-                            sectionLabel("RECENT")
+                            sectionLabel("Recent")
                             ForEach(items) { item in
                                 Button {
                                     onOpenMessage(item)
@@ -82,7 +82,7 @@ struct ActivityFeedView: View {
     }
 
     private func sectionLabel(_ label: String) -> some View {
-        Text(label).font(m.font(.caption, .semibold)).tracking(0.6).foregroundStyle(colors.textSecondary).padding(
+        Text(label).font(m.font(.secondary, .semibold)).foregroundStyle(colors.textSecondary).padding(
             .horizontal, m.sp24
         ).padding(.top, m.sp20).padding(.bottom, m.sp12)
     }

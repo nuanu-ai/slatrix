@@ -260,6 +260,78 @@ struct Snapshots {
         }
     }
 
+    @Test("Jump to, the search menu, search results and People", arguments: Theme.allCases)
+    func search(theme: Theme) async throws {
+        _ = NSApplication.shared
+        UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let window = offscreenWindow(NSSize(width: 1440, height: 900))
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        func press(_ keyCode: UInt16, _ characters: String) {
+            for type in [NSEvent.EventType.keyDown, .keyUp] {
+                window.sendEvent(
+                    NSEvent.keyEvent(
+                        with: type, location: .zero, modifierFlags: [], timestamp: 0,
+                        windowNumber: window.windowNumber, context: nil, characters: characters,
+                        charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode)!)
+            }
+        }
+        func search(_ text: String) async throws {
+            let bar = try #require(
+                views(hosting).compactMap { $0 as? NSTextField }.first { $0.placeholderString == "Search Harbor" })
+            window.makeFirstResponder(bar)
+            (window.firstResponder as? NSTextView)?.selectAll(nil)
+            window.firstResponder?.insertText(text)
+            _ = try await settledImage(hosting)
+        }
+        let name = theme.rawValue
+        _ = try await settledImage(hosting)
+
+        NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "search"])
+        try write(await settledImage(hosting), "switcher-empty-\(name)")
+        window.firstResponder?.insertText("de")
+        try write(await settledImage(hosting), "switcher-query-\(name)")
+        press(53, "\u{1b}")
+        _ = try await settledImage(hosting)
+
+        try await search("team")
+        press(36, "\r")
+        try write(await settledImage(hosting), "search-messages-\(name)")
+        try await search("te")
+        try write(await settledImage(hosting), "search-menu-\(name)")
+        try await search("a")
+        press(36, "\r")
+        _ = try await settledImage(hosting)
+        // The People tab, last in the results' tab bar.
+        let tab = CGPoint(x: 617, y: 900 - 116)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            window.sendEvent(
+                NSEvent.mouseEvent(
+                    with: type, location: tab, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+        }
+        try write(await settledImage(hosting), "search-people-\(name)")
+
+        NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "people"])
+        _ = try await settledImage(hosting)
+        window.firstResponder?.insertText("a")
+        try write(await settledImage(hosting), "people-\(name)")
+    }
+
     /// The window at 1440 × 900 and 100% with `view` as its content, after `prepare`.
     private func render(
         _ view: some View, theme: Theme, name: String, prepare: () -> Void = {}

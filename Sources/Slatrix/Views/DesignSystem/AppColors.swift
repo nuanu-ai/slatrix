@@ -89,6 +89,8 @@ struct AppColors {
         }
     }
     var selectionText: Color { .white }
+    /// Words a search matched, in a result: Slack's yellow.
+    var highlight: Color { Color(hex: 0xf2c744).opacity(dark ? 0.3 : 0.5) }
     /// The keyboard focus ring around buttons, rows and fields; the same in every theme, so views without the
     /// appearance store, like an AppKit popover's, can draw it.
     static let focusRing = Color(hex: 0x1d9bd1)

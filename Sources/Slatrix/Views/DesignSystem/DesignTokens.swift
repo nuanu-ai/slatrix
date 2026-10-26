@@ -79,6 +79,8 @@ struct Metrics: Equatable {
     var iconButton: CGFloat { 28 * zoom }
     /// Text fields and push buttons.
     var control: CGFloat { 32 * zoom }
+    /// A row in a menu-like list: the ⌘K switcher and the search menu.
+    var menuRow: CGFloat { 32 * zoom }
     /// Small buttons in dense rows.
     var controlSmall: CGFloat { 28 * zoom }
     /// Modal footers and sign-in.
