@@ -5,6 +5,11 @@ enum LoadingPresentation {
     /// header changes and the rows follow.
     static let handoff = Duration.milliseconds(100)
 
+    /// The SDK restores most drops within a moment; only one that lasts gets the connection notice.
+    static let connectionNoticeDelay = Duration.seconds(2)
+
+    static func showsConnectionNotice(downFor: Duration) -> Bool { downFor >= connectionNoticeDelay }
+
     /// Offline, a network wait lasts until the connection returns; the connection notice says so instead.
     static func showsIndicator(waited: Duration, hasContent: Bool, offline: Bool = false) -> Bool {
         !hasContent && !offline && waited >= indicatorDelay

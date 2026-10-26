@@ -678,7 +678,6 @@ struct RootView: View {
     /// Connection, loading and error states, as toasts over the conversation.
     private var transientBanners: some View {
         VStack(spacing: m.sp8) {
-            ConnectionBanner(matrix: matrix, onRetry: retryConnection)
             if pendingMatrixLink != nil {
                 HStack(spacing: m.sp8) {
                     ProgressView().controlSize(.small)
@@ -887,7 +886,10 @@ struct RootView: View {
                     colors.primaryText.opacity(appearance.isDark ? 0.19 : 0.08),
                     in: RoundedRectangle(cornerRadius: m.radius))
             }.buttonStyle(.row).frame(maxWidth: m(Self.searchWidth)).disabled(matrix.user == nil)
-            Spacer(minLength: 0)
+            // An overlay, so the notice coming and going never moves the search field.
+            Spacer(minLength: 0).overlay(alignment: .trailing) {
+                ConnectionNotice(matrix: matrix, onRetry: retryConnection).padding(.trailing, m.sp8)
+            }
             if matrix.isPreview {
                 // The preview's one way out: everything else in it is the real interface.
                 Button("Sign in") {
@@ -2642,26 +2644,35 @@ private struct HistoryMenu: View {
     }
 }
 
-private struct ConnectionBanner: View {
+/// A lost connection, in the title bar once it has lasted a moment; it covers nothing and moves nothing.
+private struct ConnectionNotice: View {
     let matrix: MatrixService
     let onRetry: () -> Void
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
+    @State private var shown = false
     var body: some View {
-        if let message = matrix.connectionErrorMessage {
-            HStack(spacing: m.sp12) {
-                Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
-                Text(message).font(m.font(.meta)).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: m.sp8)
-                if matrix.canRetryConnection || matrix.isRetryingConnection {
-                    Button(action: onRetry) {
-                        HStack(spacing: m.sp8) {
-                            if matrix.isRetryingConnection { ProgressView().controlSize(.mini) }
-                            Text(matrix.isRetryingConnection ? "Reconnecting…" : "Retry")
-                        }
-                    }.buttonStyle(.bordered).controlSize(.small).disabled(matrix.isRetryingConnection)
-                }
-            }.padding(m.sp12).modifier(Toast(colors: appearance.colors))
+        let message = matrix.connectionErrorMessage
+        ZStack {
+            if shown, let message {
+                HStack(spacing: m.sp8) {
+                    Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
+                    Text(message).lineLimit(1)
+                    if matrix.canRetryConnection || matrix.isRetryingConnection {
+                        Button(matrix.isRetryingConnection ? "Reconnecting…" : "Retry", action: onRetry)
+                            .buttonStyle(.link).disabled(matrix.isRetryingConnection)
+                    }
+                }.font(m.font(.caption)).foregroundStyle(appearance.colors.muted).fixedSize().transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: shown)
+        .task(id: message != nil) {
+            shown = false
+            guard message != nil else { return }
+            let start = ContinuousClock.now
+            try? await Task.sleep(for: LoadingPresentation.connectionNoticeDelay)
+            guard !Task.isCancelled else { return }
+            shown = LoadingPresentation.showsConnectionNotice(downFor: .now - start)
         }
     }
 }
