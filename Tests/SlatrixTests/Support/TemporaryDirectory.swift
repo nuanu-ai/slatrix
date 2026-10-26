@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 
 /// A private scratch folder per test, removed when the test releases it.
 final class TemporaryDirectory {
@@ -12,6 +14,20 @@ final class TemporaryDirectory {
     func file(_ name: String, _ contents: Data = Data("Fixture content\n".utf8)) throws -> URL {
         let file = path(name)
         try contents.write(to: file)
+        return file
+    }
+
+    /// A PNG filled with one red, which a pixel check can find on screen.
+    func png(_ name: String, width: Int, height: Int) throws -> URL {
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let file = path(name)
+        let destination = CGImageDestinationCreateWithURL(file as CFURL, "public.png" as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
         return file
     }
 

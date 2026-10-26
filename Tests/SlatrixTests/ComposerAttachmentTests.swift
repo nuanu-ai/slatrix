@@ -90,6 +90,25 @@ struct ComposerAttachmentTests {
         await #expect(throws: Importer.Failure.self) { try await Importer.stage(.image(data, png: png), existing: []) }
     }
 
+    @Test("A staged image's tray thumbnail is decoded from the staged copy, downsampled to the tile")
+    func trayThumbnail() async throws {
+        let scratch = try TemporaryDirectory()
+        let original = try scratch.png("photo.png", width: 1_200, height: 800)
+        let staged = try await Importer.stage(.files([original]), existing: [])
+        defer { Importer.discard(staged) }
+        try FileManager.default.removeItem(at: original)
+        let thumbnail = try #require(Importer.thumbnail(of: staged[0], pixels: 124))
+        #expect(max(thumbnail.width, thumbnail.height) == 124)
+    }
+
+    @Test("The tray decodes nothing outside the staging folder: neither the original nor a remote URL")
+    func trayThumbnailStaysLocal() throws {
+        let scratch = try TemporaryDirectory()
+        let original = try scratch.png("photo.png", width: 300, height: 200)
+        #expect(Importer.thumbnail(of: original, pixels: 124) == nil)
+        #expect(Importer.thumbnail(of: URL(string: "https://example.org/photo.png")!, pixels: 124) == nil)
+    }
+
     @Test("A cancelled import stages nothing")
     func cancelledImport() async throws {
         let scratch = try TemporaryDirectory()
