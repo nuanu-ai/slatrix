@@ -429,7 +429,7 @@ struct QuickSwitcherView: View {
         selectedIndex = 0
         paging = false
         error = nil
-        guard submitted.mode == .messages, let sdkQuery = submitted.messageQuery.sdkQuery else {
+        guard submitted.mode == .messages, let sdkQuery = submitted.messageQuery.sdkQuery() else {
             searching = false
             return
         }
