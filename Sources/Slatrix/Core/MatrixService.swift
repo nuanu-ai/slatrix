@@ -941,7 +941,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let service = try await newClient.syncService().withOfflineMode().finish()
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         roomSubscriptions.attach(service.roomListService())
-        try await connectionRecovery.attach(service) { [weak self] feedback in
+        try await connectionRecovery.attach(service, client: newClient) { [weak self] feedback in
             guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
             self.connectionDetail = feedback.detail
             self.connectionErrorMessage = feedback.errorMessage

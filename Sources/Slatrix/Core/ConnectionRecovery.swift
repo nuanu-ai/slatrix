@@ -36,6 +36,7 @@ final class ConnectionRecovery {
     private var generation = UUID()
     private var attachmentRequest = UUID()
     private var service: SyncService?
+    private var client: Client?
     private var handle: TaskHandle?
     private var attempt: Attempt?
     private var revision = 0
@@ -47,12 +48,15 @@ final class ConnectionRecovery {
     private(set) var feedback = MatrixConnectionFeedback(
         state: .idle, isRetrying: false, canRetry: false, detail: "Disconnected", errorMessage: nil)
 
-    func attach(_ service: SyncService, onUpdate: @escaping (MatrixConnectionFeedback) -> Void) async throws {
+    func attach(
+        _ service: SyncService, client: Client? = nil, onUpdate: @escaping (MatrixConnectionFeedback) -> Void
+    ) async throws {
         let request = UUID()
         attachmentRequest = request
         await stopCurrent()
         guard attachmentRequest == request else { throw CancellationError() }
         self.service = service
+        self.client = client
         self.onUpdate = onUpdate
         let account = generation
         publish()
@@ -63,6 +67,10 @@ final class ConnectionRecovery {
                         return
                     }
                     self.revision = revision
+                    // A network error pauses a room's send queue; what waited there goes out once sync is back.
+                    if state == .running, self.sdkState != .running, let client = self.client {
+                        Task { await client.enableAllSendQueues(enable: true) }
+                    }
                     self.sdkState = state
                     self.publish()
                     self.scheduleAutomaticRetry()
@@ -149,6 +157,7 @@ final class ConnectionRecovery {
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
         wakeObserver = nil
         service = nil
+        client = nil
         attempt = nil
         revision = 0
         sdkState = nil
