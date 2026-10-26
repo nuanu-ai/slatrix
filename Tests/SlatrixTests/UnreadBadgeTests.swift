@@ -24,6 +24,7 @@ struct UnreadBadgeTests {
             (room(messages: 3), .bold),
             (room(notifications: 2), .bold),
             (room(messages: 5, mentions: 2), .count("2")),
+            (room(mentions: 99), .count("99")),
             (room(mentions: 100), .count("99+")),
             (room(marked: true), .bold),
             (room(direct: true, messages: 3), .count("3")),

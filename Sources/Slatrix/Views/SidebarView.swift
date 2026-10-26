@@ -348,6 +348,11 @@ private struct SidebarRoomRow: View, Equatable {
             .modifier(SidebarRowFill(selected: selected))
         }.buttonStyle(.row).padding(.horizontal, m.sp8).help(room.name)
             .accessibilityAddTraits(selected ? .isSelected : [])
+            // Bold and dimming don't reach VoiceOver.
+            .accessibilityValue(
+                [badge != .none ? "Unread" : nil, room.muted ? "Muted" : nil].compactMap(\.self)
+                    .joined(separator: ", ")
+            )
             .contextMenu {
                 Button("Mark unread") { onMarkUnread(room) }.disabled(isPreview || room.membership != "join")
                 Button("Mark read") { onMarkRead(room) }.disabled(isPreview || room.membership != "join")
