@@ -72,4 +72,41 @@ struct ComposerHostedTests {
         editor.deleteBackward(nil)
         #expect(editor.string == "Hi  " && draft.text == "Hi  ")
     }
+
+    @Test("Staged images show as thumbnails that land without changing the composer's height")
+    func trayThumbnailsKeepHeight() async throws {
+        let scratch = try TemporaryDirectory()
+        let staged = try await ComposerAttachmentImporter.stage(
+            .files([
+                try scratch.png("wide.png", width: 1_600, height: 900),
+                try scratch.png("tall.png", width: 600, height: 1_200), try scratch.file("notes.txt"),
+            ]), existing: [])
+        defer { ComposerAttachmentImporter.discard(staged) }
+        let (hosting, window) = host(
+            MessageComposer(
+                text: .constant(""), placeholder: "Message #team", members: [], onSend: { _, _ in },
+                onTyping: { _ in }, queuedFiles: .constant(staged)
+            ).frame(width: 360))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let before = hosting.fittingSize.height
+        #expect(await eventually { showsRed(hosting) })
+        #expect(hosting.fittingSize.height == before)
+    }
+
+    /// Whether any pixel has the fixture images' red; nothing else in the composer is red.
+    private func showsRed(_ view: NSView) -> Bool {
+        view.layoutSubtreeIfNeeded()
+        guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return false }
+        view.cacheDisplay(in: view.bounds, to: image)
+        for x in stride(from: 0, to: image.pixelsWide, by: 2) {
+            for y in stride(from: 0, to: image.pixelsHigh, by: 2) {
+                guard let color = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                if color.redComponent > 0.85 && color.greenComponent < 0.3 && color.blueComponent < 0.3 { return true }
+            }
+        }
+        return false
+    }
 }

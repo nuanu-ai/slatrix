@@ -17,7 +17,7 @@ import os
         /// A loading indicator or placeholder on screen, by place. Every such name ends in `Loading`.
         case appLoading, sidebarLoading, conversationLoading, timelineLoading, historyLoading, threadLoading
         case threadsLoading, searchLoading, pinsLoading, peopleLoading, profileLoading, replyLoading, linkLoading
-        case previewLoading, sheetLoading, attachmentsLoading
+        case sheetLoading, attachmentsLoading
         /// A visible timeline row moved while the reader was not at the newest message.
         case timelineJump
 

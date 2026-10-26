@@ -53,4 +53,24 @@ struct MediaPresentationTests {
         #expect(step("$c", 1) == nil)
         #expect(step("$pdf", 1) == nil)
     }
+
+    @Test("Opened from Files, the viewer steps through the list's files in list order, documents included")
+    @MainActor func filesOrder() {
+        let list = [
+            message("$new", kind: "m.image", mime: "image/png"), message("$link", kind: "m.text"),
+            message("$pdf", kind: "m.file", mime: "application/pdf"),
+            message("$old", kind: "m.video", mime: "video/mp4"),
+        ]
+        // The open conversation, in the other order; Files doesn't step through it.
+        let timeline = Array(list.reversed())
+        let viewer = MediaViewerState()
+        viewer.open(list[2], files: list)
+        viewer.step(1, in: timeline)
+        #expect(viewer.message?.eventID == "$old")
+        viewer.step(1, in: timeline)
+        #expect(viewer.message?.eventID == "$old")
+        viewer.step(-1, in: timeline)
+        viewer.step(-1, in: timeline)
+        #expect(viewer.message?.eventID == "$new")
+    }
 }

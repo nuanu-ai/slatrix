@@ -88,9 +88,12 @@ enum MediaBox {
 }
 
 enum MediaViewerNavigation {
-    /// The image or video `offset` steps from `eventID` in timeline order, or nil past either end.
-    static func neighbor(of eventID: String, by offset: Int, in messages: [ChatMessage]) -> ChatMessage? {
-        let media = messages.filter(\.isViewerMedia)
+    /// The file `offset` steps from `eventID`, or nil past either end: in a timeline its images and videos, in a
+    /// Files list every file, since the viewer previews documents too.
+    static func neighbor(of eventID: String, by offset: Int, in messages: [ChatMessage], files: Bool = false)
+        -> ChatMessage?
+    {
+        let media = messages.filter { files ? $0.attachment != nil && !$0.isRedacted : $0.isViewerMedia }
         guard let index = media.firstIndex(where: { $0.eventID == eventID }), media.indices.contains(index + offset)
         else { return nil }
         return media[index + offset]
@@ -101,24 +104,41 @@ enum MediaViewerNavigation {
 @Observable @MainActor final class MediaViewerState {
     private(set) var message: ChatMessage?
     private(set) var surface = MessageActionTarget.Surface.conversation
+    /// The Files list it was opened from, in the list's order; nil for a timeline.
+    private(set) var files: [ChatMessage]?
 
     func open(_ message: ChatMessage, surface: MessageActionTarget.Surface) {
         self.surface = surface
+        files = nil
+        self.message = message
+    }
+
+    func open(_ message: ChatMessage, files: [ChatMessage]) {
+        surface = .conversation
+        self.files = files
         self.message = message
     }
 
     func close() { message = nil }
 
-    /// Stays put at either end.
-    func step(_ offset: Int, in messages: [ChatMessage]) {
-        guard let message, let next = MediaViewerNavigation.neighbor(of: message.eventID, by: offset, in: messages)
-        else { return }
-        self.message = next
+    /// The file `offset` steps away: in the Files list it came from, or else in `messages`, its timeline.
+    func neighbor(_ offset: Int, in messages: [ChatMessage]) -> ChatMessage? {
+        message.flatMap {
+            MediaViewerNavigation.neighbor(of: $0.eventID, by: offset, in: files ?? messages, files: files != nil)
+        }
     }
 
-    /// Follows the message as its timeline changes, and closes once it is deleted, replaced or gone.
+    /// Stays put at either end.
+    func step(_ offset: Int, in messages: [ChatMessage]) {
+        if let next = neighbor(offset, in: messages) { message = next }
+    }
+
+    /// Follows the message as its timeline or Files list changes, and closes once it is deleted, replaced or gone.
     func update(from messages: [ChatMessage]) {
         guard let current = message else { return }
+        if let files {
+            self.files = files.compactMap { file in messages.first { $0.eventID == file.eventID } }
+        }
         if let found = messages.first(where: { $0.eventID == current.eventID }), !found.isRedacted,
             found.attachment == current.attachment
         {

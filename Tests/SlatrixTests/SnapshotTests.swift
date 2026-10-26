@@ -301,6 +301,59 @@ struct Snapshots {
         try write(await settledImage(hosting), "\(name)-\(theme.rawValue)")
     }
 
+    @Test("Files and the composer's attachment tray", arguments: Theme.allCases)
+    func files(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        matrix.selectPreviewRoom(PreviewMedia.roomID)
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+
+        let files = try ["preview.photo", "preview.gif", "preview.pdf"].map { id in
+            try #require(matrix.messages.first { $0.id == id }?.attachment.flatMap(PreviewMedia.file))
+        }
+        let staged = try await ComposerAttachmentImporter.stage(.files(files), existing: [])
+        defer { ComposerAttachmentImporter.discard(staged) }
+        let views: [(String, CGSize, AnyView)] = [
+            (
+                "tray", CGSize(width: 600, height: 200),
+                AnyView(
+                    MessageComposer(
+                        text: .constant(""), placeholder: "Message #design", members: [], onSend: { _, _ in },
+                        onTyping: { _ in }, queuedFiles: .constant(staged)
+                    ).padding(16))
+            ),
+            (
+                "files", CGSize(width: 900, height: 560),
+                AnyView(
+                    SharedFilesView(
+                        matrix: matrix, service: matrix.sharedFiles, workspaceID: "preview.workspace",
+                        onOpen: { _ in }, onOpenMedia: { _, _ in }))
+            ),
+        ]
+        for (name, size, view) in views {
+            let hosting = NSHostingView(
+                rootView: view.frame(width: size.width).background(appearance.colors.canvas)
+                    .environmentObject(appearance))
+            let window = NSWindow(
+                contentRect: NSRect(origin: CGPoint(x: -20000, y: -20000), size: size), styleMask: .borderless,
+                backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+            window.contentView = hosting
+            window.orderFrontRegardless()
+            defer {
+                window.contentView = nil
+                window.close()
+            }
+            try write(await settledImage(hosting), "\(name)-\(theme.rawValue)")
+        }
+    }
+
     @Test("Emoji picker, empty and searching", arguments: Theme.allCases)
     func emojiPicker(theme: Theme) async throws {
         let (window, hosting) = try themedWindow(

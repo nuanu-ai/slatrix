@@ -2082,11 +2082,16 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     func attachmentSourceRevision(_ message: ChatMessage) -> Data? {
         if isPreview { return message.attachment.map { Data($0.url.utf8) } }
         return shownMedia(message).map { Data($0.media.identity.utf8) }
+            ?? sharedFiles.item(for: message)?.mediaRevision
     }
     func prepareAttachmentPreview(_ message: ChatMessage) async throws -> AttachmentPreviewLease {
         if isPreview {
             guard let url = message.attachment.flatMap(PreviewMedia.file) else { throw MatrixServiceError.preview }
             return AttachmentPreviewLease(url: url, handle: nil) { true }
+        }
+        // A file opened from Files, whose conversation may be closed, comes through Files' own timeline.
+        if shownMedia(message) == nil, let item = sharedFiles.item(for: message) {
+            return try await sharedFiles.preparePreview(item)
         }
         let client = try requireClient()
         guard connectionStopTask == nil, let shown = shownMedia(message),
@@ -2157,6 +2162,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 throw MatrixServiceError.preview
             }
             return data
+        }
+        if mediaSources[message.eventID] == nil, let item = sharedFiles.item(for: message) {
+            return try await sharedFiles.thumbnailData(item)
         }
         let client = try requireClient()
         guard let original = mediaSources[message.eventID] else { throw MatrixServiceError.noRoom }

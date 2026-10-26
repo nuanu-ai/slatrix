@@ -1,4 +1,5 @@
 #if DEBUG
+import ImageIO
 import SwiftUI
 
 /// Every design system component in every state, for review before screens adopt it. Debug builds only:
@@ -221,17 +222,41 @@ struct ComponentGallery: View {
         let message = ChatMessage(
             id: "$guidelines", roomID: "!design:harbor.example", senderID: "@julia:harbor.example",
             senderName: "Julia Park", body: attachment.name, timestamp: .now, kind: "m.file", attachment: attachment)
-        return HStack(alignment: .top, spacing: m.sp40) {
-            HStack(alignment: .top, spacing: m.sp16) {
-                ForEach(FileKind.allCases, id: \.self) { kind in
-                    VStack(spacing: m.sp4) {
-                        FileTypeIcon(kind: kind)
-                        caption(kind.label)
+        return VStack(alignment: .leading, spacing: m.sp24) {
+            HStack(alignment: .top, spacing: m.sp40) {
+                HStack(alignment: .top, spacing: m.sp16) {
+                    ForEach(FileKind.allCases, id: \.self) { kind in
+                        VStack(spacing: m.sp4) {
+                            FileTypeIcon(kind: kind)
+                            caption(kind.label)
+                        }
                     }
                 }
+                AttachmentView(matrix: matrix, message: message, attachment: attachment).frame(width: m(420))
             }
-            AttachmentView(matrix: matrix, message: message, attachment: attachment).frame(width: m(420))
+            VStack(alignment: .leading, spacing: 0) {
+                caption("Rows in Files: resting, hovered, an image and a link")
+                fileRow(.file(.pdf), "Brand guidelines.pdf", "Shared by Julia Park in #design · Oct 24")
+                fileRow(
+                    .file(.spreadsheet), "Q4 budget.xlsx", "Shared by Sam Ortiz in #planning · Oct 22", hovering: true)
+                fileRow(.thumbnail(sampleImage), "launch-hero.png", "Shared by Alex Rivera in #design · Oct 21")
+                fileRow(.link, "https://harbor.example/roadmap", "Shared by Mina Cho in #design · Oct 20", file: false)
+            }.frame(width: m(480))
         }
+    }
+
+    private func fileRow(
+        _ tile: FileRowTile, _ name: String, _ caption: String, hovering: Bool = false, file: Bool = true
+    ) -> some View {
+        FileRow(
+            tile: tile, name: name, caption: caption, onDownload: file ? {} : nil, hovering: hovering, onOpen: {},
+            menu: { Button("Open in default app") {} })
+    }
+
+    private var sampleImage: CGImage? {
+        PreviewMedia.thumbnail(MessageAttachment(name: "launch-hero.png", url: "preview://launch-hero.png"))
+            .flatMap { CGImageSourceCreateWithData($0 as CFData, nil) }
+            .flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
     }
 
     /// Skeleton rows only: the spinner never stops moving, so a snapshot of it never settles.

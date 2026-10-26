@@ -154,7 +154,10 @@ private func file(
     case .video:
         type = .video(
             content: VideoMessageContent(
-                filename: name, caption: nil, formattedCaption: caption, source: source, info: nil))
+                filename: name, caption: nil, formattedCaption: caption, source: source,
+                info: VideoInfo(
+                    duration: 12, height: 720, width: 1_280, mimetype: "video/mp4", size: size, thumbnailInfo: nil,
+                    thumbnailSource: thumbnail, blurhash: nil)))
     case .audio:
         type = .audio(
             content: AudioMessageContent(
@@ -182,7 +185,8 @@ final class SharedFilesTests {
     private let source = Source("mxc://example.org/encrypted-file")
     private let room: SharedRoom
     private let client: SharedClient
-    private let service = SharedFilesService()
+    private let matrix = MatrixService()
+    private var service: SharedFilesService { matrix.sharedFiles }
 
     init() throws {
         temp = try TemporaryDirectory()
@@ -201,9 +205,6 @@ final class SharedFilesTests {
     private func show(_ values: [TimelineItem], until condition: @escaping @MainActor () -> Bool) async {
         room.history.reset(values)
         #expect(await eventually(condition))
-    }
-    private func exists(_ name: String) -> Bool {
-        FileManager.default.fileExists(atPath: temp.path(name).path)
     }
 
     @Test("Files lists the room's files and links from its own timeline, including threads, without sending receipts")
@@ -244,19 +245,15 @@ final class SharedFilesTests {
         await page.value
     }
 
-    @Test("Saving downloads the original encrypted source uncached under a safe name and replaces the file atomically")
-    func savesAtomically() async throws {
+    @Test("A row's file downloads like a conversation's while that is closed: the original, uncached, safely named")
+    func servesClosedConversation() async throws {
         await open()
-        let original = try #require(service.items.first { $0.message.id == "$old" })
-        let destination = temp.path("saved.txt")
-        try Data("existing".utf8).write(to: destination)
-        try await service.saveAttachment(original, to: destination)
-        #expect(try Data(contentsOf: destination) == Data("downloaded bytes".utf8))
+        let row = try #require(service.items.first { $0.message.id == "$old" })
+        #expect(matrix.attachmentSourceRevision(row.message) != nil)
+        let file = try await matrix.prepareAttachmentPreview(row.message)
+        #expect(try Data(contentsOf: file.url) == Data("downloaded bytes".utf8))
         let download = try #require(client.downloads.all.first)
         #expect(download.source === source && !download.cached && download.filename == "report.txt")
-        #expect(
-            try FileManager.default.contentsOfDirectory(atPath: temp.url.path).allSatisfy { !$0.hasPrefix(".slatrix-") }
-        )
     }
 
     @Test("An edit replaces the row, and the old row can no longer download")
@@ -267,9 +264,7 @@ final class SharedFilesTests {
             self.service.items.first?.filename == "edited-name.txt"
         }
         #expect(service.items.count == 1 && service.items[0].message.isEdited)
-        await #expect(throws: MatrixServiceError.self) {
-            try await self.service.saveAttachment(original, to: self.temp.path("stale.txt"))
-        }
+        await #expect(throws: (any Error).self) { _ = try await self.matrix.prepareAttachmentPreview(original.message) }
         #expect(client.downloads.all.isEmpty)
     }
 
@@ -278,9 +273,8 @@ final class SharedFilesTests {
         await open()
         let original = try #require(service.items.first { $0.message.id == "$old" })
         await show([FakeTimelineItem(textEvent("$old", body: "", redacted: true))]) { self.service.items.isEmpty }
-        await #expect(throws: MatrixServiceError.self) {
-            try await self.service.saveAttachment(original, to: self.temp.path("redacted.txt"))
-        }
+        await #expect(throws: (any Error).self) { _ = try await self.matrix.prepareAttachmentPreview(original.message) }
+        #expect(client.downloads.all.isEmpty)
     }
 
     @Test("Images, videos and audio are listed alongside files")
@@ -319,6 +313,18 @@ final class SharedFilesTests {
         #expect(client.thumbnails.all.isEmpty)
     }
 
+    @Test("A video without a poster is never fetched whole as its own thumbnail")
+    func videoWithoutPoster() async {
+        await open()
+        await show([file("$video", source: source, kind: .video)]) {
+            self.service.items.map(\.message.id) == ["$video"]
+        }
+        await #expect(throws: MatrixServiceError.self) {
+            _ = try await self.service.thumbnailData(self.service.items[0])
+        }
+        #expect(client.thumbnails.all.isEmpty)
+    }
+
     @Test("Rich-text links are listed; spoilers and unsafe schemes are not, and a spoiler caption stays hidden")
     func links() async {
         await open()
@@ -340,25 +346,18 @@ final class SharedFilesTests {
         #expect(service.items.first { $0.message.id == "$caption" }?.message.body == "[Spoiler hidden]")
     }
 
-    @Test("A second save of the same file is refused; closing cancels the first without writing or leaving downloads")
+    @Test("Closing cancels a download without leaving its file")
     func closeCancelsDownload() async throws {
         await open()
         let pending = try #require(service.items.first { $0.message.id == "$old" })
         client.downloadGate.arm()
-        let download = Task {
-            try await service.saveAttachment(pending, to: temp.path("closed.txt"))
-        }
+        let download = Task { try await matrix.prepareAttachmentPreview(pending.message) }
         #expect(await eventually { self.client.downloadGate.isWaiting })
-        await #expect(throws: MatrixServiceError.self) {
-            try await self.service.saveAttachment(pending, to: self.temp.path("duplicate.txt"))
-        }
         service.close()
         client.downloadGate.release()
-        await #expect(throws: CancellationError.self) { try await download.value }
+        await #expect(throws: CancellationError.self) { _ = try await download.value }
         #expect(try FileManager.default.contentsOfDirectory(atPath: temp.url.path).allSatisfy { !$0.hasPrefix("sdk-") })
-        #expect(
-            !exists("closed.txt") && service.items.isEmpty && service.errorMessage == nil
-                && service.savingItemIDs.isEmpty)
+        #expect(service.items.isEmpty && service.errorMessage == nil)
     }
 
     @Test("Rows from before the history was reopened cannot act")
@@ -370,18 +369,18 @@ final class SharedFilesTests {
         await #expect(throws: MatrixServiceError.self) { _ = try await self.service.thumbnailData(old) }
     }
 
-    @Test("Signing out during a download cancels it without writing or showing the old account's error")
+    @Test("Signing out during a download cancels it without surfacing the old account's error")
     func signOutDuringDownload() async throws {
         await open()
         let current = try #require(service.items.first { $0.message.id == "$old" })
         client.downloadGate.arm()
         client.failDownload = true
-        let download = Task { try await service.saveAttachment(current, to: temp.path("old.txt")) }
+        let download = Task { try await matrix.prepareAttachmentPreview(current.message) }
         #expect(await eventually { self.client.downloadGate.isWaiting })
         service.attach(nil)
         client.downloadGate.release()
-        await #expect(throws: CancellationError.self) { try await download.value }
-        #expect(service.errorMessage == nil && !exists("old.txt"))
+        await #expect(throws: CancellationError.self) { _ = try await download.value }
+        #expect(service.errorMessage == nil)
     }
 
     @Test("Signing out during setup hides the late setup error and closes every listener without receipts")
@@ -417,5 +416,24 @@ struct SharedContentMappingTests {
         arguments: [("..", "attachment"), ("/private/path/name\n.txt", "name.txt"), ("../report.txt", "report.txt")])
     func safeFilename(input: String, expected: String) {
         #expect(SharedContentMapping.safeFilename(input) == expected)
+    }
+
+    @Test(
+        "A Files row says who shared it, in which channel and when; a direct message needs no place, an old year shows",
+        arguments: [
+            (false, "2026-10-24", "Shared by Alice in #design · Oct 24"),
+            (true, "2026-10-24", "Shared by Alice · Oct 24"),
+            (false, "2025-03-02", "Shared by Alice in #design · Mar 2, 2025"),
+        ])
+    func caption(direct: Bool, day: String, expected: String) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_US")
+        calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let parse = Date.ISO8601FormatStyle().year().month().day()
+        let room = ChatRoom(id: "!design:example.org", name: direct ? "Alice" : "design", isDirect: direct)
+        #expect(
+            SharedContentMapping.caption(
+                sender: "Alice", room: room, date: try parse.parse(day), now: try parse.parse("2026-10-26"),
+                calendar: calendar) == expected)
     }
 }
