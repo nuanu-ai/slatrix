@@ -13,6 +13,8 @@ struct MessageBodyRun: Hashable, Sendable {
     var text: String
     var style: MessageTextStyle = []
     var link: URL? = nil
+    /// The user ID a mention names, or "@room".
+    var mention: String? = nil
 }
 
 struct RenderedMessageBody: Sendable {
@@ -62,7 +64,7 @@ final class MessageBodyRenderer: @unchecked Sendable {
         let key = Key(body: body, html: formattedBody, revealSpoilers: revealSpoilers)
         if let entry = lock.withLock({ cache[key] }) { return entry.result }
         var result = Self.parse(body: body, html: formattedBody, revealSpoilers: revealSpoilers)
-        result.runs = Self.linkified(result.runs)
+        result.runs = Self.linkified(Self.mentioned(result.runs))
         let cost =
             body.utf8.count + (formattedBody?.utf8.count ?? 0) + result.runs.reduce(0) { $0 + $1.text.utf8.count + 128 }
         guard cost <= Self.maximumCacheBytes / 4 else { return result }
@@ -98,24 +100,47 @@ final class MessageBodyRenderer: @unchecked Sendable {
 
     private static let addresses = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 
+    private static let mentions = try? NSRegularExpression(
+        pattern: "(?<![A-Za-z0-9_])(?:" + MatrixID.userPattern + "|@room(?![A-Za-z0-9_:]))")
+
     /// Web and mail addresses typed as plain text become links, as in Slack. Code and existing links keep their text.
     private static func linkified(_ runs: [MessageBodyRun]) -> [MessageBodyRun] {
-        guard let addresses else { return runs }
+        split(runs, by: addresses, containing: ".") { match, text, style in
+            match.url.flatMap { safeLink($0.absoluteString) }.map { MessageBodyRun(text: text, style: style, link: $0) }
+        }
+    }
+
+    /// User IDs and @room typed as plain text become mentions, which read "@localpart" until a view names them.
+    private static func mentioned(_ runs: [MessageBodyRun]) -> [MessageBodyRun] {
+        split(runs, by: mentions, containing: "@") { _, id, style in
+            id == "@room"
+                ? MessageBodyRun(text: id, style: style, mention: id)
+                : MessageBodyRun(
+                    text: "@" + MatrixID.localpart(id), style: style, link: URL(string: MatrixID.permalink(id)),
+                    mention: id)
+        }
+    }
+
+    private static func split(
+        _ runs: [MessageBodyRun], by expression: NSRegularExpression?, containing marker: Character,
+        replace: (NSTextCheckingResult, String, MessageTextStyle) -> MessageBodyRun?
+    ) -> [MessageBodyRun] {
+        guard let expression else { return runs }
         var result: [MessageBodyRun] = []
         for run in runs {
-            guard run.link == nil, !run.style.contains(.code), run.text.contains(".") else {
+            guard run.link == nil, run.mention == nil, !run.style.contains(.code), run.text.contains(marker) else {
                 result.append(run)
                 continue
             }
             let text = run.text as NSString
             var cursor = 0
-            for match in addresses.matches(in: run.text, range: NSRange(location: 0, length: text.length)) {
-                guard let url = match.url, let link = safeLink(url.absoluteString) else { continue }
+            for match in expression.matches(in: run.text, range: NSRange(location: 0, length: text.length)) {
+                guard let replaced = replace(match, text.substring(with: match.range), run.style) else { continue }
                 if match.range.location > cursor {
                     let before = NSRange(location: cursor, length: match.range.location - cursor)
                     result.append(MessageBodyRun(text: text.substring(with: before), style: run.style))
                 }
-                result.append(MessageBodyRun(text: text.substring(with: match.range), style: run.style, link: link))
+                result.append(replaced)
                 cursor = NSMaxRange(match.range)
             }
             if cursor < text.length {
@@ -125,10 +150,38 @@ final class MessageBodyRenderer: @unchecked Sendable {
         return result
     }
 
+    /// The person a matrix.to or matrix: link points at, when it points at a person.
+    private static func mentionedUser(_ link: URL?) -> String? {
+        guard let link, let parts = URLComponents(url: link, resolvingAgainstBaseURL: false) else { return nil }
+        let id: String
+        if parts.scheme == "https", parts.host?.lowercased() == "matrix.to", let fragment = parts.fragment,
+            fragment.hasPrefix("/@")
+        {
+            id = String(fragment.dropFirst().prefix { $0 != "?" })
+        } else if parts.scheme == "matrix", parts.path.hasPrefix("u/") {
+            id = "@" + parts.path.dropFirst(2)
+        } else {
+            return nil
+        }
+        return MatrixID.isUser(id) ? id : nil
+    }
+
+    /// A mention that reads "@localpart" shows the member's display name once the conversation knows it.
+    static func named(_ runs: [MessageBodyRun], name: (String) -> String?) -> [MessageBodyRun] {
+        runs.map { run in
+            guard let id = run.mention, run.text == "@" + MatrixID.localpart(id), let name = name(id), !name.isEmpty
+            else { return run }
+            var named = run
+            named.text = "@" + name
+            return named
+        }
+    }
+
     private enum ParseFailure: Error { case limit, unsupported }
     private struct Context {
         var style: MessageTextStyle = []
         var link: URL? = nil
+        var mention: String? = nil
         var preformatted = false
         var listDepth = 0
         var quoteDepth = 0
@@ -161,10 +214,14 @@ final class MessageBodyRenderer: @unchecked Sendable {
             guard !normalized.isEmpty else { return }
             outputUnits += normalized.utf16.count
             guard outputUnits <= MessageBodyRenderer.maximumOutputUnits else { throw ParseFailure.limit }
-            if let last = runs.indices.last, runs[last].style == context.style && runs[last].link == context.link {
+            if let last = runs.indices.last, runs[last].style == context.style && runs[last].link == context.link,
+                runs[last].mention == context.mention
+            {
                 runs[last].text += normalized
             } else {
-                runs.append(MessageBodyRun(text: normalized, style: context.style, link: context.link))
+                runs.append(
+                    MessageBodyRun(text: normalized, style: context.style, link: context.link, mention: context.mention)
+                )
             }
         }
 
@@ -278,7 +335,15 @@ final class MessageBodyRenderer: @unchecked Sendable {
         case "pre":
             next.style.insert(.code)
             next.preformatted = true
-        case "a": next.link = element.attribute(forName: "href").flatMap { safeLink($0.stringValue ?? "") }
+        case "a":
+            next.link = element.attribute(forName: "href").flatMap { safeLink($0.stringValue ?? "") }
+            if let id = mentionedUser(next.link) {
+                next.mention = id
+                let name = (element.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let shown = name.isEmpty || name == id ? MatrixID.localpart(id) : String(name.drop { $0 == "@" })
+                try builder.append("@" + shown, context: next)
+                return
+            }
         case "blockquote": next.quoteDepth += 1
         case "br":
             try builder.newline(force: true)

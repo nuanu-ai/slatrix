@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// A count in a filled pill that is round for one digit: red for mentions, neutral for other unread messages.
+/// Slack's red count in a pill that is round for one digit: mentions, and unread direct messages.
 struct CountBadge: View {
     let text: String
-    var mention = true
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
@@ -11,8 +10,7 @@ struct CountBadge: View {
         let colors = appearance.colors
         Text(text).font(m.font(.caption, .bold)).monospacedDigit().lineLimit(1)
             .padding(.horizontal, m.sp4).frame(minWidth: m(18), minHeight: m(18))
-            .background(mention ? colors.mention : colors.textSecondary, in: Capsule())
-            .foregroundStyle(mention ? colors.onAccent : colors.canvas)
+            .background(colors.mention, in: Capsule()).foregroundStyle(colors.onAccent)
     }
 }
 

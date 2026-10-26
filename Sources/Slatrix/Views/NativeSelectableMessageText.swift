@@ -1,6 +1,52 @@
 import AppKit
 import SwiftUI
 
+/// How mention pills look to this reader: a mention of `me`, or of the room, is the yellow one.
+struct MentionPalette: Equatable {
+    var me: String?
+    var text: NSColor
+    var fill: NSColor
+    var ownText: NSColor
+    var ownFill: NSColor
+}
+
+extension NSAttributedString.Key {
+    /// A mention pill's fill, which `PillLayoutManager` draws rounded behind the text.
+    static let mentionPill = NSAttributedString.Key("SlatrixMentionPill")
+}
+
+/// Draws `.mentionPill` fills as rounded pills, a little wider than their text and as tall as the line.
+final class PillLayoutManager: NSLayoutManager {
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        if let storage = textStorage, let container = textContainers.first {
+            let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+            storage.enumerateAttribute(.mentionPill, in: characters) { value, range, _ in
+                guard let fill = value as? NSColor,
+                    let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+                else { return }
+                let spacing =
+                    (storage.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle)?
+                    .lineSpacing ?? 0
+                // In proportion to the font, so pills scale with zoom: 2 pt of padding and a 3 pt radius at 15 pt.
+                let padding = font.pointSize * 0.13
+                let radius = font.pointSize * 0.2
+                fill.setFill()
+                enumerateEnclosingRects(
+                    forGlyphRange: glyphRange(forCharacterRange: range, actualCharacterRange: nil),
+                    withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: container
+                ) { rect, _ in
+                    let pill = NSRect(
+                        x: rect.minX - padding + origin.x, y: rect.minY + origin.y, width: rect.width + 2 * padding,
+                        height: rect.height - spacing)
+                    NSBezierPath(roundedRect: pill, xRadius: radius, yRadius: radius).fill()
+                }
+            }
+        }
+        // After the pills, so a selection highlight covers them.
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+    }
+}
+
 struct NativeSelectableMessageText: NSViewRepresentable {
     /// Layout width until SwiftUI proposes one; never seen on screen.
     private static let fallbackWidth: CGFloat = 480
@@ -8,6 +54,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
     var fontSize: Double
     var textColor: NSColor
     var linkColor: NSColor
+    var mentions: MentionPalette? = nil
     var menuCommands: () -> [MessageMenuCommand]
     var onOpenURL: (URL) -> Void
     @Environment(\.lineLimit) private var lineLimit
@@ -17,7 +64,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             size: NSSize(width: Self.fallbackWidth, height: CGFloat.greatestFiniteMagnitude))
         container.lineFragmentPadding = 0
         container.widthTracksTextView = true
-        let layout = NSLayoutManager()
+        let layout = PillLayoutManager()
         layout.addTextContainer(container)
         let storage = NSTextStorage()
         storage.addLayoutManager(layout)
@@ -47,11 +94,14 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         view.menuCommands = menuCommands
         view.textContainer?.maximumNumberOfLines = max(0, lineLimit ?? 0)
         view.textContainer?.lineBreakMode = lineLimit == nil ? .byWordWrapping : .byTruncatingTail
-        view.linkTextAttributes = [.foregroundColor: linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
+        // Each run styles its own link, so a mention pill isn't underlined until the pointer is over it.
+        view.linkTextAttributes = [.cursor: NSCursor.pointingHand]
         if context.coordinator.runs != runs || context.coordinator.fontSize != fontSize
             || context.coordinator.textColor != textColor || context.coordinator.linkColor != linkColor
+            || context.coordinator.mentions != mentions
         {
-            let attributed = Self.attributed(runs, fontSize: fontSize, textColor: textColor, linkColor: linkColor)
+            let attributed = Self.attributed(
+                runs, fontSize: fontSize, textColor: textColor, linkColor: linkColor, mentions: mentions)
             let selection =
                 view.string == attributed.string
                 ? view.selectedRanges : [NSValue(range: NSRange(location: 0, length: 0))]
@@ -61,6 +111,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             context.coordinator.fontSize = fontSize
             context.coordinator.textColor = textColor
             context.coordinator.linkColor = linkColor
+            context.coordinator.mentions = mentions
         }
     }
 
@@ -89,6 +140,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         var fontSize: Double?
         var textColor: NSColor?
         var linkColor: NSColor?
+        var mentions: MentionPalette?
         /// Laid-out sizes by width for the current text; a timeline row is measured at one or two widths, many times.
         var sizes: [CGFloat: CGSize] = [:]
         var onOpenURL: (URL) -> Void
@@ -101,9 +153,10 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         }
     }
 
-    static func attributed(_ runs: [MessageBodyRun], fontSize: Double, textColor: NSColor, linkColor: NSColor)
-        -> NSAttributedString
-    {
+    static func attributed(
+        _ runs: [MessageBodyRun], fontSize: Double, textColor: NSColor, linkColor: NSColor,
+        mentions: MentionPalette? = nil
+    ) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = fontSize / 5  // 3 pt at the 15 pt body, scaling with zoom.
@@ -126,6 +179,12 @@ struct NativeSelectableMessageText: NSViewRepresentable {
                 attributes[.link] = link
                 attributes[.foregroundColor] = linkColor
                 attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
+            if let mention = run.mention, let mentions {
+                let own = mention == mentions.me || mention == "@room"
+                attributes[.foregroundColor] = own ? mentions.ownText : mentions.text
+                attributes[.underlineStyle] = nil
+                attributes[.mentionPill] = own ? mentions.ownFill : mentions.fill
             }
             result.append(NSAttributedString(string: run.text, attributes: attributes))
         }
@@ -152,11 +211,53 @@ final class MessageTextView: NSTextView {
     }
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
+        underlineMention(at: event)
         let over = isUnderPointer(event)
         guard over != pointerOverText else { return }
         pointerOverText = over
         (over ? NSCursor.iBeam : NSCursor.arrow).set()
     }
+
+    // Slack underlines the mention under the pointer.
+    private var underlinedMention: NSRange?
+    private lazy var exitTracking = NSTrackingArea(
+        rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if !trackingAreas.contains(exitTracking) { addTrackingArea(exitTracking) }
+    }
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        underlineMention(at: nil)
+    }
+    private func underlineMention(at event: NSEvent?) {
+        guard let layout = layoutManager, let container = textContainer, let storage = textStorage else { return }
+        var mention: NSRange?
+        if let event {
+            let point = convert(event.locationInWindow, from: nil)
+            let glyph = layout.glyphIndex(for: point, in: container)
+            var range = NSRange()
+            if glyph < layout.numberOfGlyphs,
+                layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(point),
+                storage.attribute(
+                    .mentionPill, at: layout.characterIndexForGlyph(at: glyph), longestEffectiveRange: &range,
+                    in: NSRange(location: 0, length: storage.length)) != nil
+            {
+                mention = range
+            }
+        }
+        guard mention != underlinedMention else { return }
+        if let old = underlinedMention {
+            let valid = NSIntersectionRange(old, NSRange(location: 0, length: storage.length))
+            layout.removeTemporaryAttribute(.underlineStyle, forCharacterRange: valid)
+        }
+        if let mention {
+            layout.addTemporaryAttribute(
+                .underlineStyle, value: NSUnderlineStyle.single.rawValue, forCharacterRange: mention)
+        }
+        underlinedMention = mention
+    }
+
     private func isUnderPointer(_ event: NSEvent) -> Bool {
         guard let content = window?.contentView else { return false }
         let point = content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow

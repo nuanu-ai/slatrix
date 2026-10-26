@@ -4,9 +4,11 @@ import Testing
 
 struct UnreadBadgeTests {
     private static func room(
-        messages: Int = 0, notifications: Int = 0, mentions: Int = 0, muted: Bool = false, marked: Bool = false
+        direct: Bool = false, messages: Int = 0, notifications: Int = 0, mentions: Int = 0, muted: Bool = false,
+        marked: Bool = false
     ) -> ChatRoom {
         var result = ChatRoom(id: "!room", name: "room")
+        result.isDirect = direct
         result.unreadMessages = messages
         result.unread = notifications
         result.mentions = mentions
@@ -16,25 +18,35 @@ struct UnreadBadgeTests {
     }
 
     @Test(
-        "A conversation's badge shows mentions first, then its unread count, then a marked-unread dot",
+        "As in Slack, mentions and unread direct messages get a red count; other unread channels only go bold",
         arguments: [
             (room(), UnreadBadge.none),
-            (room(messages: 3), .messages("3")),
-            (room(notifications: 2), .messages("2")),
-            (room(messages: 4, notifications: 2), .messages("4")),
-            (room(messages: 5, mentions: 2), .mentions("2")),
-            (room(marked: true), .marked),
-            (room(messages: 1, marked: true), .messages("1")),
-            (room(messages: 120), .messages("99+")),
-            (room(mentions: 100), .mentions("99+")),
+            (room(messages: 3), .bold),
+            (room(notifications: 2), .bold),
+            (room(messages: 5, mentions: 2), .count("2")),
+            (room(mentions: 99), .count("99")),
+            (room(mentions: 100), .count("99+")),
+            (room(marked: true), .bold),
+            (room(direct: true, messages: 3), .count("3")),
+            (room(direct: true, notifications: 2), .count("2")),
+            (room(direct: true, messages: 4, notifications: 2), .count("4")),
+            (room(direct: true, messages: 120), .count("99+")),
+            (room(direct: true, marked: true), .bold),
         ])
     func badge(room: ChatRoom, expected: UnreadBadge) {
         #expect(UnreadBadge(room) == expected)
     }
 
-    @Test("A muted conversation shows only its mentions, as in Slack")
-    func muted() {
-        #expect(UnreadBadge(Self.room(messages: 7, muted: true)) == .none)
-        #expect(UnreadBadge(Self.room(messages: 7, mentions: 1, muted: true)) == .mentions("1"))
+    @Test(
+        "A muted conversation shows nothing unless it mentions you or was marked unread",
+        arguments: [
+            (room(messages: 7, muted: true), UnreadBadge.none),
+            (room(direct: true, messages: 7, muted: true), .none),
+            (room(messages: 7, mentions: 1, muted: true), .count("1")),
+            (room(direct: true, messages: 7, mentions: 1, muted: true), .count("1")),
+            (room(muted: true, marked: true), .bold),
+        ])
+    func muted(room: ChatRoom, expected: UnreadBadge) {
+        #expect(UnreadBadge(room) == expected)
     }
 }

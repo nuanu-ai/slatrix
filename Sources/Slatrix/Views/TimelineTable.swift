@@ -930,6 +930,8 @@ struct TimelineRow: View, Equatable {
                 }
                 .environment(\.metrics, metrics).environmentObject(appearance)
                 .environment(\.openURL, context.openURL)
+                .environment(
+                    \.mentions, MentionContext(me: context.matrix?.user?.id, members: context.matrix?.members ?? []))
         }
     }
 

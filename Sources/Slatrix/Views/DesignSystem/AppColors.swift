@@ -70,6 +70,7 @@ struct AppColors {
 
     var hover: Color { Color(hex: dark ? 0xffffff : 0x1d1c1d).opacity(dark ? 0.08 : 0.06) }
     var pressed: Color { Color(hex: dark ? 0xffffff : 0x1d1c1d).opacity(dark ? 0.14 : 0.11) }
+    /// A quiet tint for what is picked on the canvas: my reactions, search results, the open Preferences tab.
     var selection: Color {
         switch palette {
         case .slate: Color(hex: dark ? 0x293b94 : 0xe7ebff)
@@ -78,6 +79,16 @@ struct AppColors {
         case .forest: Color(hex: dark ? 0x2d6654 : 0xdeeee5)
         }
     }
+    /// The open conversation in the sidebar: Slack's strong fill, under `selectionText`.
+    var selectionStrong: Color {
+        switch palette {
+        case .slate: Color(hex: 0x1164a3)
+        case .aubergine: Color(hex: dark ? 0x7c3085 : 0x611f69)
+        case .ocean: Color(hex: dark ? 0x0f7aa8 : 0x0b5c8a)
+        case .forest: Color(hex: dark ? 0x2a7d5f : 0x1d6b50)
+        }
+    }
+    var selectionText: Color { .white }
     /// The keyboard focus ring around buttons, rows and fields; the same in every theme, so views without the
     /// appearance store, like an AppKit popover's, can draw it.
     static let focusRing = Color(hex: 0x1d9bd1)
@@ -98,6 +109,12 @@ struct AppColors {
     var warning: Color { Color(hex: dark ? 0xf0a030 : 0xc46800) }
     /// Mention badges: the same red as destructive, as in Slack.
     var mention: Color { destructive }
+    /// An @Name pill in a message or the composer: Slack's link blue on a pale blue fill.
+    var mentionText: Color { Color(hex: dark ? 0x1d9bd1 : 0x1264a3) }
+    var mentionFill: Color { Color(hex: 0x1d9bd1).opacity(dark ? 0.18 : 0.1) }
+    /// The pill of a mention that notifies you, or everyone: Slack's yellow.
+    var mentionYouText: Color { dark ? Color(hex: 0xf2c744) : mentionText }
+    var mentionYouFill: Color { Color(hex: 0xf2c744).opacity(dark ? 0.2 : 0.4) }
     var presenceActive: Color { Color(hex: 0x2bac76) }
     var presenceAway: Color { Color(hex: dark ? 0xabadb1 : 0x616061) }
 

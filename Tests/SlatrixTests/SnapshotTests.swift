@@ -70,6 +70,42 @@ struct Snapshots {
         try write(await settledImage(hosting), "profile-\(name)")
     }
 
+    @Test("Sidebar", arguments: SidebarPalette.allCases, Theme.allCases)
+    func sidebar(palette: SidebarPalette, theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        let savedPalette = UserDefaults.standard.object(forKey: "appearance.palette")
+        defer {
+            UserDefaults.standard.set(savedMode, forKey: "appearance.mode")
+            UserDefaults.standard.set(savedPalette, forKey: "appearance.palette")
+        }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        appearance.palette = palette
+        let sidebar = SidebarView(
+            matrix: matrix, route: .constant(.home), workspaceID: .constant("preview.workspace"),
+            search: .constant(""), draftRoomIDs: ["preview.room.3"], onSelect: { _ in }, onCreate: { _ in },
+            onPreferences: {}, onProfile: {}, onSignOut: {}, onMarkUnread: { _ in }, onMarkRead: { _ in },
+            onInviteWorkspace: { _ in }, onEditWorkspace: { _ in }, onNotifications: { _ in }, onBrowseChannels: {})
+        let hosting = NSHostingView(
+            rootView: sidebar.frame(width: 68 + 280, height: 760).environmentObject(appearance))
+        let window = NSWindow(
+            contentRect: NSRect(x: -20000, y: -20000, width: 68 + 280, height: 760), styleMask: .borderless,
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        try write(await settledImage(hosting), "sidebar-\(palette.rawValue)-\(theme.rawValue)")
+    }
+
     @Test("Component gallery", arguments: Theme.allCases)
     func gallery(theme: Theme) async throws {
         _ = NSApplication.shared
@@ -91,6 +127,52 @@ struct Snapshots {
             window.close()
         }
         try write(await settledImage(hosting), "gallery-\(theme.rawValue)")
+    }
+
+    @Test("Mentions in messages and the composer", arguments: Theme.allCases)
+    func mentions(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        func message(_ sender: String, _ body: String, html: String? = nil) -> ChatMessage {
+            ChatMessage(
+                id: sender + body, roomID: "!room:example.org", senderID: "@\(sender.lowercased()):example.org",
+                senderName: sender, body: body, formattedBody: html,
+                timestamp: Date(timeIntervalSince1970: 1_800_000_000))
+        }
+        let alice = "<a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a>"
+        let me = "<a href=\"https://matrix.to/#/@me:example.org\">Dmitry</a>"
+        let view = VStack(alignment: .leading, spacing: 0) {
+            MessageRow(message: message("Bob", "-", html: "Hey \(alice), can you review the deck before standup?"))
+            MessageRow(message: message("Carol", "-", html: "\(me) the build is green, @room please pull"))
+            MessageRow(message: message("Dave", "Pinging @carol:example.org and @erin:example.org about it"))
+            MessageComposer(
+                text: .constant("Thanks [Alice Liddell](https://matrix.to/#/@alice:example.org) "),
+                placeholder: "Message #design", members: [], onSend: { _, _ in }, onTyping: { _ in }
+            ).padding(16)
+        }
+        .frame(width: 560).background(appearance.colors.canvas)
+        .environment(
+            \.mentions,
+            MentionContext(me: "@me:example.org", members: [ChatUser(id: "@carol:example.org", name: "Carol Chen")])
+        )
+        .environmentObject(appearance)
+        let hosting = NSHostingView(rootView: view)
+        let window = NSWindow(
+            contentRect: NSRect(origin: CGPoint(x: -20000, y: -20000), size: hosting.fittingSize),
+            styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        try write(await settledImage(hosting), "mentions-\(theme.rawValue)")
     }
 
     @Test("Attachments and the media viewer", arguments: Theme.allCases)

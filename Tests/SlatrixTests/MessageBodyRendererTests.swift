@@ -193,4 +193,54 @@ struct MessageBodyRendererTests {
         #expect(render(html, body: "secret 2^3").plainText == "[Spoiler hidden]")
         #expect(render(html, body: "secret 2^3", reveal: true).plainText == "secret 2^3")
     }
+
+    @Test(
+        "A link to a person reads @ and the link's text and carries their ID",
+        arguments: [
+            "https://matrix.to/#/@alice:example.org", "https://matrix.to/#/%40alice%3Aexample.org?via=example.org",
+            "matrix:u/alice:example.org?action=chat",
+        ])
+    func personLink(href: String) {
+        let runs = render("<p>Hi <a href=\"\(href)\">Alice</a>!</p>").runs
+        #expect(runs.map(\.text).joined() == "Hi @Alice!")
+        #expect(runs.first { $0.text == "@Alice" }?.mention == "@alice:example.org")
+    }
+
+    @Test("A bare ID reads @ and its localpart, and @room mentions everyone")
+    func bareMentions() {
+        let runs = render(nil, body: "@room ping @alice:example.org.").runs
+        #expect(runs.map(\.text).joined() == "@room ping @alice.")
+        #expect(runs.compactMap(\.mention) == ["@room", "@alice:example.org"])
+    }
+
+    @Test("Mentions in code, and addresses that only look like mentions, stay text")
+    func notMentions() {
+        let runs = render(
+            "<p><code>@alice:example.org</code> bob@example.org.com email@room.org @roommate</p><pre>@room</pre>"
+        ).runs
+        #expect(runs.allSatisfy { $0.mention == nil })
+    }
+
+    @Test(
+        "A person link with an unsafe or foreign target is not a mention",
+        arguments: ["javascript://matrix.to/#/@alice:example.org", "https://evil.example/#/@alice:example.org"])
+    func foreignPersonLink(href: String) {
+        let runs = render("<a href=\"\(href)\">Alice</a>").runs
+        #expect(runs.map(\.text).joined() == "Alice" && runs.allSatisfy { $0.mention == nil })
+        #expect(runs.allSatisfy { $0.link == nil || $0.link?.host == "evil.example" })
+    }
+
+    @Test("A bare ID shows the member's name when the conversation knows it; a linked name stays as sent")
+    func memberNames() {
+        let names = ["@alice:example.org": "Alice Liddell", "@bob:example.org": "Robert"]
+        let bare = MessageBodyRenderer.named(render(nil, body: "@alice:example.org and @carol:example.org").runs) {
+            names[$0]
+        }
+        #expect(bare.map(\.text).joined() == "@Alice Liddell and @carol")
+        let linked = MessageBodyRenderer.named(render("<a href='https://matrix.to/#/@bob:example.org'>Bobby</a>").runs)
+        {
+            names[$0]
+        }
+        #expect(linked.map(\.text).joined() == "@Bobby")
+    }
 }

@@ -18,8 +18,9 @@ import Foundation
                 id: "preview.room.\(index)", name: name,
                 topic: index == 0
                     ? "A place for the team. Share ideas, ask questions, and keep things moving."
-                    : "Everything about \(name.lowercased()).", unread: index == 2 ? 3 : 0, favorite: index == 0,
-                memberCount: 4, spaceIDs: ["preview.workspace"])
+                    : "Everything about \(name.lowercased()).", unread: [2, 7, 8].contains(index) ? 3 : 0,
+                mentions: index == 7 ? 1 : 0, favorite: index == 0, muted: index == 8, memberCount: 4,
+                spaceIDs: ["preview.workspace"])
         }
         rooms += ["Brand", "Launch"].enumerated().map { index, name in
             ChatRoom(
@@ -28,7 +29,9 @@ import Foundation
         }
         rooms.append(
             contentsOf: ["Alex", "Julia", "Sam"].enumerated().map { index, name in
-                ChatRoom(id: "preview.dm.\(index)", name: name, isDirect: true, isEncrypted: true, memberCount: 2)
+                ChatRoom(
+                    id: "preview.dm.\(index)", name: name, isDirect: true, isEncrypted: true,
+                    unreadMessages: index == 1 ? 2 : 0, memberCount: 2)
             })
         members = [
             ChatUser(id: "preview.alex", name: "Alex"),

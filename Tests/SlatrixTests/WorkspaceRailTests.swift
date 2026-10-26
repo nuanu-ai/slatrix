@@ -5,7 +5,7 @@ import Testing
 struct WorkspaceRailTests {
     private static func room(
         _ id: String, spaces: [String] = [], direct: Bool = false, unread: Int = 0, mentions: Int = 0,
-        muted: Bool = false, membership: String = "join"
+        muted: Bool = false, marked: Bool = false, membership: String = "join"
     ) -> ChatRoom {
         var result = ChatRoom(id: id, name: id)
         result.spaceIDs = spaces
@@ -13,6 +13,7 @@ struct WorkspaceRailTests {
         result.unreadMessages = unread
         result.mentions = mentions
         result.muted = muted
+        result.isMarkedUnread = marked
         result.membership = membership
         return result
     }
@@ -33,28 +34,30 @@ struct WorkspaceRailTests {
     }
 
     @Test(
-        "A workspace icon counts its channels' mentions, or shows a dot for unread channels that are not muted",
+        "A workspace icon counts its channels' mentions, or goes bold when one of its channel rows would",
         arguments: [
-            ([room("a", spaces: ["!lab"], unread: 4)], WorkspaceRail.Badge.unread),
+            ([room("a", spaces: ["!lab"], unread: 4)], UnreadBadge.bold),
             (
                 [room("a", spaces: ["!lab"], unread: 4, mentions: 2), room("b", spaces: ["!lab"], mentions: 1)],
-                .mentions(3)
+                .count("3")
             ),
-            ([room("a", spaces: ["!lab"], unread: 4, muted: true)], .quiet),
-            ([room("a", spaces: ["!lab"], mentions: 1, muted: true)], .mentions(1)),
+            ([room("a", spaces: ["!lab"], mentions: 60), room("b", spaces: ["!lab"], mentions: 60)], .count("99+")),
+            ([room("a", spaces: ["!lab"], unread: 4, muted: true)], .none),
+            ([room("a", spaces: ["!lab"], muted: true, marked: true)], .bold),
+            ([room("a", spaces: ["!lab"], mentions: 1, muted: true)], .count("1")),
             // Direct messages show in every workspace, so they mark none of them.
-            ([room("dm", spaces: ["!lab"], direct: true, mentions: 1)], .quiet),
-            ([room("a", spaces: ["!test"], mentions: 1)], .quiet),
-            ([room("a", spaces: ["!lab"], mentions: 1, membership: "invite")], .quiet),
+            ([room("dm", spaces: ["!lab"], direct: true, unread: 3, mentions: 1)], .none),
+            ([room("a", spaces: ["!test"], mentions: 1)], .none),
+            ([room("a", spaces: ["!lab"], mentions: 1, membership: "invite")], .none),
         ])
-    func badge(rooms: [ChatRoom], expected: WorkspaceRail.Badge) {
+    func badge(rooms: [ChatRoom], expected: UnreadBadge) {
         #expect(WorkspaceRail.badge("!lab", rooms: rooms) == expected)
     }
 
     @Test("All counts only the channels that belong to no workspace")
     func allBadge() {
         let rooms = [Self.room("a", spaces: ["!lab"], mentions: 5), Self.room("orphan", mentions: 1)]
-        #expect(WorkspaceRail.badge(nil, rooms: rooms) == .mentions(1))
+        #expect(WorkspaceRail.badge(nil, rooms: rooms) == .count("1"))
     }
 
     private static let alpha = Workspace(id: "!alpha", name: "Alpha")

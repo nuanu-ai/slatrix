@@ -642,12 +642,15 @@ extension TimelineRowContext {
     {
         let message = row.message
         let own = message.senderID == matrix?.user?.id
-        let body = message.body
         let copyText = MessageMenuCommand(
             id: "copy-text", title: "Copy text",
-            perform: {
+            perform: { [members = matrix?.members ?? []] in
+                // The text as shown, so a mention copies as "@Name", never as its link or ID.
+                let rendered = MessageBodyRenderer.shared.render(
+                    body: message.body, formattedBody: message.formattedBody, revealSpoilers: true)
+                let runs = MessageBodyRenderer.named(rendered.runs) { id in members.first { $0.id == id }?.name }
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(body, forType: .string)
+                NSPasteboard.general.setString(runs.map(\.text).joined(), forType: .string)
             })
         var commands: [MessageMenuCommand] = []
         if own && message.sendState != "sent" {

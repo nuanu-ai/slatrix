@@ -13,6 +13,8 @@ struct SidebarView: View {
     var onSelect: (String) -> Void
     var onCreate: (CreationKind) -> Void
     var onPreferences: () -> Void
+    var onProfile: () -> Void
+    var onSignOut: () -> Void
     var onMarkUnread: (ChatRoom) -> Void
     var onMarkRead: (ChatRoom) -> Void
     var onInviteWorkspace: (String) -> Void
@@ -67,25 +69,24 @@ struct SidebarView: View {
                     shortcut(.directory, label: "People", count: nil)
                     Divider().overlay(colors.border).padding(.horizontal, m.sp12).padding(.vertical, m.sp12)
                     if visibleRooms.contains(where: \.favorite) {
-                        roomSection("Starred", symbol: "star", rooms: visibleRooms.filter(\.favorite))
+                        roomSection("Starred", rooms: visibleRooms.filter(\.favorite)) { EmptyView() }
                     }
                     roomSection(
-                        "Channels", symbol: "number", rooms: visibleRooms.filter { !$0.isDirect && !$0.favorite })
-                    Button(action: onBrowseChannels) {
-                        Label("Browse channels", systemImage: "magnifyingglass").font(m.font(.body)).frame(
-                            maxWidth: .infinity, alignment: .leading
-                        ).padding(.leading, m.sp32).frame(height: m.row)
-                    }.buttonStyle(.row).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp8)
+                        "Channels", rooms: visibleRooms.filter { !$0.isDirect && !$0.favorite },
+                        add: ("Add channels", .channel)
+                    ) {
+                        Button("Create a channel…") { onCreate(.channel) }
+                        Button("Browse channels…", action: onBrowseChannels)
+                    }
+                    actionRow("Browse channels", symbol: "magnifyingglass", action: onBrowseChannels)
                     roomSection(
-                        "Direct messages", symbol: "bubble.left.and.bubble.right",
-                        rooms: visibleRooms.filter { $0.isDirect && !$0.favorite })
-                    Button {
-                        onCreate(.directMessage)
-                    } label: {
-                        Label("Add teammates", systemImage: "plus").font(m.font(.body)).frame(
-                            maxWidth: .infinity, alignment: .leading
-                        ).padding(.leading, m.sp32).frame(height: m.row)
-                    }.buttonStyle(.row).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp8)
+                        "Direct messages", rooms: visibleRooms.filter { $0.isDirect && !$0.favorite },
+                        add: ("New message", .directMessage)
+                    ) {
+                        Button("New message…") { onCreate(.directMessage) }
+                        Button("Browse people…") { route = .directory }
+                    }
+                    actionRow("Add teammates", symbol: "plus") { onCreate(.directMessage) }
                 }.padding(.bottom, m.sp24)
             }.scrollIndicators(.hidden)
                 .loadingInterval(
@@ -129,7 +130,6 @@ struct SidebarView: View {
             .menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden).fixedSize(horizontal: false, vertical: true)
             .help(workspace?.name ?? "All conversations")
             Spacer(minLength: m.sp2)
-            IconButton(symbol: "gearshape", label: "Preferences", action: onPreferences)
             IconButton(symbol: "square.and.pencil", label: "New message") { onCreate(.directMessage) }
         }.foregroundStyle(colors.textPrimary).padding(.horizontal, m.sp16).frame(height: m.paneHeader)
     }
@@ -147,7 +147,10 @@ struct SidebarView: View {
                 Text(matrix.user?.name ?? "Slatrix")
                 if let id = matrix.user?.id { Text(id) }
                 Divider()
+                Button("Profile", action: onProfile)
                 Button("Preferences…") { onPreferences() }
+                Divider()
+                Button(matrix.isPreview ? "Leave preview" : "Sign out", action: onSignOut)
             } label: {
                 AvatarView(
                     name: matrix.user?.name ?? "You", size: m.avatar, matrix: matrix, source: matrix.user?.avatarURL)
@@ -196,7 +199,7 @@ struct SidebarView: View {
     private func workspaceIcon(_ space: Workspace?) -> some View {
         let selected = workspaceID == space?.id
         let name = space?.name ?? "All conversations"
-        let badge = selected ? WorkspaceRail.Badge.quiet : WorkspaceRail.badge(space?.id, rooms: matrix.rooms)
+        let badge = selected ? UnreadBadge.none : WorkspaceRail.badge(space?.id, rooms: matrix.rooms)
         let corner = m.avatar * 0.19
         return Button {
             workspaceID = space?.id
@@ -218,12 +221,11 @@ struct SidebarView: View {
             )
             .overlay(alignment: .topTrailing) {
                 switch badge {
-                case .mentions(let count):
-                    CountBadge(text: count > 99 ? "99+" : "\(count)")
-                case .unread:
+                case .count(let count): CountBadge(text: count)
+                case .bold:
                     Circle().fill(colors.textPrimary).frame(width: m(Self.dot) * 1.5, height: m(Self.dot) * 1.5)
                         .overlay(Circle().stroke(colors.frame, lineWidth: m.sp2))
-                case .quiet: EmptyView()
+                case .none: EmptyView()
                 }
             }
         }.buttonStyle(.row).help(name)
@@ -231,9 +233,9 @@ struct SidebarView: View {
             .accessibilityValue(
                 {
                     switch badge {
-                    case .mentions(let count): "\(count) \(count == 1 ? "mention" : "mentions")"
-                    case .unread: "Unread messages"
-                    case .quiet: ""
+                    case .count(let count): "\(count) \(count == "1" ? "mention" : "mentions")"
+                    case .bold: "Unread messages"
+                    case .none: ""
                     }
                 }()
             )
@@ -248,43 +250,42 @@ struct SidebarView: View {
             }
     }
     private func shortcut(_ item: AppRoute, label: String, count: Int?) -> some View {
-        Button {
+        let selected = route == item
+        return Button {
             route = item
         } label: {
-            HStack(spacing: m.sp12) {
+            HStack(spacing: m.sp8) {
                 Image(systemName: item.symbol).font(m.font(.body)).frame(width: m.avatarSmall)
                 Text(label).font(m.font(.body))
                 Spacer()
                 if let count { Text("\(count)").font(m.font(.caption, .bold)) }
             }
-            .padding(.horizontal, m.sp16).frame(height: m.row).background(
-                route == item ? colors.selection : .clear, in: RoundedRectangle(cornerRadius: m.radius))
+            .foregroundStyle(selected ? colors.selectionText : colors.textSecondary)
+            .padding(.leading, m.sp16).padding(.trailing, m.sp12).frame(height: m.row)
+            .modifier(SidebarRowFill(selected: selected))
+        }.buttonStyle(.row).padding(.horizontal, m.sp8).accessibilityAddTraits(selected ? .isSelected : [])
+    }
+    private func actionRow(_ label: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: m.sp8) {
+                Image(systemName: symbol).font(m.font(.body)).frame(width: m.avatarSmall)
+                Text(label).font(m.font(.body))
+                Spacer()
+            }.foregroundStyle(colors.textSecondary).padding(.leading, m.sp16).frame(height: m.row)
+                .modifier(SidebarRowFill(selected: false))
         }.buttonStyle(.row).padding(.horizontal, m.sp8)
     }
-    private func roomSection(_ title: String, symbol: String, rooms: [ChatRoom]) -> some View {
+    private func roomSection(
+        _ title: String, rooms: [ChatRoom], add: (label: String, kind: CreationKind)? = nil,
+        @ViewBuilder menu: () -> some View
+    ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: m.sp8) {
-                Button {
+            SectionHeader(
+                title: title, collapsed: collapsed.contains(title),
+                onToggle: {
                     if collapsed.contains(title) { collapsed.remove(title) } else { collapsed.insert(title) }
-                } label: {
-                    HStack(spacing: m.sp8) {
-                        Image(systemName: collapsed.contains(title) ? "chevron.right" : "chevron.down").font(
-                            m.font(.caption, .bold)
-                        ).frame(width: m.sp12)
-                        Image(systemName: symbol).font(m.font(.body))
-                        Text(title).font(m.font(.body))
-                        Spacer()
-                    }
-                }.buttonStyle(.row)
-                if title != "Starred" {
-                    IconButton(symbol: "plus", label: "Add \(title.lowercased())", role: .meta) {
-                        onCreate(title == "Channels" ? .channel : .directMessage)
-                    }
-                }
-            }.foregroundStyle(colors.textSecondary).padding(.leading, m.sp12).padding(.trailing, m.sp8).frame(
-                height: m.control
-            )
-            .padding(.top, m.sp8)
+                }, addLabel: add?.label, onAdd: { add.map { onCreate($0.kind) } }, menu: menu
+            ).padding(.horizontal, m.sp8).padding(.top, m.sp12)
             if !collapsed.contains(title) {
                 ForEach(rooms) { room in
                     SidebarRoomRow(
@@ -301,7 +302,6 @@ struct SidebarView: View {
 
 /// One conversation in the sidebar. Equal while what it shows is, so a change to one room redraws one row.
 private struct SidebarRoomRow: View, Equatable {
-    private static let dot: CGFloat = 6
     let room: ChatRoom
     let selected: Bool
     let hasDraft: Bool
@@ -321,42 +321,38 @@ private struct SidebarRoomRow: View, Equatable {
     }
 
     var body: some View {
+        let badge = UnreadBadge(room)
         Button {
             onSelect(room.id)
         } label: {
             HStack(spacing: m.sp8) {
                 if room.isDirect {
                     AvatarView(name: room.name, size: m.avatarSmall, matrix: matrix, source: room.avatarURL)
+                        .opacity(room.muted && !selected ? 0.5 : 1)
                 } else {
                     Image(systemName: room.isEncrypted ? "lock" : "number").font(m.font(.body)).frame(
-                        width: m.avatarSmall
-                    )
-                    .foregroundStyle(room.hasUnread ? colors.textPrimary : colors.textSecondary)
+                        width: m.avatarSmall)
                 }
-                Text(room.name).font(m.font(.body, room.hasUnread ? .bold : .regular)).lineLimit(1)
+                Text(room.name).font(m.font(.body, badge != .none ? .bold : .regular)).lineLimit(1)
                     .truncationMode(.tail)
-                if room.muted {
-                    Image(systemName: "bell.slash").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
-                }
                 Spacer(minLength: m.sp2)
-                if hasDraft {
-                    Image(systemName: "pencil").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
-                }
-                switch UnreadBadge(room) {
-                case .mentions(let count): CountBadge(text: count)
-                case .messages(let count): CountBadge(text: count, mention: false)
-                case .marked:
-                    Circle().fill(colors.textPrimary).frame(width: m(Self.dot), height: m(Self.dot)).accessibilityLabel(
-                        "Marked unread")
-                case .none: EmptyView()
-                }
-            }.padding(.leading, m.sp32).padding(.trailing, m.sp12).frame(height: m.row)
-                .background(
-                    selected ? colors.selection : .clear,
-                    in: RoundedRectangle(cornerRadius: m.radius)
-                )
-                .contentShape(Rectangle())
+                if hasDraft { Image(systemName: "pencil").font(m.font(.caption)) }
+                if case .count(let count) = badge { CountBadge(text: count) }
+            }
+            .foregroundStyle(
+                selected
+                    ? colors.selectionText
+                    : room.muted ? colors.textTertiary : badge != .none ? colors.textPrimary : colors.textSecondary
+            )
+            .padding(.leading, m.sp16).padding(.trailing, m.sp12).frame(height: m.row)
+            .modifier(SidebarRowFill(selected: selected))
         }.buttonStyle(.row).padding(.horizontal, m.sp8).help(room.name)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            // Bold and dimming don't reach VoiceOver.
+            .accessibilityValue(
+                [badge != .none ? "Unread" : nil, room.muted ? "Muted" : nil].compactMap(\.self)
+                    .joined(separator: ", ")
+            )
             .contextMenu {
                 Button("Mark unread") { onMarkUnread(room) }.disabled(isPreview || room.membership != "join")
                 Button("Mark read") { onMarkRead(room) }.disabled(isPreview || room.membership != "join")
@@ -371,6 +367,22 @@ private struct SidebarRoomRow: View, Equatable {
                 Button("Notifications…") { onNotifications(room.id) }.disabled(
                     isPreview || room.membership != "join")
             }
+    }
+}
+
+/// A sidebar row's fill: Slack's strong selection, or a tint under the pointer. Hover is the row's own state, so
+/// moving the pointer redraws one row, never the list.
+private struct SidebarRowFill: ViewModifier {
+    let selected: Bool
+    @State private var hovering = false
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+
+    func body(content: Content) -> some View {
+        content.background(
+            selected ? appearance.colors.selectionStrong : hovering ? appearance.colors.hover : .clear,
+            in: RoundedRectangle(cornerRadius: m.radius)
+        ).onHover { hovering = $0 }
     }
 }
 

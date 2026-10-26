@@ -113,9 +113,9 @@ enum MatrixMapping {
                     in: text, range: NSRange(text.startIndex..., in: text), withTemplate: " ")
             }
         }
-        let pattern =
-            "(?<![A-Za-z0-9_])@[A-Za-z0-9._=/+\\-]+:(?:\\[[0-9A-Fa-f:]+\\]|[A-Za-z0-9](?:[A-Za-z0-9.\\-]*[A-Za-z0-9])?)(?::[0-9]{1,5})?"
-        guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
+        guard let expression = try? NSRegularExpression(pattern: "(?<![A-Za-z0-9_])" + MatrixID.userPattern) else {
+            return []
+        }
         let ids = expression.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap {
             match -> String? in
             guard let range = Range(match.range, in: text) else { return nil }
@@ -160,6 +160,13 @@ enum MatrixMapping {
         return formatted.body
     }
 
+    /// A message summarized as text: mentions read "@Name", never a link or a raw ID, and a spoiler hides it all.
+    static func previewText(_ body: String, formatted: FormattedBody?) -> String {
+        let html = htmlBody(formatted)
+        if html?.localizedCaseInsensitiveContains("data-mx-spoiler") == true { return "[Spoiler hidden]" }
+        return MessageBodyRenderer.shared.render(body: body, formattedBody: html).plainText
+    }
+
     static func replyPreview(eventID: String, details: EmbeddedEventDetails) -> ChatReplyPreview {
         switch details {
         case .unavailable: return ChatReplyPreview(state: .unavailable, eventID: eventID)
@@ -178,19 +185,13 @@ enum MatrixMapping {
                 switch value.msgType {
                 case .text(let text):
                     preview.kind = "m.text"
-                    if htmlBody(text.formatted)?.localizedCaseInsensitiveContains("data-mx-spoiler") == true {
-                        preview.body = "[Spoiler hidden]"
-                    }
+                    preview.body = previewText(value.body, formatted: text.formatted)
                 case .notice(let text):
                     preview.kind = "m.notice"
-                    if htmlBody(text.formatted)?.localizedCaseInsensitiveContains("data-mx-spoiler") == true {
-                        preview.body = "[Spoiler hidden]"
-                    }
+                    preview.body = previewText(value.body, formatted: text.formatted)
                 case .emote(let text):
                     preview.kind = "m.emote"
-                    if htmlBody(text.formatted)?.localizedCaseInsensitiveContains("data-mx-spoiler") == true {
-                        preview.body = "[Spoiler hidden]"
-                    }
+                    preview.body = previewText(value.body, formatted: text.formatted)
                 case .image: preview.kind = "m.image"
                 case .file: preview.kind = "m.file"
                 case .video: preview.kind = "m.video"

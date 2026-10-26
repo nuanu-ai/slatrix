@@ -8,20 +8,16 @@ enum WorkspaceRail {
         return workspaces.filter(\.isTopLevel) + (orphans ? [nil] : [])
     }
 
-    enum Badge: Equatable {
-        case quiet, unread
-        case mentions(Int)
-    }
-
-    /// What a workspace's icon shows for its channels. Direct messages appear in every workspace, so they mark none.
-    static func badge(_ workspaceID: String?, rooms: [ChatRoom]) -> Badge {
+    /// What a workspace's icon shows for its channels: their mentions, or bold while any channel row is. Direct
+    /// messages appear in every workspace, so they mark none.
+    static func badge(_ workspaceID: String?, rooms: [ChatRoom]) -> UnreadBadge {
         let channels = rooms.filter { room in
             room.membership == "join" && !room.isDirect && !room.isSpace
                 && (workspaceID.map(room.spaceIDs.contains) ?? room.spaceIDs.isEmpty)
         }
         let mentions = channels.reduce(0) { $0 + $1.mentions }
-        if mentions > 0 { return .mentions(mentions) }
-        return channels.contains { $0.hasUnread && !$0.muted } ? .unread : .quiet
+        if mentions > 0 { return .count(UnreadBadge.label(mentions)) }
+        return channels.contains { UnreadBadge($0) != .none } ? .bold : .none
     }
 
     /// How a remembered selection of All is stored.

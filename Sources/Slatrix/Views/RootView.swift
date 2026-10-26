@@ -334,6 +334,7 @@ struct RootView: View {
             .quickLookPreview(Binding(get: { previews.url }, set: previews.presentationChanged))
             .background(PreviewInvalidation(matrix: matrix, previews: previews, viewer: viewer))
             .environment(\.openURL, OpenURLAction(handler: handleOpenURL))
+            .environment(\.mentions, MentionContext(me: matrix.user?.id))
             .background(layoutMeasurement)
     }
 
@@ -634,6 +635,10 @@ struct RootView: View {
                             draftCount: draftAddresses.count,
                             onSelect: selectRoom, onCreate: presentCreation,
                             onPreferences: { handleMenu("preferences") },
+                            onProfile: {
+                                if let me = matrix.user { profilePane = ProfileSelection(id: me.id, fallback: me) }
+                            },
+                            onSignOut: { logoutConfirmation = true },
                             onMarkUnread: { markReadState($0, unread: true) },
                             onMarkRead: { markReadState($0, unread: false) },
                             onInviteWorkspace: { id in
@@ -1828,6 +1833,11 @@ struct RootView: View {
         selectRoom(target.roomID, record: true, eventID: destination.membership == "join" ? target.eventID : nil)
     }
     private func handleOpenURL(_ url: URL) -> OpenURLAction.Result {
+        // A mention opens its person's card beside the click, as a click on a sender's name does.
+        if case .user(let userID)? = (try? MatrixLinkService.parse(url))?.id {
+            openProfile(userID, fallback: nil)
+            return .handled
+        }
         if MatrixLinkService.isMatrixCandidate(url) {
             enqueueMatrixLink(url)
             return .handled

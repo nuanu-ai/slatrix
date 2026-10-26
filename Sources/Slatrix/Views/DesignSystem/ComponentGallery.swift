@@ -28,6 +28,11 @@ struct ComponentGallery: View {
                     section("Buttons") { buttons }
                     section("Fields") { fields }
                     section("Avatars, badges and tags") { identity }
+                    section("Section header") {
+                        SectionHeader(title: "Channels", collapsed: false, onToggle: {}, addLabel: "Add channels") {
+                            EmptyView()
+                        }.frame(width: m(280)).background(appearance.colors.sidebar)
+                    }
                     section("Loading") { loading }
                 }
             }
@@ -72,7 +77,8 @@ struct ComponentGallery: View {
                 "Line and state",
                 [
                     ("border", c.border), ("border strong", c.borderStrong), ("hover", c.hover),
-                    ("pressed", c.pressed), ("selection", c.selection), ("focus ring", c.focusRing),
+                    ("pressed", c.pressed), ("selection", c.selection),
+                    ("selection strong", c.selectionStrong), ("focus ring", c.focusRing),
                 ]
             ),
             (
@@ -198,7 +204,7 @@ struct ComponentGallery: View {
             AvatarView(name: "Mina Cho", size: m.avatar, presence: .away)
             AvatarView(name: "Harbor", size: m.avatarLarge, presence: .active)
             CountBadge(text: "3")
-            CountBadge(text: "12", mention: false)
+            CountBadge(text: "99+")
             TagLabel(text: "You")
             TagLabel(text: "Invited")
             Circle().fill(c.mention).frame(width: m(9), height: m(9))
