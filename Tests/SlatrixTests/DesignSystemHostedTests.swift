@@ -85,6 +85,29 @@ struct DesignSystemHostedTests {
         #expect(host.showsFocusRing() == (state == .focused))
     }
 
+    private struct FocusedCard: View {
+        @FocusState private var focused: Bool
+        var body: some View {
+            VStack(spacing: 16) {
+                Button("Row") {}.buttonStyle(.row)
+                Button("More") {}.buttonStyle(.secondary)
+                IconButton(symbol: "xmark", label: "Close") {}
+            }
+            .padding(16).frame(width: 200, height: 200).background(Color.white)
+            .focusable().focusEffectDisabled().focused($focused).onAppear { focused = true }
+        }
+    }
+
+    @Test(
+        "Buttons in a focused card show no ring while the Mac's keyboard navigation is off",
+        .enabled(if: !NSApplication.shared.isFullKeyboardAccessEnabled))
+    func noRingWithoutKeyboardNavigation() async {
+        let host = Host(FocusedCard(), size: CGSize(width: 200, height: 200))
+        defer { host.close() }
+        #expect(await eventually { host.window.firstResponder !== host.window })
+        #expect(!host.showsFocusRing())
+    }
+
     private func popoverHost(_ popovers: Popovers) -> Host {
         Host(
             PopoverHost(popovers: popovers) {
