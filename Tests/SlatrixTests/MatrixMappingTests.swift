@@ -175,6 +175,17 @@ struct ReplyPreviewMappingTests {
         #expect(preview.isRedacted && preview.body == "This message was deleted")
     }
 
+    @Test("Quote and Activity previews show a mention as @Name, never its link or raw ID")
+    func previewMentions() {
+        let body = "[Alice](https://matrix.to/#/@alice:example.org) look"
+        let html = FormattedBody(
+            format: .html, body: "<a href=\"https://matrix.to/#/@alice:example.org\">Alice</a> look")
+        let quote = MatrixMapping.replyPreview(eventID: "$quoted", details: ready(content(body, formatted: html)))
+        #expect(quote.body == "@Alice look")
+        #expect(ActivityService.previewBody(body, formatted: html) == "@Alice look")
+        #expect(ActivityService.previewBody("ping @bob:example.org", formatted: nil) == "ping @bob")
+    }
+
     @Test("A quoted spoiler stays hidden")
     func spoilerQuote() {
         let spoiler = content(

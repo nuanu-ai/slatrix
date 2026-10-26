@@ -50,6 +50,26 @@ struct NativeMessageTextTests {
         #expect(text.attribute(.link, at: 24, effectiveRange: nil) == nil)
     }
 
+    @Test("A mention of someone else is a blue pill; one of you, or of the room, is yellow; none is underlined")
+    func mentionPills() {
+        let profile = URL(string: "https://matrix.to/#/@alice:example.org")!
+        let pills = MentionPalette(
+            me: "@me:example.org", text: .systemBlue, fill: .systemTeal, ownText: .systemBrown, ownFill: .systemYellow)
+        let text = NativeSelectableMessageText.attributed(
+            [
+                MessageBodyRun(text: "@Alice", link: profile, mention: "@alice:example.org"),
+                MessageBodyRun(text: " "), MessageBodyRun(text: "@Me", mention: "@me:example.org"),
+                MessageBodyRun(text: " "), MessageBodyRun(text: "@room", mention: "@room"),
+            ], fontSize: 15, textColor: .labelColor, linkColor: .systemBlue, mentions: pills)
+        #expect(text.attribute(.mentionPill, at: 0, effectiveRange: nil) as? NSColor == .systemTeal)
+        #expect(text.attribute(.mentionPill, at: 7, effectiveRange: nil) as? NSColor == .systemYellow)
+        #expect(text.attribute(.foregroundColor, at: 7, effectiveRange: nil) as? NSColor == .systemBrown)
+        #expect(text.attribute(.mentionPill, at: 11, effectiveRange: nil) as? NSColor == .systemYellow)
+        #expect(text.attribute(.mentionPill, at: 6, effectiveRange: nil) == nil)
+        #expect(text.attribute(.link, at: 0, effectiveRange: nil) as? URL == profile)
+        #expect(text.attribute(.underlineStyle, at: 0, effectiveRange: nil) == nil)
+    }
+
     @Test("A menu item runs only its own enabled command")
     func menuActions() {
         var ran: [String] = []
