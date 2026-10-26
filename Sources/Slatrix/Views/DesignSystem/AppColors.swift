@@ -98,6 +98,12 @@ struct AppColors {
     var warning: Color { Color(hex: dark ? 0xf0a030 : 0xc46800) }
     /// Mention badges: the same red as destructive, as in Slack.
     var mention: Color { destructive }
+    /// An @Name pill in a message or the composer: Slack's link blue on a pale blue fill.
+    var mentionText: Color { Color(hex: dark ? 0x1d9bd1 : 0x1264a3) }
+    var mentionFill: Color { Color(hex: 0x1d9bd1).opacity(dark ? 0.18 : 0.1) }
+    /// The pill of a mention that notifies you, or everyone: Slack's yellow.
+    var mentionYouText: Color { dark ? Color(hex: 0xf2c744) : mentionText }
+    var mentionYouFill: Color { Color(hex: 0xf2c744).opacity(dark ? 0.2 : 0.4) }
     var presenceActive: Color { Color(hex: 0x2bac76) }
     var presenceAway: Color { Color(hex: dark ? 0xabadb1 : 0x616061) }
 }

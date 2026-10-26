@@ -84,8 +84,7 @@ struct ActivityItem: Identifiable, Hashable {
     }
 
     nonisolated static func previewBody(_ body: String, formatted: FormattedBody?) -> String {
-        MatrixMapping.htmlBody(formatted)?.localizedCaseInsensitiveContains("data-mx-spoiler") == true
-            ? "[Spoiler hidden]" : String(body.prefix(4096))
+        String(MatrixMapping.previewText(body, formatted: formatted).prefix(4096))
     }
 
     @discardableResult

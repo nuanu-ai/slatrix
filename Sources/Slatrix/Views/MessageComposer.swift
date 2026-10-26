@@ -101,7 +101,8 @@ struct MessageComposer: View {
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
                 ComposerNativeEditor(
-                    text: $text, state: editor, enabled: !sending,
+                    text: $text, state: editor, members: members, mentionText: NSColor(colors.mentionText),
+                    mentionFill: NSColor(colors.mentionFill), enabled: !sending,
                     acceptsAttachments: !sending && !isEditing && !preparingAttachments, onTextChange: changed,
                     onSelectionChange: updateMention, onSend: send, onSpecialKey: specialKey,
                     onAttachments: queueInput, onAttachmentError: attachmentFailed
@@ -401,10 +402,11 @@ struct MessageComposer: View {
     private func updateMention(_ value: String, _ range: NSRange) {
         let prefix = (value as NSString).substring(to: min(range.location, (value as NSString).length))
         if let match = prefix.range(of: #"(?:^|\s)@[^\s@]*$"#, options: .regularExpression),
-            let at = prefix[match].lastIndex(of: "@")
+            let at = prefix[match].lastIndex(of: "@"),
+            case let location = prefix.utf16.distance(from: prefix.utf16.startIndex, to: at),
+            !editor.isMention(at: location)
         {
             mentionQuery = String(prefix[prefix.index(after: at)...])
-            let location = prefix.utf16.distance(from: prefix.utf16.startIndex, to: at.samePosition(in: prefix.utf16)!)
             mentionRange = NSRange(location: location, length: (prefix as NSString).length - location)
             mentionIndex = 0
         } else {
@@ -445,7 +447,7 @@ struct MessageComposer: View {
     }
 
     private func chooseMention(_ member: ChatUser) {
-        editor.insert(member.id + " ", replacing: mentionRange)
+        editor.insertMention(member, replacing: mentionRange)
         mentionQuery = nil
         mentionRange = nil
         editor.focus()
@@ -608,15 +610,40 @@ struct MessageComposer: View {
         focus()
     }
 
-    func wrap(_ marker: String) {
+    /// Inserts text that may hold mention tokens, which `insertText` would flatten.
+    func insert(_ value: NSAttributedString, replacing range: NSRange? = nil, selection: NSRange? = nil) {
+        guard let textView, textView.isEditable else { return }
+        let selected = range ?? textView.selectedRange()
+        guard textView.shouldChangeText(in: selected, replacementString: value.string) else { return }
+        textView.textStorage?.replaceCharacters(in: selected, with: value)
+        textView.didChangeText()
+        textView.setSelectedRange(selection ?? NSRange(location: selected.location + value.length, length: 0))
+        focus()
+    }
+
+    func insertMention(_ member: ChatUser, replacing range: NSRange?) {
         guard let textView else { return }
+        let token = NSMutableAttributedString(string: "@" + member.name, attributes: textView.mention(member.id))
+        token.append(NSAttributedString(string: " ", attributes: textView.typingAttributes))
+        insert(token, replacing: range)
+    }
+
+    func isMention(at location: Int) -> Bool {
+        guard let storage = textView?.textStorage, location < storage.length else { return false }
+        return storage.attribute(.composerMention, at: location, effectiveRange: nil) != nil
+    }
+
+    func wrap(_ marker: String) {
+        guard let textView, let storage = textView.textStorage else { return }
         let range = textView.selectedRange()
-        let selected = (textView.string as NSString).substring(with: range)
-        let content = selected.isEmpty ? "text" : selected
-        insert(
-            marker + content + marker,
-            selection: NSRange(
-                location: range.location + (marker as NSString).length, length: (content as NSString).length))
+        let plain = textView.typingAttributes
+        let content =
+            range.length > 0
+            ? storage.attributedSubstring(from: range) : NSAttributedString(string: "text", attributes: plain)
+        let wrapped = NSMutableAttributedString(string: marker, attributes: plain)
+        wrapped.append(content)
+        wrapped.append(NSAttributedString(string: marker, attributes: plain))
+        insert(wrapped, selection: NSRange(location: range.location + marker.utf16.count, length: content.length))
     }
 
     func link() {
@@ -630,30 +657,37 @@ struct MessageComposer: View {
     }
 
     func prefixLines(_ prefix: String) {
-        guard let textView else { return }
+        guard let textView, let storage = textView.textStorage else { return }
         let text = textView.string as NSString
         var range = textView.selectedRange()
         if range.length > 0 && text.substring(with: NSRange(location: NSMaxRange(range) - 1, length: 1)) == "\n" {
             range.length -= 1
         }
         let lines = text.lineRange(for: range)
-        var content = text.substring(with: lines)
-        let trailingNewline = content.hasSuffix("\n")
-        if trailingNewline { content.removeLast() }
-        let result =
-            content.components(separatedBy: "\n").enumerated().map { index, line in
-                (prefix == "1. " ? "\(index + 1). " : prefix) + line
-            }.joined(separator: "\n") + (trailingNewline ? "\n" : "")
-        insert(
-            result, replacing: lines, selection: NSRange(location: lines.location, length: (result as NSString).length))
+        let result = NSMutableAttributedString(attributedString: storage.attributedSubstring(from: lines))
+        // Every line start but the empty one after a trailing newline, last first so earlier offsets hold.
+        var starts = [0]
+        for (offset, unit) in result.string.utf16.enumerated() where unit == 10 && offset + 1 < result.length {
+            starts.append(offset + 1)
+        }
+        for (number, start) in starts.enumerated().reversed() {
+            let marker = prefix == "1. " ? "\(number + 1). " : prefix
+            result.insert(NSAttributedString(string: marker, attributes: textView.typingAttributes), at: start)
+        }
+        insert(result, replacing: lines, selection: NSRange(location: lines.location, length: result.length))
     }
 }
 
 private struct ComposerNativeEditor: NSViewRepresentable {
     static let minHeight: CGFloat = 60
     static let maxHeight: CGFloat = 160
+    /// Markdown, with mentions as links; the editor shows them as tokens.
     @Binding var text: String
     var state: ComposerEditorState
+    /// Names the bare IDs of messages sent before tokens existed.
+    var members: [ChatUser]
+    var mentionText: NSColor
+    var mentionFill: NSColor
     var enabled: Bool
     var acceptsAttachments: Bool
     var onTextChange: (String, NSRange) -> Void
@@ -687,7 +721,8 @@ private struct ComposerNativeEditor: NSViewRepresentable {
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
-        let view = ComposerTextView(frame: .zero)
+        let view = ComposerTextView(usingTextLayoutManager: false)
+        view.textContainer?.replaceLayoutManager(PillLayoutManager())
         view.isRichText = false
         view.importsGraphics = false
         view.drawsBackground = false
@@ -715,11 +750,12 @@ private struct ComposerNativeEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let view = scroll.documentView as? ComposerTextView else { return }
         configure(view, context: context)
-        if view.string != text {
+        if text != context.coordinator.text {
             context.coordinator.synchronizing = true
             let previous = view.selectedRange()
-            view.string = text
-            view.setSelectedRange(NSRange(location: min(previous.location, (text as NSString).length), length: 0))
+            view.load(text, members: members)
+            view.setSelectedRange(NSRange(location: min(previous.location, view.string.utf16.count), length: 0))
+            context.coordinator.text = text
             context.coordinator.synchronizing = false
         }
         view.isEditable = enabled
@@ -738,16 +774,26 @@ private struct ComposerNativeEditor: NSViewRepresentable {
         view.onAttachmentError = onAttachmentError
         view.onBold = { state.wrap("**") }
         view.onItalic = { state.wrap("_") }
+        view.colorMentions(text: mentionText, fill: mentionFill)
     }
 
     @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerNativeEditor
         var synchronizing = false
+        /// The Markdown the editor last showed or wrote.
+        var text = ""
         init(_ parent: ComposerNativeEditor) { self.parent = parent }
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? ComposerTextView else { return }
-            parent.text = view.string
+            text = view.markdown
+            parent.text = text
             parent.onTextChange(view.string, view.selectedRange())
+        }
+        func textView(
+            _ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,
+            toCharacterRange new: NSRange
+        ) -> NSRange {
+            (textView as? ComposerTextView)?.outsideMentions(new, from: old) ?? new
         }
         func textDidBeginEditing(_ notification: Notification) { parent.state.isFocused = true }
         func textDidEndEditing(_ notification: Notification) { parent.state.isFocused = false }
@@ -759,6 +805,16 @@ private struct ComposerNativeEditor: NSViewRepresentable {
     }
 }
 
+extension NSAttributedString.Key {
+    fileprivate static let composerMention = NSAttributedString.Key("SlatrixComposerMention")
+}
+
+/// A token's person. An object, so two adjacent tokens for one person stay two tokens.
+private final class ComposerMention: NSObject {
+    let userID: String
+    init(userID: String) { self.userID = userID }
+}
+
 private final class ComposerTextView: NSTextView {
     var onSend: (() -> Void)?
     var onSpecialKey: ((NSEvent) -> Bool)?
@@ -767,6 +823,89 @@ private final class ComposerTextView: NSTextView {
     var onAttachmentError: ((String) -> Void)?
     var onBold: (() -> Void)?
     var onItalic: (() -> Void)?
+    private var mentionText = NSColor.linkColor
+    private var mentionFill = NSColor.clear
+
+    // MARK: Mention tokens: "@Name" that edits as one piece and is sent as a Markdown link.
+
+    func mention(_ userID: String) -> [NSAttributedString.Key: Any] {
+        var attributes = typingAttributes
+        attributes[.foregroundColor] = mentionText
+        attributes[.mentionPill] = mentionFill
+        attributes[.composerMention] = ComposerMention(userID: userID)
+        return attributes
+    }
+
+    func load(_ markdown: String, members: [ChatUser]) {
+        let parsed = ComposerMentions.tokens(in: markdown) { id in members.first { $0.id == id }?.name }
+        let text = NSMutableAttributedString(string: parsed.display, attributes: typingAttributes)
+        for token in parsed.tokens { text.setAttributes(mention(token.userID), range: token.range) }
+        textStorage?.setAttributedString(text)
+    }
+
+    var markdown: String {
+        var tokens: [ComposerMentions.Token] = []
+        textStorage?.enumerateAttribute(.composerMention, in: NSRange(location: 0, length: textStorage?.length ?? 0)) {
+            value, range, _ in
+            if let mention = value as? ComposerMention { tokens.append(.init(range: range, userID: mention.userID)) }
+        }
+        return ComposerMentions.markdown(string, tokens: tokens)
+    }
+
+    func colorMentions(text: NSColor, fill: NSColor) {
+        guard text != mentionText || fill != mentionFill, let storage = textStorage else { return }
+        mentionText = text
+        mentionFill = fill
+        storage.enumerateAttribute(.composerMention, in: NSRange(location: 0, length: storage.length)) {
+            value, range, _ in
+            guard value != nil else { return }
+            storage.addAttributes([.foregroundColor: text, .mentionPill: fill], range: range)
+        }
+    }
+
+    /// Text typed next to a token is plain text, not more of the token.
+    override var typingAttributes: [NSAttributedString.Key: Any] {
+        get {
+            var attributes = super.typingAttributes
+            attributes[.composerMention] = nil
+            attributes[.mentionPill] = nil
+            attributes[.foregroundColor] = NSColor.labelColor
+            return attributes
+        }
+        set { super.typingAttributes = newValue }
+    }
+
+    /// The token that `index` falls strictly inside.
+    private func mention(cutAt index: Int) -> NSRange? {
+        guard let storage = textStorage, index > 0, index < storage.length else { return nil }
+        var token = NSRange()
+        guard
+            storage.attribute(
+                .composerMention, at: index, longestEffectiveRange: &token,
+                in: NSRange(location: 0, length: storage.length)) != nil, token.location < index
+        else { return nil }
+        return token
+    }
+
+    private func widened(_ range: NSRange) -> NSRange {
+        [range.location, NSMaxRange(range)].compactMap(mention(cutAt:)).reduce(range, NSUnionRange)
+    }
+
+    /// The caret never stops inside a token: it jumps over it the way it was moving. A selection takes whole tokens.
+    func outsideMentions(_ range: NSRange, from old: NSRange) -> NSRange {
+        guard range.length == 0, let token = mention(cutAt: range.location) else { return widened(range) }
+        return NSRange(location: old.location <= token.location ? NSMaxRange(token) : token.location, length: 0)
+    }
+
+    /// An edit that cuts into a token takes the whole token, so one Backspace deletes it.
+    override func shouldChangeText(in range: NSRange, replacementString: String?) -> Bool {
+        let whole = widened(range)
+        guard whole != range, let replacementString else {
+            return super.shouldChangeText(in: range, replacementString: replacementString)
+        }
+        insertText(replacementString, replacementRange: whole)
+        return false
+    }
 
     override func keyDown(with event: NSEvent) {
         guard !hasMarkedText() else {
