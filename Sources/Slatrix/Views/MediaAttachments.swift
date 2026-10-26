@@ -194,6 +194,9 @@ private struct InlineMedia: View {
                 .frame(maxWidth: box.width)
         }
         .buttonStyle(.row).help(attachment.name).accessibilityLabel("Open \(attachment.name)")
+        .accessibilityAction(named: "Download") {
+            Task { await AttachmentFiles.shared.download(message, matrix: matrix) }
+        }
         .overlay(alignment: .topTrailing) {
             if hovering || downloading {
                 MediaActionsToolbar(

@@ -290,9 +290,20 @@ final class MediaStageView: NSView {
     override var acceptsFirstResponder: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
 
+    /// Where the keyboard was before the viewer opened, such as the composer; it goes back there on close.
+    private weak var previousResponder: NSResponder?
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        previousResponder = window?.firstResponder
         window?.makeFirstResponder(self)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil, let window, window.firstResponder === self {
+            window.makeFirstResponder(previousResponder)
+        }
+        super.viewWillMove(toWindow: newWindow)
     }
 
     override func keyDown(with event: NSEvent) {

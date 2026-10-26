@@ -256,9 +256,7 @@ struct RootView: View {
             modal(kind).environmentObject(appearance)
         }
         .overlay {
-            MediaViewer(matrix: matrix, viewer: viewer) { target in
-                startForward(target)
-            }
+            MediaViewer(matrix: matrix, viewer: viewer, onForward: startForward)
         }
     }
 
