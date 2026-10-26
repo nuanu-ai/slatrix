@@ -15,10 +15,11 @@ if [[ -n $(git status --porcelain -- Sources) ]]; then
     exit 1
 fi
 
-restore() { rm -rf Sources && git checkout -q HEAD -- Sources; }
+# --no-overlay also drops files that exist on only one side, so the index ends where it started.
+restore() { rm -rf Sources && git checkout -q --no-overlay HEAD -- Sources; }
 trap restore EXIT
 rm -rf Sources
-git checkout -q "$(git merge-base "$base" HEAD)" -- Sources
+git checkout -q --no-overlay "$(git merge-base "$base" HEAD)" -- Sources
 
 mkdir -p .build
 if swift test "${swift_test_args[@]}" --quiet > .build/red-check.log 2>&1; then
