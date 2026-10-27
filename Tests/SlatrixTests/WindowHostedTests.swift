@@ -16,7 +16,7 @@ struct WindowHostedTests {
         let hosting: NSHostingView<AnyView>
         let messages: [ChatMessage]
 
-        init() {
+        init(zoom: Double = 1) {
             _ = NSApplication.shared
             matrix.enterPreview()
             messages = busyConversation(1_000, roomID: matrix.selectedRoomID!, tag: UUID().uuidString)
@@ -26,7 +26,10 @@ struct WindowHostedTests {
                 ChatRoom(
                     id: "!busy\($0):example.org", name: "Busy \($0)", unread: $0 % 3, spaceIDs: ["preview.workspace"])
             }
-            hosting = NSHostingView(rootView: AnyView(RootView(matrix: matrix).environmentObject(AppearanceStore())))
+            hosting = NSHostingView(
+                rootView: AnyView(
+                    RootView(matrix: matrix).environmentObject(AppearanceStore())
+                        .environment(\.metrics, Metrics(zoom: zoom))))
             window = offscreenWindow(NSSize(width: 1_440, height: 900))
             window.contentView = hosting
             window.orderFrontRegardless()
@@ -59,6 +62,42 @@ struct WindowHostedTests {
         }
 
         static func views(in view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+
+        /// Laid out, so what it finds is what the window shows.
+        func shown() -> [NSView] {
+            hosting.layoutSubtreeIfNeeded()
+            return Self.views(in: hosting).filter { $0.window != nil }
+        }
+        /// The sidebar's and an open pane's dividers.
+        var dividers: Int { shown().filter { String(describing: type(of: $0)) == "ResizePointerView" }.count }
+        var sidebarShown: Bool {
+            shown().contains { ($0 as? NSTextField)?.placeholderString == "Find a conversation…" }
+        }
+        /// The conversation's left edge: past the rail while it shows, at the window's inset once it folds away.
+        var conversationLeft: CGFloat? {
+            shown().compactMap { $0 as? UploadDropView }.map { $0.convert($0.bounds, to: nil).minX }.min()
+        }
+        var searchFieldShown: Bool {
+            shown().contains { ($0 as? NSTextField)?.placeholderString?.hasPrefix("Search ") == true }
+        }
+
+        /// Through a message's own context menu, the item a right-click shows.
+        func openThread() throws {
+            let message = try #require(
+                shown().compactMap { $0 as? MessageTextView }.last { !$0.isEditable && !$0.string.isEmpty })
+            let event = try #require(
+                NSEvent.mouseEvent(
+                    with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            let item = try #require(message.menu(for: event)?.items.first { $0.identifier?.rawValue == "thread" })
+            _ = item.target?.perform(item.action, with: item)
+        }
+
+        func resize(_ width: CGFloat) { window.setContentSize(NSSize(width: width, height: 900)) }
+
+        func menu(_ action: String) {
+            NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
+        }
     }
 
     @Test(
@@ -117,5 +156,78 @@ struct WindowHostedTests {
         harness.hosting.layoutSubtreeIfNeeded()
         #expect(
             Harness.views(in: harness.hosting).contains { ($0 as? NSTextView)?.isEditable == true && $0.window != nil })
+    }
+
+    @Test("At 150% zoom an open thread stays inside the panel")
+    func paneFitsAtZoom() async throws {
+        let harness = Harness(zoom: 1.5)
+        defer { harness.close() }
+        #expect(await harness.settle())
+        try harness.openThread()
+        // The rightmost drop target is the thread's, as wide as the pane; the panel ends 4 pt from the window's edge.
+        let panelEdge = harness.window.frame.width - Metrics(zoom: 1.5).sp4
+        #expect(
+            await eventually {
+                let targets = harness.shown().compactMap { $0 as? UploadDropView }
+                return targets.count == 2 && targets.allSatisfy { $0.convert($0.bounds, to: nil).maxX <= panelEdge }
+            })
+    }
+
+    @Test("Narrowing the window moves the thread over the conversation, then folds the sidebar away")
+    func narrowing() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        try harness.openThread()
+        #expect(await eventually { harness.dividers == 2 })
+
+        harness.resize(1_000)
+        #expect(await eventually { harness.dividers == 1 && harness.sidebarShown })
+        harness.resize(700)
+        #expect(
+            await eventually {
+                harness.dividers == 0 && harness.conversationLeft ?? .infinity < Metrics().rail
+                    && harness.searchFieldShown
+            })
+        harness.resize(560)
+        #expect(await eventually { !harness.searchFieldShown })
+
+        harness.resize(1_440)
+        #expect(await eventually { harness.dividers == 2 && harness.sidebarShown && harness.searchFieldShown })
+    }
+
+    @Test("In a narrow window the sidebar opens as a drawer, and picking a conversation or Esc closes it")
+    func drawer() async {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        harness.resize(700)
+        #expect(await eventually { !harness.sidebarShown })
+
+        harness.menu("toggle-sidebar")
+        #expect(await eventually { harness.sidebarShown })
+        harness.menu("next-conversation")
+        #expect(await eventually { !harness.sidebarShown })
+
+        harness.menu("toggle-sidebar")
+        #expect(await eventually { harness.sidebarShown })
+        // Esc, as the app's key monitor delivers it.
+        harness.menu("mark-read")
+        #expect(await eventually { !harness.sidebarShown })
+    }
+
+    @Test("Hiding the sidebar by hand at full width hides the rail too, and it comes back")
+    func hiddenByHand() async {
+        let key = "layout.sidebarHidden"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer { UserDefaults.standard.set(saved, forKey: key) }
+        UserDefaults.standard.set(false, forKey: key)
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        harness.menu("toggle-sidebar")
+        #expect(await eventually { !harness.sidebarShown && harness.conversationLeft ?? .infinity < Metrics().rail })
+        harness.menu("toggle-sidebar")
+        #expect(await eventually { harness.sidebarShown && harness.dividers == 1 })
     }
 }
