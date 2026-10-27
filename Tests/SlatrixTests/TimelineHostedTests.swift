@@ -42,12 +42,14 @@ struct TimelineHostedTests {
         let popovers: Popovers
         let atBottom: (Bool) -> Void
         var zoom: CGFloat = 1
+        /// A new timeline of the same conversation, as the app opens one at an older message and back.
+        var timeline = 0
         var body: some View {
             TimelineView(
                 matrix: service, room: room, savedIDs: [], onThread: { _ in },
                 onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onBottomVisibilityChange: atBottom
             )
-            .id(room.id)
+            .id("\(room.id):\(timeline)")
             .environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom)).environment(popovers)
         }
     }
@@ -318,6 +320,24 @@ struct TimelineHostedTests {
         harness.hosting.rootView = harness.fixture(Self.room)
         await settle(harness) { harness.top(of: reading) != nil }
         #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
+    }
+
+    @Test("Leaving an older message for the newest ones lands at the newest, wherever the reader had been")
+    func returnFromOlderLandsAtNewest() async throws {
+        let harness = Harness(messages: Self.messages(0..<40))
+        defer { harness.close() }
+        await settle(harness)
+        harness.scroll(toTop: harness.clip.bounds.minY - 700)
+        var fixture = harness.fixture(Self.room)
+        fixture.timeline = 1
+        harness.service.focusedEventID = "Message-5"
+        harness.hosting.rootView = fixture
+        await settle(harness) { harness.top(of: "Message 5") != nil }
+        fixture.timeline = 2
+        harness.service.focusedEventID = nil
+        harness.hosting.rootView = fixture
+        await settle(harness) { harness.top(of: "Message 39") != nil }
+        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
     }
 
     @Test("A message at rest offers its whole menu, its VoiceOver actions and the emoji picker")
