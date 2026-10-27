@@ -58,11 +58,11 @@ struct MessageSendFailure: Hashable {
         case .missingMediaContent:
             return Self(
                 kind: .missingMedia,
-                message: "The file is gone. Cancel and attach it again.")
+                message: "The file is gone. Delete this and attach it again.")
         case .invalidMimeType:
             return Self(
                 kind: .invalidMedia,
-                message: "This file type isn’t supported. Cancel and choose another file.")
+                message: "This file type isn’t supported. Delete this and choose another file.")
         case .genericApiError:
             return recoverable
                 ? Self(
@@ -71,7 +71,7 @@ struct MessageSendFailure: Hashable {
                 )
                 : Self(
                     kind: .rejected,
-                    message: "The server rejected this message. Retry or cancel it."
+                    message: "The server rejected this message."
                 )
         }
     }

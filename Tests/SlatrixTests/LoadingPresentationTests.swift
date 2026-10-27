@@ -26,4 +26,11 @@ struct LoadingPresentationTests {
     func connectionNoticeWaits(down: Duration, shows: Bool) {
         #expect(LoadingPresentation.showsConnectionNotice(downFor: down) == shows)
     }
+
+    @Test(
+        "A message that goes out at once never shows the sending clock; one still sending after a few seconds does",
+        arguments: [(Duration.milliseconds(0), false), (.seconds(1), false), (.seconds(3), true), (.seconds(60), true)])
+    func slowSendClock(sendingFor: Duration, shows: Bool) {
+        #expect(LoadingPresentation.showsSendingClock(sendingFor: sendingFor) == shows)
+    }
 }

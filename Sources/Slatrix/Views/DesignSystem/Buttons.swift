@@ -12,7 +12,7 @@ enum ButtonKind: CaseIterable {
     case secondary
     /// Red, white text: deleting, leaving, signing out.
     case destructive
-    /// Accent text that underlines on hover.
+    /// Accent text that underlines on hover; red for a destructive role.
     case link
 }
 
@@ -36,7 +36,7 @@ struct HouseButtonStyle: ButtonStyle {
                 kind: kind,
                 state: InteractionState(
                     enabled: enabled, pressed: configuration.isPressed, focused: keyboardFocused(focusedWithin),
-                    hovering: hovering), square: square
+                    hovering: hovering), square: square, destructive: configuration.role == .destructive
             ) { configuration.label }
             .onHover { hovering = $0 }
         }
@@ -65,6 +65,7 @@ struct ButtonChrome<Label: View>: View {
     let kind: ButtonKind
     let state: InteractionState
     var square = false
+    var destructive = false
     @ViewBuilder let label: Label
     @Environment(\.metrics) private var m
     @Environment(\.controlSize) private var size
@@ -73,9 +74,11 @@ struct ButtonChrome<Label: View>: View {
     var body: some View {
         let colors = appearance.colors
         if kind == .link {
-            label.foregroundStyle(colors.accent).underline(state == .hover || state == .pressed)
-                .opacity(state == .disabled ? 0.4 : state == .pressed ? 0.7 : 1)
-                .focusRing(state == .focused, cornerRadius: m.radiusSmall)
+            label.foregroundStyle(destructive ? colors.destructive : colors.accent).underline(
+                state == .hover || state == .pressed
+            )
+            .opacity(state == .disabled ? 0.4 : state == .pressed ? 0.7 : 1)
+            .focusRing(state == .focused, cornerRadius: m.radiusSmall)
         } else {
             let shape = RoundedRectangle(cornerRadius: m.radius)
             let height = size == .small || size == .mini ? m.controlSmall : size == .large ? m.controlLarge : m.control
