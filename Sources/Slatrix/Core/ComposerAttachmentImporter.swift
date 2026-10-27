@@ -17,6 +17,10 @@ enum ComposerAttachmentInput: Sendable {
             self = .files(files)
         } else if let type = pasteboard.availableType(from: [.png, .tiff]), let data = pasteboard.data(forType: type) {
             self = .image(data, png: type == .png)
+        } else if let promises = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self])
+            as? [NSFilePromiseReceiver], !promises.isEmpty
+        {
+            self = .promises(FilePromises(receivers: promises))
         } else {
             return nil
         }
@@ -77,6 +81,11 @@ enum ComposerAttachmentImporter {
 
     static func stage(_ input: ComposerAttachmentInput, existing: [URL]) async throws -> [URL] {
         try Task.checkCancellation()
+        if case .promises(let promises) = input {
+            let folder = try newFolder()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            return try await stage(.files(receive(promises, into: folder)), existing: existing)
+        }
         let worker = Task.detached(priority: .userInitiated) { try prepare(input, existing: existing) }
         let staged = try await withTaskCancellationHandler(
             operation: { try await worker.value }, onCancel: { worker.cancel() })
@@ -97,9 +106,7 @@ enum ComposerAttachmentImporter {
             throw Failure(
                 message: "A saved attachment is damaged.")
         }
-        let folder = try session.get().directory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let folder = try newFolder()
         var succeeded = false
         defer { if !succeeded { try? FileManager.default.removeItem(at: folder) } }
         let url = folder.appendingPathComponent(filename)
@@ -229,15 +236,12 @@ enum ComposerAttachmentImporter {
         if case .image = input { count = 1 } else { count = files.count }
         guard count > 0 else { throw Failure(message: "No readable files were found to attach.") }
         guard existing.count + count <= maximumFiles else { throw Failure(message: "Attach up to 20 files at a time.") }
-        let active = try session.get()
         var folders: [URL] = []
         var result: [URL] = []
         var succeeded = false
         defer { if !succeeded { for folder in folders { try? FileManager.default.removeItem(at: folder) } } }
         func destination(_ name: String) throws -> URL {
-            let folder = active.directory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-            try FileManager.default.createDirectory(
-                at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            let folder = try newFolder()
             folders.append(folder)
             return folder.appendingPathComponent(name)
         }
@@ -275,6 +279,45 @@ enum ComposerAttachmentImporter {
         try Task.checkCancellation()
         succeeded = true
         return result
+    }
+
+    /// A new private folder in this session's staging area.
+    private static func newFolder() throws -> URL {
+        let folder = try session.get().directory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        return folder
+    }
+
+    /// Asks the apps behind `promises` to write their files into `folder`, and returns them once all are written.
+    /// Only a file written straight into `folder` counts, so a promise can't point at any other file.
+    @MainActor private static func receive(_ promises: FilePromises, into folder: URL) async throws -> [URL] {
+        var remaining = promises.receivers.reduce(0) { $0 + $1.fileTypes.count }
+        guard remaining > 0 else { return [] }
+        let expected = folder.resolvingSymlinksInPath()
+        return try await withCheckedThrowingContinuation { continuation in
+            var files: [URL] = []
+            var failed = false
+            for promise in promises.receivers {
+                promise.receivePromisedFiles(atDestination: folder, operationQueue: .main) { url, error in
+                    MainActor.assumeIsolated {
+                        guard remaining > 0 else { return }
+                        if error == nil && url.deletingLastPathComponent().resolvingSymlinksInPath() == expected {
+                            files.append(url)
+                        } else {
+                            failed = true
+                        }
+                        remaining -= 1
+                        guard remaining == 0 else { return }
+                        if failed {
+                            continuation.resume(throwing: Failure(message: "Couldn’t read a file. Attach it again."))
+                        } else {
+                            continuation.resume(returning: files)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private static func openFile(_ url: URL) throws -> Int32 {

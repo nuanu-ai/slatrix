@@ -28,6 +28,7 @@ private final class FakePromise: NSFilePromiseReceiver, @unchecked Sendable {
     ) {
         let file = destinationDir.appendingPathComponent(name)
         written = file
+        nonisolated(unsafe) let reader = reader
         operationQueue.addOperation {
             try? Data("Promised content\n".utf8).write(to: file)
             reader(self.reported ?? file, nil)
