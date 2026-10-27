@@ -78,6 +78,19 @@ struct Snapshots {
         }
         try write(await settledImage(hosting), "channel-\(name)")
 
+        // A file dragged over the conversation, then over the thread once it opens: the rightmost pane takes it.
+        let drag = FakeDrag(files: [URL(fileURLWithPath: #filePath)], over: window)
+        func dropOverlay(_ name: String) async throws {
+            let target = try #require(
+                Self.views(in: hosting).compactMap { $0 as? UploadDropView }.max {
+                    $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX
+                })
+            _ = target.draggingEntered(drag)
+            try write(await settledImage(hosting), name)
+            target.draggingExited(drag)
+        }
+        try await dropOverlay("drop-channel-\(name)")
+
         // Open a thread through the message's own context menu, the same item a right-click shows.
         // The sample workspace answers any thread with the same replies, so use a message that is always on screen.
         let thread = try #require(textViews(in: hosting).last { !$0.isEditable && !$0.string.isEmpty })
@@ -92,6 +105,7 @@ struct Snapshots {
             editor.insertText("Replying in the thread", replacementRange: editor.selectedRange())
         }
         try write(await settledImage(hosting), "thread-\(name)")
+        try await dropOverlay("drop-thread-\(name)")
 
         // The profile card, from the same message's "View profile" item.
         let profile = try #require(thread.menu(for: event)?.items.first { $0.identifier?.rawValue == "profile" })

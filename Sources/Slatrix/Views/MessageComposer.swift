@@ -203,6 +203,7 @@ struct MessageComposer: View {
                 onCancelEdit?()
             }
         }
+        .uploadIntake(isEnabled && !sending && !isEditing && !preparingAttachments ? queueInput as UploadIntake : nil)
     }
 
     private var floating: some View {
@@ -655,7 +656,6 @@ private struct ComposerNativeEditor: NSViewRepresentable {
         view.isAutomaticTextReplacementEnabled = false
         view.isContinuousSpellCheckingEnabled = true
         view.delegate = context.coordinator
-        view.registerForDraggedTypes(view.registeredDraggedTypes + [.fileURL, .png, .tiff])
         view.setAccessibilityLabel("Message editor")
         scroll.documentView = view
         state.textView = view
@@ -859,20 +859,6 @@ private final class ComposerTextView: NSTextView {
     override func paste(_ sender: Any?) {
         guard isEditable else { return }
         if hasAttachment(.general) { _ = acceptAttachments(.general) } else { super.paste(sender) }
-    }
-
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard hasAttachment(sender.draggingPasteboard) else { return super.draggingEntered(sender) }
-        return isEditable && acceptsAttachments ? .copy : []
-    }
-
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        draggingEntered(sender)
-    }
-
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard hasAttachment(sender.draggingPasteboard) else { return super.performDragOperation(sender) }
-        return acceptAttachments(sender.draggingPasteboard)
     }
 
     private func hasAttachment(_ pasteboard: NSPasteboard) -> Bool {

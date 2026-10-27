@@ -50,4 +50,55 @@ struct DropToUploadHostedTests {
         // It spans the conversation, so it must not turn it into a handle that moves the window.
         #expect(!targets[0].mouseDownCanMoveWindow)
     }
+
+    private final class Tray { var files: [URL] = [] }
+
+    /// A composer in a pane that takes drops, and the pane's drop target.
+    private func pane(editing: Bool = false, tray: Tray) throws -> (NSWindow, UploadDropView) {
+        let hosting = NSHostingView(
+            rootView: MessageComposer(
+                text: .constant(""), placeholder: "Message #team", members: [], isEditing: editing,
+                onSend: { _, _ in }, onTyping: { _ in },
+                queuedFiles: Binding(get: { tray.files }, set: { tray.files = $0 })
+            )
+            .frame(width: 360, height: 300).dropToUpload("Upload to #team").environmentObject(AppearanceStore()))
+        let window = offscreenWindow(NSSize(width: 400, height: 400))
+        window.contentView = hosting
+        hosting.layoutSubtreeIfNeeded()
+        let target = try #require(Self.views(in: hosting).compactMap { $0 as? UploadDropView }.first)
+        return (window, target)
+    }
+
+    @Test("Files dropped on a pane are staged in its composer's tray, as the + button stages them")
+    func dropStagesInTray() async throws {
+        let scratch = try TemporaryDirectory()
+        let file = try scratch.file("notes.txt")
+        let tray = Tray()
+        let (window, target) = try pane(tray: tray)
+        defer {
+            ComposerAttachmentImporter.discard(tray.files)
+            window.contentView = nil
+            window.close()
+        }
+        let drag = FakeDrag(files: [file], over: window)
+        #expect(target.draggingEntered(drag) == .copy)
+        #expect(target.performDragOperation(drag))
+        #expect(await eventually { tray.files.count == 1 })
+        // A private copy, so changing the original before sending changes nothing.
+        #expect(tray.files.first?.standardizedFileURL != file.standardizedFileURL)
+        #expect(tray.files.first.flatMap { try? Data(contentsOf: $0) } == (try Data(contentsOf: file)))
+    }
+
+    @Test("While a message is being edited, its pane refuses dropped files")
+    func editingRefusesDrops() throws {
+        let scratch = try TemporaryDirectory()
+        let (window, target) = try pane(editing: true, tray: Tray())
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let drag = FakeDrag(files: [try scratch.file("notes.txt")], over: window)
+        #expect(target.draggingEntered(drag) == [])
+        #expect(!target.performDragOperation(drag))
+    }
 }

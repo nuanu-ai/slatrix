@@ -1030,6 +1030,7 @@ struct RootView: View {
                 TypingLine(matrix: matrix)
             }
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
+            .dropToUpload(room.isDirect ? "Upload to \(room.name)" : "Upload to #\(room.name)")
     }
     private enum ChannelTab { case messages, pins, files }
     private func openChannelTab(_ tab: ChannelTab) {
@@ -1220,7 +1221,7 @@ struct RootView: View {
                         ? AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID) : nil
                 ).padding(.horizontal, m.sp12).alignmentGuide(.top) { $0[.bottom] }
             }
-        }.background(colors.canvas)
+        }.background(colors.canvas).dropToUpload("Upload to thread")
     }
     private var collectionContent: some View {
         VStack(spacing: 0) {
