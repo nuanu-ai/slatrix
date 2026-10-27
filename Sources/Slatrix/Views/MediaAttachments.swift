@@ -106,8 +106,11 @@ extension MatrixService {
         return image
     }
 
-    private func mediaImageKey(_ message: ChatMessage) -> NSString? {
-        attachmentSourceRevision(message).map {
+    fileprivate func mediaImageKey(_ message: ChatMessage) -> NSString? {
+        // While it sends, `eventID` is its transaction ID. The send queue swaps its local copy for the uploaded one
+        // midway, but the picture is the same.
+        if message.sendState != "sent" { return "\(message.eventID)|sending" as NSString }
+        return attachmentSourceRevision(message).map {
             "\(message.eventID)|\(String(decoding: $0, as: UTF8.self))" as NSString
         }
     }
@@ -205,7 +208,13 @@ private struct InlineMedia: View {
             }
         }
         .onHover { hovering = $0 }
-        .task(id: animates) { await load() }
+        // A sent file gets its server copy when its remote echo lands, and the still loads from that.
+        .task(id: LoadID(source: matrix.mediaImageKey(message), animates: animates)) { await load() }
+    }
+
+    private struct LoadID: Equatable {
+        let source: NSString?
+        let animates: Bool
     }
 
     @ViewBuilder private var badge: some View {
@@ -238,6 +247,7 @@ private struct InlineMedia: View {
     }
 
     private func load() async {
+        // A picture on screen stays when the server confirms a sent file: its copy is the same picture.
         if still == nil, matrix.cachedMediaImage(message) == nil, let image = await matrix.loadMediaImage(message),
             !Task.isCancelled
         {

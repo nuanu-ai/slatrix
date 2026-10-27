@@ -35,6 +35,17 @@ private final class SendTimeline: Timeline, @unchecked Sendable {
         if failEnqueue { throw MatrixServiceError.request("enqueue failed") }
         return SendHandle(noHandle: .init())
     }
+    let attachments = Recorder<AttachmentKind>()
+    override func sendAttachment(params: UploadParameters, attachment: AttachmentKind) throws
+        -> SendAttachmentJoinHandle
+    {
+        attachments.append(attachment)
+        return SentAttachment(noHandle: .init())
+    }
+}
+
+private final class SentAttachment: SendAttachmentJoinHandle, @unchecked Sendable {
+    override func join() async throws {}
 }
 
 private let roomID = "!original:example.org"
@@ -74,6 +85,20 @@ struct ComposerSendTests {
         #expect((threaded ? thread : main).sends.all == [quoted ? "reply:$quoted" : "send"])
         #expect((threaded ? main : thread).sends.all.isEmpty)
         #expect(room.notices.all.isEmpty && service.errorMessage == nil)
+    }
+
+    @Test(
+        "An uploaded image carries its size as it displays, so every client reserves its shape before it loads",
+        arguments: [(1, 160, 90), (6, 90, 160)])
+    func uploadedImageSize(orientation: Int, width: UInt64, height: UInt64) async throws {
+        let scratch = try TemporaryDirectory()
+        let photo = try scratch.png("photo.png", width: 160, height: 90, orientation: orientation)
+        try await service.uploadFile(photo, roomID: roomID)
+        guard case .image(let info, _) = try #require(main.attachments.all.first) else {
+            Issue.record("not sent as an image")
+            return
+        }
+        #expect(info.width == width && info.height == height)
     }
 
     @Test("A send the SDK refuses to queue fails without being retried", arguments: [false, true])

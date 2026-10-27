@@ -21,6 +21,20 @@ struct AttachmentPreviewTests {
         service.projectMediaCaptionForChecks([FakeTimelineItem(event)], roomID: roomID, inThread: false)
     }
 
+    @Test("Your own image shows while it sends, from the copy being sent, and stays as its upload finishes")
+    func sendingImage() async throws {
+        // Only the copy being sent is a picture; the server's thumbnail is empty.
+        client.stored = try pngData()
+        func sending(_ url: String) throws {
+            show(try imageEvent("photo-transaction", width: 160, height: 90, url: url, sending: true))
+        }
+        try sending("mxc://send-queue.localhost/photo")
+        let queued = try #require(service.messages.first)
+        let image = try #require(await service.loadMediaImage(queued))
+        try sending("mxc://example.org/photo")
+        #expect(service.cachedMediaImage(try #require(service.messages.first)) === image)
+    }
+
     @Test("Previewing an attachment again reuses the downloaded file")
     func reusesDownload() async throws {
         show(fileEvent("$file", source: try encryptedSource()))

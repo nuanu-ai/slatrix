@@ -136,6 +136,13 @@ final class FakeClient: Client, @unchecked Sendable {
         await thumbnails.wait()
         return thumbnail
     }
+
+    /// The whole file from the media store, which holds what the send queue sends; nil when it isn't there.
+    var stored: Data?
+    override func getMediaContent(mediaSource: MediaSource) async throws -> Data {
+        guard let stored else { throw CancellationError() }
+        return stored
+    }
 }
 
 final class FakeMediaFile: MediaFileHandle, @unchecked Sendable {
