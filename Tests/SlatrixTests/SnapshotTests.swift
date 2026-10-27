@@ -240,6 +240,22 @@ struct Snapshots {
             window.close()
         }
         try write(await settledImage(hosting), "sidebar-\(palette.rawValue)-\(theme.rawValue)")
+
+        // Collapsed sections keep the open conversation and the unread ones. The headers' places from the top:
+        // Direct messages under all eight channels, then Channels under the shortcuts and Starred.
+        matrix.selectPreviewRoom("preview.room.3")
+        for header in [599.0, 307] {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(
+                    try #require(
+                        NSEvent.mouseEvent(
+                            with: type, location: CGPoint(x: 68 + 80, y: 760 - header), modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+            }
+            _ = try await settledImage(hosting)
+        }
+        try write(await settledImage(hosting), "sidebar-collapsed-\(palette.rawValue)-\(theme.rawValue)")
     }
 
     @Test("Component gallery", arguments: Theme.allCases)
@@ -315,6 +331,38 @@ struct Snapshots {
             window.close()
         }
         try write(await settledImage(hosting), "mentions-\(Int(zoom * 100))-\(theme.rawValue)")
+    }
+
+    @Test("The @ list scrolled to its end: an invited person, then @room", arguments: Theme.allCases)
+    func mentionList(theme: Theme) async throws {
+        let members =
+            [
+                "Aisha Khan", "AI Agent", "Alex Moreau", "Amelia Hart", "Anders Berg", "Ana Lima", "Arjun Rao",
+                "Ava Chen", "Aaron Price", "Abby Lee",
+            ].map { ChatUser(id: "@\($0.lowercased().prefix { $0 != " " }):example.org", name: $0) }
+            + [ChatUser(id: "@adam:example.org", name: "Adam Invited", membership: "invite")]
+        let draft = ComposerHostedTests.Draft()
+        let (window, hosting) = try themedWindow(
+            MessageComposer(
+                text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #design",
+                members: members, onSend: { _, _ in },
+                onTyping: { _ in }
+            ).padding(16).frame(width: 560, height: 480, alignment: .bottom),
+            theme: theme)
+        defer { window.close() }
+        hosting.layoutSubtreeIfNeeded()
+        let editor = try #require(textViews(in: hosting).first { $0.isEditable })
+        window.makeFirstResponder(editor)
+        editor.insertText("@", replacementRange: editor.selectedRange())
+        _ = try await settledImage(hosting)
+        // ↑ from the first row wraps to @room, scrolling the list to its end.
+        editor.keyDown(
+            with: try #require(
+                NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                    windowNumber: window.windowNumber, context: nil, characters: "\u{F700}",
+                    charactersIgnoringModifiers: "\u{F700}", isARepeat: false, keyCode: 126)))
+        try write(await settledImage(hosting), "mention-list-\(theme.rawValue)")
     }
 
     @Test("Formatting in the composer, the same message sent, and a quote from Element", arguments: Theme.allCases)
@@ -645,10 +693,19 @@ struct Snapshots {
         try write(await settledImage(hosting), "hovered-row-\(theme.rawValue)")
     }
 
-    @Test("The tooltip over a hovered reaction", arguments: [1, 1.25], Theme.allCases)
+    @Test("The tooltip over a hovered reaction, short and wrapped", arguments: [1, 1.25], Theme.allCases)
     func reactionTooltip(zoom: Double, theme: Theme) async throws {
+        try await reactionTooltip(zoom: zoom, theme: theme, long: false)
+        try await reactionTooltip(zoom: zoom, theme: theme, long: true)
+    }
+
+    private func reactionTooltip(zoom: Double, theme: Theme, long: Bool) async throws {
         let matrix = MatrixService()
         matrix.enterPreview()
+        if long {
+            let names = ["preview.alex": "Alexandra Konstantinopoulou", "preview.julia": "Julia von Fürstenberg"]
+            matrix.members = matrix.members.map { ChatUser(id: $0.id, name: names[$0.id] ?? $0.name) }
+        }
         let room = try #require(matrix.selectedRoom)
         matrix.messages = matrix.messages.map {
             var message = $0
@@ -682,7 +739,8 @@ struct Snapshots {
         let chip = NSPoint(x: text.convert(text.bounds, to: nil).minX + m.sp8, y: row.minY + m.sp4 + m.sp24 / 2)
         scroll.onPointer?(chip)
         _ = await eventually { window.childWindows?.isEmpty == false }
-        try write(await settledImage(hosting), "reaction-tooltip-\(Int(zoom * 100))-\(theme.rawValue)")
+        try write(
+            await settledImage(hosting), "reaction-tooltip-\(long ? "long-" : "")\(Int(zoom * 100))-\(theme.rawValue)")
     }
 
     @Test("The New line over the first unread message", arguments: Theme.allCases)

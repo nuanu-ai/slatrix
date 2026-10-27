@@ -30,9 +30,10 @@ struct AppColors {
     var sunken: Color { Color(hex: dark ? 0x27282c : 0xf4f4f4) }
     /// Popovers, menus, toolbars and toasts that float over content.
     var overlay: Color { Color(hex: dark ? 0x222529 : 0xffffff) }
-    /// Tooltips: the theme's text color as a surface, as Slack inverts them.
-    var tooltip: Color { Color(hex: dark ? 0xe8e8e8 : 0x1d1c1d) }
-    var onTooltip: Color { Color(hex: dark ? 0x1d1c1d : 0xffffff) }
+    /// Tooltips: a dark bubble in both themes, as Slack's are. In dark mode it sits below the canvas, and the
+    /// elevation's hairline sets it apart from the conversation.
+    var tooltip: Color { Color(hex: dark ? 0x111214 : 0x1d1c1d) }
+    var onTooltip: Color { Color(hex: 0xffffff) }
     /// Dims the window under a modal.
     var scrim: Color { Color.black.opacity(dark ? 0.48 : 0.32) }
     var sidebar: Color {
