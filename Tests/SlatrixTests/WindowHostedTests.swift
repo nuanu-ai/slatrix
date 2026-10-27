@@ -402,6 +402,12 @@ struct WindowHostedTests {
         harness.resize(1_000)
         #expect(offscreen())
         #expect(await eventually { abs(offset()) <= 1 }, "\(offset())")
+
+        // The buttons' container now reaches down the whole bar, and a click on the field still lands in it.
+        let search = try #require(harness.searchField)
+        let field = search.convert(search.bounds, to: nil)
+        let hit = harness.window.contentView?.superview?.hitTest(NSPoint(x: field.midX, y: field.minY + 1))
+        #expect(hit.map { $0 === search || $0.isDescendant(of: search) } == true)
     }
 
     @Test("A modal dims the window below the title bar, which looks the same and takes no clicks", arguments: [1, 1.5])
