@@ -1132,8 +1132,15 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
         text.enumerateSubstrings(in: NSRange(location: 0, length: text.length), options: .byParagraphs) {
             _, content, enclosing, _ in
             var paragraph = ComposerFormat.Paragraph(block: self.block(at: enclosing.location))
+            var token: ComposerMention?
             storage.enumerateAttributes(in: content) { attributes, range, _ in
                 let mention = attributes[.composerMention] as? ComposerMention
+                // A pill's padding kerns its last character into a run of its own; the token is still one link.
+                if let mention, mention === token {
+                    paragraph.runs[paragraph.runs.count - 1].text += text.substring(with: range)
+                    return
+                }
+                token = mention
                 paragraph.runs.append(
                     MessageBodyRun(
                         text: text.substring(with: range), style: self.style(attributes),
