@@ -41,14 +41,18 @@ struct ProfilePaneHostedTests {
         // Alex's name sits on the line above the welcome's text.
         let text = try #require(welcome()).convert(try #require(welcome()).bounds, to: nil)
         let name = NSPoint(x: text.minX + 8, y: text.maxY + 12)
-        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            await drainMainActor()
-            window.sendEvent(
-                try #require(
-                    NSEvent.mouseEvent(
-                        with: type, location: name, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+        func clickName() async throws {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                await drainMainActor()
+                window.sendEvent(
+                    try #require(
+                        NSEvent.mouseEvent(
+                            with: type, location: name, modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+            }
         }
+        try await clickName()
         #expect(await eventually { dividers() == 2 })
 
         // Esc from the composer, where the cursor usually is.
@@ -62,6 +66,12 @@ struct ProfilePaneHostedTests {
                         windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
                         charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)))
         }
+        #expect(await eventually { dividers() == 1 })
+
+        // Esc from anywhere else, as the app's key monitor delivers it.
+        try await clickName()
+        #expect(await eventually { dividers() == 2 })
+        NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "mark-read"])
         #expect(await eventually { dividers() == 1 })
     }
 }

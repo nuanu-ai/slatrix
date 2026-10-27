@@ -5,7 +5,8 @@ import SwiftUI
 /// update with it.
 @Observable @MainActor final class InWindowModal {
     enum Kind: Hashable, Identifiable {
-        case preferences, shortcuts, switcher
+        case preferences(PreferencesView.Tab)
+        case shortcuts, switcher
         var id: Self { self }
     }
     var current: Kind?

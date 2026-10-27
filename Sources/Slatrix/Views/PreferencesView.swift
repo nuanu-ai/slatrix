@@ -11,7 +11,7 @@ struct PreferencesView: View {
     var onClose: () -> Void
     var onLogout: () -> Void
     var onRecovery: () -> Void
-    @State private var tab = PreferenceTab.appearance
+    @State var tab = Tab.appearance
     @State private var profileName = ""
     @State private var saving = false
     @State private var requestingNotifications = false
@@ -26,7 +26,7 @@ struct PreferencesView: View {
     @State private var savedProfile = false
     private var colors: AppColors { appearance.colors }
 
-    private enum PreferenceTab: String, CaseIterable, Identifiable, Hashable {
+    enum Tab: String, CaseIterable, Identifiable, Hashable {
         case appearance, notifications, account, advanced
         var id: String { rawValue }
         var title: String { rawValue.capitalized }
@@ -40,7 +40,7 @@ struct PreferencesView: View {
         }
     }
     private struct NotificationStatusContext: Hashable {
-        let tab: PreferenceTab
+        let tab: Tab
         let session: UUID
     }
     private var notificationStatusContext: NotificationStatusContext {
@@ -54,7 +54,7 @@ struct PreferencesView: View {
         ) {
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: m.sp4) {
-                    ForEach(PreferenceTab.allCases) { item in
+                    ForEach(Tab.allCases) { item in
                         Button {
                             tab = item
                             error = nil
