@@ -204,7 +204,7 @@ struct Snapshots {
             MessageRow(message: message("Carol", "-", html: "\(me) the build is green, @room please pull"))
             MessageRow(message: message("Dave", "Pinging @carol:example.org and @erin:example.org about it"))
             MessageComposer(
-                text: .constant("Thanks [Alice Liddell](https://matrix.to/#/@alice:example.org) "),
+                text: .constant("Thanks <a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a> for this"),
                 placeholder: "Message #design", members: [], onSend: { _, _ in }, onTyping: { _ in }
             ).padding(16)
         }
@@ -224,6 +224,53 @@ struct Snapshots {
             window.close()
         }
         try write(await settledImage(hosting), "mentions-\(theme.rawValue)")
+    }
+
+    @Test("Formatting in the composer, the same message sent, and a quote from Element", arguments: Theme.allCases)
+    func formatting(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let html =
+            "<strong>Bold</strong>, <em>italic</em>, <del>struck</del> and <code>inline code</code> for "
+            + "<a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a>"
+            + "<pre><code>let answer = 42\nprint(answer)</code></pre>"
+            + "<ul><li>A bullet</li><li>Another one that is long enough to wrap onto a second line in the row</li></ul>"
+            + "<ol><li>First</li><li>Second</li></ol><blockquote>A quote with a bar beside it</blockquote>After the quote"
+        let sent = ComposerFormat.message(draft: html)
+        func message(_ sender: String, _ body: String, html: String?) -> ChatMessage {
+            ChatMessage(
+                id: sender + body, roomID: "!room:example.org", senderID: "@\(sender.lowercased()):example.org",
+                senderName: sender, body: body, formattedBody: html,
+                timestamp: Date(timeIntervalSince1970: 1_800_000_000))
+        }
+        let view = VStack(alignment: .leading, spacing: 0) {
+            MessageRow(message: message("Dmitry", sent.body, html: sent.html))
+            MessageRow(
+                message: message(
+                    "Bob", "> Ship it on Friday?\n\nYes, after the review.",
+                    html: "<blockquote>\n<p>Ship it on Friday?</p>\n</blockquote>\n<p>Yes, after the review.</p>\n"))
+            MessageComposer(
+                text: .constant(html), placeholder: "Message #design", members: [], onSend: { _, _ in },
+                onTyping: { _ in }
+            ).padding(16)
+        }
+        .frame(width: 560).background(appearance.colors.canvas)
+        .environment(\.mentions, MentionContext(me: "@me:example.org"))
+        .environmentObject(appearance)
+        let hosting = NSHostingView(rootView: view)
+        let window = offscreenWindow(hosting.fittingSize)
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        try write(await settledImage(hosting), "formatting-\(theme.rawValue)")
     }
 
     @Test("Attachments and the media viewer", arguments: Theme.allCases)

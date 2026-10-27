@@ -164,7 +164,8 @@ enum ProtectedLocalStateCodec {
     private static let magic = Data("ELVLT01\n".utf8)
     private static let maximumFileBytes = maximumPlaintextBytes + 128
     private struct Payload: Codable {
-        var version = 1
+        /// 2 stores drafts as Matrix HTML; 1 stored them as Markdown. Older builds refuse 2 rather than misread it.
+        var version = 2
         var state: ProtectedLocalState
     }
 
@@ -194,9 +195,18 @@ enum ProtectedLocalStateCodec {
                 let object = try JSONSerialization.jsonObject(with: plaintext) as? [String: Any],
                 Set(object.keys) == ["version", "state"]
             else { throw ProtectedLocalStateError.invalidData }
-            let payload = try JSONDecoder().decode(Payload.self, from: plaintext)
-            guard payload.version == 1 else { throw ProtectedLocalStateError.invalidData }
+            var payload = try JSONDecoder().decode(Payload.self, from: plaintext)
+            guard [1, 2].contains(payload.version) else { throw ProtectedLocalStateError.invalidData }
             try payload.state.validate()
+            if payload.version == 1 {
+                // A draft that would outgrow the limit as HTML stays as written rather than lock the whole vault.
+                let migrate = { (text: String) in
+                    let html = ComposerFormat.draft(plain: text)
+                    return html.utf8.count <= 131_072 ? html : text
+                }
+                payload.state.drafts = payload.state.drafts.mapValues(migrate)
+                payload.state.threadDrafts = payload.state.threadDrafts.mapValues(migrate)
+            }
             return payload.state
         } catch { throw ProtectedLocalStateError.invalidData }
     }

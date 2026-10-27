@@ -105,24 +105,11 @@ enum MatrixMapping {
         size.map { $0 <= maximumAutomaticPreviewBytes } ?? false
     }
 
-    static func mentionedUserIDs(in body: String) -> [String] {
-        var text = body.removingPercentEncoding ?? body
-        for pattern in ["(?s)```.*?(?:```|$)", "`[^`\\n]*`", "(?m)^\\s*>.*$"] {
-            if let ignored = try? NSRegularExpression(pattern: pattern) {
-                text = ignored.stringByReplacingMatches(
-                    in: text, range: NSRange(text.startIndex..., in: text), withTemplate: " ")
-            }
-        }
-        guard let expression = try? NSRegularExpression(pattern: "(?<![A-Za-z0-9_])" + MatrixID.userPattern) else {
-            return []
-        }
-        let ids = expression.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap {
-            match -> String? in
-            guard let range = Range(match.range, in: text) else { return nil }
-            let id = String(text[range])
-            return (try? serverNameFromUserId(userId: id)) == nil ? nil : id
-        }
-        return Array(Set(ids)).sorted()
+    static func content(_ message: ComposerFormat.Message) throws -> RoomMessageEventContentWithoutRelation {
+        try messageEventContentNew(
+            msgtype: .text(
+                content: TextMessageContent(
+                    body: message.body, formatted: message.html.map { FormattedBody(format: .html, body: $0) })))
     }
 
     /// Fills the shared rich-text cache with the HTML bodies of these items.
@@ -1614,11 +1601,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         return projected
     }
 
-    func sendMessage(_ body: String, threadRootID: String? = nil, replyToID: String? = nil, roomID: String? = nil)
+    /// `draft` is the composer's Matrix HTML.
+    func sendMessage(_ draft: String, threadRootID: String? = nil, replyToID: String? = nil, roomID: String? = nil)
         async throws
     {
         try assertDestination(roomID)
-        guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let message = ComposerFormat.message(draft: draft)
+        guard !message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let token = selection
         let target: Timeline
         if let threadRootID {
@@ -1631,8 +1620,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             target = try requireTimeline()
         }
         _ = try requireRoom(roomID)
-        let content = messageEventContentFromMarkdown(md: body).withMentions(
-            mentions: Mentions(userIds: MatrixMapping.mentionedUserIDs(in: body), room: false))
+        let content = try MatrixMapping.content(message).withMentions(
+            mentions: Mentions(userIds: message.mentions, room: false))
         // Thread timelines infer their own relation. Extra JSON cannot override
         // that fallback relation, so an explicit quote must use sendReply.
         if let reply = replyToID {
@@ -2001,7 +1990,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         do {
             try await timeline.edit(
                 eventOrTransactionId: .eventId(eventId: target.message.eventID),
-                newContent: .roomMessage(content: messageEventContentFromMarkdown(md: body)))
+                newContent: .roomMessage(content: MatrixMapping.content(ComposerFormat.message(draft: body))))
             try validateMessageAction(target)
         } catch {
             try validateMessageAction(target)

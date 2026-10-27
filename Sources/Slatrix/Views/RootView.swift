@@ -1303,10 +1303,11 @@ struct RootView: View {
         }
     }
     private func draftSummary(_ address: AttachmentDraftAddress) -> String {
-        let text =
+        let draft =
             address.threadRootID.map {
                 drafts.threads[ThreadDraftAddress(roomID: address.roomID, rootID: $0).id] ?? ""
             } ?? drafts.conversations[address.roomID] ?? ""
+        let text = ComposerFormat.message(draft: draft).body
         let count = max(attachmentDrafts.queues[address]?.count ?? 0, attachmentDrafts.files[address]?.count ?? 0)
         return text + (count == 0 ? "" : (text.isEmpty ? "" : "\n") + "\(count) attachment\(count == 1 ? "" : "s")")
     }
@@ -2014,7 +2015,7 @@ struct RootView: View {
         else { return }
         editTarget = target
         editActionTarget = action
-        editText = message.body
+        editText = ComposerFormat.draft(body: message.body, html: message.formattedBody)
         cancelReply()
     }
     private func cancelCurrentEdit() {

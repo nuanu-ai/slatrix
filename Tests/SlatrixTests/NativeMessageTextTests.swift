@@ -70,6 +70,69 @@ struct NativeMessageTextTests {
         #expect(text.attribute(.underlineStyle, at: 0, effectiveRange: nil) == nil)
     }
 
+    private func style(_ text: NSAttributedString, at index: Int) -> NSParagraphStyle? {
+        text.attribute(.paragraphStyle, at: index, effectiveRange: nil) as? NSParagraphStyle
+    }
+
+    /// Where the glyph for `character` lands once `text` is laid out `width` points wide.
+    private func positions(_ text: NSAttributedString, width: CGFloat) -> (Int) -> NSPoint {
+        let storage = NSTextStorage(attributedString: text)
+        let layout = PillLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        layout.ensureLayout(for: container)
+        return { character in
+            _ = storage  // A layout manager holds its storage weakly.
+            let glyph = layout.glyphIndexForCharacter(at: character)
+            let line = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            return NSPoint(x: line.minX + layout.location(forGlyphAt: glyph).x, y: line.minY)
+        }
+    }
+
+    @Test("A quote indents past its bar, and the text after it does not")
+    func quoteLayout() {
+        let text = NativeSelectableMessageText.attributed(
+            [MessageBodyRun(text: "said\nthis\n", block: MessageBlock(quote: 1)), MessageBodyRun(text: "after")],
+            fontSize: 15, textColor: .labelColor, linkColor: .systemBlue)
+        let at = positions(text, width: 400)
+        #expect(at(0).x >= MessageBlocks.barWidth(15) * 2 && at(5).x == at(0).x)
+        #expect(text.attribute(.quoteBar, at: 9, effectiveRange: nil) is NSColor)
+        #expect(at(10).x == 0 && text.attribute(.quoteBar, at: 10, effectiveRange: nil) == nil)
+    }
+
+    @Test("A list item's wrapped lines start under its first word, not under its marker")
+    func listLayout() throws {
+        let item = String(repeating: "word ", count: 30)
+        let text = NativeSelectableMessageText.attributed(
+            [
+                MessageBodyRun(text: "• ", block: MessageBlock(list: 1), marker: true),
+                MessageBodyRun(text: item, block: MessageBlock(list: 1)),
+            ], fontSize: 15, textColor: .labelColor, linkColor: .systemBlue)
+        let at = positions(text, width: 200)
+        let wrapped = try #require((2..<text.length).first { at($0).y > at(2).y })
+        #expect(at(0).x == 0 && at(2).x > 0)
+        #expect(abs(at(wrapped).x - at(2).x) < 0.5)
+    }
+
+    @Test("A code block sits on a padded fill instead of inline code's background")
+    func codeBlockLayout() {
+        let text = NativeSelectableMessageText.attributed(
+            [
+                MessageBodyRun(text: "before\n"),
+                MessageBodyRun(text: "let x\nlet y\n", style: .code, block: MessageBlock(code: true)),
+                MessageBodyRun(text: "after"),
+            ], fontSize: 15, textColor: .labelColor, linkColor: .systemBlue)
+        let at = positions(text, width: 400)
+        #expect(text.attribute(.codeBlock, at: 7, effectiveRange: nil) is NSColor)
+        #expect(text.attribute(.backgroundColor, at: 7, effectiveRange: nil) == nil)
+        #expect(at(7).x > 0 && at(13).x == at(7).x && at(19).x == 0)
+        // Padding above the first line and below the last, none between them.
+        #expect((style(text, at: 7)?.paragraphSpacingBefore ?? 0) > 0 && style(text, at: 7)?.paragraphSpacing == 0)
+        #expect(style(text, at: 13)?.paragraphSpacingBefore == 0 && (style(text, at: 13)?.paragraphSpacing ?? 0) > 0)
+    }
+
     @Test("A menu item runs only its own enabled command")
     func menuActions() {
         var ran: [String] = []
