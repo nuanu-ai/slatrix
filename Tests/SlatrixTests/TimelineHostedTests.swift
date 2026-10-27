@@ -520,27 +520,30 @@ extension TimelineHostedTests {
     }
 
     private func tooltip(_ harness: Harness) -> TooltipView? {
-        harness.hosting.subviews.lazy.compactMap { $0 as? TooltipView }.first { !$0.isHidden && $0.alphaValue > 0 }
+        harness.window.childWindows?.lazy.compactMap { $0.contentView as? TooltipView }.first
     }
 
     @Test("Hovering a reaction shows who reacted above it after a short delay, moving no row, and leaving hides it")
     func reactionTooltip() async throws {
-        var messages = Self.actionable(0..<30)
-        messages[29].reactions = [MessageReaction(key: "👍", count: 2, mine: true, senders: ["@bea:x", Self.user])]
+        // Few enough to fit on screen, so no row is measured ahead of the reader (which follows the real pointer).
+        var messages = Self.actionable(0..<4)
+        messages[3].reactions = [MessageReaction(key: "👍", count: 2, mine: true, senders: ["@bea:x", Self.user])]
         let harness = Harness(messages: messages)
         harness.service.members = [ChatUser(id: "@bea:x", name: "Bea")]
+        // History stays loading, so no page lands while the test points.
+        harness.timeline.gate.arm()
         defer { harness.close() }
-        await settle(harness) { harness.top(of: "Message 29") != nil }
+        await settle(harness) { harness.top(of: "Message 3") != nil }
         let table = try #require(harness.scrollView?.documentView as? NSTableView)
         func heights() -> [CGFloat] { (0..<table.numberOfRows).map { table.rect(ofRow: $0).height } }
-        let text = try hover(harness, "Message 29")
+        let text = try hover(harness, "Message 3")
         var cell: NSView? = text
         while let view = cell, !(view is TimelineCell) { cell = view.superview }
         let row = try #require(cell).convert(try #require(cell).bounds, to: nil)
         harness.layout()
         await drainMainActor()
         let before = heights()
-        let top = harness.top(of: "Message 29")
+        let top = harness.top(of: "Message 3")
 
         // The reaction is the row's last line: a 24 pt chip over the row's 4 pt bottom padding, under the text.
         let m = Metrics()
@@ -552,12 +555,13 @@ extension TimelineHostedTests {
         let shown = try #require(tooltip(harness))
         #expect(ContinuousClock.now - start >= .milliseconds(250))
         #expect(shown.text == "You and Bea reacted with :+1:")
-        let frame = shown.convert(shown.bounds, to: nil)
-        #expect(frame.minY >= chip.y + m.sp24 / 2 && frame.minX <= chip.x && chip.x <= frame.maxX)
-        #expect(harness.hosting.bounds.contains(frame))
+        let frame = harness.window.convertFromScreen(try #require(shown.window).frame)
+        #expect(frame.minY >= chip.y && frame.minX <= chip.x && chip.x <= frame.maxX)
+        // Inside the window, but for room the shadow takes.
+        #expect(harness.hosting.bounds.insetBy(dx: -m.sp12, dy: -m.sp12).contains(frame))
         harness.layout()
         #expect(heights() == before)
-        #expect(harness.top(of: "Message 29") == top)
+        #expect(harness.top(of: "Message 3") == top)
 
         harness.scrollView?.onPointer?(nil)
         #expect(tooltip(harness) == nil)

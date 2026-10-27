@@ -124,7 +124,9 @@ enum Elevation {
 /// Durations and curves. Each is nil under Reduce Motion, so the change is instant.
 enum Motion {
     /// Overlays, popovers and modals fading in.
-    static var overlay: Animation? { reduced ? nil : .easeOut(duration: 0.12) }
+    static var overlay: Animation? { reduced ? nil : .easeOut(duration: overlayDuration) }
+    /// `overlay`'s length, for AppKit views; zero under Reduce Motion.
+    static var overlayDuration: TimeInterval { reduced ? 0 : 0.12 }
     /// Photos fading in over initials, scroll-to.
     static var content: Animation? { reduced ? nil : .easeOut(duration: 0.12) }
     /// A message jumped to losing its highlight, slowly enough to follow.
