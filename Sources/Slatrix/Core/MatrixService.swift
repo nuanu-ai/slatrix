@@ -512,6 +512,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         didSet {
             let locked = messages.contains { $0.kind == "m.room.encrypted" }
             if locked != hasLockedMessages { hasLockedMessages = locked }
+            if messages.first?.id != oldValue.first?.id { blankPages = 0 }
         }
     }
     /// Whether the open conversation shows messages this device can't decrypt yet; apart from `messages`, so its
@@ -523,6 +524,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var threadSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     var threadMessages: [ChatMessage] = []
     private(set) var hasMoreHistory = true
+    /// Older pages asked for since an older message last showed. Joins, topic changes and other events the timeline
+    /// hides can fill page after page, so a conversation stops loading history on its own after a few of those.
+    private var blankPages = 0
+    var loadsMoreHistory: Bool { hasMoreHistory && blankPages < 5 }
     private(set) var hasMoreForwardHistory = false
     private(set) var isLoadingForwardHistory = false
     private(set) var firstUnreadEventID: String?
@@ -1458,6 +1463,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         typingUsers = []
         errorMessage = nil
         hasMoreHistory = true
+        blankPages = 0
         hasMoreThreadHistory = true
         firstUnreadEventID = nil
         lastAutomaticReceipt = nil
@@ -1643,6 +1649,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         if let current = backwardPage, current.timeline === timeline { return try await current.task.value }
         let task = Task { try await timeline.paginateBackwards(numEvents: 100) }
         backwardPage = (timeline, task)
+        blankPages += 1
         defer { if backwardPage?.timeline === timeline { backwardPage = nil } }
         return try await task.value
     }
