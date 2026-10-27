@@ -186,10 +186,10 @@ struct WindowHostedTests {
         let save = try #require(text.menu(for: event)?.items.first { $0.identifier?.rawValue == "save" })
         _ = save.target?.perform(save.action, with: save)
 
-        // The toast is the inverse of the canvas: a solid bar of the primary text color, wider than any glyph.
+        // The toast is a solid bar of the tooltip color, wider than any glyph.
         let timeline = try harness.timeline()
         let bottom = CGRect(x: timeline.minX, y: timeline.minY, width: timeline.width, height: 120)
-        let ink = try #require(NSColor(harness.appearance.colors.textPrimary).usingColorSpace(.sRGB))
+        let ink = try #require(NSColor(harness.appearance.colors.tooltip).usingColorSpace(.sRGB))
         func toastShown() -> Bool {
             harness.longestRun(in: bottom) {
                 abs($0.redComponent - ink.redComponent) + abs($0.greenComponent - ink.greenComponent)

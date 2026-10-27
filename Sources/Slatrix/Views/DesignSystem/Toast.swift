@@ -1,16 +1,16 @@
 import AppKit
 import SwiftUI
 
-/// Slack's toast: a one-off confirmation such as "Link copied", small, on the inverse of the canvas.
+/// Slack's toast: a one-off confirmation such as "Link copied", small and dark in both themes, as a tooltip is.
 struct Toast: View {
     let text: String
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
     var body: some View {
-        Text(text).font(m.font(.secondary, .semibold)).foregroundStyle(appearance.colors.canvas)
+        Text(text).font(m.font(.secondary, .semibold)).foregroundStyle(appearance.colors.onTooltip)
             .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
-            .background(appearance.colors.textPrimary, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+            .background(appearance.colors.tooltip, in: RoundedRectangle(cornerRadius: m.radiusLarge))
             .elevation(.e2, cornerRadius: m.radiusLarge)
     }
 }
