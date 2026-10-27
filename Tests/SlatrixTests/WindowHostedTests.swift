@@ -12,6 +12,7 @@ import Testing
 struct WindowHostedTests {
     @MainActor private final class Harness {
         let matrix = MatrixService()
+        let appearance = AppearanceStore()
         let window: NSWindow
         let hosting: NSHostingView<AnyView>
         let messages: [ChatMessage]
@@ -26,7 +27,7 @@ struct WindowHostedTests {
                 ChatRoom(
                     id: "!busy\($0):example.org", name: "Busy \($0)", unread: $0 % 3, spaceIDs: ["preview.workspace"])
             }
-            hosting = NSHostingView(rootView: AnyView(RootView(matrix: matrix).environmentObject(AppearanceStore())))
+            hosting = NSHostingView(rootView: AnyView(RootView(matrix: matrix).environmentObject(appearance)))
             window = offscreenWindow(NSSize(width: 1_440, height: 900))
             window.contentView = hosting
             window.orderFrontRegardless()
@@ -59,6 +60,41 @@ struct WindowHostedTests {
         }
 
         static func views(in view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+
+        /// The newest message's text, where the window shows it.
+        func newest() throws -> NSView {
+            try #require(Self.views(in: hosting).first { ($0 as? MessageTextView)?.string == messages.last?.body })
+        }
+
+        /// The timeline's frame in the window.
+        func timeline() throws -> CGRect {
+            let scroll = try #require(try newest().enclosingScrollView)
+            return scroll.convert(scroll.bounds, to: nil)
+        }
+
+        /// The longest row of pixels in `band`, a frame in the window, that pass `test`, in points.
+        func longestRun(in band: CGRect, _ test: (NSColor) -> Bool) -> CGFloat {
+            hosting.layoutSubtreeIfNeeded()
+            guard let image = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { return 0 }
+            hosting.cacheDisplay(in: hosting.bounds, to: image)
+            let scale = CGFloat(image.pixelsWide) / hosting.bounds.width
+            var longest = 0
+            // Bitmap rows run down from the top; window frames up from the bottom.
+            let rows =
+                Int((hosting.bounds.height - band.maxY) * scale)..<Int((hosting.bounds.height - band.minY) * scale)
+            for y in stride(from: rows.lowerBound, to: rows.upperBound, by: 2) {
+                var run = 0
+                for x in Int(band.minX * scale)..<Int(band.maxX * scale) {
+                    if let pixel = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), test(pixel) {
+                        run += 1
+                        longest = max(longest, run)
+                    } else {
+                        run = 0
+                    }
+                }
+            }
+            return CGFloat(longest) / scale
+        }
     }
 
     @Test(
@@ -134,6 +170,61 @@ struct WindowHostedTests {
                     ($0 as? NSTextField)?.placeholderString == "Find members"
                 }
             })
+    }
+
+    @Test("Saving a message for later confirms it with a toast above the composer that leaves on its own")
+    func saveToast() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let text = try #require(try harness.newest() as? MessageTextView)
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let save = try #require(text.menu(for: event)?.items.first { $0.identifier?.rawValue == "save" })
+        _ = save.target?.perform(save.action, with: save)
+
+        // The toast is the inverse of the canvas: a solid bar of the primary text color, wider than any glyph.
+        let timeline = try harness.timeline()
+        let bottom = CGRect(x: timeline.minX, y: timeline.minY, width: timeline.width, height: 120)
+        let ink = try #require(NSColor(harness.appearance.colors.textPrimary).usingColorSpace(.sRGB))
+        func toastShown() -> Bool {
+            harness.longestRun(in: bottom) {
+                abs($0.redComponent - ink.redComponent) + abs($0.greenComponent - ink.greenComponent)
+                    + abs($0.blueComponent - ink.blueComponent) < 0.1
+            } > 120
+        }
+        #expect(await eventually { toastShown() })
+        #expect(await eventually(timeout: .seconds(8)) { !toastShown() })
+    }
+
+    @Test("Going offline shows a banner over the conversation, and reconnecting clears it, with the timeline still")
+    func offlineBanner() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let newest = try harness.newest()
+        let before = newest.convert(newest.bounds, to: nil)
+        let timeline = try harness.timeline()
+        let top = CGRect(x: timeline.minX, y: timeline.maxY - 60, width: timeline.width, height: 60)
+        // The banner's warning tint: warm, across most of the pane.
+        func bannerShown() -> Bool {
+            harness.longestRun(in: top) { $0.redComponent - $0.blueComponent > 0.05 } > timeline.width / 2
+        }
+
+        harness.matrix.applyConnection(
+            MatrixConnectionFeedback(
+                state: .offline, isRetrying: false, canRetry: true,
+                errorMessage: "You’re offline. Check your connection."
+            ))
+        #expect(await eventually { bannerShown() })
+        #expect(newest.convert(newest.bounds, to: nil) == before)
+
+        harness.matrix.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
+        #expect(await eventually { !bannerShown() })
+        #expect(newest.convert(newest.bounds, to: nil) == before)
     }
 
     @Test("A conversation opened at an older message keeps its composer")
