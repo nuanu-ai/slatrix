@@ -752,6 +752,27 @@ struct Snapshots {
         try write(await settledImage(hosting), "hovered-row-\(theme.rawValue)")
     }
 
+    @Test("A channel with no messages, at its intro", arguments: Theme.allCases)
+    func emptyChannel(theme: Theme) async throws {
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let room = try #require(matrix.selectedRoom)
+        // Signed in, with older history still to load, as a channel of only joins opens.
+        matrix.isPreview = false
+        matrix.configureMessageActionsForChecks(
+            client: FakeClient(rooms: [FakeRoom(roomInfo(id: room.id))]), main: StartOfTimeline(), thread: nil,
+            rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
+        matrix.messages = []
+        let (window, hosting) = try themedWindow(
+            TimelineView(
+                matrix: matrix, room: room, savedIDs: [], onThread: { _ in }, onReply: { _ in }, onEdit: { _ in },
+                onSave: { _ in }
+            ).environment(Popovers()).frame(width: 760, height: 480),
+            theme: theme)
+        defer { window.close() }
+        try write(await settledImage(hosting), "empty-channel-\(theme.rawValue)")
+    }
+
     @Test("The tooltip over a hovered reaction, short and wrapped", arguments: [1, 1.25], Theme.allCases)
     func reactionTooltip(zoom: Double, theme: Theme) async throws {
         try await reactionTooltip(zoom: zoom, theme: theme, long: false)
