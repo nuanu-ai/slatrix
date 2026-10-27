@@ -46,4 +46,36 @@ struct RoomMembersTests {
         #expect(!members.blockedMain)
         #expect(service.members.map(\.name) == ["Alice"])
     }
+
+    @Test("Members keep whether they joined, were invited, left or were banned")
+    func membership() async {
+        let room = FakeOpenRoom("!team:example.org", cached: [])
+        room.memberList = [
+            roomMember("@al:example.org", membership: .join), roomMember("@bo:example.org", membership: .invite),
+            roomMember("@cy:example.org", membership: .leave), roomMember("@di:example.org", membership: .ban),
+        ]
+        let service = MatrixService()
+        service.configureMessageActionsForChecks(
+            client: FakeClient(rooms: [room]), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
+            selectionID: UUID(), threadID: UUID())
+        service.selectedRoomID = room.id()
+        await service.loadMembers()
+        #expect(service.members.map(\.membership) == ["join", "invite", "leave", "ban"])
+    }
+
+    @Test("@room is offered and notifies only when your power level allows it", arguments: [false, true])
+    func roomNotification(allowed: Bool) async {
+        let room = FakeOpenRoom("!team:example.org", cached: [])
+        room.memberList = [roomMember("@me:example.org")]
+        room.canNotifyRoom = allowed
+        let service = MatrixService()
+        service.configureMessageActionsForChecks(
+            client: FakeClient(rooms: [room]), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
+            selectionID: UUID(), threadID: UUID())
+        service.user = ChatUser(id: "@me:example.org", name: "Me")
+        service.selectedRoomID = room.id()
+        await service.loadMembers()
+        #expect(service.canMentionRoom == allowed)
+        #expect(service.mentions(ComposerFormat.message(draft: "Heads up @room")).room == allowed)
+    }
 }

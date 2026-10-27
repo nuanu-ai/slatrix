@@ -530,6 +530,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var forwardLoadID: UUID?
     private(set) var hasMoreThreadHistory = true
     var members: [ChatUser] = []
+    /// Whether your power level lets you notify the whole selected room, read with its members.
+    var canMentionRoom = false
     var user: ChatUser?
     /// Emoji this account reacted with, newest first, kept in its account data so Element shares them.
     private(set) var recentEmoji: [String] = []
@@ -1177,6 +1179,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         messages = []
         threadMessages = []
         members = []
+        canMentionRoom = false
         user = nil
         selectedRoomID = nil
         typingUsers = []
@@ -1277,6 +1280,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         timelineHandle = kept.listener
         messages = kept.messages
         members = kept.members
+        canMentionRoom = false
         hasMoreHistory = kept.hasMoreHistory
         firstUnreadEventID = kept.firstUnreadEventID
         eventIDs = kept.eventIDs
@@ -1466,6 +1470,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         messages = []
         threadMessages = []
         members = []
+        canMentionRoom = false
         typingUsers = []
         errorMessage = nil
         hasMoreHistory = true
@@ -1622,7 +1627,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         _ = try requireRoom(roomID)
         let content = try MatrixMapping.content(message).withMentions(
-            mentions: Mentions(userIds: message.mentions, room: false))
+            mentions: mentions(message))
         // Thread timelines infer their own relation. Extra JSON cannot override
         // that fallback relation, so an explicit quote must use sendReply.
         if let reply = replyToID {
@@ -2632,21 +2637,44 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         requestRefresh()
         return destination
     }
+    /// Servers honor a room mention only from someone with the power level for it; for anyone else "@room" is text.
+    func mentions(_ message: ComposerFormat.Message) -> Mentions {
+        Mentions(userIds: message.mentions, room: message.mentionsRoom && canMentionRoom)
+    }
+
+    private nonisolated static func membership(_ state: MembershipState) -> String {
+        switch state {
+        case .join: "join"
+        case .invite: "invite"
+        case .leave: "leave"
+        case .ban: "ban"
+        case .knock: "knock"
+        case .custom(let value): value
+        }
+    }
+
     func loadMembers() async {
         let token = selection
         do {
-            let iterator = try await requireRoom().members()
+            let room = try requireRoom()
+            let iterator = try await room.members()
             // nextChunk is a synchronous FFI call; a large room must not stall the main thread.
             let result = await Task.detached(priority: .userInitiated) {
                 var result: [ChatUser] = []
                 while !Task.isCancelled, let chunk = iterator.nextChunk(chunkSize: 500), !chunk.isEmpty {
                     result += chunk.map {
-                        ChatUser(id: $0.userId, name: $0.displayName ?? $0.userId, avatarURL: $0.avatarUrl)
+                        ChatUser(
+                            id: $0.userId, name: $0.displayName ?? $0.userId, avatarURL: $0.avatarUrl,
+                            membership: Self.membership($0.membership))
                     }
                 }
                 return result
             }.value
-            if token == selection { members = result }
+            let canNotify = (try? await room.getPowerLevels().canOwnUserTriggerRoomNotification()) ?? false
+            if token == selection {
+                members = result
+                canMentionRoom = canNotify
+            }
         } catch { if token == selection { errorMessage = Self.safeError(error) } }
     }
     func searchMessages(query: String, roomID: String? = nil) async throws {

@@ -83,6 +83,13 @@ struct ComposerFormatTests {
     }
 
     @Test(
+        "@room typed outside code notifies the room",
+        arguments: [("Heads up @room", true), ("<code>@room</code>", false), ("@roommate", false)])
+    func roomMention(draft: String, notifies: Bool) {
+        #expect(ComposerFormat.message(draft: draft).mentionsRoom == notifies)
+    }
+
+    @Test(
         "A complete Matrix ID typed outside code mentions its person",
         arguments: [
             ("Hi @alice:example.org, @alice:example.org", ["@alice:example.org"]),

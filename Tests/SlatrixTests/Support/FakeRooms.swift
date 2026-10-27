@@ -55,6 +55,9 @@ final class FakeRoom: Room, @unchecked Sendable {
         return memberList
     }
     override func isEncrypted() async -> Bool { true }
+    override func getPowerLevels() async throws -> RoomPowerLevels {
+        throw ClientError.Generic(msg: "fixture has no power levels", details: nil)
+    }
     override func membership() -> Membership { info?.membership ?? .joined }
     override func roomInfo() async throws -> RoomInfo {
         lock.withLock { reads += 1 }
@@ -156,9 +159,9 @@ final class FakeMediaFile: MediaFileHandle, @unchecked Sendable {
     deinit { try? FileManager.default.removeItem(at: url) }
 }
 
-func roomMember(_ id: String, name: String? = nil) -> RoomMember {
+func roomMember(_ id: String, name: String? = nil, membership: MembershipState = .join) -> RoomMember {
     RoomMember(
-        userId: id, displayName: name, avatarUrl: nil, status: nil, call: nil, membership: .join,
+        userId: id, displayName: name, avatarUrl: nil, status: nil, call: nil, membership: membership,
         isNameAmbiguous: false, powerLevel: .value(value: 0), isIgnored: false, suggestedRoleForPowerLevel: .creator,
         membershipChangeReason: nil, isServiceMember: false)
 }

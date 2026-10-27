@@ -981,6 +981,8 @@ struct RootView: View {
                                 text: text,
                                 placeholder: room.isDirect ? "Message \(room.name)" : "Message #\(room.name)",
                                 members: matrix.members,
+                                recentSenders: { [matrix] in matrix.messages.reversed().map(\.senderID) },
+                                canMentionRoom: matrix.canMentionRoom,
                                 onSend: {
                                     [context = composerContext, reply = scopedReply(roomID: room.id)] body, files in
                                     try await send(body, files: files, room: room, context: context, reply: reply)
@@ -1171,6 +1173,8 @@ struct RootView: View {
                         MessageComposer(
                             text: text, placeholder: "Reply…",
                             members: matrix.members,
+                            recentSenders: { [matrix] in matrix.threadMessages.reversed().map(\.senderID) },
+                            canMentionRoom: matrix.canMentionRoom,
                             onSend: {
                                 [
                                     context = composerContext,

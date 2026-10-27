@@ -49,6 +49,8 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     let buildGate = Gate()
     let membersGate = Gate()
     var memberList: [RoomMember] = []
+    /// Whether your power level lets you notify the whole room.
+    var canNotifyRoom = false
     init(_ id: String, cached: [TimelineItem]) {
         identifier = id
         self.cached = cached
@@ -68,9 +70,20 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
         await membersGate.wait()
         return FakeMembers(memberList)
     }
+    override func getPowerLevels() async throws -> RoomPowerLevels { FakePowerLevels(canNotifyRoom: canNotifyRoom) }
     override func subscribeToTypingNotifications(listener: TypingNotificationsListener) -> TaskHandle {
         FakeCancellableHandle(noHandle: .init())
     }
+}
+
+private final class FakePowerLevels: RoomPowerLevels, @unchecked Sendable {
+    let canNotifyRoom: Bool
+    init(canNotifyRoom: Bool) {
+        self.canNotifyRoom = canNotifyRoom
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func canOwnUserTriggerRoomNotification() -> Bool { canNotifyRoom }
 }
 
 final class FakeMembers: RoomMembersIterator, @unchecked Sendable {

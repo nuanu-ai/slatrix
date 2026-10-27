@@ -268,6 +268,38 @@ struct Snapshots {
         try write(await settledImage(hosting), "mentions-\(Int(zoom * 100))-\(theme.rawValue)")
     }
 
+    @Test("The @ list scrolled to its end: an invited person, then @room", arguments: Theme.allCases)
+    func mentionList(theme: Theme) async throws {
+        let members =
+            [
+                "Aisha Khan", "AI Agent", "Alex Moreau", "Amelia Hart", "Anders Berg", "Ana Lima", "Arjun Rao",
+                "Ava Chen", "Aaron Price", "Abby Lee",
+            ].map { ChatUser(id: "@\($0.lowercased().prefix { $0 != " " }):example.org", name: $0) }
+            + [ChatUser(id: "@adam:example.org", name: "Adam Invited", membership: "invite")]
+        let draft = ComposerHostedTests.Draft()
+        let (window, hosting) = try themedWindow(
+            MessageComposer(
+                text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #design",
+                members: members, onSend: { _, _ in },
+                onTyping: { _ in }
+            ).padding(16).frame(width: 560, height: 480, alignment: .bottom),
+            theme: theme)
+        defer { window.close() }
+        hosting.layoutSubtreeIfNeeded()
+        let editor = try #require(textViews(in: hosting).first { $0.isEditable })
+        window.makeFirstResponder(editor)
+        editor.insertText("@", replacementRange: editor.selectedRange())
+        _ = try await settledImage(hosting)
+        // ↑ from the first row wraps to @room, scrolling the list to its end.
+        editor.keyDown(
+            with: try #require(
+                NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                    windowNumber: window.windowNumber, context: nil, characters: "\u{F700}",
+                    charactersIgnoringModifiers: "\u{F700}", isARepeat: false, keyCode: 126)))
+        try write(await settledImage(hosting), "mention-list-\(theme.rawValue)")
+    }
+
     @Test("Formatting in the composer, the same message sent, and a quote from Element", arguments: Theme.allCases)
     func formatting(theme: Theme) async throws {
         _ = NSApplication.shared
