@@ -60,10 +60,13 @@ struct SidebarLayoutTests {
         #expect(SidebarLayout.paneWidth(preferred: 380, ideal: 380, availableWidth: available) == nil)
     }
 
-    @Test("With the sidebar hidden by hand, the pane has the sidebar's room too")
-    func paneBesideHiddenSidebar() {
-        #expect(SidebarLayout.paneWidth(preferred: 380, ideal: 380, availableWidth: 900, sidebarHidden: true) == 380)
-        #expect(SidebarLayout.paneWidth(preferred: 380, ideal: 380, availableWidth: 900) == nil)
+    @Test(
+        "With the sidebar folded away, the pane covers the conversation only once it would be too narrow alone",
+        arguments: [(900.0, 380.0), (774, 280), (773.5, nil)] as [(CGFloat, CGFloat?)])
+    func paneBesideCollapsedSidebar(available: CGFloat, expected: CGFloat?) {
+        #expect(
+            SidebarLayout.paneWidth(preferred: 380, ideal: 380, availableWidth: available, sidebarShown: false)
+                == expected)
     }
 
     @Test("The rail and sidebar leave once the narrowest sidebar no longer fits beside a readable conversation")
@@ -73,6 +76,13 @@ struct SidebarLayoutTests {
         #expect(SidebarLayout.collapses(availableWidth: .nan))
     }
 
+    @Test("With a pane open, the sidebar leaves first, so the conversation and the pane stay side by side")
+    func sidebarCollapsesForPane() {
+        #expect(!SidebarLayout.collapses(availableWidth: 1_064, paneOpen: true))
+        #expect(SidebarLayout.collapses(availableWidth: 1_063.5, paneOpen: true))
+        #expect(SidebarLayout.paneWidth(preferred: 380, ideal: 380, availableWidth: 1_064) == 280)
+    }
+
     @Test("The title bar's search becomes a button in a narrow window")
     func searchField() {
         #expect(SidebarLayout.searchFits(availableWidth: 640))
@@ -80,21 +90,23 @@ struct SidebarLayoutTests {
     }
 
     /// Dragging the window's edge back and forth over a threshold must not flicker, so as the width falls each part
-    /// gives way exactly once and never returns, whether or not the sidebar was hidden by hand.
+    /// gives way exactly once and never returns, with or without a pane open.
     @Test("Each part changes once as the window narrows", arguments: [false, true])
-    func noFlipFlop(sidebarHidden: Bool) {
+    func noFlipFlop(paneOpen: Bool) {
         let widths = stride(from: 2_000.0, through: 400, by: -0.5).map { CGFloat($0) }
         let states = widths.map { width in
-            [
-                SidebarLayout.collapses(availableWidth: width),
-                SidebarLayout.paneWidth(
-                    preferred: 380, ideal: 380, availableWidth: width, sidebarHidden: sidebarHidden) == nil,
+            let collapsed = SidebarLayout.collapses(availableWidth: width, paneOpen: paneOpen)
+            return [
+                collapsed,
+                paneOpen
+                    && SidebarLayout.paneWidth(
+                        preferred: 380, ideal: 380, availableWidth: width, sidebarShown: !collapsed) == nil,
                 !SidebarLayout.searchFits(availableWidth: width),
             ]
         }
         for part in 0..<3 {
             let changes = zip(states, states.dropFirst()).filter { $0[part] != $1[part] }
-            #expect(changes.count == 1, "part \(part)")
+            #expect(changes.count == (part == 1 && !paneOpen ? 0 : 1), "part \(part)")
         }
     }
 }

@@ -173,7 +173,7 @@ struct WindowHostedTests {
             })
     }
 
-    @Test("Narrowing the window moves the thread over the conversation, then folds the sidebar away")
+    @Test("Narrowing the window with a thread open folds the sidebar away first, then moves the thread over")
     func narrowing() async throws {
         let harness = Harness()
         defer { harness.close() }
@@ -181,18 +181,26 @@ struct WindowHostedTests {
         try harness.openThread()
         #expect(await eventually { harness.dividers == 2 })
 
+        // Only the thread's divider: conversation and thread side by side, the sidebar folded away.
         harness.resize(1_000)
-        #expect(await eventually { harness.dividers == 1 && harness.sidebarShown })
-        harness.resize(700)
         #expect(
             await eventually {
-                harness.dividers == 0 && harness.conversationLeft ?? .infinity < Metrics().rail
-                    && harness.searchFieldShown
+                harness.dividers == 1 && !harness.sidebarShown
+                    && harness.conversationLeft ?? .infinity < Metrics().rail
             })
+        harness.resize(700)
+        #expect(await eventually { harness.dividers == 0 && harness.searchFieldShown })
         harness.resize(560)
         #expect(await eventually { !harness.searchFieldShown })
 
+        // Closing the thread brings the sidebar back on its own.
+        harness.resize(1_000)
+        #expect(await eventually { harness.dividers == 1 && !harness.sidebarShown })
+        harness.menu("toggle-pane")
+        #expect(await eventually { harness.dividers == 1 && harness.sidebarShown })
+
         harness.resize(1_440)
+        try harness.openThread()
         #expect(await eventually { harness.dividers == 2 && harness.sidebarShown && harness.searchFieldShown })
     }
 
