@@ -10,14 +10,16 @@ private let onePixelPNG = Data(
     base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6qZsAAAAASUVORK5CYII=")!
 
 /// What another app does with a file promise: writes `name` into the folder it is given, then reports it, or reports
-/// `reported` instead.
+/// `reported` instead. One that never `arrives` is asked, then stays silent.
 private final class FakePromise: NSFilePromiseReceiver, @unchecked Sendable {
     let name: String
     let reported: URL?
+    let arrives: Bool
     var written: URL?
-    init(_ name: String, reporting reported: URL? = nil) {
+    init(_ name: String, reporting reported: URL? = nil, arrives: Bool = true) {
         self.name = name
         self.reported = reported
+        self.arrives = arrives
         super.init()
     }
     required init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) { nil }
@@ -28,6 +30,7 @@ private final class FakePromise: NSFilePromiseReceiver, @unchecked Sendable {
     ) {
         let file = destinationDir.appendingPathComponent(name)
         written = file
+        guard arrives else { return }
         nonisolated(unsafe) let reader = reader
         operationQueue.addOperation {
             try? Data("Promised content\n".utf8).write(to: file)
@@ -103,6 +106,46 @@ struct ComposerAttachmentTests {
         await #expect(throws: Importer.Failure.self) {
             try await Importer.stage(.promises(FilePromises(receivers: [promise])), existing: [])
         }
+    }
+
+    /// Stages `promise` the way a composer does, in a task of its own, recording how that ends.
+    @MainActor private final class Drop {
+        var outcome: Result<[URL], any Error>?
+        var task: Task<Void, Never>?
+        init(_ promise: FakePromise, deadline: Duration = .seconds(30)) {
+            task = Task { @MainActor [self] in
+                do {
+                    outcome = .success(
+                        try await Importer.stage(
+                            .promises(FilePromises(receivers: [promise])), existing: [], promiseDeadline: deadline))
+                } catch {
+                    outcome = .failure(error)
+                }
+            }
+        }
+    }
+
+    @Test("A promise whose app never writes the file gives up at its deadline and leaves no folder behind")
+    @MainActor func promiseDeadline() async throws {
+        let promise = FakePromise("IMG_0001.HEIC", arrives: false)
+        let drop = Drop(promise, deadline: .milliseconds(50))
+        defer { drop.task?.cancel() }
+        #expect(await eventually { drop.outcome != nil })
+        #expect(throws: Importer.Failure.self) { try drop.outcome?.get() }
+        let folder = try #require(promise.written).deletingLastPathComponent()
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    @Test("Leaving the conversation stops waiting for a promise and leaves no folder behind")
+    @MainActor func promiseCancelled() async throws {
+        let promise = FakePromise("IMG_0001.HEIC", arrives: false)
+        let drop = Drop(promise)
+        #expect(await eventually { promise.written != nil })
+        drop.task?.cancel()
+        #expect(await eventually { drop.outcome != nil })
+        #expect(throws: CancellationError.self) { try drop.outcome?.get() }
+        let folder = try #require(promise.written).deletingLastPathComponent()
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
     }
 
     @Test("A full queue takes no more files")
