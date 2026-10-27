@@ -48,6 +48,9 @@ struct RootView: View {
     @State private var sidebarSearch = ""
     @AppStorage("layout.sidebarWidth") private var preferredSidebarWidth = 280.0
     @AppStorage("layout.sidebarHidden") private var sidebarHidden = false
+    /// The rail and sidebar over the conversation while they are collapsed.
+    @State private var sidebarDrawer = false
+    @State private var collapsedSections: Set<String> = []
     /// The dragged thread and details pane width at 100% zoom; 0 until dragged, for each pane's own width.
     @AppStorage("layout.paneWidth") private var preferredPaneWidth = 0.0
     @State private var resizingPaneWidth: CGFloat?
@@ -129,13 +132,19 @@ struct RootView: View {
     private static let titleBarHeight: CGFloat = 40
     private static let windowButtonsWidth: CGFloat = 72
     private static let searchWidth: CGFloat = 648
+    private var paneOpen: Bool { profilePane != nil || (room != nil && threadRoot != nil) }
     /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
     private var inspectorWidth: CGFloat? {
-        guard profilePane != nil || (room != nil && threadRoot != nil) else { return nil }
+        guard paneOpen else { return nil }
         return SidebarLayout.paneWidth(
             preferred: resizingPaneWidth ?? CGFloat(preferredPaneWidth),
             ideal: Self.paneWidth,
-            availableWidth: availableContentWidth / m.zoom)
+            availableWidth: availableContentWidth / m.zoom, sidebarShown: !sidebarCollapsed)
+    }
+    /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
+    /// open pane.
+    private var sidebarCollapsed: Bool {
+        sidebarHidden || SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom, paneOpen: paneOpen)
     }
     /// Pane width plus its divider, at 100% zoom.
     private var occupiedInspectorWidth: CGFloat { inspectorWidth.map { $0 + SidebarLayout.handleWidth } ?? 0 }
@@ -422,7 +431,9 @@ struct RootView: View {
                 resetUI()
                 openPendingNotification()
             }
+            .onChange(of: sidebarCollapsed) { _, _ in sidebarDrawer = false }
             .onChange(of: route) { _, next in
+                sidebarDrawer = false
                 if let request = pendingMatrixLink, request.route != next { cancelMatrixLink() }
                 if next != .home {
                     cancelCurrentEdit()
@@ -638,33 +649,8 @@ struct RootView: View {
                     hasIdentity: { await matrix.accountHasIdentity() }, onRecovery: { showRecovery = true }
                 ) {
                     HStack(spacing: 0) {
-                        SidebarView(
-                            matrix: matrix, route: $route,
-                            workspaceID: Binding(
-                                get: { workspaceID },
-                                set: {
-                                    Performance.start(.workspaceSwitch)
-                                    workspaceID = $0
-                                    workspaceInitialized = true
-                                }), search: $sidebarSearch, draftRoomIDs: draftRoomIDs,
-                            draftCount: draftAddresses.count,
-                            onSelect: selectRoom, onCreate: presentCreation,
-                            onPreferences: { handleMenu("preferences") },
-                            onProfile: {
-                                if let me = matrix.user { profilePane = ProfileSelection(id: me.id, fallback: me) }
-                            },
-                            onSignOut: { logoutConfirmation = true },
-                            onMarkUnread: { markReadState($0, unread: true) },
-                            onMarkRead: { markReadState($0, unread: false) },
-                            onInviteWorkspace: { id in
-                                inviteTargetRoomID = id
-                                creation = .invite
-                            }, onEditWorkspace: { roomDetails = DetailsSelection(id: $0) },
-                            onNotifications: { roomNotifications = DetailsSelection(id: $0) },
-                            listWidth: sidebarListWidth,
-                            listHidden: sidebarHidden, onBrowseChannels: presentPublicDirectory
-                        ).layoutIsolated().frame(width: m.rail + (sidebarHidden ? 0 : sidebarListWidth))
-                        if !sidebarHidden {
+                        if !sidebarCollapsed {
+                            sidebar.transition(.move(edge: .leading))
                             ResizeHandle(
                                 currentWidth: sidebarListWidth, onChange: resizeSidebar, onCommit: commitSidebarWidth,
                                 onReset: {
@@ -693,7 +679,14 @@ struct RootView: View {
                                 banners.padding(
                                     .top, (route == .home && room != nil ? m.paneHeader + m.sp40 : m.paneHeader) + 1)
                             }
-                            .overlay { if inspectorWidth == nil { inspector(room) } }
+                            // Too narrow to sit beside: the pane lies over the conversation's right side, as in Slack.
+                            .overlay(alignment: .trailing) {
+                                if paneOpen && inspectorWidth == nil {
+                                    inspector(room).frame(maxWidth: m(Self.paneWidth))
+                                        .overlay(alignment: .leading) { colors.border.frame(width: 1) }
+                                        .elevation(.e3, cornerRadius: 0)
+                                }
+                            }
                             if let width = inspectorWidth {
                                 ResizeHandle(
                                     pane: .trailing,
@@ -715,11 +708,15 @@ struct RootView: View {
                                 .allowsHitTesting(false)
                         }
                         .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
-                        .padding(.trailing, m.sp4).padding(.bottom, m.sp4)
+                        .padding(.leading, sidebarCollapsed ? m.sp4 : 0).padding(.trailing, m.sp4)
+                        .padding(.bottom, m.sp4)
+                        .overlay(alignment: .leading) { drawer }
+                        .animation(Motion.pane, value: sidebarCollapsed)
                 }
             }
         }
         .coordinateSpace(.named(SearchBar.space))
+        .focusedSceneValue(\.sidebarShown, !sidebarCollapsed || sidebarDrawer)
         .overlay(alignment: .topLeading) {
             SearchMenu(
                 bar: searchBar, matrix: matrix, recents: recentSearches, visited: history,
@@ -896,12 +893,59 @@ struct RootView: View {
         }
     }
 
+    /// The workspace rail and conversation list, beside the conversation or in the drawer.
+    private var sidebar: some View {
+        SidebarView(
+            matrix: matrix, route: $route,
+            workspaceID: Binding(
+                get: { workspaceID },
+                set: {
+                    Performance.start(.workspaceSwitch)
+                    workspaceID = $0
+                    workspaceInitialized = true
+                }), search: $sidebarSearch, draftRoomIDs: draftRoomIDs,
+            draftCount: draftAddresses.count,
+            onSelect: selectRoom, onCreate: presentCreation,
+            onPreferences: { handleMenu("preferences") },
+            onProfile: {
+                if let me = matrix.user { profilePane = ProfileSelection(id: me.id, fallback: me) }
+            },
+            onSignOut: { logoutConfirmation = true },
+            onMarkUnread: { markReadState($0, unread: true) },
+            onMarkRead: { markReadState($0, unread: false) },
+            onInviteWorkspace: { id in
+                inviteTargetRoomID = id
+                creation = .invite
+            }, onEditWorkspace: { roomDetails = DetailsSelection(id: $0) },
+            onNotifications: { roomNotifications = DetailsSelection(id: $0) },
+            listWidth: sidebarListWidth, onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections
+        ).layoutIsolated().frame(width: m.rail + sidebarListWidth)
+    }
+
+    /// The collapsed sidebar, slid over the conversation from the title bar's button, with a scrim that closes it.
+    private var drawer: some View {
+        let shown = sidebarCollapsed && sidebarDrawer
+        return ZStack(alignment: .leading) {
+            if shown {
+                Button {
+                    sidebarDrawer = false
+                } label: {
+                    colors.scrim.contentShape(Rectangle())
+                }.buttonStyle(.row)
+                    .focusable(false).accessibilityLabel("Close sidebar").transition(.opacity)
+                sidebar.background(colors.sidebar).elevation(.e3, cornerRadius: 0).transition(.move(edge: .leading))
+            }
+        }
+        .animation(Motion.pane, value: shown)
+    }
+
     private var titleBar: some View {
         HStack(spacing: m.sp12) {
             // The window buttons are AppKit chrome and do not zoom.
             Color.clear.frame(width: Self.windowButtonsWidth)
             Spacer(minLength: 0)
             HStack(spacing: m.sp2) {
+                if sidebarCollapsed { SidebarToggle(matrix: matrix) { sidebarDrawer.toggle() } }
                 IconButton(symbol: "arrow.left", label: "Back", role: .title) { navigateHistory(-1) }.disabled(
                     historyIndex <= 0)
                 IconButton(symbol: "arrow.right", label: "Forward", role: .title) { navigateHistory(1) }.disabled(
@@ -911,10 +955,13 @@ struct RootView: View {
                     selectRoom(history[index], record: false)
                 }
             }
-            SearchBarField(
-                bar: searchBar, prompt: "Search \(currentWorkspaceName)", matrix: matrix, recents: recentSearches,
-                visited: history, onPick: pickSearch
-            ).frame(maxWidth: m(Self.searchWidth)).disabled(matrix.user == nil)
+            TitleSearch(bar: searchBar, fits: SidebarLayout.searchFits(availableWidth: availableContentWidth / m.zoom))
+            {
+                SearchBarField(
+                    bar: searchBar, prompt: "Search \(currentWorkspaceName)", matrix: matrix, recents: recentSearches,
+                    visited: history, onPick: pickSearch
+                ).frame(maxWidth: m(Self.searchWidth))
+            }.disabled(matrix.user == nil)
             Spacer(minLength: 0)
             if matrix.isPreview {
                 // The preview's one way out: everything else in it is the real interface.
@@ -1549,6 +1596,7 @@ struct RootView: View {
         _ id: String, record: Bool, eventID: String? = nil, thread: ChatMessage? = nil,
         keepPendingNotification: Bool = false, restoringReply: MessageReplyTarget? = nil
     ) {
+        sidebarDrawer = false
         cancelThreadOpen()
         if !keepPendingNotification, let target = PlatformIntegration.shared.pendingNotification {
             PlatformIntegration.shared.consumeNotification(target)
@@ -2516,7 +2564,14 @@ struct RootView: View {
             workspaceID = rail[index - 1]?.id
             workspaceInitialized = true
             route = .home
-        case "toggle-sidebar": sidebarHidden.toggle()
+        case "toggle-sidebar":
+            // A window too narrow for the sidebar can only show it as the drawer.
+            if SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom, paneOpen: paneOpen) {
+                sidebarDrawer.toggle()
+            } else {
+                sidebarHidden.toggle()
+                sidebarDrawer = false
+            }
         case "toggle-pane":
             if profilePane != nil {
                 profilePane = nil
@@ -2524,7 +2579,9 @@ struct RootView: View {
             }
             if route == .home, threadRoot != nil { closeThread() }
         case "mark-read":
-            if profilePane != nil {
+            if sidebarCollapsed && sidebarDrawer {
+                sidebarDrawer = false
+            } else if profilePane != nil {
                 profilePane = nil
             } else if route == .home, let room {
                 _ = conversationKey(.markRead, room: room, threadRootID: nil)
@@ -2659,6 +2716,66 @@ private struct HistoryMenu: View {
             Image(systemName: "clock").font(m.font(.title)).frame(width: m.iconButton, height: m.iconButton)
         }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m.iconButton + m.sp4)
             .help("Recent conversations")
+    }
+}
+
+/// The title bar's button for the collapsed sidebar. Reads the room list itself, so unread changes redraw only it.
+private struct SidebarShownKey: FocusedValueKey { typealias Value = Bool }
+
+extension FocusedValues {
+    /// Whether the window shows its sidebar, inline or as the drawer, for the View menu's Show or Hide Sidebar.
+    var sidebarShown: Bool? {
+        get { self[SidebarShownKey.self] }
+        set { self[SidebarShownKey.self] = newValue }
+    }
+}
+
+private struct SidebarToggle: View {
+    let matrix: MatrixService
+    let action: () -> Void
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+    var body: some View {
+        let badge = UnreadBadge.combined(matrix.rooms)
+        IconButton(symbol: "sidebar.left", label: "Show sidebar", role: .title, action: action)
+            // As the rail marks a workspace: a red count for mentions and direct messages, a dot for the rest.
+            .overlay(alignment: .topTrailing) {
+                switch badge {
+                case .count(let count): CountBadge(text: count).offset(x: m.sp8, y: -m.sp4)
+                case .bold:
+                    Circle().fill(appearance.colors.textPrimary).frame(width: m(9), height: m(9))
+                        .overlay(Circle().stroke(appearance.colors.frame, lineWidth: m.sp2))
+                case .none: EmptyView()
+                }
+            }
+            .accessibilityValue(
+                {
+                    switch badge {
+                    case .count(let count): "\(count) unread"
+                    case .bold: "Unread messages"
+                    case .none: ""
+                    }
+                }())
+    }
+}
+
+/// The title bar's search field, or in a narrow window a button that opens it in its place until it closes.
+private struct TitleSearch<Field: View>: View {
+    let bar: SearchBar
+    let fits: Bool
+    @ViewBuilder let field: () -> Field
+    @State private var open = false
+    var body: some View {
+        Group {
+            if fits || open {
+                // Opened from the button, ⌘G or ⌘F: the field was not there to take the cursor, so it takes it now.
+                field().onAppear { if open { bar.focus() } }
+            } else {
+                IconButton(symbol: "magnifyingglass", label: "Search", role: .title) { open = true }
+            }
+        }
+        .onChange(of: bar.focusRequests) { _, _ in if !fits { open = true } }
+        .onChange(of: bar.menuOpen) { _, menuOpen in if !menuOpen { open = false } }
     }
 }
 

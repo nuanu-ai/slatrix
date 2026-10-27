@@ -40,6 +40,17 @@ private final class ProfileClient: Client, @unchecked Sendable {
     override func isUserStatusSupported() async throws -> Bool { true }
 }
 
+/// Holds a value the view under test binds to, as its parent would.
+private struct WithState<Value, Content: View>: View {
+    @State private var value: Value
+    let content: (Binding<Value>) -> Content
+    init(_ value: Value, @ViewBuilder content: @escaping (Binding<Value>) -> Content) {
+        _value = State(initialValue: value)
+        self.content = content
+    }
+    var body: some View { content($value) }
+}
+
 /// Renders the sample workspace in-process and writes PNGs to `.build/snapshots/` for a person to look at.
 /// Opt in with `SLATRIX_SNAPSHOTS=1 swift test --filter Snapshots`; nothing is compared automatically.
 @MainActor
@@ -111,6 +122,51 @@ struct Snapshots {
         let profile = try #require(thread.menu(for: event)?.items.first { $0.identifier?.rawValue == "profile" })
         _ = profile.target?.perform(profile.action, with: profile)
         try write(await settledImage(hosting), "profile-\(name)")
+    }
+
+    @Test("Window widths, with and without a thread, and the collapsed sidebar's drawer", arguments: Theme.allCases)
+    func widths(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let window = offscreenWindow(NSSize(width: 1440, height: 900))
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        func menu(_ action: String) {
+            NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
+        }
+        _ = try await settledImage(hosting)
+        for width in [1440, 1000, 800, 600, 480] {
+            window.setContentSize(NSSize(width: width, height: 900))
+            try write(await settledImage(hosting), "width-\(width)-\(theme.rawValue)")
+        }
+        menu("toggle-sidebar")
+        try write(await settledImage(hosting), "width-480-drawer-\(theme.rawValue)")
+        menu("mark-read")
+
+        // The same widths with a thread open, from the newest message's own context menu.
+        let message = try #require(textViews(in: hosting).last { !$0.isEditable && !$0.string.isEmpty })
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let item = try #require(message.menu(for: event)?.items.first { $0.identifier?.rawValue == "thread" })
+        _ = item.target?.perform(item.action, with: item)
+        for width in [480, 600, 800, 1000, 1440] {
+            window.setContentSize(NSSize(width: width, height: 900))
+            try write(await settledImage(hosting), "width-\(width)-thread-\(theme.rawValue)")
+        }
     }
 
     @Test("A message jumped to, in the live conversation and at an older message", arguments: Theme.allCases)
@@ -224,11 +280,14 @@ struct Snapshots {
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
         appearance.palette = palette
-        let sidebar = SidebarView(
-            matrix: matrix, route: .constant(.home), workspaceID: .constant("preview.workspace"),
-            search: .constant(""), draftRoomIDs: ["preview.room.3"], onSelect: { _ in }, onCreate: { _ in },
-            onPreferences: {}, onProfile: {}, onSignOut: {}, onMarkUnread: { _ in }, onMarkRead: { _ in },
-            onInviteWorkspace: { _ in }, onEditWorkspace: { _ in }, onNotifications: { _ in }, onBrowseChannels: {})
+        let sidebar = WithState(Set<String>()) { collapsed in
+            SidebarView(
+                matrix: matrix, route: .constant(.home), workspaceID: .constant("preview.workspace"),
+                search: .constant(""), draftRoomIDs: ["preview.room.3"], onSelect: { _ in }, onCreate: { _ in },
+                onPreferences: {}, onProfile: {}, onSignOut: {}, onMarkUnread: { _ in }, onMarkRead: { _ in },
+                onInviteWorkspace: { _ in }, onEditWorkspace: { _ in }, onNotifications: { _ in },
+                onBrowseChannels: {}, collapsed: collapsed)
+        }
         let hosting = NSHostingView(
             rootView: sidebar.frame(width: 68 + 280, height: 760).environmentObject(appearance))
         let window = offscreenWindow(NSSize(width: 68 + 280, height: 760))
