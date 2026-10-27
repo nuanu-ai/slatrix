@@ -56,6 +56,9 @@ struct DropToUploadHostedTests {
         // An image from a browser or Photos, with no file behind it.
         let image = FakeDrag(png: Data())
         #expect(try points.allSatisfy { try dropTarget(of: image, in: window, at: $0) === targets[0] })
+        // A photo from Photos or an attachment from Mail, promised rather than written yet.
+        let promise = FakeDrag(promise: "public.jpeg")
+        #expect(try points.allSatisfy { try dropTarget(of: promise, in: window, at: $0) === targets[0] })
         // It spans the conversation, so it must not turn it into a handle that moves the window.
         #expect(!targets[0].mouseDownCanMoveWindow)
 

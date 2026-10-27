@@ -22,7 +22,8 @@ struct SidebarView: View {
     var onNotifications: (String) -> Void
     var listWidth: CGFloat = 280
     var onBrowseChannels: () -> Void
-    @State private var collapsed: Set<String> = []
+    /// Section titles folded shut; held by the window, so they survive the sidebar moving into the drawer and back.
+    @Binding var collapsed: Set<String>
     private var colors: AppColors { appearance.colors }
     private var workspace: Workspace? { matrix.workspaces.first { $0.id == workspaceID } }
     private var hasUnreadActivity: Bool {
@@ -284,15 +285,14 @@ struct SidebarView: View {
                     if collapsed.contains(title) { collapsed.remove(title) } else { collapsed.insert(title) }
                 }, addLabel: add?.label, onAdd: { add.map { onCreate($0.kind) } }, menu: menu
             ).padding(.horizontal, m.sp8).padding(.top, m.sp12)
-            if !collapsed.contains(title) {
-                ForEach(rooms) { room in
-                    SidebarRoomRow(
-                        room: room, selected: matrix.selectedRoomID == room.id && route == .home,
-                        hasDraft: draftRoomIDs.contains(room.id), isPreview: matrix.isPreview, matrix: matrix,
-                        onSelect: onSelect, onMarkUnread: onMarkUnread, onMarkRead: onMarkRead,
-                        onNotifications: onNotifications
-                    ).equatable()
-                }
+            let selectedID = route == .home ? matrix.selectedRoomID : nil
+            ForEach(SidebarLayout.sectionRooms(rooms, collapsed: collapsed.contains(title), selectedID: selectedID)) {
+                room in
+                SidebarRoomRow(
+                    room: room, selected: selectedID == room.id, hasDraft: draftRoomIDs.contains(room.id),
+                    isPreview: matrix.isPreview, matrix: matrix, onSelect: onSelect, onMarkUnread: onMarkUnread,
+                    onMarkRead: onMarkRead, onNotifications: onNotifications
+                ).equatable()
             }
         }
     }

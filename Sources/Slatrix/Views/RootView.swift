@@ -50,6 +50,7 @@ struct RootView: View {
     @AppStorage("layout.sidebarHidden") private var sidebarHidden = false
     /// The rail and sidebar over the conversation while they are collapsed.
     @State private var sidebarDrawer = false
+    @State private var collapsedSections: Set<String> = []
     /// The dragged thread and details pane width at 100% zoom; 0 until dragged, for each pane's own width.
     @AppStorage("layout.paneWidth") private var preferredPaneWidth = 0.0
     @State private var resizingPaneWidth: CGFloat?
@@ -921,7 +922,7 @@ struct RootView: View {
                 creation = .invite
             }, onEditWorkspace: { roomDetails = DetailsSelection(id: $0) },
             onNotifications: { roomNotifications = DetailsSelection(id: $0) },
-            listWidth: sidebarListWidth, onBrowseChannels: presentPublicDirectory
+            listWidth: sidebarListWidth, onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections
         ).layoutIsolated().frame(width: m.rail + sidebarListWidth)
     }
 

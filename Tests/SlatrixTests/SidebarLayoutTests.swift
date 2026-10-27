@@ -109,4 +109,26 @@ struct SidebarLayoutTests {
             #expect(changes.count == (part == 1 && !paneOpen ? 0 : 1), "part \(part)")
         }
     }
+
+    private static let section = [
+        ChatRoom(id: "read", name: "read"),
+        ChatRoom(id: "open", name: "open"),
+        ChatRoom(id: "unread", name: "unread", unreadMessages: 3),
+        ChatRoom(id: "mention", name: "mention", mentions: 1),
+        ChatRoom(id: "marked", name: "marked", isMarkedUnread: true),
+        ChatRoom(id: "dm", name: "dm", isDirect: true, unreadMessages: 2),
+        ChatRoom(id: "muted", name: "muted", unreadMessages: 5, muted: true),
+        ChatRoom(id: "muted mention", name: "muted mention", mentions: 1, muted: true),
+    ]
+
+    @Test("A collapsed section keeps the open conversation and the ones its badge marks unread, in order")
+    func collapsedSection() {
+        let rooms = SidebarLayout.sectionRooms(Self.section, collapsed: true, selectedID: "open")
+        #expect(rooms.map(\.id) == ["open", "unread", "mention", "marked", "dm", "muted mention"])
+    }
+
+    @Test("An expanded section lists every conversation")
+    func expandedSection() {
+        #expect(SidebarLayout.sectionRooms(Self.section, collapsed: false, selectedID: nil) == Self.section)
+    }
 }

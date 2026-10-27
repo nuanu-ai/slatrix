@@ -40,6 +40,17 @@ private final class ProfileClient: Client, @unchecked Sendable {
     override func isUserStatusSupported() async throws -> Bool { true }
 }
 
+/// Holds a value the view under test binds to, as its parent would.
+private struct WithState<Value, Content: View>: View {
+    @State private var value: Value
+    let content: (Binding<Value>) -> Content
+    init(_ value: Value, @ViewBuilder content: @escaping (Binding<Value>) -> Content) {
+        _value = State(initialValue: value)
+        self.content = content
+    }
+    var body: some View { content($value) }
+}
+
 /// Renders the sample workspace in-process and writes PNGs to `.build/snapshots/` for a person to look at.
 /// Opt in with `SLATRIX_SNAPSHOTS=1 swift test --filter Snapshots`; nothing is compared automatically.
 @MainActor
@@ -204,11 +215,14 @@ struct Snapshots {
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
         appearance.palette = palette
-        let sidebar = SidebarView(
-            matrix: matrix, route: .constant(.home), workspaceID: .constant("preview.workspace"),
-            search: .constant(""), draftRoomIDs: ["preview.room.3"], onSelect: { _ in }, onCreate: { _ in },
-            onPreferences: {}, onProfile: {}, onSignOut: {}, onMarkUnread: { _ in }, onMarkRead: { _ in },
-            onInviteWorkspace: { _ in }, onEditWorkspace: { _ in }, onNotifications: { _ in }, onBrowseChannels: {})
+        let sidebar = WithState(Set<String>()) { collapsed in
+            SidebarView(
+                matrix: matrix, route: .constant(.home), workspaceID: .constant("preview.workspace"),
+                search: .constant(""), draftRoomIDs: ["preview.room.3"], onSelect: { _ in }, onCreate: { _ in },
+                onPreferences: {}, onProfile: {}, onSignOut: {}, onMarkUnread: { _ in }, onMarkRead: { _ in },
+                onInviteWorkspace: { _ in }, onEditWorkspace: { _ in }, onNotifications: { _ in },
+                onBrowseChannels: {}, collapsed: collapsed)
+        }
         let hosting = NSHostingView(
             rootView: sidebar.frame(width: 68 + 280, height: 760).environmentObject(appearance))
         let window = offscreenWindow(NSSize(width: 68 + 280, height: 760))
@@ -220,6 +234,22 @@ struct Snapshots {
             window.close()
         }
         try write(await settledImage(hosting), "sidebar-\(palette.rawValue)-\(theme.rawValue)")
+
+        // Collapsed sections keep the open conversation and the unread ones. The headers' places from the top:
+        // Direct messages under all eight channels, then Channels under the shortcuts and Starred.
+        matrix.selectPreviewRoom("preview.room.3")
+        for header in [599.0, 307] {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(
+                    try #require(
+                        NSEvent.mouseEvent(
+                            with: type, location: CGPoint(x: 68 + 80, y: 760 - header), modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+            }
+            _ = try await settledImage(hosting)
+        }
+        try write(await settledImage(hosting), "sidebar-collapsed-\(palette.rawValue)-\(theme.rawValue)")
     }
 
     @Test("Component gallery", arguments: Theme.allCases)

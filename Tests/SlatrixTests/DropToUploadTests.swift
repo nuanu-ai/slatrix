@@ -25,6 +25,9 @@ struct DropToUploadTests {
     func registeredTypes() {
         let types = Pane().view.registeredDraggedTypes
         #expect([.fileURL, .png, .tiff].allSatisfy(types.contains))
+        #expect(
+            NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }.allSatisfy(
+                types.contains))
         #expect(!types.contains(.string))
     }
 
@@ -56,6 +59,19 @@ struct DropToUploadTests {
             return
         }
         #expect(data == png)
+    }
+
+    @Test("A file promised by Photos, Mail or a browser shows the overlay and, dropped, goes to the composer")
+    func dropsPromise() throws {
+        let pane = Pane()
+        let drag = FakeDrag(promise: "public.jpeg")
+        #expect(pane.view.draggingEntered(drag) == .copy)
+        #expect(pane.view.performDragOperation(drag))
+        guard case .promises(let promises) = try #require(pane.staged.first) else {
+            Issue.record("Staged \(pane.staged) instead of the promise")
+            return
+        }
+        #expect(promises.receivers.map(\.fileTypes) == [["public.jpeg"]])
     }
 
     @Test("A drag that leaves the pane takes its overlay with it")
