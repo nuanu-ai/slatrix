@@ -186,6 +186,30 @@ struct NativeMessageTextTests {
         #expect(after.minX >= found[1].maxX - 0.01)
     }
 
+    @Test("A mention's text is drawn in the middle of its pill")
+    func pillInset() throws {
+        let storage = laidOut([mention("Alice"), MessageBodyRun(text: " and "), mention("Bob")])
+        let layout = try #require(storage.layoutManagers.first)
+        let rep = try #require(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 400, pixelsHigh: 40, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let context = try #require(NSGraphicsContext(bitmapImageRep: rep))
+        context.cgContext.translateBy(x: 0, y: 40)
+        context.cgContext.scaleBy(x: 1, y: -1)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context.cgContext, flipped: true)
+        layout.drawGlyphs(forGlyphRange: NSRange(location: 0, length: layout.numberOfGlyphs), at: .zero)
+        NSGraphicsContext.restoreGraphicsState()
+        for pill in pills(storage) {
+            let inked = (Int(pill.minX)..<Int(pill.maxX.rounded(.up))).filter { x in
+                (Int(pill.minY)..<Int(pill.maxY)).contains { y in (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.3 }
+            }
+            let ink = try #require(inked.first.flatMap { first in inked.last.map { (first, $0 + 1) } })
+            #expect(abs((CGFloat(ink.0) - pill.minX) - (pill.maxX - CGFloat(ink.1))) <= 1.5)
+        }
+    }
+
     @Test("A menu item runs only its own enabled command")
     func menuActions() {
         var ran: [String] = []

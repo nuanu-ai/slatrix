@@ -183,8 +183,8 @@ struct Snapshots {
         try write(await settledImage(hosting), "gallery-\(theme.rawValue)")
     }
 
-    @Test("Mentions in messages and the composer", arguments: Theme.allCases)
-    func mentions(theme: Theme) async throws {
+    @Test("Mentions in messages and the composer", arguments: [1, 1.25], Theme.allCases)
+    func mentions(zoom: Double, theme: Theme) async throws {
         _ = NSApplication.shared
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
@@ -203,16 +203,28 @@ struct Snapshots {
             MessageRow(message: message("Bob", "-", html: "Hey \(alice), can you review the deck before standup?"))
             MessageRow(message: message("Carol", "-", html: "\(me) the build is green, @room please pull"))
             MessageRow(message: message("Dave", "Pinging @carol:example.org and @erin:example.org about it"))
+            MessageRow(
+                message: message(
+                    "Erin", "-",
+                    html: "The launch checklist is done and the release notes are written, so \(alice) takes a "
+                        + "last look and the release is ready to tag once she and our release manager \(me) agree"))
+            // Wraps inside the mention.
+            MessageRow(
+                message: message(
+                    "Grace", "-",
+                    html: "The launch checklist is done and the notes are written, so \(alice) can sign off"))
+            MessageRow(message: message("Frank", "-", html: "🎉 \(alice) 🙌 shipped it, สวัสดี \(me)!"))
             MessageComposer(
                 text: .constant("Thanks <a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a> for this"),
                 placeholder: "Message #design", members: [], onSend: { _, _ in }, onTyping: { _ in }
             ).padding(16)
         }
-        .frame(width: 560).background(appearance.colors.canvas)
+        .frame(width: 560 * zoom).background(appearance.colors.canvas)
         .environment(
             \.mentions,
             MentionContext(me: "@me:example.org", members: [ChatUser(id: "@carol:example.org", name: "Carol Chen")])
         )
+        .environment(\.metrics, Metrics(zoom: zoom))
         .environmentObject(appearance)
         let hosting = NSHostingView(rootView: view)
         let window = offscreenWindow(hosting.fittingSize)
@@ -223,7 +235,7 @@ struct Snapshots {
             window.contentView = nil
             window.close()
         }
-        try write(await settledImage(hosting), "mentions-\(theme.rawValue)")
+        try write(await settledImage(hosting), "mentions-\(Int(zoom * 100))-\(theme.rawValue)")
     }
 
     @Test("Formatting in the composer, the same message sent, and a quote from Element", arguments: Theme.allCases)
