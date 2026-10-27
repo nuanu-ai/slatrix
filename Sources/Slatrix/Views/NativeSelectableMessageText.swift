@@ -15,33 +15,93 @@ extension NSAttributedString.Key {
     static let mentionPill = NSAttributedString.Key("SlatrixMentionPill")
 }
 
-/// Draws `.mentionPill` fills as rounded pills, a little wider than their text and as tall as the line.
+extension NSMutableAttributedString {
+    /// Reserves each pill's padding on both sides as real space, kerning after its last character, so the text around
+    /// a pill never touches its fill. Run again after the font size changes.
+    func padMentionPills() {
+        enumerateAttribute(.mentionPill, in: NSRange(location: 0, length: length)) { value, range, _ in
+            guard value != nil, let font = attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+            else { return }
+            addAttribute(
+                .kern, value: 2 * PillLayoutManager.padding(font),
+                range: NSRange(location: NSMaxRange(range) - 1, length: 1))
+        }
+    }
+}
+
+/// Draws `.mentionPill` runs as Slack's inline mention: a rounded fill as tall as the font, whatever the line holds,
+/// around text inset by the padding that `padMentionPills()` reserves.
 class PillLayoutManager: NSLayoutManager {
+    struct Pill {
+        /// In text container coordinates, one per line the mention spans.
+        var rect: NSRect
+        var radius: CGFloat
+        var fill: NSColor
+    }
+
+    /// In proportion to the font, so pills scale with zoom: 2 pt at 15 pt.
+    static func padding(_ font: NSFont) -> CGFloat { font.pointSize * 0.13 }
+
+    func pills(forCharacterRange characters: NSRange) -> [Pill] {
+        guard let storage = textStorage else { return [] }
+        var pills: [Pill] = []
+        storage.enumerateAttribute(.mentionPill, in: characters) { value, range, _ in
+            guard let fill = value as? NSColor,
+                let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+            else { return }
+            // A 3 pt radius at 15 pt, and a hair more than the font's height.
+            let radius = font.pointSize * 0.2
+            let bleed = font.pointSize * 0.05
+            let text = storage.string as NSString
+            var glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            // One fill per line the mention spans, from its first glyph there to where the next glyph starts, which
+            // takes in the kerning after its last character. (Glyph bounding rects run wide on lines with emoji.)
+            while glyphs.length > 0 {
+                var line = NSRange()
+                let fragment = lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: &line)
+                let part = NSIntersectionRange(glyphs, line)
+                glyphs = NSRange(location: NSMaxRange(part), length: NSMaxRange(glyphs) - NSMaxRange(part))
+                // A mention that wraps ends the line at its last word, padded as its end is.
+                var words = characterRange(forGlyphRange: part, actualGlyphRange: nil)
+                while words.length > 1, text.character(at: NSMaxRange(words) - 1) == 0x20 { words.length -= 1 }
+                let next = NSMaxRange(glyphRange(forCharacterRange: words, actualCharacterRange: nil))
+                let start = location(forGlyphAt: part.location)
+                let end =
+                    next < NSMaxRange(line)
+                    ? fragment.minX + location(forGlyphAt: next).x
+                    : lineFragmentUsedRect(forGlyphAt: part.location, effectiveRange: nil).maxX
+                // From the baseline, so taller glyphs elsewhere on the line or line spacing never stretch it.
+                let rect = NSRect(
+                    x: fragment.minX + start.x, y: fragment.minY + start.y - font.ascender - bleed,
+                    width: end - fragment.minX - start.x + (glyphs.length > 0 ? 2 * Self.padding(font) : 0),
+                    height: font.ascender - font.descender + 2 * bleed)
+                pills.append(Pill(rect: rect, radius: radius, fill: fill))
+            }
+        }
+        return pills
+    }
+
+    /// A mention's text sits in the middle of its reserved space.
+    override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        guard let storage = textStorage else { return super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin) }
+        let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        storage.enumerateAttribute(.mentionPill, in: characters) { value, range, _ in
+            let glyphs = NSIntersectionRange(
+                glyphRange(forCharacterRange: range, actualCharacterRange: nil), glyphsToShow)
+            let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+            let shift = value != nil ? font.map(Self.padding) ?? 0 : 0
+            super.drawGlyphs(forGlyphRange: glyphs, at: NSPoint(x: origin.x + shift, y: origin.y))
+        }
+    }
+
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         drawBlocks(forGlyphRange: glyphsToShow, at: origin)
-        if let storage = textStorage, let container = textContainers.first {
-            let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
-            storage.enumerateAttribute(.mentionPill, in: characters) { value, range, _ in
-                guard let fill = value as? NSColor,
-                    let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
-                else { return }
-                let spacing =
-                    (storage.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle)?
-                    .lineSpacing ?? 0
-                // In proportion to the font, so pills scale with zoom: 2 pt of padding and a 3 pt radius at 15 pt.
-                let padding = font.pointSize * 0.13
-                let radius = font.pointSize * 0.2
-                fill.setFill()
-                enumerateEnclosingRects(
-                    forGlyphRange: glyphRange(forCharacterRange: range, actualCharacterRange: nil),
-                    withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: container
-                ) { rect, _ in
-                    let pill = NSRect(
-                        x: rect.minX - padding + origin.x, y: rect.minY + origin.y, width: rect.width + 2 * padding,
-                        height: rect.height - spacing)
-                    NSBezierPath(roundedRect: pill, xRadius: radius, yRadius: radius).fill()
-                }
-            }
+        for pill in pills(forCharacterRange: characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)) {
+            pill.fill.setFill()
+            NSBezierPath(
+                roundedRect: pill.rect.offsetBy(dx: origin.x, dy: origin.y), xRadius: pill.radius,
+                yRadius: pill.radius
+            ).fill()
         }
         // After the pills, so a selection highlight covers them.
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
@@ -226,6 +286,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             lineStart = run.text.hasSuffix("\n")
         }
         MessageBlocks.padCodeBlocks(result, in: NSRange(location: 0, length: result.length), fontSize: fontSize)
+        result.padMentionPills()
         return result
     }
 }

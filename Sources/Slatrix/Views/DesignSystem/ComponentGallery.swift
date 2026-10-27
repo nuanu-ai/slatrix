@@ -35,6 +35,7 @@ struct ComponentGallery: View {
                         }.frame(width: m(280)).background(appearance.colors.sidebar)
                     }
                     section("Loading") { loading }
+                    section("Tooltip") { tooltips }
                 }
             }
             section("Profile") { profile }
@@ -264,6 +265,13 @@ struct ComponentGallery: View {
         SkeletonRows(count: 2).frame(width: m(420), height: m(132))
             .background(appearance.colors.canvas, in: RoundedRectangle(cornerRadius: m.radiusLarge))
             .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(appearance.colors.border))
+    }
+
+    private var tooltips: some View {
+        HStack(alignment: .bottom, spacing: m.sp24) {
+            Tooltip("Copy link")
+            Tooltip(text: "Alice, Bob and you reacted with :+1:") { Text("👍").font(m.font(.display)) }
+        }.padding(.vertical, m.sp8)
     }
 
     private var emoji: some View {

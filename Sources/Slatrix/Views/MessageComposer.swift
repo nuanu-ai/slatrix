@@ -841,6 +841,7 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
         themeText = text
         storage.beginEditing()
         restyle(NSRange(location: 0, length: storage.length))
+        storage.padMentionPills()
         storage.endEditing()
         typingAttributes = attributes(typingStyle, block: typingBlock)
     }
@@ -939,6 +940,7 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
         MessageBlocks.padCodeBlocks(
             storage, in: NSRange(location: start, length: min(storage.length, NSMaxRange(paragraphs) + 1) - start),
             fontSize: fontSize)
+        storage.padMentionPills()
     }
 
     // MARK: Typing
@@ -1089,6 +1091,7 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
             }
         }
         MessageBlocks.padCodeBlocks(text, in: NSRange(location: 0, length: text.length), fontSize: fontSize)
+        text.padMentionPills()
         return text
     }
 

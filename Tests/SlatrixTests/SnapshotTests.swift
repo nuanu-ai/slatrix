@@ -197,8 +197,8 @@ struct Snapshots {
         try write(await settledImage(hosting), "gallery-\(theme.rawValue)")
     }
 
-    @Test("Mentions in messages and the composer", arguments: Theme.allCases)
-    func mentions(theme: Theme) async throws {
+    @Test("Mentions in messages and the composer", arguments: [1, 1.25], Theme.allCases)
+    func mentions(zoom: Double, theme: Theme) async throws {
         _ = NSApplication.shared
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
@@ -217,16 +217,28 @@ struct Snapshots {
             MessageRow(message: message("Bob", "-", html: "Hey \(alice), can you review the deck before standup?"))
             MessageRow(message: message("Carol", "-", html: "\(me) the build is green, @room please pull"))
             MessageRow(message: message("Dave", "Pinging @carol:example.org and @erin:example.org about it"))
+            MessageRow(
+                message: message(
+                    "Erin", "-",
+                    html: "The launch checklist is done and the release notes are written, so \(alice) takes a "
+                        + "last look and the release is ready to tag once she and our release manager \(me) agree"))
+            // Wraps inside the mention.
+            MessageRow(
+                message: message(
+                    "Grace", "-",
+                    html: "The launch checklist is done and the notes are written, so \(alice) can sign off"))
+            MessageRow(message: message("Frank", "-", html: "🎉 \(alice) 🙌 shipped it, สวัสดี \(me)!"))
             MessageComposer(
                 text: .constant("Thanks <a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a> for this"),
                 placeholder: "Message #design", members: [], onSend: { _, _ in }, onTyping: { _ in }
             ).padding(16)
         }
-        .frame(width: 560).background(appearance.colors.canvas)
+        .frame(width: 560 * zoom).background(appearance.colors.canvas)
         .environment(
             \.mentions,
             MentionContext(me: "@me:example.org", members: [ChatUser(id: "@carol:example.org", name: "Carol Chen")])
         )
+        .environment(\.metrics, Metrics(zoom: zoom))
         .environmentObject(appearance)
         let hosting = NSHostingView(rootView: view)
         let window = offscreenWindow(hosting.fittingSize)
@@ -237,7 +249,7 @@ struct Snapshots {
             window.contentView = nil
             window.close()
         }
-        try write(await settledImage(hosting), "mentions-\(theme.rawValue)")
+        try write(await settledImage(hosting), "mentions-\(Int(zoom * 100))-\(theme.rawValue)")
     }
 
     @Test("Formatting in the composer, the same message sent, and a quote from Element", arguments: Theme.allCases)
@@ -568,6 +580,46 @@ struct Snapshots {
         try write(await settledImage(hosting), "hovered-row-\(theme.rawValue)")
     }
 
+    @Test("The tooltip over a hovered reaction", arguments: [1, 1.25], Theme.allCases)
+    func reactionTooltip(zoom: Double, theme: Theme) async throws {
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let room = try #require(matrix.selectedRoom)
+        matrix.messages = matrix.messages.map {
+            var message = $0
+            if message.body.hasPrefix("The details") {
+                message.reactions = [
+                    MessageReaction(
+                        key: "🎉", count: 3, mine: true, senders: ["preview.alex", "preview.you", "preview.julia"]),
+                    MessageReaction(key: "👀", count: 1, mine: false, senders: ["preview.sam"]),
+                ]
+            }
+            return message
+        }
+        let (window, hosting) = try themedWindow(
+            TimelineView(
+                matrix: matrix, room: room, savedIDs: [], onThread: { _ in }, onReply: { _ in }, onEdit: { _ in },
+                onSave: { _ in }
+            ).environment(Popovers()).environment(\.metrics, Metrics(zoom: zoom)).frame(width: 760, height: 720),
+            theme: theme)
+        defer { window.close() }
+        _ = try await settledImage(hosting)
+        let scroll = try #require(Self.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
+        let text = try #require(
+            Self.views(in: hosting).compactMap { $0 as? MessageTextView }.first { $0.string.hasPrefix("The details") })
+        var cell: NSView? = text
+        while let view = cell, !(view is TimelineCell) { cell = view.superview }
+        let row = try #require(cell).convert(try #require(cell).bounds, to: nil)
+        scroll.onPointer?(NSPoint(x: row.midX, y: row.midY))
+        _ = try await settledImage(hosting)
+        // The reactions are the row's last line, over its bottom padding.
+        let m = Metrics(zoom: zoom)
+        let chip = NSPoint(x: text.convert(text.bounds, to: nil).minX + m.sp8, y: row.minY + m.sp4 + m.sp24 / 2)
+        scroll.onPointer?(chip)
+        _ = await eventually { window.childWindows?.isEmpty == false }
+        try write(await settledImage(hosting), "reaction-tooltip-\(Int(zoom * 100))-\(theme.rawValue)")
+    }
+
     @Test("The New line over the first unread message", arguments: Theme.allCases)
     func newLine(theme: Theme) async throws {
         let appearance = AppearanceStore()
@@ -674,18 +726,21 @@ struct Snapshots {
         return previous
     }
 
-    /// The window as the window server composites it now; empty until it has the window's first frame.
+    /// The window, with its child windows such as a tooltip over it, as the window server composites them now;
+    /// empty until it has the window's first frame.
     private static func image(_ window: NSWindow) -> Data {
-        // Options: including window (8); ignore framing (1) and best resolution (8).
-        let image = windowImage(.null, 8, UInt32(window.windowNumber), 1 | 8)?.takeRetainedValue()
+        // Front to back. Options: ignore framing (1) and best resolution (8).
+        var ids = ((window.childWindows ?? []) + [window]).map { UnsafeRawPointer(bitPattern: $0.windowNumber) }
+        let list = ids.withUnsafeMutableBufferPointer { CFArrayCreate(nil, $0.baseAddress, $0.count, nil) }
+        let image = list.flatMap { windowsImage(.null, $0, 1 | 8)?.takeRetainedValue() }
         return image.flatMap { NSBitmapImageRep(cgImage: $0).representation(using: .png, properties: [:]) } ?? Data()
     }
 
-    /// `CGWindowListCreateImage`, unavailable in the SDK but still in the OS; reading the process's own window needs
-    /// no screen recording permission, which ScreenCaptureKit would.
-    private static let windowImage = unsafeBitCast(
-        dlsym(dlopen(nil, RTLD_NOW), "CGWindowListCreateImage"),
-        to: (@convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?).self)
+    /// `CGWindowListCreateImageFromArray`, unavailable in the SDK but still in the OS; reading the process's own
+    /// windows needs no screen recording permission, which ScreenCaptureKit would.
+    private static let windowsImage = unsafeBitCast(
+        dlsym(dlopen(nil, RTLD_NOW), "CGWindowListCreateImageFromArray"),
+        to: (@convention(c) (CGRect, CFArray, UInt32) -> Unmanaged<CGImage>?).self)
 
     private func write(_ png: Data, _ name: String) throws {
         let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
