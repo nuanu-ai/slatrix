@@ -518,6 +518,50 @@ extension TimelineHostedTests {
         #expect(try moved(to: overToolbar) == .arrow)
         #expect(try moved(to: body) == .iBeam)
     }
+
+    private func tooltip(_ harness: Harness) -> TooltipView? {
+        harness.hosting.subviews.lazy.compactMap { $0 as? TooltipView }.first { !$0.isHidden && $0.alphaValue > 0 }
+    }
+
+    @Test("Hovering a reaction shows who reacted above it after a short delay, moving no row, and leaving hides it")
+    func reactionTooltip() async throws {
+        var messages = Self.actionable(0..<30)
+        messages[29].reactions = [MessageReaction(key: "👍", count: 2, mine: true, senders: ["@bea:x", Self.user])]
+        let harness = Harness(messages: messages)
+        harness.service.members = [ChatUser(id: "@bea:x", name: "Bea")]
+        defer { harness.close() }
+        await settle(harness) { harness.top(of: "Message 29") != nil }
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        func heights() -> [CGFloat] { (0..<table.numberOfRows).map { table.rect(ofRow: $0).height } }
+        let text = try hover(harness, "Message 29")
+        var cell: NSView? = text
+        while let view = cell, !(view is TimelineCell) { cell = view.superview }
+        let row = try #require(cell).convert(try #require(cell).bounds, to: nil)
+        harness.layout()
+        await drainMainActor()
+        let before = heights()
+        let top = harness.top(of: "Message 29")
+
+        // The reaction is the row's last line: a 24 pt chip over the row's 4 pt bottom padding, under the text.
+        let m = Metrics()
+        let chip = NSPoint(x: text.convert(text.bounds, to: nil).minX + m.sp8, y: row.minY + m.sp4 + m.sp24 / 2)
+        harness.scrollView?.onPointer?(chip)
+        let start = ContinuousClock.now
+        #expect(tooltip(harness) == nil, "Nothing shows at once")
+        _ = await eventually { tooltip(harness) != nil }
+        let shown = try #require(tooltip(harness))
+        #expect(ContinuousClock.now - start >= .milliseconds(250))
+        #expect(shown.text == "You and Bea reacted with :+1:")
+        let frame = shown.convert(shown.bounds, to: nil)
+        #expect(frame.minY >= chip.y + m.sp24 / 2 && frame.minX <= chip.x && chip.x <= frame.maxX)
+        #expect(harness.hosting.bounds.contains(frame))
+        harness.layout()
+        #expect(heights() == before)
+        #expect(harness.top(of: "Message 29") == top)
+
+        harness.scrollView?.onPointer?(nil)
+        #expect(tooltip(harness) == nil)
+    }
 }
 
 /// Budgets for the table at the scale of a busy room; see `PerformanceBudgetTests`.
