@@ -87,7 +87,8 @@ enum ComposerAttachmentImporter {
         if case .promises(let promises) = input {
             let folder = try newFolder()
             defer { try? FileManager.default.removeItem(at: folder) }
-            return try await stage(.files(receive(promises, into: folder)), existing: existing)
+            return try await stage(
+                .files(receive(promises, into: folder, deadline: promiseDeadline)), existing: existing)
         }
         let worker = Task.detached(priority: .userInitiated) { try prepare(input, existing: existing) }
         let staged = try await withTaskCancellationHandler(
@@ -293,33 +294,57 @@ enum ComposerAttachmentImporter {
     }
 
     /// Asks the apps behind `promises` to write their files into `folder`, and returns them once all are written.
-    /// Only a file written straight into `folder` counts, so a promise can't point at any other file.
-    @MainActor private static func receive(_ promises: FilePromises, into folder: URL) async throws -> [URL] {
-        var remaining = promises.receivers.reduce(0) { $0 + $1.fileTypes.count }
-        guard remaining > 0 else { return [] }
+    /// Only a file written straight into `folder` counts, so a promise can't point at any other file. Missing the
+    /// deadline, or being cancelled, drops the whole drop.
+    @MainActor private static func receive(_ promises: FilePromises, into folder: URL, deadline: Duration)
+        async throws -> [URL]
+    {
+        let wait = PromiseWait(remaining: promises.receivers.reduce(0) { $0 + $1.fileTypes.count })
+        guard wait.remaining > 0 else { return [] }
         let expected = folder.resolvingSymlinksInPath()
-        return try await withCheckedThrowingContinuation { continuation in
-            var files: [URL] = []
-            var failed = false
-            for promise in promises.receivers {
-                promise.receivePromisedFiles(atDestination: folder, operationQueue: .main) { url, error in
-                    MainActor.assumeIsolated {
-                        guard remaining > 0 else { return }
-                        if error == nil && url.deletingLastPathComponent().resolvingSymlinksInPath() == expected {
-                            files.append(url)
-                        } else {
-                            failed = true
-                        }
-                        remaining -= 1
-                        guard remaining == 0 else { return }
-                        if failed {
-                            continuation.resume(throwing: Failure(message: "Couldn’t read a file. Attach it again."))
-                        } else {
-                            continuation.resume(returning: files)
+        let timer = Task { @MainActor in
+            try await Task.sleep(for: deadline)
+            wait.finish(.failure(Failure(message: "A dropped file never arrived. Drop it again.")))
+        }
+        defer { timer.cancel() }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                wait.continuation = continuation
+                for promise in promises.receivers {
+                    promise.receivePromisedFiles(atDestination: folder, operationQueue: .main) { url, error in
+                        MainActor.assumeIsolated {
+                            let inside = url.deletingLastPathComponent().resolvingSymlinksInPath() == expected
+                            wait.arrived(error == nil && inside ? url : nil)
                         }
                     }
                 }
             }
+        } onCancel: {
+            Task { @MainActor in wait.finish(.failure(CancellationError())) }
+        }
+    }
+
+    /// Promised files as they arrive, and the one place waiting for them ends.
+    @MainActor private final class PromiseWait {
+        var continuation: CheckedContinuation<[URL], Error>?
+        private(set) var remaining: Int
+        private var files: [URL] = []
+        private var failed = false
+
+        init(remaining: Int) { self.remaining = remaining }
+
+        /// One promised file written, or nil when it failed or landed outside our folder.
+        func arrived(_ file: URL?) {
+            guard remaining > 0 else { return }
+            if let file { files.append(file) } else { failed = true }
+            remaining -= 1
+            guard remaining == 0 else { return }
+            finish(failed ? .failure(Failure(message: "Couldn’t read a file. Attach it again.")) : .success(files))
+        }
+
+        func finish(_ result: Result<[URL], Error>) {
+            continuation?.resume(with: result)
+            continuation = nil
         }
     }
 
