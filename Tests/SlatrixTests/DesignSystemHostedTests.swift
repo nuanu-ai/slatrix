@@ -400,4 +400,25 @@ struct DesignSystemHostedTests {
         }
         #expect(visited == [1, 2, 1])
     }
+
+    @Test("A toast stays dark in the dark theme, darker than the conversation under it, as a tooltip does")
+    func darkToast() throws {
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        let appearance = AppearanceStore()
+        appearance.mode = .dark
+        appearance.systemIsDark = true
+        let host = Host(
+            Toast(text: "Link copied").environmentObject(appearance).frame(width: 200, height: 60),
+            size: CGSize(width: 200, height: 60))
+        defer { host.close() }
+        host.hosting.layoutSubtreeIfNeeded()
+        let image = try #require(host.hosting.bitmapImageRepForCachingDisplay(in: host.hosting.bounds))
+        host.hosting.cacheDisplay(in: host.hosting.bounds, to: image)
+        // In the toast's top padding, above its text.
+        let scale = CGFloat(image.pixelsWide) / host.hosting.bounds.width
+        let fill = try #require(image.colorAt(x: Int(100 * scale), y: Int(18 * scale))?.usingColorSpace(.sRGB))
+        let canvas = try #require(NSColor(appearance.colors.canvas).usingColorSpace(.sRGB))
+        #expect(fill.brightnessComponent < canvas.brightnessComponent)
+    }
 }
