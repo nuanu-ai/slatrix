@@ -14,7 +14,6 @@ struct SlatrixApp: App {
     @NSApplicationDelegateAdaptor(SlatrixAppDelegate.self) private var appDelegate
     @State private var matrix = MatrixService()
     @StateObject private var appearance = AppearanceStore()
-    @AppStorage("layout.sidebarHidden") private var sidebarHidden = false
     var body: some Scene {
         Window("Slatrix", id: "main") {
             RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, metrics)
@@ -39,8 +38,7 @@ struct SlatrixApp: App {
                 Button("Attach file…") { menuAction("attach") }.keyboardShortcut("u")
             }
             CommandGroup(before: .toolbar) {
-                Button(sidebarHidden ? "Show Sidebar" : "Hide Sidebar") { menuAction("toggle-sidebar") }
-                    .keyboardShortcut("d", modifiers: [.command, .shift])
+                SidebarMenuItem { menuAction("toggle-sidebar") }
                 Button("Toggle right pane") { menuAction("toggle-pane") }.keyboardShortcut(".")
                 Divider()
                 Button("Actual Size") { appearance.zoom = 1 }.keyboardShortcut("0")
@@ -115,6 +113,16 @@ struct SlatrixApp: App {
     }
     private func menuAction(_ action: String) {
         NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
+    }
+}
+
+/// Says what ⇧⌘D will do: the window reports whether its sidebar, inline or as the drawer, is showing.
+private struct SidebarMenuItem: View {
+    let action: () -> Void
+    @FocusedValue(\.sidebarShown) private var shown
+    var body: some View {
+        Button(shown == false ? "Show Sidebar" : "Hide Sidebar", action: action)
+            .keyboardShortcut("d", modifiers: [.command, .shift])
     }
 }
 

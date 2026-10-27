@@ -32,21 +32,23 @@ enum SidebarLayout {
     private static let reserved: CGFloat = 68 + handleWidth + readableWidth + inset
 
     /// Whether the rail and sidebar leave for a drawer: the narrowest sidebar no longer fits beside a readable
+    /// conversation and, while one is open, the narrowest pane. The sidebar gives way before the pane covers the
     /// conversation.
-    static func collapses(availableWidth: CGFloat) -> Bool { !(availableWidth >= reserved + minimumWidth) }
+    static func collapses(availableWidth: CGFloat, paneOpen: Bool = false) -> Bool {
+        !(availableWidth >= reserved + minimumWidth + (paneOpen ? handleWidth + minimumPaneWidth : 0))
+    }
 
     /// Whether the title bar keeps its search field, which otherwise becomes a button; below this the field would
     /// be too short for its prompt.
     static func searchFits(availableWidth: CGFloat) -> Bool { availableWidth >= 640 }
 
     /// The thread or details pane width: the dragged width, or the pane's ideal one, narrowed to what fits beside
-    /// the narrowest sidebar (or none, when it is hidden by hand) and a readable conversation. Nil when even the
-    /// minimum does not fit, or the window is too narrow for a sidebar, so the pane covers the conversation instead.
+    /// a readable conversation and the narrowest sidebar while it shows. Nil when even the minimum does not fit, so
+    /// the pane covers the conversation instead.
     static func paneWidth(
-        preferred: CGFloat, ideal: CGFloat, availableWidth: CGFloat, sidebarHidden: Bool = false
+        preferred: CGFloat, ideal: CGFloat, availableWidth: CGFloat, sidebarShown: Bool = true
     ) -> CGFloat? {
-        guard !collapses(availableWidth: availableWidth) else { return nil }
-        let beside = sidebarHidden ? inset + readableWidth + inset : reserved + minimumWidth
+        let beside = sidebarShown ? reserved + minimumWidth : inset + readableWidth + inset
         let space = availableWidth - beside - handleWidth
         guard space >= minimumPaneWidth else { return nil }
         let wanted =

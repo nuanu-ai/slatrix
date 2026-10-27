@@ -136,11 +136,12 @@ struct RootView: View {
         return SidebarLayout.paneWidth(
             preferred: resizingPaneWidth ?? CGFloat(preferredPaneWidth),
             ideal: Self.paneWidth,
-            availableWidth: availableContentWidth / m.zoom, sidebarHidden: sidebarHidden)
+            availableWidth: availableContentWidth / m.zoom, sidebarShown: !sidebarCollapsed)
     }
-    /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation.
+    /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
+    /// open pane.
     private var sidebarCollapsed: Bool {
-        sidebarHidden || SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom)
+        sidebarHidden || SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom, paneOpen: paneOpen)
     }
     /// Pane width plus its divider, at 100% zoom.
     private var occupiedInspectorWidth: CGFloat { inspectorWidth.map { $0 + SidebarLayout.handleWidth } ?? 0 }
@@ -675,7 +676,7 @@ struct RootView: View {
                                 if paneOpen && inspectorWidth == nil {
                                     inspector(room).frame(maxWidth: m(Self.paneWidth))
                                         .overlay(alignment: .leading) { colors.border.frame(width: 1) }
-                                        .elevation(.e2, cornerRadius: 0)
+                                        .elevation(.e3, cornerRadius: 0)
                                 }
                             }
                             if let width = inspectorWidth {
@@ -707,6 +708,7 @@ struct RootView: View {
             }
         }
         .coordinateSpace(.named(SearchBar.space))
+        .focusedSceneValue(\.sidebarShown, !sidebarCollapsed || sidebarDrawer)
         .overlay(alignment: .topLeading) {
             SearchMenu(
                 bar: searchBar, matrix: matrix, recents: recentSearches, visited: history,
@@ -2594,7 +2596,7 @@ struct RootView: View {
             route = .home
         case "toggle-sidebar":
             // A window too narrow for the sidebar can only show it as the drawer.
-            if SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom) {
+            if SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom, paneOpen: paneOpen) {
                 sidebarDrawer.toggle()
             } else {
                 sidebarHidden.toggle()
@@ -2748,6 +2750,16 @@ private struct HistoryMenu: View {
 }
 
 /// The title bar's button for the collapsed sidebar. Reads the room list itself, so unread changes redraw only it.
+private struct SidebarShownKey: FocusedValueKey { typealias Value = Bool }
+
+extension FocusedValues {
+    /// Whether the window shows its sidebar, inline or as the drawer, for the View menu's Show or Hide Sidebar.
+    var sidebarShown: Bool? {
+        get { self[SidebarShownKey.self] }
+        set { self[SidebarShownKey.self] = newValue }
+    }
+}
+
 private struct SidebarToggle: View {
     let matrix: MatrixService
     let action: () -> Void
