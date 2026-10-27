@@ -175,6 +175,22 @@ struct Snapshots {
             window.close()
         }
         try write(await settledImage(hosting), "sidebar-\(palette.rawValue)-\(theme.rawValue)")
+
+        // Collapsed sections keep the open conversation and the unread ones. The headers' places from the top:
+        // Direct messages under all eight channels, then Channels under the shortcuts and Starred.
+        matrix.selectPreviewRoom("preview.room.3")
+        for header in [599.0, 307] {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(
+                    try #require(
+                        NSEvent.mouseEvent(
+                            with: type, location: CGPoint(x: 68 + 80, y: 760 - header), modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+            }
+            _ = try await settledImage(hosting)
+        }
+        try write(await settledImage(hosting), "sidebar-collapsed-\(palette.rawValue)-\(theme.rawValue)")
     }
 
     @Test("Component gallery", arguments: Theme.allCases)
