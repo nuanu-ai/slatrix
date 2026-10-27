@@ -146,17 +146,6 @@ struct DesignSystemHostedTests {
             size: CGSize(width: 800, height: 600))
     }
 
-    @Test("Esc closes the card")
-    func escapeCloses() async {
-        let popovers = Popovers()
-        let host = popoverHost(popovers)
-        defer { host.close() }
-        popovers.show(.profile(userID: "@alice:example.org", fallback: nil), at: CGPoint(x: 100, y: 100))
-        #expect(await eventually { host.window.firstResponder !== host.window })
-        host.pressEscape()
-        #expect(await eventually { popovers.current == nil })
-    }
-
     @Test("The emoji picker opens ready to search; arrows move, Return picks and Esc closes")
     func emojiPickerKeyboard() async throws {
         let popovers = Popovers()
@@ -233,7 +222,7 @@ struct DesignSystemHostedTests {
         let host = popoverHost(popovers)
         defer { host.close() }
         // The card sits right of and a little above the anchor: about x 112–432, y 76–228.
-        popovers.show(.profile(userID: "@alice:example.org", fallback: nil), at: CGPoint(x: 100, y: 100))
+        popovers.show(.emoji(EmojiPick { _ in }), at: CGPoint(x: 100, y: 100))
         #expect(await eventually { host.window.firstResponder !== host.window })
         await host.click(CGPoint(x: 250, y: 150))
         await drainMainActor()

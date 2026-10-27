@@ -99,8 +99,10 @@ struct TimelineTable: NSViewRepresentable {
     var live: Bool
     var bottomAligned: Bool
     var focusedEventID: String?
+    /// New with each jump, so jumping to the message already focused scrolls back to it.
+    var jumpID: UUID?
     var startsAtUnread: Bool
-    /// Where to remember the reading position across visits; nil for a timeline opened at an older message.
+    /// Where to remember the reading position across visits.
     var memoryKey: String?
     var canLoadOlder: Bool
     var canLoadNewer: Bool
@@ -185,6 +187,9 @@ struct TimelineTable: NSViewRepresentable {
     private var scrollingUp = true
     private var lastTop: CGFloat = 0
     private var applying = false
+    /// Whether the reader moved the view since the table last put it somewhere.
+    private var scrolledByReader = false
+    private var atOlderMessage = false
     private var reported: (Bool, Bool)?
     /// While the table waits for its first rows.
     private var loading: Performance.Interval?
@@ -223,11 +228,17 @@ struct TimelineTable: NSViewRepresentable {
         self.configuration = configuration
         if previous == nil, !opened {
             loading = Performance.begin(configuration.context.isThread ? .threadLoading : .timelineLoading)
+            // A table shows one timeline; the view it leaves with may already describe the next.
+            atOlderMessage = !configuration.live
         }
         configuration.context.onHeight = { [weak self] id, height in self?.reported(height, for: id) }
         configuration.scroller.bottom = { [weak self] in self?.scrollToBottom(animated: true) }
-        if previous?.focusedEventID != configuration.focusedEventID { pendingFocus = configuration.focusedEventID }
+        if previous?.focusedEventID != configuration.focusedEventID || previous?.jumpID != configuration.jumpID {
+            pendingFocus = configuration.focusedEventID
+        }
         apply(configuration.entries)
+        // A jump within rows already shown changes none of them.
+        if opened, pendingFocus != nil { afterScroll() }
     }
 
     // MARK: Rows
@@ -607,7 +618,8 @@ struct TimelineTable: NSViewRepresentable {
         opened = true
         let focused = pendingFocus.flatMap { focus in rows.first { $0.messageEventID == focus }?.id }
         if focused != nil { pendingFocus = nil }
-        let remembered = configuration.memoryKey.flatMap { TimelineMemory.positions[$0] }.flatMap(local)
+        let remembered =
+            configuration.live ? configuration.memoryKey.flatMap { TimelineMemory.positions[$0] }.flatMap(local) : nil
         let opening = Policy.opening(
             focusedRowID: focused, unreadRowID: index["unread"] == nil ? nil : "unread",
             startsAtUnread: configuration.startsAtUnread, remembered: remembered, contains: { index[$0] != nil })
@@ -683,6 +695,7 @@ struct TimelineTable: NSViewRepresentable {
         }
         // The reader moved: a linked message that has not loaded yet no longer takes over the view.
         pendingFocus = nil
+        scrolledByReader = true
         let top = scrollView.contentView.bounds.minY
         if top != lastTop { scrollingUp = top < lastTop }
         lastTop = top
@@ -697,20 +710,26 @@ struct TimelineTable: NSViewRepresentable {
     /// Reports the viewport's state, keeps the hover with the pointer and loads history ahead of the reader.
     private func afterScroll() {
         guard let configuration else { return }
-        updateHover()
-        let viewport = viewport
-        let state = (viewport.isAtBottom, opened && Policy.showsJumpToLatest(viewport, live: configuration.live))
-        if reported.map({ $0 != state }) ?? true {
-            reported = state
-            // SwiftUI state; never changed from inside its own update or layout.
-            DispatchQueue.main.async { configuration.onScroll(state.0, state.1) }
-        }
         if let pendingFocus, let row = rows.first(where: { $0.messageEventID == pendingFocus }) {
             self.pendingFocus = nil
+            scrolledByReader = false
             applying = true
             scroll(to: .centered(rowID: row.id))
             settle(keeping: .centered(rowID: row.id))
             applying = false
+            if !configuration.context.isThread { Performance.finishOnScreen(.roomOpen, ["rows": rows.count]) }
+        }
+        updateHover()
+        let viewport = viewport
+        let state = (
+            viewport.isAtBottom,
+            opened
+                && Policy.showsJumpToLatest(viewport, live: configuration.live, scrolledByReader: scrolledByReader)
+        )
+        if reported.map({ $0 != state }) ?? true {
+            reported = state
+            // SwiftUI state; never changed from inside its own update or layout.
+            DispatchQueue.main.async { configuration.onScroll(state.0, state.1) }
         }
         checkHistory()
     }
@@ -726,8 +745,13 @@ struct TimelineTable: NSViewRepresentable {
     }
 
     func remember() {
-        guard opened, let key = configuration?.memoryKey else { return }
-        TimelineMemory.positions[key] = persistent(position())
+        guard let key = configuration?.memoryKey else { return }
+        // Coming back from a timeline opened at an older message lands at the newest one.
+        guard !atOlderMessage else {
+            TimelineMemory.positions[key] = nil
+            return
+        }
+        if opened { TimelineMemory.positions[key] = persistent(position()) }
     }
 
     /// Row IDs are per timeline instance; a remembered position names a message by its event instead.

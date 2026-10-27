@@ -106,4 +106,16 @@ struct WindowHostedTests {
         }
         #expect(time < .milliseconds(1_700), "\(time)")
     }
+
+    @Test("A conversation opened at an older message keeps its composer")
+    func composerStaysAtOlderMessage() async {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        harness.matrix.focusedEventID = harness.messages[500].eventID
+        await drainMainActor()
+        harness.hosting.layoutSubtreeIfNeeded()
+        #expect(
+            Harness.views(in: harness.hosting).contains { ($0 as? NSTextView)?.isEditable == true && $0.window != nil })
+    }
 }

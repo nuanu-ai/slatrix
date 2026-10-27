@@ -16,6 +16,30 @@ private final class StartOfTimeline: Timeline, @unchecked Sendable {
     override func paginateBackwards(numEvents: UInt16) async throws -> Bool { true }
 }
 
+/// Julia has a photo and a status, Sam is in a call, and anyone else has only a name.
+private final class ProfileClient: Client, @unchecked Sendable {
+    let photo: String
+    init(photo: String) {
+        self.photo = photo
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func getProfile(userId: String) async throws -> UserProfile {
+        switch userId {
+        case "@julia:harbor.example":
+            UserProfile(
+                userId: userId, displayName: "Julia Park", avatarUrl: photo,
+                status: UserStatus(emoji: "🌴", text: "Out until Monday"), call: nil)
+        case "@sam:harbor.example":
+            UserProfile(
+                userId: userId, displayName: "Sam Ortiz", avatarUrl: nil, status: nil,
+                call: UserCall(callJoinedTs: nil))
+        default: UserProfile(userId: userId, displayName: "Dmitry", avatarUrl: nil, status: nil, call: nil)
+        }
+    }
+    override func isUserStatusSupported() async throws -> Bool { true }
+}
+
 /// Renders the sample workspace in-process and writes PNGs to `.build/snapshots/` for a person to look at.
 /// Opt in with `SLATRIX_SNAPSHOTS=1 swift test --filter Snapshots`; nothing is compared automatically.
 @MainActor
@@ -73,6 +97,37 @@ struct Snapshots {
         let profile = try #require(thread.menu(for: event)?.items.first { $0.identifier?.rawValue == "profile" })
         _ = profile.target?.perform(profile.action, with: profile)
         try write(await settledImage(hosting), "profile-\(name)")
+    }
+
+    @Test("A message jumped to, in the live conversation and at an older message", arguments: Theme.allCases)
+    func jump(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let window = offscreenWindow(NSSize(width: 1440, height: 900))
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        _ = try await settledImage(hosting)
+        let room = try #require(matrix.selectedRoomID)
+        matrix.jump = MessageJump(roomID: room, eventID: "preview.share")
+        // The highlight fades after a moment; settling would wait it out.
+        try await Task.sleep(for: .milliseconds(800))
+        try write(Self.image(window), "jump-live-\(theme.rawValue)")
+        matrix.focusedEventID = "preview.share"
+        matrix.jump = MessageJump(roomID: room, eventID: "preview.share")
+        try await Task.sleep(for: .milliseconds(800))
+        try write(Self.image(window), "jump-older-\(theme.rawValue)")
     }
 
     @Test("Sidebar", arguments: SidebarPalette.allCases, Theme.allCases)
@@ -517,6 +572,52 @@ struct Snapshots {
         try write(await settledImage(hosting), "new-line-\(theme.rawValue)")
     }
 
+    @Test(
+        "Profiles: someone with a photo and status, someone in a call without one, and you", arguments: Theme.allCases)
+    func profiles(theme: Theme) async throws {
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        // Signed in rather than sampled, so the photo draws from the cache.
+        matrix.isPreview = false
+        matrix.user = ChatUser(id: "@dmitry:harbor.example", name: "Dmitry")
+        let photo = "mxc://harbor.example/julia"
+        _ = await matrix.avatarImages.image(for: photo + "#large") { try Self.samplePhoto() }
+        let people = PeopleService()
+        people.attach(ProfileClient(photo: photo))
+        for (id, name) in [
+            ("@julia:harbor.example", "julia"), ("@sam:harbor.example", "sam"), ("@dmitry:harbor.example", "you"),
+        ] {
+            let (window, hosting) = try themedWindow(
+                ProfilePane(
+                    matrix: matrix, people: people, userID: id, onOpenConversation: { _ in }, onEditProfile: {},
+                    onClose: {}
+                ).frame(width: 380, height: 720),
+                theme: theme)
+            defer { window.close() }
+            try write(await settledImage(hosting), "profile-pane-\(name)-\(theme.rawValue)")
+        }
+    }
+
+    /// A soft gradient standing in for someone's photo.
+    private static func samplePhoto() throws -> Data {
+        let side = 512
+        let context = try #require(
+            CGContext(
+                data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let colors = [
+            CGColor(red: 0.95, green: 0.62, blue: 0.45, alpha: 1), CGColor(red: 0.36, green: 0.3, blue: 0.62, alpha: 1),
+        ]
+        let gradient = try #require(
+            CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, 1]))
+        context.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: side, y: side), options: [])
+        context.setFillColor(CGColor(red: 1, green: 0.9, blue: 0.8, alpha: 0.9))
+        context.fillEllipse(in: CGRect(x: 176, y: 220, width: 160, height: 160))
+        context.fillEllipse(in: CGRect(x: 96, y: -120, width: 320, height: 300))
+        let image = try #require(context.makeImage())
+        return try #require(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))
+    }
+
     /// `view` on the canvas in an offscreen window that the window server composites.
     private func themedWindow(_ view: some View, theme: Theme, appearance: AppearanceStore = AppearanceStore())
         throws -> (NSWindow, NSView)
@@ -549,11 +650,7 @@ struct Snapshots {
         var unchanged = 0
         for _ in 0..<400 {
             view.layoutSubtreeIfNeeded()
-            // Nil until the window server has the window's first frame. Options: including window (8); ignore
-            // framing (1) and best resolution (8).
-            let image = Self.windowImage(.null, 8, UInt32(window.windowNumber), 1 | 8)?.takeRetainedValue()
-            let png =
-                image.flatMap { NSBitmapImageRep(cgImage: $0).representation(using: .png, properties: [:]) } ?? Data()
+            let png = Self.image(window)
             unchanged = png == previous ? unchanged + 1 : 0
             if unchanged == 6 && !png.isEmpty { return png }
             previous = png
@@ -561,6 +658,13 @@ struct Snapshots {
         }
         Issue.record("Rendering never settled")
         return previous
+    }
+
+    /// The window as the window server composites it now; empty until it has the window's first frame.
+    private static func image(_ window: NSWindow) -> Data {
+        // Options: including window (8); ignore framing (1) and best resolution (8).
+        let image = windowImage(.null, 8, UInt32(window.windowNumber), 1 | 8)?.takeRetainedValue()
+        return image.flatMap { NSBitmapImageRep(cgImage: $0).representation(using: .png, properties: [:]) } ?? Data()
     }
 
     /// `CGWindowListCreateImage`, unavailable in the SDK but still in the OS; reading the process's own window needs

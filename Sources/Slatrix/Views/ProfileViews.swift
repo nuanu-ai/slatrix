@@ -1,54 +1,23 @@
 import AppKit
 import SwiftUI
 
-/// Slack's profile card: what the room already knows about a person, at once, with the fetched profile replacing
-/// it quietly. Shown in a `PopoverHost`.
-struct ProfileCard: View {
-    let matrix: MatrixService
-    let people: PeopleService
-    let userID: String
-    var fallback: ChatUser? = nil
-    var onOpenConversation: (String) -> Void
-    var onViewProfile: () -> Void
-    @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
-
-    var body: some View {
-        let person = ProfileDetails(people: people, userID: userID, fallback: fallback)
-        let colors = appearance.colors
-        VStack(alignment: .leading, spacing: m.sp12) {
-            Button(action: onViewProfile) {
-                AvatarView(
-                    name: person.name, size: m.popoverWidth - 2 * m.sp16, cornerRadius: m.radiusLarge,
-                    matrix: matrix, source: person.avatarURL)
-            }.buttonStyle(.row).help("View full profile")
-            ProfileHeading(person: person, own: userID == matrix.user?.id)
-            HStack(spacing: m.sp8) {
-                if userID != matrix.user?.id {
-                    MessageButton(matrix: matrix, userID: userID, onOpen: onOpenConversation)
-                }
-                ProfileMenu(userID: userID, onViewProfile: onViewProfile)
-            }
-        }
-        .foregroundStyle(colors.textBody)
-        .task(id: userID) { await people.loadProfile(userID: userID, fallback: fallback) }
-    }
-}
-
-/// Slack's full profile, in the right-hand pane beside the conversation.
+/// Slack's profile, in the right-hand pane beside the conversation. What the room already knows shows at once, and
+/// the fetched profile replaces it quietly.
 struct ProfilePane: View {
-    private static let photoSide: CGFloat = 256
     let matrix: MatrixService
     let people: PeopleService
     let userID: String
     var fallback: ChatUser? = nil
     var onOpenConversation: (String) -> Void
+    var onEditProfile: () -> Void
     var onClose: () -> Void
+    @State private var shown = false
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
     var body: some View {
         let person = ProfileDetails(people: people, userID: userID, fallback: fallback)
+        let own = userID == matrix.user?.id
         let colors = appearance.colors
         VStack(spacing: 0) {
             HStack {
@@ -58,28 +27,58 @@ struct ProfilePane: View {
             }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
             Divider().overlay(colors.border)
             ScrollView {
-                VStack(alignment: .leading, spacing: m.sp16) {
-                    AvatarView(
-                        name: person.name, size: m(Self.photoSide), cornerRadius: m.radiusPanel, matrix: matrix,
-                        source: person.avatarURL
-                    ).frame(maxWidth: .infinity)
-                    ProfileHeading(person: person, own: userID == matrix.user?.id)
-                    HStack(spacing: m.sp8) {
-                        if userID != matrix.user?.id {
-                            MessageButton(matrix: matrix, userID: userID, onOpen: onOpenConversation)
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: m.sp16) {
+                        AvatarView(
+                            name: person.name, size: m.profilePhoto, cornerRadius: m.radiusLarge, matrix: matrix,
+                            source: person.avatarURL
+                        ).frame(maxWidth: .infinity)
+                        VStack(alignment: .leading, spacing: m.sp4) {
+                            HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
+                                Text(person.name).font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
+                                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                if own { TagLabel(text: "You") }
+                            }
+                            // Where Slack shows a title; Matrix has a status instead.
+                            if let status = person.status {
+                                Text(status).font(m.font(.title)).fixedSize(horizontal: false, vertical: true)
+                            }
                         }
-                        ProfileMenu(userID: userID, onViewProfile: nil)
-                    }
+                        if person.inCall {
+                            Label {
+                                Text("In a call")
+                            } icon: {
+                                Image(systemName: "video.fill").foregroundStyle(colors.presenceActive)
+                            }.font(m.font(.body))
+                        }
+                        ProfileActions(
+                            matrix: matrix, userID: userID, own: own, onOpen: onOpenConversation, onEdit: onEditProfile
+                        )
+                        // A failed Message belongs to the person it was for, not the next profile opened in the pane.
+                        .id(userID)
+                    }.padding(m.sp20)
                     Divider().overlay(colors.border)
-                    VStack(alignment: .leading, spacing: m.sp4) {
-                        Text("Matrix ID").font(m.font(.secondary, .semibold)).foregroundStyle(colors.textPrimary)
-                        Text(userID).font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
-                            .textSelection(.enabled)
-                    }
-                }.padding(m.sp20)
+                    VStack(alignment: .leading, spacing: m.sp16) {
+                        Text("Contact information").font(m.font(.body, .bold)).foregroundStyle(colors.textPrimary)
+                        HStack(spacing: m.sp12) {
+                            Image(systemName: "at").font(m.font(.body)).foregroundStyle(colors.textSecondary)
+                                .frame(width: m.iconTile, height: m.iconTile)
+                                .background(colors.sunken, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: m.sp2) {
+                                Text("Matrix ID").font(m.font(.secondary, .semibold))
+                                    .foregroundStyle(colors.textSecondary)
+                                Text(userID).font(m.font(.body)).foregroundStyle(colors.accent).lineLimit(1)
+                                    .truncationMode(.middle).textSelection(.enabled)
+                            }
+                        }
+                    }.padding(m.sp20).frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
         .foregroundStyle(colors.textBody).background(colors.canvas)
+        .opacity(shown ? 1 : 0)
+        .onAppear { withAnimation(Motion.pane) { shown = true } }
         .task(id: userID) { await people.loadProfile(userID: userID, fallback: fallback) }
     }
 }
@@ -89,47 +88,26 @@ private struct ProfileDetails {
     let name: String
     let avatarURL: String?
     let status: String?
-    let userID: String
+    let inCall: Bool
 
     @MainActor init(people: PeopleService, userID: String, fallback: ChatUser?) {
         let profile = people.profile?.id == userID ? people.profile : nil
         let known = fallback?.id == userID ? fallback : nil
-        self.userID = userID
         name = profile?.name ?? known?.name ?? userID
         avatarURL = profile?.avatarURL ?? known?.avatarURL
         status = people.statusSupported ? profile?.status : nil
+        inCall = profile?.inCall ?? false
     }
 }
 
-private struct ProfileHeading: View {
-    let person: ProfileDetails
-    let own: Bool
-    @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
-
-    var body: some View {
-        let colors = appearance.colors
-        VStack(alignment: .leading, spacing: m.sp4) {
-            HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
-                Text(person.name).font(m.font(.title, .bold)).foregroundStyle(colors.textPrimary)
-                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                if own { TagLabel(text: "You") }
-            }
-            Text(person.userID).font(m.font(.secondary)).foregroundStyle(colors.textSecondary).lineLimit(1)
-                .truncationMode(.middle).textSelection(.enabled)
-            if let status = person.status, !status.isEmpty {
-                Text(status).font(m.font(.secondary)).foregroundStyle(colors.textBody)
-                    .fixedSize(horizontal: false, vertical: true).padding(.top, m.sp4)
-            }
-        }
-    }
-}
-
-/// Opens or creates the direct message; the spinner waits like every other, and a failure shows under it.
-private struct MessageButton: View {
+/// Slack's row of outlined buttons: Message for someone else, Edit profile for you, then ⋮. Message opens or creates
+/// the direct message; its spinner waits like every other, and a failure shows under the row.
+private struct ProfileActions: View {
     let matrix: MatrixService
     let userID: String
+    let own: Bool
     let onOpen: (String) -> Void
+    let onEdit: () -> Void
     @State private var request: UUID?
     @State private var error: String?
     @Environment(\.metrics) private var m
@@ -137,14 +115,27 @@ private struct MessageButton: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: m.sp8) {
-            Button(action: open) {
-                HStack(spacing: m.sp8) {
-                    if request != nil { DelayedProgress() }
-                    Text("Message")
-                }.frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.primary)
-            .disabled(request != nil || matrix.isPreview || (try? PeopleMapping.validatedID(userID)) == nil)
+            HStack(spacing: m.sp8) {
+                if own {
+                    Button("Edit profile", action: onEdit).buttonStyle(.secondary)
+                } else {
+                    Button(action: open) {
+                        HStack(spacing: m.sp8) {
+                            // The spinner takes the icon's place, so the row never shifts.
+                            ZStack {
+                                Image(systemName: "bubble.left").opacity(request == nil ? 1 : 0)
+                                if request != nil { DelayedProgress() }
+                            }
+                            Text("Message")
+                        }
+                    }
+                    .buttonStyle(.secondary)
+                    .disabled(request != nil || matrix.isPreview || (try? PeopleMapping.validatedID(userID)) == nil)
+                }
+                Button(action: showMenu) {
+                    Image(systemName: "ellipsis").rotationEffect(.degrees(90)).accessibilityLabel("More actions")
+                }.buttonStyle(.secondaryIcon).help("More actions")
+            }.controlSize(.large)
             if let error {
                 Text(error).font(m.font(.meta)).foregroundStyle(appearance.colors.destructive)
                     .fixedSize(horizontal: false, vertical: true)
@@ -171,30 +162,19 @@ private struct MessageButton: View {
             }
         }
     }
-}
 
-/// Slack's ⋯ beside Message: copy the ID, and from the card, open the full profile. A native menu, as everywhere.
-private struct ProfileMenu: View {
-    let userID: String
-    let onViewProfile: (() -> Void)?
-    @Environment(\.metrics) private var m
-
-    var body: some View {
-        Button(action: show) {
-            Image(systemName: "ellipsis").font(m.font(.body)).accessibilityLabel("More actions")
-        }.buttonStyle(.secondary).help("More actions")
-    }
-
-    private func show() {
-        var commands: [MessageMenuCommand] = []
-        if let onViewProfile {
-            commands.append(MessageMenuCommand(id: "view-profile", title: "View full profile", perform: onViewProfile))
+    /// A native menu, as everywhere.
+    private func showMenu() {
+        let copy = { (text: String) in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
         }
-        commands.append(
-            MessageMenuCommand(id: "copy-id", title: "Copy member ID") { [userID] in
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(userID, forType: .string)
-            })
+        let commands = [
+            MessageMenuCommand(id: "copy-id", title: "Copy member ID") { [userID] in copy(userID) },
+            MessageMenuCommand(id: "copy-link", title: "Copy link to profile") { [userID] in
+                copy(MatrixID.permalink(userID))
+            },
+        ]
         NativeMessageMenu.make(commands: commands).popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 }

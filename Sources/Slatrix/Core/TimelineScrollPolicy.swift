@@ -67,10 +67,12 @@ enum TimelineScrollPolicy {
         return .bottom
     }
 
-    /// "Jump to latest" shows once the reader is half a screen away from the newest message, or anywhere in a
-    /// timeline opened at an older message whose end is not loaded.
-    static func showsJumpToLatest(_ viewport: Viewport, live: Bool) -> Bool {
-        live ? viewport.distanceFromBottom > viewport.height / 2 : !viewport.isAtBottom
+    /// "Jump to recent" shows anywhere in a timeline opened at an older message, which never gets new ones. In a live
+    /// timeline it shows once the reader has scrolled more than two screens from the newest message themselves: closer
+    /// than that a flick gets back, and the app's own scroll to the unread line or a linked message is where the
+    /// reader asked to be.
+    static func showsJumpToLatest(_ viewport: Viewport, live: Bool, scrolledByReader: Bool) -> Bool {
+        !live || scrolledByReader && viewport.distanceFromBottom > viewport.height * 2
     }
 
     /// History starts loading this many screens before the reader reaches an end, so a page lands before they do.

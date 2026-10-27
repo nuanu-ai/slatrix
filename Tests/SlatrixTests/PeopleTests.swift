@@ -110,13 +110,19 @@ struct PeopleMappingTests {
         #expect(try PeopleMapping.validatedID("  \(alice)  ") == alice)
     }
 
-    @Test("A profile without a display name shows its ID, and status shows only where the server supports it")
+    @Test(
+        "A profile without a display name shows its ID, and status and calls show only where the server supports them")
     func profileMapping() {
         let value = UserProfile(
-            userId: alice, displayName: nil, avatarUrl: nil, status: UserStatus(emoji: "🌱", text: "Working"), call: nil)
+            userId: alice, displayName: nil, avatarUrl: nil, status: UserStatus(emoji: "🌱", text: "Working"),
+            call: UserCall(callJoinedTs: nil))
         #expect(PeopleMapping.profile(value, statusSupported: true).name == alice)
         #expect(PeopleMapping.profile(value, statusSupported: true).status == "🌱 Working")
+        #expect(PeopleMapping.profile(value, statusSupported: true).inCall)
         #expect(PeopleMapping.profile(value, statusSupported: false).status == nil)
+        #expect(!PeopleMapping.profile(value, statusSupported: false).inCall)
+        let idle = UserProfile(userId: alice, displayName: nil, avatarUrl: nil, status: nil, call: nil)
+        #expect(!PeopleMapping.profile(idle, statusSupported: true).inCall)
     }
 
     @Test(
