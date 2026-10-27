@@ -7,6 +7,7 @@ struct PersonProfile: Identifiable, Hashable {
     var name: String
     var avatarURL: String? = nil
     var status: String? = nil
+    var inCall = false
     var profileAvailable = true
 }
 
@@ -28,7 +29,8 @@ enum PeopleMapping {
                 [String($0.emoji.prefix(32)), String($0.text.prefix(512))].filter { !$0.isEmpty }.joined(separator: " ")
             } : nil
         return PersonProfile(
-            id: value.userId, name: name, avatarURL: value.avatarUrl, status: status?.isEmpty == false ? status : nil)
+            id: value.userId, name: name, avatarURL: value.avatarUrl, status: status?.isEmpty == false ? status : nil,
+            inCall: statusSupported && value.call != nil)
     }
 
     static func exactDirectParticipants(_ members: [RoomMember], ownUserID: String, targetUserID: String) -> Bool {

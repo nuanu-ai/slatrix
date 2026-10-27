@@ -319,25 +319,15 @@ struct ComponentGallery: View {
 
     private var profile: some View {
         let person = ChatUser(id: "@julia:harbor.example", name: "Julia Park")
-        return HStack(alignment: .top, spacing: m.sp40) {
-            VStack(alignment: .leading, spacing: m.sp8) {
-                caption("Card, beside a click on a name or photo")
-                PopoverSurface {
-                    ProfileCard(
-                        matrix: matrix, people: people, userID: person.id, fallback: person,
-                        onOpenConversation: { _ in }, onViewProfile: {})
-                }
-            }
-            VStack(alignment: .leading, spacing: m.sp8) {
-                caption("Full profile pane")
-                ProfilePane(
-                    matrix: matrix, people: people, userID: person.id, fallback: person,
-                    onOpenConversation: { _ in }, onClose: {}
-                )
-                .frame(width: m(336), height: m(640))
-                .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(appearance.colors.border))
-                .clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
-            }
+        return VStack(alignment: .leading, spacing: m.sp8) {
+            caption("Side pane, from a click on a name or photo")
+            ProfilePane(
+                matrix: matrix, people: people, userID: person.id, fallback: person,
+                onOpenConversation: { _ in }, onEditProfile: {}, onClose: {}
+            )
+            .frame(width: m(380), height: m(640))
+            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(appearance.colors.border))
+            .clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
         }
     }
 }
