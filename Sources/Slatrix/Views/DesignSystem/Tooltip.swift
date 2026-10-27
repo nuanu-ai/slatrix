@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Slack's tooltip: a line of `.meta` text on the inverted surface, under optional leading content such as a
-/// reaction's emoji, drawn large.
+/// Slack's tooltip: centered `.meta` text on a dark bubble, wrapped at `tooltipText`, under optional leading content
+/// such as a reaction's emoji, drawn large.
 struct Tooltip<Leading: View>: View {
     let text: String
     @ViewBuilder var leading: Leading
@@ -13,12 +13,27 @@ struct Tooltip<Leading: View>: View {
         let colors = appearance.colors
         VStack(spacing: m.sp4) {
             leading
-            Text(text).font(m.font(.meta))
+            WrapWidth(width: m.tooltipText) { Text(text).font(m.font(.meta)).multilineTextAlignment(.center) }
         }
         .foregroundStyle(colors.onTooltip).padding(.horizontal, m.sp8).padding(.vertical, m.sp4)
         .fixedSize()
         .background(colors.tooltip, in: RoundedRectangle(cornerRadius: m.radius))
         .elevation(.e2, cornerRadius: m.radius)
+    }
+}
+
+/// Offers its content at most `width`, so text wraps there, and takes the content's own size, so a short line keeps
+/// its width.
+private struct WrapWidth: Layout {
+    let width: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        subviews.first?.sizeThatFits(ProposedViewSize(width: min(proposal.width ?? width, width), height: nil))
+            ?? .zero
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
     }
 }
 

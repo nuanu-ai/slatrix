@@ -596,10 +596,19 @@ struct Snapshots {
         try write(await settledImage(hosting), "hovered-row-\(theme.rawValue)")
     }
 
-    @Test("The tooltip over a hovered reaction", arguments: [1, 1.25], Theme.allCases)
+    @Test("The tooltip over a hovered reaction, short and wrapped", arguments: [1, 1.25], Theme.allCases)
     func reactionTooltip(zoom: Double, theme: Theme) async throws {
+        try await reactionTooltip(zoom: zoom, theme: theme, long: false)
+        try await reactionTooltip(zoom: zoom, theme: theme, long: true)
+    }
+
+    private func reactionTooltip(zoom: Double, theme: Theme, long: Bool) async throws {
         let matrix = MatrixService()
         matrix.enterPreview()
+        if long {
+            let names = ["preview.alex": "Alexandra Konstantinopoulou", "preview.julia": "Julia von Fürstenberg"]
+            matrix.members = matrix.members.map { ChatUser(id: $0.id, name: names[$0.id] ?? $0.name) }
+        }
         let room = try #require(matrix.selectedRoom)
         matrix.messages = matrix.messages.map {
             var message = $0
@@ -633,7 +642,8 @@ struct Snapshots {
         let chip = NSPoint(x: text.convert(text.bounds, to: nil).minX + m.sp8, y: row.minY + m.sp4 + m.sp24 / 2)
         scroll.onPointer?(chip)
         _ = await eventually { window.childWindows?.isEmpty == false }
-        try write(await settledImage(hosting), "reaction-tooltip-\(Int(zoom * 100))-\(theme.rawValue)")
+        try write(
+            await settledImage(hosting), "reaction-tooltip-\(long ? "long-" : "")\(Int(zoom * 100))-\(theme.rawValue)")
     }
 
     @Test("The New line over the first unread message", arguments: Theme.allCases)
