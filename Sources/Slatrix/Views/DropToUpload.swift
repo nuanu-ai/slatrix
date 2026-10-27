@@ -60,7 +60,7 @@ private struct UploadDropTarget: NSViewRepresentable {
     }
 }
 
-/// Takes file and image drags over a pane while letting every click through: AppKit finds a drop target by frame and
+/// Takes file, file promise and image drags over a pane while letting every click through: AppKit finds a drop target by frame and
 /// registered types, never by `hitTest`.
 final class UploadDropView: NSView {
     var intake: UploadIntake?
@@ -68,7 +68,9 @@ final class UploadDropView: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        registerForDraggedTypes([.fileURL, .png, .tiff])
+        registerForDraggedTypes(
+            [.fileURL, .png, .tiff] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
+        )
     }
 
     required init?(coder: NSCoder) { nil }
