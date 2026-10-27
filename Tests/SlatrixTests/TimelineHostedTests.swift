@@ -134,6 +134,23 @@ struct TimelineHostedTests {
         }
 
         static func views(in view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+
+        /// The on-screen row of the message with this event or transaction ID.
+        func cell(showing eventID: String) -> TimelineCell? {
+            Self.views(in: hosting).compactMap { $0 as? TimelineCell }.first { cell in
+                guard cell.window != nil, case .message(let entry) = cell.entry?.kind else { return false }
+                return entry.message.eventID == eventID
+            }
+        }
+        var showsImage: Bool { Self.views(in: hosting).contains { ($0 as? NSImageView)?.image != nil } }
+    }
+
+    private static func png() throws -> Data {
+        let image = try #require(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 160, pixelsHigh: 90, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        return try #require(image.representation(using: .png, properties: [:]))
     }
 
     private static func messages(_ range: Range<Int>, prefix: String = "Message") -> [ChatMessage] {
@@ -210,11 +227,7 @@ struct TimelineHostedTests {
     func imageArrivalKeepsLayout() async throws {
         let harness = Harness(messages: [], height: 800)
         defer { harness.close() }
-        let image = try #require(
-            NSBitmapImageRep(
-                bitmapDataPlanes: nil, pixelsWide: 160, pixelsHigh: 90, bitsPerSample: 8, samplesPerPixel: 4,
-                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
-        harness.client.thumbnail = try #require(image.representation(using: .png, properties: [:]))
+        harness.client.thumbnail = try Self.png()
         harness.client.thumbnails.arm()
         harness.service.projectMediaCaptionForChecks(
             [
@@ -229,18 +242,34 @@ struct TimelineHostedTests {
         #expect(
             await eventually {
                 harness.layout()
-                return Harness.views(in: harness.hosting).contains { ($0 as? NSImageView)?.image != nil }
+                return harness.showsImage
             })
         harness.layout()
         // The row's content still measures the height the table gave it before the image came.
-        let row = try #require(
-            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }.first { cell in
-                guard cell.window != nil, case .message(let entry) = cell.entry?.kind else { return false }
-                return entry.message.eventID == "$photo"
-            })
+        let row = try #require(harness.cell(showing: "$photo"))
         #expect(ceil(row.height(width: row.frame.width)) == row.frame.height)
         #expect(try #require(harness.top(of: "Before the photo")) == before)
         #expect(try #require(harness.top(of: "After the photo")) == after)
+    }
+
+    @Test("Your own image appears once the server confirms it, without reopening the conversation")
+    func sentImageAppearsWhenConfirmed() async throws {
+        let harness = Harness(messages: [], height: 800)
+        defer { harness.close() }
+        harness.client.thumbnail = try Self.png()
+        let url = "mxc://example.org/photo"
+        func show(_ event: EventTimelineItem) {
+            harness.service.projectMediaCaptionForChecks(
+                [FakeTimelineItem(event, uniqueID: "photo")], roomID: Self.room.id, inThread: false)
+        }
+        show(try imageEvent("photo-transaction", width: 1_600, height: 900, url: url, sending: true))
+        await settle(harness) { harness.cell(showing: "photo-transaction") != nil }
+        show(try imageEvent("$photo", width: 1_600, height: 900, url: url))
+        #expect(
+            await eventually {
+                harness.layout()
+                return harness.cell(showing: "$photo") != nil && harness.showsImage
+            })
     }
 
     @Test("Older history arrives without moving a pixel of what you are reading")

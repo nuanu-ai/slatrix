@@ -48,23 +48,29 @@ func fileEvent(_ id: String, source: MediaSource?, sender: String = "@owner:exam
         lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
 }
 
-func imageEvent(_ id: String, width: UInt64?, height: UInt64?, mime: String = "image/png") throws -> EventTimelineItem {
+/// A remote image, or with `sending` the reader's own local echo of it, whose `id` is then its transaction ID.
+func imageEvent(
+    _ id: String, width: UInt64?, height: UInt64?, mime: String = "image/png", url: String? = nil,
+    sending: Bool = false
+) throws -> EventTimelineItem {
     let image = ImageMessageContent(
         filename: "photo.png", caption: nil, formattedCaption: nil,
-        source: try MediaSource.fromUrl(url: "mxc://example.org/\(id.dropFirst())"),
+        source: try MediaSource.fromUrl(url: url ?? "mxc://example.org/\(id.dropFirst())"),
         info: ImageInfo(
             height: height, width: width, mimetype: mime, size: 1_000, thumbnailInfo: nil, thumbnailSource: nil,
             blurhash: nil, isAnimated: nil))
     return EventTimelineItem(
-        isRemote: true, eventOrTransactionId: .eventId(eventId: id), sender: "@alice:example.org",
-        senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil, isOwn: false, isEditable: false,
+        isRemote: !sending, eventOrTransactionId: sending ? .transactionId(transactionId: id) : .eventId(eventId: id),
+        sender: "@alice:example.org", senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil,
+        isOwn: sending, isEditable: sending,
         content: .msgLike(
             content: MsgLikeContent(
                 kind: .message(
                     content: MessageContent(
                         msgType: .image(content: image), body: "photo.png", isEdited: false, mentions: nil)),
                 inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
-        reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000, localSendState: nil, editSendState: nil,
+        reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000,
+        localSendState: sending ? .notSentYet(progress: nil) : nil, editSendState: nil,
         redactionSendState: nil, localCreatedAt: nil, readReceipts: [:], origin: nil, canBeRepliedTo: true,
         lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
 }
