@@ -107,6 +107,35 @@ struct WindowHostedTests {
         #expect(time < .milliseconds(1_700), "\(time)")
     }
 
+    @Test("A click on the member facepile opens channel details on Members")
+    func facepileOpensMembers() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        // The facepile sits just left of the header's ⋮, the rightmost menu in the window.
+        let menu = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? NSPopUpButton }.map {
+                $0.convert($0.bounds, to: nil)
+            }
+            .max { $0.minX < $1.minX })
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            await drainMainActor()
+            harness.window.sendEvent(
+                try #require(
+                    NSEvent.mouseEvent(
+                        with: type, location: NSPoint(x: menu.minX - 20, y: menu.midY), modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: harness.window.windowNumber,
+                        context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+        }
+        #expect(
+            await eventually {
+                harness.hosting.layoutSubtreeIfNeeded()
+                return Harness.views(in: harness.hosting).contains {
+                    ($0 as? NSTextField)?.placeholderString == "Find members"
+                }
+            })
+    }
+
     @Test("A conversation opened at an older message keeps its composer")
     func composerStaysAtOlderMessage() async {
         let harness = Harness()
