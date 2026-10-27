@@ -46,4 +46,20 @@ struct RoomMembersTests {
         #expect(!members.blockedMain)
         #expect(service.members.map(\.name) == ["Alice"])
     }
+
+    @Test("Members keep whether they joined, were invited, left or were banned")
+    func membership() async {
+        let room = FakeOpenRoom("!team:example.org", cached: [])
+        room.memberList = [
+            roomMember("@al:example.org", membership: .join), roomMember("@bo:example.org", membership: .invite),
+            roomMember("@cy:example.org", membership: .leave), roomMember("@di:example.org", membership: .ban),
+        ]
+        let service = MatrixService()
+        service.configureMessageActionsForChecks(
+            client: FakeClient(rooms: [room]), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
+            selectionID: UUID(), threadID: UUID())
+        service.selectedRoomID = room.id()
+        await service.loadMembers()
+        #expect(service.members.map(\.membership) == ["join", "invite", "leave", "ban"])
+    }
 }

@@ -156,9 +156,9 @@ final class FakeMediaFile: MediaFileHandle, @unchecked Sendable {
     deinit { try? FileManager.default.removeItem(at: url) }
 }
 
-func roomMember(_ id: String, name: String? = nil) -> RoomMember {
+func roomMember(_ id: String, name: String? = nil, membership: MembershipState = .join) -> RoomMember {
     RoomMember(
-        userId: id, displayName: name, avatarUrl: nil, status: nil, call: nil, membership: .join,
+        userId: id, displayName: name, avatarUrl: nil, status: nil, call: nil, membership: membership,
         isNameAmbiguous: false, powerLevel: .value(value: 0), isIgnored: false, suggestedRoleForPowerLevel: .creator,
         membershipChangeReason: nil, isServiceMember: false)
 }

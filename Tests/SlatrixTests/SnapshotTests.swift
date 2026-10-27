@@ -252,6 +252,26 @@ struct Snapshots {
         try write(await settledImage(hosting), "mentions-\(Int(zoom * 100))-\(theme.rawValue)")
     }
 
+    @Test("The @ list, scrolled, with an invited person and @room", arguments: Theme.allCases)
+    func mentionList(theme: Theme) async throws {
+        let members = [
+            "Aisha Khan", "AI Agent", "Alex Moreau", "Amelia Hart", "Anders Berg", "Ana Lima", "Arjun Rao",
+            "Ava Chen", "Aaron Price", "Abby Lee",
+        ].map { ChatUser(id: "@\($0.lowercased().prefix { $0 != " " }):example.org", name: $0) }
+            + [ChatUser(id: "@adam:example.org", name: "Adam Invited", membership: "invite")]
+        let (window, hosting) = try themedWindow(
+            MessageComposer(
+                text: .constant(""), placeholder: "Message #design", members: members, onSend: { _, _ in },
+                onTyping: { _ in }
+            ).padding(16).frame(width: 560, height: 480, alignment: .bottom),
+            theme: theme)
+        defer { window.close() }
+        let editor = try #require(textViews(in: hosting).first { $0.isEditable })
+        window.makeFirstResponder(editor)
+        editor.insertText("@a", replacementRange: editor.selectedRange())
+        try write(await settledImage(hosting), "mention-list-\(theme.rawValue)")
+    }
+
     @Test("Formatting in the composer, the same message sent, and a quote from Element", arguments: Theme.allCases)
     func formatting(theme: Theme) async throws {
         _ = NSApplication.shared

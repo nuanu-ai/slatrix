@@ -78,11 +78,11 @@ struct ComposerHostedTests {
         init(_ text: String = "") { self.text = text }
     }
 
-    private func composer(_ draft: Draft) throws -> (NSTextView, NSWindow) {
+    private func composer(_ draft: Draft, members: [ChatUser] = []) throws -> (NSTextView, NSWindow) {
         let (hosting, window) = host(
             MessageComposer(
                 text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #team",
-                members: [], onSend: { _, _ in draft.sends += 1 }, onTyping: { _ in }
+                members: members, onSend: { _, _ in draft.sends += 1 }, onTyping: { _ in }
             ).frame(width: 360))
         let editor = try editor(in: hosting)
         window.makeFirstResponder(editor)
@@ -114,6 +114,20 @@ struct ComposerHostedTests {
         for character in text {
             editor.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0))
         }
+    }
+
+    @Test("A two-word name keeps the @ list open, and Return mentions the person instead of sending")
+    func mentionAcrossSpace() throws {
+        let draft = Draft()
+        let members = [
+            ChatUser(id: "@aisha:example.org", name: "Aisha Khan"), ChatUser(id: "@agent:example.org", name: "AI Agent"),
+        ]
+        let (editor, window) = try composer(draft, members: members)
+        defer { close(window) }
+        type(editor, "@AI A")
+        try press(editor, "\r", 36)
+        #expect(editor.string == "@AI Agent ")
+        #expect(draft.text.contains("https://matrix.to/#/@agent:example.org") && draft.sends == 0)
     }
 
     @Test(
