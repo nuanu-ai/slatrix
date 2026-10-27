@@ -417,6 +417,8 @@ struct MessageRow: View {
     var replyPreview: ReplyPreviewView? = nil
     var attachment: AttachmentView? = nil
     var actions = MessageRowActions()
+    /// Where each reaction sits while the row is hovered, for the timeline's tooltip naming who reacted.
+    var reactionFrame: ((String, CGRect) -> Void)? = nil
     @Environment(\.metrics) private var m
     @Environment(\.mentions) private var mentions
     private var colors: AppColors { appearance.colors }
@@ -540,8 +542,20 @@ struct MessageRow: View {
                         Text("\(reaction.count)").font(m.font(.caption, .semibold))
                             .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
                     }
-                }.buttonStyle(.row).disabled(actions.react == nil).help(
-                    reaction.tooltip(me: mentions.me) { id in mentions.members.first { $0.id == id }?.name })
+                }.buttonStyle(.row).disabled(actions.react == nil)
+                    .accessibilityLabel(
+                        reaction.tooltip(me: mentions.me) { id in mentions.members.first { $0.id == id }?.name }
+                    )
+                    .background {
+                        // Only the hovered row says where its reactions are, so rows at rest do no work for the tooltip.
+                        if hovered, let reactionFrame {
+                            Color.clear.onGeometryChange(for: CGRect.self) {
+                                $0.frame(in: .named(TimelineRow.space))
+                            } action: {
+                                reactionFrame(reaction.key, $0)
+                            }
+                        }
+                    }
             }
             // Shown on hover only, in space it always has, as Slack does.
             Button {

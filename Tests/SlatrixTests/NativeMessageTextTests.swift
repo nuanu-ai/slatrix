@@ -133,6 +133,83 @@ struct NativeMessageTextTests {
         #expect(style(text, at: 13)?.paragraphSpacingBefore == 0 && (style(text, at: 13)?.paragraphSpacing ?? 0) > 0)
     }
 
+    /// `runs` laid out in a message's text system; the storage owns the layout manager.
+    private func laidOut(_ runs: [MessageBodyRun], width: CGFloat = 400) -> NSTextStorage {
+        let pills = MentionPalette(
+            me: nil, text: .systemBlue, fill: .systemTeal, ownText: .systemBrown, ownFill: .systemYellow)
+        let storage = NSTextStorage(
+            attributedString: NativeSelectableMessageText.attributed(
+                runs, fontSize: 15, textColor: .labelColor, linkColor: .systemBlue, mentions: pills))
+        let layout = PillLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        layout.ensureLayout(for: container)
+        return storage
+    }
+    private func mention(_ name: String) -> MessageBodyRun {
+        MessageBodyRun(text: "@" + name, mention: "@\(name.lowercased()):example.org")
+    }
+    private func pills(_ storage: NSTextStorage) -> [NSRect] {
+        let layout = storage.layoutManagers[0] as! PillLayoutManager
+        return layout.pills(forCharacterRange: NSRange(location: 0, length: storage.length)).map(\.rect)
+    }
+    /// Where the characters in `range` sit on their line, in text container coordinates.
+    private func glyphs(_ storage: NSTextStorage, _ range: NSRange) -> NSRect {
+        let layout = storage.layoutManagers[0]
+        return layout.boundingRect(
+            forGlyphRange: layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil),
+            in: layout.textContainers[0])
+    }
+
+    @Test("A mention's pill is as tall beside an emoji or a taller script, or above another line, as on a plain line")
+    func pillHeight() throws {
+        let plain = try #require(pills(laidOut([MessageBodyRun(text: "Thanks "), mention("Alice")])).first)
+        let tall = try #require(pills(laidOut([MessageBodyRun(text: "Thanks 🎉 สวัสดี "), mention("Alice")])).first)
+        let above = try #require(pills(laidOut([mention("Alice"), MessageBodyRun(text: "\nThanks")])).first)
+        #expect(abs(tall.height - plain.height) < 0.5)
+        #expect(abs(above.height - plain.height) < 0.5)
+    }
+
+    @Test("A mention at a line start lines up with the text, and the text beside a mention stays clear of its pill")
+    func pillEdges() throws {
+        let storage = laidOut([
+            mention("Alice"), MessageBodyRun(text: " and ("), mention("Bob"), MessageBodyRun(text: ")"),
+        ])
+        let found = pills(storage)
+        try #require(found.count == 2)
+        #expect(found[0].minX >= 0)
+        let before = glyphs(storage, NSRange(location: 11, length: 1))
+        let after = glyphs(storage, NSRange(location: 16, length: 1))
+        #expect(before.maxX <= found[1].minX + 0.01)
+        #expect(after.minX >= found[1].maxX - 0.01)
+    }
+
+    @Test("A mention's text is drawn in the middle of its pill")
+    func pillInset() throws {
+        let storage = laidOut([mention("Alice"), MessageBodyRun(text: " and "), mention("Bob")])
+        let layout = try #require(storage.layoutManagers.first)
+        let rep = try #require(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 400, pixelsHigh: 40, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let context = try #require(NSGraphicsContext(bitmapImageRep: rep))
+        context.cgContext.translateBy(x: 0, y: 40)
+        context.cgContext.scaleBy(x: 1, y: -1)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context.cgContext, flipped: true)
+        layout.drawGlyphs(forGlyphRange: NSRange(location: 0, length: layout.numberOfGlyphs), at: .zero)
+        NSGraphicsContext.restoreGraphicsState()
+        for pill in pills(storage) {
+            let inked = (Int(pill.minX)..<Int(pill.maxX.rounded(.up))).filter { x in
+                (Int(pill.minY)..<Int(pill.maxY)).contains { y in (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.3 }
+            }
+            let ink = try #require(inked.first.flatMap { first in inked.last.map { (first, $0 + 1) } })
+            #expect(abs((CGFloat(ink.0) - pill.minX) - (pill.maxX - CGFloat(ink.1))) <= 1.5)
+        }
+    }
+
     @Test("A menu item runs only its own enabled command")
     func menuActions() {
         var ran: [String] = []

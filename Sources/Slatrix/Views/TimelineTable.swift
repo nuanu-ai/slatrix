@@ -82,6 +82,8 @@ struct TimelineMessageEntry: Hashable {
     var onPickEmoji: (EmojiPick) -> Void = { _ in }
     /// A displayed row whose height no longer matches its measurement, after state of its own changed.
     var onHeight: (String, CGFloat) -> Void = { _, _ in }
+    /// Where a hovered row's reaction sits in its cell: the row, the reaction and its frame.
+    var onReactionFrame: (String, String, CGRect) -> Void = { _, _, _ in }
 }
 
 /// Lets the SwiftUI shell move the list without owning it.
@@ -181,6 +183,10 @@ struct TimelineTable: NSViewRepresentable {
     private var hoveredID: String?
     private let toolbar = TimelineToolbarView(rootView: nil)
     private var toolbarEntry: TimelineEntry?
+    private let tooltip = TooltipPresenter()
+    /// The hovered row's reactions, by key, in its cell's coordinates.
+    private var reactionFrames: [String: CGRect] = [:]
+    private var pointer: NSPoint?
     /// Heights of this table's rows the table has been given, by row ID; the rest are estimates.
     private var known: [String: CGFloat] = [:]
     private var prefetching = false
@@ -232,6 +238,12 @@ struct TimelineTable: NSViewRepresentable {
             atOlderMessage = !configuration.live
         }
         configuration.context.onHeight = { [weak self] id, height in self?.reported(height, for: id) }
+        configuration.context.onReactionFrame = { [weak self] id, key, frame in
+            guard let self, id == hoveredID else { return }
+            reactionFrames[key] = frame
+            // Reported from inside the row's layout, perhaps under a pointer that has stopped moving.
+            DispatchQueue.main.async { [weak self] in self?.placeTooltip() }
+        }
         configuration.scroller.bottom = { [weak self] in self?.scrollToBottom(animated: true) }
         if previous?.focusedEventID != configuration.focusedEventID || previous?.jumpID != configuration.jumpID {
             pendingFocus = configuration.focusedEventID
@@ -770,6 +782,8 @@ struct TimelineTable: NSViewRepresentable {
     // MARK: Hover
 
     private func pointerMoved(_ point: NSPoint?) {
+        pointer = point
+        defer { placeTooltip() }
         // The toolbar hangs over the row above its own; the pointer on it still means its row.
         if let point, !toolbar.isHidden, toolbar.frame.contains(scrollView.convert(point, from: nil)) { return }
         let row = point.map { table.row(at: table.convert($0, from: nil)) } ?? -1
@@ -778,6 +792,7 @@ struct TimelineTable: NSViewRepresentable {
         guard id != hoveredID else { return }
         let previous = hoveredID.flatMap { index[$0] }
         hoveredID = id
+        reactionFrames = [:]
         if let previous { refresh(previous) }
         if let id, let row = index[id] { refresh(row) }
         placeToolbar()
@@ -815,6 +830,25 @@ struct TimelineTable: NSViewRepresentable {
         let y = min(max(top.y - size.height / 2, visible.minY + m.sp4), visible.maxY - size.height)
         toolbar.frame.origin = NSPoint(x: top.x - m.sp16 - size.width, y: y)
         toolbar.isHidden = false
+    }
+
+    /// Slack's tooltip over the reaction under the pointer, naming who reacted.
+    private func placeTooltip() {
+        guard !reactionFrames.isEmpty, let pointer, let window = scrollView.window, let id = hoveredID,
+            let row = index[id], case .message(let entry) = rows[row].kind,
+            let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell,
+            case (let key, let frame)? = reactionFrames.lazy.map({ ($0, cell.content.convert($1, to: nil)) })
+                .first(where: { $1.contains(pointer) }),
+            let reaction = entry.message.reactions.first(where: { $0.key == key }),
+            let context = configuration?.context, let appearance = context.appearance
+        else { return tooltip.hide() }
+        let members = context.matrix?.members ?? []
+        let text = reaction.tooltip(me: context.matrix?.user?.id) { id in members.first { $0.id == id }?.name }
+        let m = context.metrics
+        tooltip.show(text, above: frame, in: window, metrics: m) {
+            Tooltip(text: text) { Text(key).font(m.font(.display)) }
+                .environment(\.metrics, m).environmentObject(appearance)
+        }
     }
 }
 
@@ -858,6 +892,12 @@ final class TimelineScrollView: NSScrollView {
         super.mouseExited(with: event)
         onPointer?(nil)
     }
+
+    // Takes the hover, and any tooltip over the window, along when the timeline goes.
+    override func viewWillMove(toWindow window: NSWindow?) {
+        super.viewWillMove(toWindow: window)
+        if window == nil { onPointer?(nil) }
+    }
 }
 
 final class TimelineToolbarView: NSHostingView<HoveredMessageToolbar?> {
@@ -874,6 +914,8 @@ final class TimelineTableView: NSTableView {
 /// every row at rest carrying them.
 final class TimelineCell: NSView {
     private let host = NSHostingController(rootView: TimelineRow?.none)
+    /// The row's SwiftUI content, in whose coordinates it reports where its parts are.
+    var content: NSView { host.view }
     /// What the cell shows, so showing the same row again is free.
     var row: TimelineRow? { host.rootView }
     var entry: TimelineEntry? { host.rootView?.entry }
@@ -928,6 +970,8 @@ final class TimelineCell: NSView {
 
 /// A timeline row's SwiftUI content, measured and shown in the same cell. Equal rows draw the same.
 struct TimelineRow: View, Equatable {
+    /// The cell's coordinates, as SwiftUI names them.
+    static let space = "TimelineRow"
     let entry: TimelineEntry
     let hovered: Bool
     /// Zoom, held here rather than read from the shared context, so a change to it redraws the row.
@@ -959,7 +1003,9 @@ struct TimelineRow: View, Equatable {
                 .environment(\.metrics, metrics).environmentObject(appearance)
                 .environment(\.openURL, context.openURL)
                 .environment(
-                    \.mentions, MentionContext(me: context.matrix?.user?.id, members: context.matrix?.members ?? []))
+                    \.mentions, MentionContext(me: context.matrix?.user?.id, members: context.matrix?.members ?? [])
+                )
+                .coordinateSpace(.named(Self.space))
         }
     }
 
@@ -996,7 +1042,8 @@ struct TimelineRow: View, Equatable {
                             matrix: matrix, message: message, attachment: $0, collapsed: row.mediaCollapsed,
                             actions: context.attachmentActions(for: message, target: target))
                     },
-                    actions: context.actions(for: row, target: target))
+                    actions: context.actions(for: row, target: target),
+                    reactionFrame: { context.onReactionFrame(entry.id, $0, $1) })
             }
         }
     }
