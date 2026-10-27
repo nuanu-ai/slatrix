@@ -264,6 +264,30 @@ struct TimelineHostedTests {
             })
     }
 
+    @Test("Your own image shows from the copy being sent and stays on screen as the server confirms it")
+    func sendingImageStaysWhenConfirmed() async throws {
+        let harness = Harness(messages: [], height: 800)
+        defer { harness.close() }
+        harness.client.stored = try pngData()
+        // The server's thumbnail never comes, so a picture after the confirmation is the one shown while sending.
+        harness.client.thumbnails.arm()
+        defer { harness.client.thumbnails.release() }
+        let url = "mxc://example.org/photo"
+        func show(_ event: EventTimelineItem) {
+            harness.service.projectMediaCaptionForChecks(
+                [FakeTimelineItem(event, uniqueID: "photo")], roomID: Self.room.id, inThread: false)
+        }
+        show(try imageEvent("photo-transaction", width: 1_600, height: 900, url: url, sending: true))
+        #expect(
+            await eventually {
+                harness.layout()
+                return harness.showsImage
+            })
+        show(try imageEvent("$photo", width: 1_600, height: 900, url: url))
+        await settle(harness) { harness.cell(showing: "$photo") != nil }
+        #expect(harness.showsImage)
+    }
+
     @Test("Older history arrives without moving a pixel of what you are reading")
     func prependIsPixelStable() async throws {
         let current = Self.messages(0..<30)
