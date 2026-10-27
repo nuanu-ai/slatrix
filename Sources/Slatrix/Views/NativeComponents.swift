@@ -74,6 +74,65 @@ struct WindowDragArea: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
+/// Centers the window's close, minimize and zoom buttons on this view's midline, as Slack's title bar does at every
+/// zoom. AppKit's own title bar is shorter and fixed, and AppKit lays it out again on a resize, a full screen change and
+/// whenever else it likes, so each time it does, this lays the buttons back out.
+struct WindowButtonsCentering: NSViewRepresentable {
+    func makeNSView(context: Context) -> CenteringView { CenteringView() }
+    func updateNSView(_ view: CenteringView, context: Context) {}
+
+    final class CenteringView: NSView {
+        private var observers: [NSObjectProtocol] = []
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers = []
+            guard let window, let close = window.standardWindowButton(.closeButton) else { return }
+            let recenter: @Sendable (Notification) -> Void = { [weak self] _ in
+                MainActor.assumeIsolated { self?.center() }
+            }
+            let laidOut = [close, close.superview?.superview].compactMap { $0 }
+            for view in laidOut { view.postsFrameChangedNotifications = true }
+            observers = laidOut.map {
+                NotificationCenter.default.addObserver(
+                    forName: NSView.frameDidChangeNotification, object: $0, queue: nil, using: recenter)
+            }
+            // Full screen lends the buttons to another window and hands them back as they were.
+            observers.append(
+                NotificationCenter.default.addObserver(
+                    forName: NSWindow.didExitFullScreenNotification, object: window, queue: nil, using: recenter))
+            center()
+        }
+
+        // Zoom changes the title bar's height.
+        override func setFrameSize(_ size: NSSize) {
+            super.setFrameSize(size)
+            center()
+        }
+
+        private func center() {
+            // In full screen the buttons drop down with the menu bar, where AppKit places them.
+            guard let window, !window.styleMask.contains(.fullScreen), !bounds.isEmpty,
+                let close = window.standardWindowButton(.closeButton), let titlebar = close.superview,
+                let container = titlebar.superview, let frame = container.superview,
+                frame === window.contentView?.superview
+            else { return }
+            // As tall as the title bar, so the buttons' container still takes their clicks.
+            let height = 2 * (frame.bounds.height - convert(bounds, to: nil).midY)
+            let bar = NSRect(x: 0, y: frame.bounds.height - height, width: frame.bounds.width, height: height)
+            if container.frame != bar { container.frame = bar }
+            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                guard let button = window.standardWindowButton(type) else { continue }
+                let y = ((titlebar.bounds.height - button.frame.height) / 2).rounded()
+                if button.frame.minY != y { button.setFrameOrigin(NSPoint(x: button.frame.minX, y: y)) }
+            }
+        }
+    }
+}
+
 extension View {
     /// Takes the space offered without asking this view its size, so a change inside it lays out only itself, not
     /// the whole window. For content that fills whatever it is given.
