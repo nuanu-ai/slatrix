@@ -538,16 +538,7 @@ struct MessageRow: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.padding(.horizontal, m.sp20).padding(.top, grouped || compact ? 3 : 12).padding(.bottom, m.sp4)
     }
-    /// Slack's clock for a send still going after a few seconds. It takes no space, so the row never moves for it.
-    private var clock: some View {
-        let since = message.timestamp
-        let delay = LoadingPresentation.sendingClockDelay / .seconds(1)
-        return SwiftUI.TimelineView(.explicit([since.addingTimeInterval(delay)])) { _ in
-            let shown = LoadingPresentation.showsSendingClock(sendingFor: .seconds(Date().timeIntervalSince(since)))
-            Image(systemName: "clock").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
-                .opacity(shown ? 1 : 0).accessibilityHidden(!shown).accessibilityLabel("Sending")
-        }.fixedSize()
-    }
+    private var clock: some View { SendingClock(since: message.timestamp) }
 
     private var reactions: some View {
         HStack(spacing: m.sp4) {
@@ -585,6 +576,36 @@ struct MessageRow: View {
             }.buttonStyle(.row).disabled(actions.openReactions == nil).help("Add reaction")
                 .opacity(hovered ? 1 : 0).allowsHitTesting(hovered).accessibilityHidden(!hovered)
         }
+    }
+}
+
+/// Slack's clock for a send still going after a few seconds. It always takes its space, so the row never moves for it.
+private struct SendingClock: View {
+    let since: Date
+    @State private var shown: Bool
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+
+    init(since: Date) {
+        self.since = since
+        // A message that has been sending a while shows its clock in its first frame.
+        _shown = State(initialValue: Self.shows(since))
+    }
+
+    private static func shows(_ since: Date) -> Bool {
+        LoadingPresentation.showsSendingClock(sendingFor: .seconds(Date().timeIntervalSince(since)))
+    }
+
+    var body: some View {
+        Image(systemName: "clock").font(m.font(.caption)).foregroundStyle(appearance.colors.textSecondary)
+            .opacity(shown ? 1 : 0).accessibilityHidden(!shown).accessibilityLabel("Sending")
+            .task(id: since) {
+                shown = Self.shows(since)
+                guard !shown else { return }
+                let left = LoadingPresentation.sendingClockDelay - .seconds(Date().timeIntervalSince(since))
+                try? await Task.sleep(for: left)
+                if !Task.isCancelled { shown = Self.shows(since) }
+            }
     }
 }
 
