@@ -144,6 +144,30 @@ struct Snapshots {
         try write(Self.image(window), "jump-older-\(theme.rawValue)")
     }
 
+    @Test("A channel's header with its facepile, and a direct message's with the person", arguments: Theme.allCases)
+    func headers(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let window = offscreenWindow(NSSize(width: 1440, height: 900))
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        try write(await settledImage(hosting), "header-channel-\(theme.rawValue)")
+        matrix.selectPreviewRoom("preview.dm.0")
+        try write(await settledImage(hosting), "header-dm-\(theme.rawValue)")
+    }
+
     @Test("Sidebar", arguments: SidebarPalette.allCases, Theme.allCases)
     func sidebar(palette: SidebarPalette, theme: Theme) async throws {
         _ = NSApplication.shared

@@ -77,6 +77,7 @@ struct RootView: View {
     @State private var pendingMatrixLink: PendingMatrixLink?
     @State private var matrixLinkTask: Task<Void, Never>?
     @State private var channelDetails: ChannelDetailsSelection?
+    @State private var leaving: ChatRoom?
     @State private var showPins = false
     @State private var pinPermissionRoomID: String?
     @State private var pinPermission = false
@@ -243,7 +244,7 @@ struct RootView: View {
             timelineID: matrix.timelineSelectionID, threadID: threadRoot?.eventID, readyThreadID: threadReadyID)
     }
     private var hasPresentedSheet: Bool {
-        publicDirectory != nil || showRecovery || creation != nil || channelDetails != nil
+        publicDirectory != nil || showRecovery || creation != nil || channelDetails != nil || leaving != nil
             || roomDetails != nil || roomNotifications != nil || forwarding != nil
             || mediaCaption != nil || matrixJoin != nil || logoutConfirmation
             || logoutRecovery.request != nil || logoutRecovery.isBusy
@@ -538,6 +539,14 @@ struct RootView: View {
             }
             .modal(item: $roomDetails) { selection in
                 RoomDetailsEditor(matrix: matrix, roomID: selection.id, onClose: { roomDetails = nil })
+            }
+            .modal(item: $leaving) { room in
+                ConfirmModal(
+                    title: "Leave \(room.name)?", message: "You may need an invitation to rejoin.", action: "Leave",
+                    onConfirm: {
+                        leaving = nil
+                        run { try await matrix.leaveRoom(room.id) }
+                    }, onCancel: { leaving = nil })
             }
             .modal(item: $roomNotifications) { selection in
                 RoomNotificationSettingsView(matrix: matrix, roomID: selection.id, onClose: { roomNotifications = nil })
@@ -1049,62 +1058,7 @@ struct RootView: View {
     }
     private func channelHeader(_ room: ChatRoom) -> some View {
         VStack(spacing: 0) {
-            HStack(spacing: m.sp8) {
-                IconButton(
-                    symbol: room.favorite ? "star.fill" : "star",
-                    label: room.favorite ? "Remove from Starred" : "Add to Starred", role: .title
-                ) { run { try await matrix.setFavorite(room, value: !room.favorite) } }
-                Button {
-                    channelDetails = ChannelDetailsSelection(room: room, tab: .about)
-                } label: {
-                    HStack(spacing: m.sp8) {
-                        if !room.isDirect {
-                            Image(systemName: room.isEncrypted ? "lock.fill" : "number").font(
-                                m.font(.title, .bold))
-                        }
-                        Text(room.name).font(m.font(.title, .bold)).lineLimit(1)
-                        Image(systemName: "chevron.down").font(m.font(.caption, .semibold))
-                    }
-                }.buttonStyle(.row).foregroundStyle(colors.textPrimary).layoutPriority(1)
-                Spacer()
-                Button {
-                    channelDetails = ChannelDetailsSelection(room: room, tab: .members)
-                } label: {
-                    HStack(spacing: m.sp4) {
-                        Image(systemName: "person")
-                        Text("\(room.memberCount)").font(m.font(.meta))
-                    }.padding(.horizontal, m.sp8).frame(height: m.iconButton)
-                }.buttonStyle(.row).help("View members")
-                IconButton(
-                    symbol: room.muted ? "bell.slash" : "bell", label: "Conversation notifications", role: .title
-                ) {
-                    roomNotifications = DetailsSelection(id: room.id)
-                }.disabled(matrix.isPreview || room.membership != "join")
-                IconButton(symbol: "magnifyingglass", label: "Search in conversation", role: .title) {
-                    handleMenu("search-conversation")
-                }
-                Menu {
-                    Button("Channel details") { channelDetails = ChannelDetailsSelection(room: room, tab: .about) }
-                    Button("Invite people…") { presentCreation(.invite) }.disabled(
-                        matrix.isPreview || room.membership != "join" || room.canInvite == false)
-                    Divider()
-                    Button("Mark unread") { markReadState(room, unread: true) }.disabled(
-                        matrix.isPreview || room.membership != "join")
-                    Button("Mark read") { markReadState(room, unread: false) }.disabled(
-                        matrix.isPreview || room.membership != "join")
-                    Divider()
-                    Button("Copy link") {
-                        run {
-                            let link = try await matrix.roomPermalink(room.id)
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(link, forType: .string)
-                        }
-                    }.disabled(matrix.isPreview)
-                } label: {
-                    Image(systemName: "ellipsis").rotationEffect(.degrees(90)).frame(
-                        width: m.iconButton, height: m.iconButton)
-                }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m.iconButton)
-            }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
+            ChannelHeader(matrix: matrix, room: room) { headerAction($0, room: room) }
             HStack(spacing: m.sp24) {
                 TabBar(
                     tabs: [
@@ -1129,6 +1083,25 @@ struct RootView: View {
                         "End-to-end encrypted")
                 }
             }.padding(.horizontal, m.sp24).frame(height: m.sp40)
+        }
+    }
+    private func headerAction(_ action: ChannelHeader.Action, room: ChatRoom) {
+        switch action {
+        case .details(let tab): channelDetails = ChannelDetailsSelection(room: room, tab: tab)
+        case .profile(let person): openProfile(person.id, fallback: person)
+        case .notifications: roomNotifications = DetailsSelection(id: room.id)
+        case .star: run { try await matrix.setFavorite(room, value: !room.favorite) }
+        case .invite: presentCreation(.invite)
+        case .markUnread: markReadState(room, unread: true)
+        case .markRead: markReadState(room, unread: false)
+        case .copyLink:
+            run {
+                let link = try await matrix.roomPermalink(room.id)
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(link, forType: .string)
+            }
+        case .search: handleMenu("search-conversation")
+        case .leave: leaving = room
         }
     }
     private func threadPanel(root: ChatMessage, room: ChatRoom) -> some View {
@@ -2444,6 +2417,7 @@ struct RootView: View {
         workspaceID = nil
         workspaceInitialized = false
         channelDetails = nil
+        leaving = nil
         showPins = false
         pinPermissionRoomID = nil
         pinPermission = false
