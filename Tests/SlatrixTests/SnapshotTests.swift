@@ -113,6 +113,51 @@ struct Snapshots {
         try write(await settledImage(hosting), "profile-\(name)")
     }
 
+    @Test("Window widths, with and without a thread, and the collapsed sidebar's drawer", arguments: Theme.allCases)
+    func widths(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let window = offscreenWindow(NSSize(width: 1440, height: 900))
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        func menu(_ action: String) {
+            NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
+        }
+        _ = try await settledImage(hosting)
+        for width in [1440, 1000, 800, 600, 480] {
+            window.setContentSize(NSSize(width: width, height: 900))
+            try write(await settledImage(hosting), "width-\(width)-\(theme.rawValue)")
+        }
+        menu("toggle-sidebar")
+        try write(await settledImage(hosting), "width-480-drawer-\(theme.rawValue)")
+        menu("mark-read")
+
+        // The same widths with a thread open, from the newest message's own context menu.
+        let message = try #require(textViews(in: hosting).last { !$0.isEditable && !$0.string.isEmpty })
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let item = try #require(message.menu(for: event)?.items.first { $0.identifier?.rawValue == "thread" })
+        _ = item.target?.perform(item.action, with: item)
+        for width in [480, 600, 800, 1000, 1440] {
+            window.setContentSize(NSSize(width: width, height: 900))
+            try write(await settledImage(hosting), "width-\(width)-thread-\(theme.rawValue)")
+        }
+    }
+
     @Test("A message jumped to, in the live conversation and at an older message", arguments: Theme.allCases)
     func jump(theme: Theme) async throws {
         _ = NSApplication.shared

@@ -21,8 +21,6 @@ struct SidebarView: View {
     var onEditWorkspace: (String) -> Void
     var onNotifications: (String) -> Void
     var listWidth: CGFloat = 280
-    /// ⇧⌘D hides the conversation list; the rail stays, as in Slack.
-    var listHidden = false
     var onBrowseChannels: () -> Void
     @State private var collapsed: Set<String> = []
     private var colors: AppColors { appearance.colors }
@@ -44,7 +42,7 @@ struct SidebarView: View {
     var body: some View {
         HStack(spacing: 0) {
             rail
-            if !listHidden { list }
+            list
         }.foregroundStyle(colors.textBody)
     }
     private var list: some View {
