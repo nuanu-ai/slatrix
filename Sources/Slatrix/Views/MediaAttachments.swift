@@ -106,7 +106,7 @@ extension MatrixService {
         return image
     }
 
-    private func mediaImageKey(_ message: ChatMessage) -> NSString? {
+    fileprivate func mediaImageKey(_ message: ChatMessage) -> NSString? {
         attachmentSourceRevision(message).map {
             "\(message.eventID)|\(String(decoding: $0, as: UTF8.self))" as NSString
         }
@@ -205,7 +205,13 @@ private struct InlineMedia: View {
             }
         }
         .onHover { hovering = $0 }
-        .task(id: animates) { await load() }
+        // A sent file gets its server copy when its remote echo lands, and the still loads from that.
+        .task(id: LoadID(source: matrix.mediaImageKey(message), animates: animates)) { await load() }
+    }
+
+    private struct LoadID: Equatable {
+        let source: NSString?
+        let animates: Bool
     }
 
     @ViewBuilder private var badge: some View {
