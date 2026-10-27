@@ -173,7 +173,6 @@ struct RootView: View {
     }
     private var draftRoomIDs: Set<String> { Set(draftAddresses.map(\.roomID)) }
     private var savedIDs: Set<String> { Set(saved.map(\.id)) }
-    private var currentWorkspaceName: String { matrix.workspaces.first { $0.id == workspaceID }?.name ?? "Slatrix" }
     private struct ComposerIdentity: Equatable {
         var userID: String?
         var isPreview: Bool
@@ -265,11 +264,14 @@ struct RootView: View {
     private var hasModal: Bool { hasPresentedSheet || modals.current != nil || modalShown }
 
     var body: some View {
-        ModalHost(onCovered: { shown in
-            modalShown = shown
-            // A notification that arrived while a modal was open opens once it closes.
-            if !shown { openPendingNotification() }
-        }) {
+        ModalHost(
+            top: m(Self.titleBarHeight),
+            onCovered: { shown in
+                modalShown = shown
+                // A notification that arrived while a modal was open opens once it closes.
+                if !shown { openPendingNotification() }
+            }
+        ) {
             PopoverHost(popovers: popovers) {
                 windowContent.environment(popovers).environment(toasts)
             } card: { kind in
@@ -958,8 +960,9 @@ struct RootView: View {
             TitleSearch(bar: searchBar, fits: SidebarLayout.searchFits(availableWidth: availableContentWidth / m.zoom))
             {
                 SearchBarField(
-                    bar: searchBar, prompt: "Search \(currentWorkspaceName)", matrix: matrix, recents: recentSearches,
-                    visited: history, onPick: pickSearch
+                    bar: searchBar,
+                    prompt: WorkspaceRail.searchPrompt(workspaceID: workspaceID, workspaces: matrix.workspaces),
+                    matrix: matrix, recents: recentSearches, visited: history, onPick: pickSearch
                 ).frame(maxWidth: m(Self.searchWidth))
             }.disabled(matrix.user == nil)
             Spacer(minLength: 0)
@@ -979,7 +982,10 @@ struct RootView: View {
                 handleMenu("shortcuts")
             }
             .padding(.trailing, m.sp12)
-        }.frame(height: m(Self.titleBarHeight)).background(WindowDragArea()).foregroundStyle(colors.textBody)
+        }.frame(height: m(Self.titleBarHeight)).background(WindowDragArea()).background(WindowButtonsCentering())
+            .foregroundStyle(colors.textBody)
+            // A modal leaves the bar as it was, beside the window buttons, and takes its clicks in the modal host.
+            .environment(\.isEnabled, true)
     }
 
     private func channelContent(_ room: ChatRoom) -> some View {

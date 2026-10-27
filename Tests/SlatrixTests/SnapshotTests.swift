@@ -124,6 +124,38 @@ struct Snapshots {
         try write(await settledImage(hosting), "profile-\(name)")
     }
 
+    @Test("The title bar with the window buttons, and Preferences open under it", arguments: [1, 1.5], Theme.allCases)
+    func titleBar(zoom: Double, theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(
+            rootView: RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom))
+        )
+        // Titled, as `.hiddenTitleBar` sets up the app's window, so the composite has the window buttons.
+        let window = offscreenWindow(
+            NSSize(width: 1440, height: 900),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let name = "\(Int(zoom * 100))-\(theme.rawValue)"
+        try write(await settledImage(hosting), "titlebar-\(name)")
+        NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "preferences"])
+        try write(await settledImage(hosting), "preferences-\(name)")
+    }
+
     @Test("Window widths, with and without a thread, and the collapsed sidebar's drawer", arguments: Theme.allCases)
     func widths(theme: Theme) async throws {
         _ = NSApplication.shared

@@ -74,6 +74,9 @@ private struct ModalPresenter<Item, Modal: View>: ViewModifier {
 /// the window under it takes no clicks, focus or VoiceOver. A modal opened from a modal stacks on top of it. Nothing
 /// under it is rebuilt to open one.
 struct ModalHost<Content: View>: View {
+    /// The window's title bar, left undimmed above the modal layer. While a modal is open a click there moves the
+    /// window instead of reaching the bar.
+    var top: CGFloat = 0
     /// Called when the first modal opens and when the last one closes.
     var onCovered: (Bool) -> Void = { _ in }
     @ViewBuilder let content: Content
@@ -92,7 +95,11 @@ struct ModalHost<Content: View>: View {
                         ModalLayer(modal: modal).disabled(modal.id != modals.last?.id).transition(.opacity)
                     }
                 }
+                .padding(.top, top)
+                .overlay(alignment: .top) { if !modals.isEmpty { WindowDragArea().frame(height: top) } }
                 .animation(Motion.overlay, value: modals.map(\.id))
+                // Measured from the window's top edge, like the title bar, which lies under the title bar's safe area.
+                .ignoresSafeArea(.container, edges: .top)
             }
     }
 }
