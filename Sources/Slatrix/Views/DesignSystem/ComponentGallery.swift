@@ -36,6 +36,7 @@ struct ComponentGallery: View {
                     }
                     section("Loading") { loading }
                     section("Tooltip") { tooltips }
+                    section("Banners and toasts") { banners }
                 }
             }
             section("Profile") { profile }
@@ -272,6 +273,21 @@ struct ComponentGallery: View {
             Tooltip("Copy link")
             Tooltip(text: "Alice, Bob and you reacted with :+1:") { Text("👍").font(m.font(.display)) }
         }.padding(.vertical, m.sp8)
+    }
+
+    private var banners: some View {
+        VStack(alignment: .leading, spacing: m.sp12) {
+            Banner(text: "You’re offline. Check your connection.", symbol: "wifi.slash") {
+                Button("Retry") {}
+            }
+            Banner(text: "Couldn’t save your drafts.", symbol: "exclamationmark.circle.fill", tone: .destructive) {
+                Button("Retry") {}
+            }
+            Banner(
+                text: "That message is no longer available.", symbol: "exclamationmark.triangle.fill",
+                onDismiss: {})
+            Toast(text: "Link copied")
+        }.frame(width: m(560))
     }
 
     private var emoji: some View {

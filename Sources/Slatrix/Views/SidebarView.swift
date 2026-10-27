@@ -95,14 +95,6 @@ struct SidebarView: View {
                 .onChange(of: matrix.rooms.isEmpty, initial: true) { _, empty in
                     if !empty { Performance.finishOnScreen(.launchRooms, ["rooms": matrix.rooms.count]) }
                 }
-            // Silent while connected, like Slack; only trouble earns a line.
-            if !matrix.isPreview && matrix.status != .ready {
-                HStack(spacing: m.sp8) {
-                    Circle().fill(colors.warning).frame(width: m(Self.dot), height: m(Self.dot))
-                    Text(matrix.connectionDetail).font(m.font(.caption)).lineLimit(1)
-                    Spacer()
-                }.foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp16).padding(.vertical, m.sp12)
-            }
         }.frame(width: listWidth).background(colors.sidebar)
     }
     private var header: some View {

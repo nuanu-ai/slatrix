@@ -175,6 +175,7 @@ struct SharedFilesView: View {
 /// A row of the Files list: a file, image or video opens in the viewer, a link in the browser.
 private struct SharedFileRow: View {
     @Environment(\.openURL) private var openURL
+    @Environment(Toasts.self) private var toasts: Toasts?
     let matrix: MatrixService
     let item: SharedContentItem
     let onOpen: () -> Void
@@ -198,11 +199,12 @@ private struct SharedFileRow: View {
                 Button("Copy link") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(link.absoluteString, forType: .string)
+                    toasts?.show("Link copied")
                 }
             } else {
                 AttachmentMenuItems(
                     matrix: matrix, message: message,
-                    copyLink: matrix.isPreview ? nil : { copyFilesLink(item, matrix: matrix) })
+                    copyLink: matrix.isPreview ? nil : { copyFilesLink(item, matrix: matrix, toasts: toasts) })
             }
             Button("View in conversation", action: onOpenMessage)
         }
@@ -231,14 +233,15 @@ private struct SharedFileRow: View {
     }
 }
 
-/// Copies a Files row's permalink; a failure lands in the window's error toast.
-@MainActor func copyFilesLink(_ item: SharedContentItem, matrix: MatrixService) {
+/// Copies a Files row's permalink; a failure lands in the window's error banner.
+@MainActor func copyFilesLink(_ item: SharedContentItem, matrix: MatrixService, toasts: Toasts? = nil) {
     let session = matrix.notificationSessionID
     Task {
         do {
             let link = try await matrix.sharedFiles.permalink(item)
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(link, forType: .string)
+            toasts?.show("Link copied")
         } catch is CancellationError {} catch {
             if matrix.notificationSessionID == session { matrix.errorMessage = MatrixService.safeError(error) }
         }
