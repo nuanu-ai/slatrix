@@ -16,6 +16,30 @@ private final class StartOfTimeline: Timeline, @unchecked Sendable {
     override func paginateBackwards(numEvents: UInt16) async throws -> Bool { true }
 }
 
+/// Julia has a photo and a status, Sam is in a call, and anyone else has only a name.
+private final class ProfileClient: Client, @unchecked Sendable {
+    let photo: String
+    init(photo: String) {
+        self.photo = photo
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func getProfile(userId: String) async throws -> UserProfile {
+        switch userId {
+        case "@julia:harbor.example":
+            UserProfile(
+                userId: userId, displayName: "Julia Park", avatarUrl: photo,
+                status: UserStatus(emoji: "🌴", text: "Out until Monday"), call: nil)
+        case "@sam:harbor.example":
+            UserProfile(
+                userId: userId, displayName: "Sam Ortiz", avatarUrl: nil, status: nil,
+                call: UserCall(callJoinedTs: nil))
+        default: UserProfile(userId: userId, displayName: "Dmitry", avatarUrl: nil, status: nil, call: nil)
+        }
+    }
+    override func isUserStatusSupported() async throws -> Bool { true }
+}
+
 /// Renders the sample workspace in-process and writes PNGs to `.build/snapshots/` for a person to look at.
 /// Opt in with `SLATRIX_SNAPSHOTS=1 swift test --filter Snapshots`; nothing is compared automatically.
 @MainActor
@@ -499,6 +523,52 @@ struct Snapshots {
             theme: theme, appearance: appearance)
         defer { window.close() }
         try write(await settledImage(hosting), "new-line-\(theme.rawValue)")
+    }
+
+    @Test(
+        "Profiles: someone with a photo and status, someone in a call without one, and you", arguments: Theme.allCases)
+    func profiles(theme: Theme) async throws {
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        // Signed in rather than sampled, so the photo draws from the cache.
+        matrix.isPreview = false
+        matrix.user = ChatUser(id: "@dmitry:harbor.example", name: "Dmitry")
+        let photo = "mxc://harbor.example/julia"
+        _ = await matrix.avatarImages.image(for: photo + "#large") { try Self.samplePhoto() }
+        let people = PeopleService()
+        people.attach(ProfileClient(photo: photo))
+        for (id, name) in [
+            ("@julia:harbor.example", "julia"), ("@sam:harbor.example", "sam"), ("@dmitry:harbor.example", "you"),
+        ] {
+            let (window, hosting) = try themedWindow(
+                ProfilePane(
+                    matrix: matrix, people: people, userID: id, onOpenConversation: { _ in }, onEditProfile: {},
+                    onClose: {}
+                ).frame(width: 380, height: 720),
+                theme: theme)
+            defer { window.close() }
+            try write(await settledImage(hosting), "profile-pane-\(name)-\(theme.rawValue)")
+        }
+    }
+
+    /// A soft gradient standing in for someone's photo.
+    private static func samplePhoto() throws -> Data {
+        let side = 512
+        let context = try #require(
+            CGContext(
+                data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let colors = [
+            CGColor(red: 0.95, green: 0.62, blue: 0.45, alpha: 1), CGColor(red: 0.36, green: 0.3, blue: 0.62, alpha: 1),
+        ]
+        let gradient = try #require(
+            CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, 1]))
+        context.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: side, y: side), options: [])
+        context.setFillColor(CGColor(red: 1, green: 0.9, blue: 0.8, alpha: 0.9))
+        context.fillEllipse(in: CGRect(x: 176, y: 220, width: 160, height: 160))
+        context.fillEllipse(in: CGRect(x: 96, y: -120, width: 320, height: 300))
+        let image = try #require(context.makeImage())
+        return try #require(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))
     }
 
     /// `view` on the canvas in an offscreen window that the window server composites.

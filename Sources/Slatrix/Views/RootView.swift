@@ -65,7 +65,7 @@ struct RootView: View {
     @State private var showRecovery = false
     @State private var creation: CreationKind?
     @State private var inviteTargetRoomID: String?
-    /// Anchored cards such as the profile card; like `modals`, read only by its host.
+    /// Anchored cards such as the emoji picker; like `modals`, read only by its host.
     @State private var popovers = Popovers()
     /// The full profile in the right-hand pane, over the thread or details until closed.
     @State private var profilePane: ProfileSelection?
@@ -122,17 +122,17 @@ struct RootView: View {
     @State private var windowCanRead = false
     @State private var readHold = ReadStateHold()
     private var colors: AppColors { appearance.colors }
-    private static let threadPaneWidth: CGFloat = 380
+    /// Threads and profiles share one pane width, as in Slack.
+    private static let paneWidth: CGFloat = 380
     private static let titleBarHeight: CGFloat = 40
     private static let windowButtonsWidth: CGFloat = 72
     private static let searchWidth: CGFloat = 648
-    private static let infoPaneWidth: CGFloat = 336
     /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
     private var inspectorWidth: CGFloat? {
         guard profilePane != nil || (room != nil && threadRoot != nil) else { return nil }
         return SidebarLayout.paneWidth(
             preferred: resizingPaneWidth ?? CGFloat(preferredPaneWidth),
-            ideal: threadRoot != nil && profilePane == nil ? Self.threadPaneWidth : Self.infoPaneWidth,
+            ideal: Self.paneWidth,
             availableWidth: availableContentWidth / m.zoom)
     }
     /// Pane width plus its divider, at 100% zoom.
@@ -278,7 +278,7 @@ struct RootView: View {
 
     @ViewBuilder private func modal(_ kind: InWindowModal.Kind) -> some View {
         switch kind {
-        case .preferences:
+        case .preferences(let tab):
             PreferencesView(
                 matrix: matrix, onClose: closeModal,
                 onLogout: {
@@ -289,7 +289,7 @@ struct RootView: View {
                 onRecovery: {
                     closeModal()
                     showRecovery = true
-                }
+                }, tab: tab
             ).onAppear { Performance.finishOnScreen(.preferencesOpen) }
         case .switcher:
             QuickSwitcherView(
@@ -307,17 +307,6 @@ struct RootView: View {
 
     @ViewBuilder private func popoverCard(_ kind: Popovers.Kind) -> some View {
         switch kind {
-        case .profile(let userID, let fallback):
-            ProfileCard(
-                matrix: matrix, people: matrix.people, userID: userID, fallback: fallback,
-                onOpenConversation: { id in
-                    popovers.close()
-                    selectRoom(id)
-                },
-                onViewProfile: {
-                    popovers.close()
-                    profilePane = ProfileSelection(id: userID, fallback: fallback)
-                })
         case .emoji(let pick):
             EmojiPicker(recent: matrix.recentEmoji) { emoji in
                 popovers.close()
@@ -801,6 +790,10 @@ struct RootView: View {
                 onOpenConversation: { id in
                     self.profilePane = nil
                     selectRoom(id)
+                },
+                onEditProfile: {
+                    Performance.start(.preferencesOpen)
+                    modals.current = .preferences(.account)
                 }, onClose: { self.profilePane = nil })
         } else if let room, let root = threadRoot {
             threadPanel(root: root, room: room)
@@ -1805,7 +1798,7 @@ struct RootView: View {
         selectRoom(target.roomID, record: true, eventID: destination.membership == "join" ? target.eventID : nil)
     }
     private func handleOpenURL(_ url: URL) -> OpenURLAction.Result {
-        // A mention opens its person's card beside the click, as a click on a sender's name does.
+        // A mention opens its person's profile, as a click on a sender's name does.
         if case .user(let userID)? = (try? MatrixLinkService.parse(url))?.id {
             openProfile(userID, fallback: nil)
             return .handled
@@ -2221,10 +2214,10 @@ struct RootView: View {
             }
         }
     }
-    /// Slack's profile card beside the click, with the name and photo the room already knows.
+    /// Slack's profile in the side pane, starting from the name and photo the room already knows.
     private func openProfile(_ userID: String, fallback: ChatUser?) {
         guard matrix.user != nil else { return }
-        popovers.show(.profile(userID: userID, fallback: fallback ?? matrix.members.first { $0.id == userID }))
+        profilePane = ProfileSelection(id: userID, fallback: fallback ?? matrix.members.first { $0.id == userID })
     }
     private func toggleSave(_ message: ChatMessage) {
         guard localReady else { return }
@@ -2476,7 +2469,8 @@ struct RootView: View {
     /// Slack's plain-key shortcuts from a composer; false lets the key do its usual thing.
     private func conversationKey(_ action: ConversationKeys.Action, room: ChatRoom, threadRootID: String?) -> Bool {
         switch action {
-        case .markRead: markReadState(room, unread: false)
+        // Esc closes the profile first, then marks read.
+        case .markRead: if profilePane != nil { profilePane = nil } else { markReadState(room, unread: false) }
         case .markAllRead: handleMenu("mark-all-read")
         case .editLastMessage:
             let messages = threadRootID == nil ? matrix.messages : matrix.threadMessages
@@ -2518,7 +2512,7 @@ struct RootView: View {
         }
         if action == "preferences" {
             Performance.start(.preferencesOpen)
-            modals.current = .preferences
+            modals.current = .preferences(.appearance)
             return
         }
         guard matrix.user != nil else { return }
@@ -2556,7 +2550,12 @@ struct RootView: View {
                 return
             }
             if route == .home, threadRoot != nil { closeThread() }
-        case "mark-read": if route == .home, let room { _ = conversationKey(.markRead, room: room, threadRootID: nil) }
+        case "mark-read":
+            if profilePane != nil {
+                profilePane = nil
+            } else if route == .home, let room {
+                _ = conversationKey(.markRead, room: room, threadRootID: nil)
+            }
         case "mark-all-read":
             for room in matrix.rooms where room.membership == "join" && room.hasUnread {
                 markReadState(room, unread: false)

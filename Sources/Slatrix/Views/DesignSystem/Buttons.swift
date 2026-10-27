@@ -19,12 +19,14 @@ enum ButtonKind: CaseIterable {
 /// Push buttons. Size follows `.controlSize`: small 28, regular 32, large 36.
 struct HouseButtonStyle: ButtonStyle {
     let kind: ButtonKind
+    var square = false
     func makeBody(configuration: Configuration) -> some View {
-        StyledButton(kind: kind, configuration: configuration)
+        StyledButton(kind: kind, square: square, configuration: configuration)
     }
 
     private struct StyledButton: View {
         let kind: ButtonKind
+        let square: Bool
         let configuration: Configuration
         @Environment(\.isEnabled) private var enabled
         @Environment(\.isFocused) private var focusedWithin
@@ -34,7 +36,7 @@ struct HouseButtonStyle: ButtonStyle {
                 kind: kind,
                 state: InteractionState(
                     enabled: enabled, pressed: configuration.isPressed, focused: keyboardFocused(focusedWithin),
-                    hovering: hovering)
+                    hovering: hovering), square: square
             ) { configuration.label }
             .onHover { hovering = $0 }
         }
@@ -44,6 +46,8 @@ struct HouseButtonStyle: ButtonStyle {
 extension ButtonStyle where Self == HouseButtonStyle {
     static var primary: Self { HouseButtonStyle(kind: .primary) }
     static var secondary: Self { HouseButtonStyle(kind: .secondary) }
+    /// A square secondary button holding only an icon, such as ⋮ at the end of a row of secondary buttons.
+    static var secondaryIcon: Self { HouseButtonStyle(kind: .secondary, square: true) }
     static var destructive: Self { HouseButtonStyle(kind: .destructive) }
     /// `.link` is AppKit's, which ignores the theme's accent.
     static var textLink: Self { HouseButtonStyle(kind: .link) }
@@ -60,6 +64,7 @@ extension InteractionState {
 struct ButtonChrome<Label: View>: View {
     let kind: ButtonKind
     let state: InteractionState
+    var square = false
     @ViewBuilder let label: Label
     @Environment(\.metrics) private var m
     @Environment(\.controlSize) private var size
@@ -73,12 +78,10 @@ struct ButtonChrome<Label: View>: View {
                 .focusRing(state == .focused, cornerRadius: m.radiusSmall)
         } else {
             let shape = RoundedRectangle(cornerRadius: m.radius)
+            let height = size == .small || size == .mini ? m.controlSmall : size == .large ? m.controlLarge : m.control
             label.font(m.font(size == .large ? .body : .secondary, .semibold)).lineLimit(1)
-                .padding(.horizontal, size == .small ? m.sp12 : m.sp16)
-                .frame(
-                    height: size == .small || size == .mini
-                        ? m.controlSmall : size == .large ? m.controlLarge : m.control
-                )
+                .padding(.horizontal, square ? 0 : size == .small ? m.sp12 : m.sp16)
+                .frame(width: square ? height : nil, height: height)
                 .foregroundStyle(kind == .secondary ? colors.textPrimary : colors.onAccent)
                 .background(fill(colors), in: shape)
                 // Hover and press darken a filled button and tint a bordered one.

@@ -73,6 +73,10 @@ struct Metrics: Equatable {
     var avatarMedium: CGFloat { 24 * zoom }
     var avatar: CGFloat { 36 * zoom }
     var avatarLarge: CGFloat { 72 * zoom }
+    /// The photo at the top of a profile.
+    var profilePhoto: CGFloat { 240 * zoom }
+    /// The rounded square behind the icon that labels a detail, such as a profile's contact rows.
+    var iconTile: CGFloat { 36 * zoom }
     /// Sidebar rows, list rows, menu-like buttons.
     var row: CGFloat { 28 * zoom }
     /// Square hit target of an icon-only button.
@@ -85,7 +89,7 @@ struct Metrics: Equatable {
     var controlSmall: CGFloat { 28 * zoom }
     /// Modal footers and sign-in.
     var controlLarge: CGFloat { 36 * zoom }
-    /// Anchored cards such as the profile card.
+    /// Anchored cards such as the emoji picker.
     var popoverWidth: CGFloat { 320 * zoom }
     /// Modal widths: confirmations, forms, and tabbed or two-column modals.
     var modalSmall: CGFloat { 440 * zoom }
@@ -125,6 +129,8 @@ enum Motion {
     static var content: Animation? { reduced ? nil : .easeOut(duration: 0.12) }
     /// A message jumped to losing its highlight, slowly enough to follow.
     static var highlight: Animation? { reduced ? nil : .easeOut(duration: 1) }
+    /// Side panes easing in beside the conversation.
+    static var pane: Animation? { reduced ? nil : .easeOut(duration: 0.15) }
     private static var reduced: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 }
 

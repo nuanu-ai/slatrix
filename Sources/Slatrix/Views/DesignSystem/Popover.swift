@@ -4,7 +4,6 @@ import SwiftUI
 /// The card shown over the window next to what was clicked. Observable, so only the host redraws with it.
 @Observable @MainActor final class Popovers {
     enum Kind: Equatable {
-        case profile(userID: String, fallback: ChatUser?)
         case emoji(EmojiPick)
     }
     struct Shown: Equatable {
