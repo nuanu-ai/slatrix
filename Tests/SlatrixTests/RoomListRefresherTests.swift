@@ -172,3 +172,36 @@ extension RoomListRefresherTests {
         #expect(quiet.infoReads == quietReads)
     }
 }
+
+private final class PostingPowers: RoomPowerLevels, @unchecked Sendable {
+    let canPost: Bool
+    init(canPost: Bool) {
+        self.canPost = canPost
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func canOwnUserSendMessage(message: MessageLikeEventType) -> Bool { canPost || message != .roomMessage }
+    override func canOwnUserPinUnpin() -> Bool { true }
+    override func canOwnUserInvite() -> Bool { true }
+}
+
+extension RoomListRefresherTests {
+    @Test("Whether you may post follows the room's power levels, and stays unknown without them")
+    func postingPermission() async {
+        let room = FakeRoom(roomInfo(id: "!news:example.org"))
+        let refresher = RoomListRefresher()
+        refresher.attach(FakeClient(rooms: [room]))
+        refresher.request()
+        #expect(await eventually { refresher.rooms.count == 1 })
+        #expect(refresher.rooms.first?.canPostMessages == nil)
+        var info = roomInfo(id: "!news:example.org")
+        info.powerLevels = PostingPowers(canPost: false)
+        room.info = info
+        room.notifyInfoChanged()
+        #expect(await eventually { refresher.rooms.first?.canPostMessages == false })
+        info.powerLevels = PostingPowers(canPost: true)
+        room.info = info
+        room.notifyInfoChanged()
+        #expect(await eventually { refresher.rooms.first?.canPostMessages == true })
+    }
+}

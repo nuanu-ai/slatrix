@@ -281,6 +281,35 @@ struct WindowHostedTests {
             Harness.views(in: harness.hosting).contains { ($0 as? NSTextView)?.isEditable == true && $0.window != nil })
     }
 
+    @Test("A channel you may not post in shows a line in place of both composers, with the timeline still")
+    func cannotPost() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let before = try harness.timeline()
+        let index = try #require(harness.matrix.rooms.firstIndex { $0.id == harness.matrix.selectedRoomID })
+        harness.matrix.rooms[index].canPostMessages = false
+        func editors() -> Int { harness.shown().filter { ($0 as? NSTextView)?.isEditable == true }.count }
+        let canvas = try #require(NSColor(harness.appearance.colors.canvas).usingColorSpace(.sRGB))
+        // The line is centered, where an empty composer shows no text: ink across the middle of a pane's bottom.
+        func lineShown(_ pane: CGRect, from bottom: CGFloat) -> Bool {
+            harness.longestRun(in: CGRect(x: pane.midX - 60, y: bottom, width: 120, height: 120)) {
+                abs($0.redComponent - canvas.redComponent) + abs($0.greenComponent - canvas.greenComponent)
+                    + abs($0.blueComponent - canvas.blueComponent) > 0.3
+            } > 0
+        }
+        #expect(await eventually { editors() == 0 && lineShown(before, from: before.minY - 120) })
+        #expect(try harness.timeline() == before)
+
+        try harness.openThread()
+        #expect(await eventually { harness.shown().compactMap { $0 as? UploadDropView }.count == 2 })
+        let pane = try #require(
+            harness.shown().compactMap { $0 as? UploadDropView }.map { $0.convert($0.bounds, to: nil) }
+                .max { $0.minX < $1.minX })
+        #expect(editors() == 0)
+        #expect(lineShown(pane, from: pane.minY))
+    }
+
     @Test("At 150% zoom an open thread stays inside the panel")
     func paneFitsAtZoom() async throws {
         let harness = Harness(zoom: 1.5)
