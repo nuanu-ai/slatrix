@@ -224,6 +224,16 @@ struct Snapshots {
         try write(await settledImage(hosting), "header-dm-\(theme.rawValue)")
     }
 
+    @Test("The line in place of the composer in a channel you may not post in", arguments: Theme.allCases)
+    func cannotPost(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let index = try #require(matrix.rooms.firstIndex { $0.id == matrix.selectedRoomID })
+        matrix.rooms[index].canPostMessages = false
+        try await render(RootView(matrix: matrix), theme: theme, name: "cannot-post")
+    }
+
     @Test("The offline banner, and a toast over the conversation", arguments: Theme.allCases)
     func bannerAndToast(theme: Theme) async throws {
         _ = NSApplication.shared
