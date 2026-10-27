@@ -365,12 +365,14 @@ struct MessageComposer: View {
                 // Lazy, so a bare @ in a big room draws only the rows on screen.
                 LazyVStack(spacing: 0) {
                     ForEach(Array(mentionMatches.enumerated()), id: \.element) { index, candidate in
-                        mentionRow(candidate, selected: index == mentionIndex).id(index)
+                        mentionRow(candidate, selected: index == mentionIndex)
                     }
                 }.padding(m.sp4)
             }
             .scrollBounceBehavior(.basedOnSize)
-            .onChange(of: mentionIndex) { proxy.scrollTo(mentionIndex) }
+            .onChange(of: mentionIndex) {
+                if mentionMatches.indices.contains(mentionIndex) { proxy.scrollTo(mentionMatches[mentionIndex]) }
+            }
         }
         .frame(height: CGFloat(min(mentionMatches.count, 8)) * m.menuRow + 2 * m.sp4)
         .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
