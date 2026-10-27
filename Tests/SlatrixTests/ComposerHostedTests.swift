@@ -258,6 +258,48 @@ struct ComposerHostedTests {
                 == "Hi <strong>bold</strong> red <a href=\"https://example.org\">site</a><ul><li>x</li></ul>")
     }
 
+    @Test("A composer cleared while in a list, as by sending or switching rooms, starts plain")
+    func clearedStartsPlain() throws {
+        final class Model: ObservableObject { @Published var text = "" }
+        struct Observed: View {
+            @ObservedObject var model: Model
+            var body: some View {
+                MessageComposer(
+                    text: $model.text, placeholder: "Message #team", members: [], onSend: { _, _ in },
+                    onTyping: { _ in }
+                ).frame(width: 360)
+            }
+        }
+        let model = Model()
+        let (hosting, window) = host(Observed(model: model))
+        defer { close(window) }
+        let editor = try editor(in: hosting)
+        window.makeFirstResponder(editor)
+        try press(editor, "8", 28, [.command, .shift])
+        type(editor, "item")
+        #expect(model.text == "<ul><li>item</li></ul>")
+        model.text = ""
+        hosting.layoutSubtreeIfNeeded()
+        type(editor, "next")
+        #expect(model.text == "next")
+    }
+
+    @Test("Pasted HTML with markup a message can't carry arrives as its plain text")
+    func pasteUnsupportedHTML() throws {
+        let draft = Draft()
+        let (editor, window) = try composer(draft)
+        defer { close(window) }
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("slatrix-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.declareTypes([.html, .string], owner: nil)
+        pasteboard.setString(
+            "<section>\n  <h2>Title</h2>\n  <p>Body <sup>1</sup></p>\n</section>\n<style>p { color: red }</style>",
+            forType: .html)
+        pasteboard.setString("Title\nBody 1", forType: .string)
+        #expect(editor.readSelection(from: pasteboard))
+        #expect(editor.string == "Title\nBody 1")
+    }
+
     @Test("An empty list item starts its text after the bullet")
     func emptyListItem() throws {
         let draft = Draft()
