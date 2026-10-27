@@ -36,6 +36,8 @@ struct MessageComposer: View {
     @State private var mentionRange: NSRange?
     @State private var mentionIndex = 0
     @State private var typingTask: Task<Void, Never>?
+    @State private var linkDraft: ComposerLinkDraft?
+    @FocusState private var linkFocused: Bool
     @EnvironmentObject private var appearance: AppearanceStore
     @Environment(Popovers.self) private var popovers: Popovers?
     @Environment(\.isEnabled) private var isEnabled
@@ -90,7 +92,7 @@ struct MessageComposer: View {
             formattingToolbar.opacity(showFormatting ? 1 : 0).disabled(!showFormatting)
                 .accessibilityHidden(!showFormatting)
             ZStack(alignment: .topLeading) {
-                if text.isEmpty {
+                if text.isEmpty && editor.formats.block == nil {
                     Text(placeholder)
                         .font(m.font(.body)).foregroundStyle(muted)
                         .padding(.leading, m.sp12).padding(.top, m.sp8)
@@ -98,9 +100,10 @@ struct MessageComposer: View {
                 }
                 ComposerNativeEditor(
                     text: $text, state: editor, members: members, mentionText: NSColor(colors.mentionText),
-                    mentionFill: NSColor(colors.mentionFill), enabled: !sending,
+                    mentionFill: NSColor(colors.mentionFill), textColor: NSColor(colors.textBody),
+                    linkColor: NSColor(colors.accent), enabled: !sending,
                     acceptsAttachments: !sending && !isEditing && !preparingAttachments, onTextChange: changed,
-                    onSelectionChange: updateMention, onSend: send, onSpecialKey: specialKey,
+                    onSelectionChange: updateMention, onSend: send, onSpecialKey: specialKey, onLink: editLink,
                     onAttachments: queueInput, onAttachmentError: attachmentFailed
                 )
                 .accessibilityLabel(isEditing ? "Edit message" : placeholder)
@@ -208,6 +211,7 @@ struct MessageComposer: View {
 
     private var floating: some View {
         VStack(alignment: .leading, spacing: m.sp8) {
+            if let draft = Binding($linkDraft) { linkCard(draft) }
             if !mentionMatches.isEmpty { mentionSuggestions }
             Group {
                 if let errorMessage {
@@ -241,19 +245,39 @@ struct MessageComposer: View {
         }
     }
 
+    /// Slack's bar and order; each button shows whether its format is on where the caret is.
     private var formattingToolbar: some View {
-        HStack(spacing: 0) {
-            formatButton("bold", label: "Bold (⌘B)") { editor.wrap("**") }
-            formatButton("italic", label: "Italic (⌘I)") { editor.wrap("_") }
-            formatButton("strikethrough", label: "Strikethrough") { editor.wrap("~~") }
+        let formats = editor.formats
+        return HStack(spacing: 0) {
+            formatButton("bold", label: "Bold", keys: "⌘B", on: formats.style.contains(.bold)) {
+                editor.toggle(.bold)
+            }
+            formatButton("italic", label: "Italic", keys: "⌘I", on: formats.style.contains(.italic)) {
+                editor.toggle(.italic)
+            }
+            formatButton("strikethrough", label: "Strikethrough", keys: "⇧⌘X", on: formats.style.contains(.strike)) {
+                editor.toggle(.strike)
+            }
             toolbarDivider
-            formatButton("link", label: "Insert link") { editor.link() }
+            formatButton("link", label: "Link", keys: "⇧⌘U", on: false, action: editLink)
             toolbarDivider
-            formatButton("list.bullet", label: "Bulleted list") { editor.prefixLines("- ") }
-            formatButton("list.number", label: "Numbered list") { editor.prefixLines("1. ") }
+            formatButton("list.number", label: "Numbered list", keys: "⇧⌘7", on: formats.block == .ordered) {
+                editor.toggle(block: .ordered)
+            }
+            formatButton("list.bullet", label: "Bulleted list", keys: "⇧⌘8", on: formats.block == .bullet) {
+                editor.toggle(block: .bullet)
+            }
             toolbarDivider
-            formatButton("text.quote", label: "Quote") { editor.prefixLines("> ") }
-            formatButton("chevron.left.forwardslash.chevron.right", label: "Inline code") { editor.wrap("`") }
+            formatButton("text.quote", label: "Quote", keys: "⇧⌘9", on: formats.block == .quote) {
+                editor.toggle(block: .quote)
+            }
+            formatButton(
+                "chevron.left.forwardslash.chevron.right", label: "Code", keys: "⇧⌘C",
+                on: formats.style.contains(.code)
+            ) { editor.toggle(.code) }
+            formatButton("curlybraces.square", label: "Code block", keys: "⌥⇧⌘C", on: formats.block == .code) {
+                editor.toggle(block: .code)
+            }
             Spacer(minLength: 0)
         }.padding(.horizontal, m.sp8).padding(.top, m.sp8).disabled(sending)
             .accessibilityElement(children: .contain).accessibilityLabel("Message formatting")
@@ -263,12 +287,51 @@ struct MessageComposer: View {
         Rectangle().fill(muted.opacity(0.25)).frame(width: 1, height: m.sp16).padding(.horizontal, m.sp4)
     }
 
-    private func formatButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+    private func formatButton(
+        _ icon: String, label: String, keys: String, on: Bool, action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Image(systemName: icon).font(m.font(.secondary)).frame(width: m.iconButton, height: m.iconButton)
+                .background(on ? muted.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: m.radiusSmall))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.icon).foregroundStyle(muted).help(label).accessibilityLabel(label)
+        .buttonStyle(.icon).foregroundStyle(on ? colors.textPrimary : muted).help("\(label) (\(keys))")
+        .accessibilityLabel(label).accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func editLink() {
+        linkDraft = editor.linkDraft()
+    }
+
+    private func saveLink() {
+        guard let linkDraft, linkDraft.isValid else { return }
+        editor.setLink(linkDraft)
+        self.linkDraft = nil
+    }
+
+    /// Slack's link card: the text and its address, over the composer.
+    private func linkCard(_ draft: Binding<ComposerLinkDraft>) -> some View {
+        VStack(alignment: .leading, spacing: m.sp8) {
+            TextField("Text", text: draft.text).textFieldStyle(.field)
+            TextField("Link", text: draft.url).textFieldStyle(.field).focused($linkFocused).onSubmit(saveLink)
+            HStack(spacing: m.sp8) {
+                Spacer()
+                Button("Cancel") {
+                    linkDraft = nil
+                    editor.focus()
+                }.buttonStyle(.secondary)
+                Button("Save", action: saveLink).buttonStyle(.primary).disabled(!draft.wrappedValue.isValid)
+            }
+        }
+        .padding(m.sp12).frame(width: m.popoverWidth)
+        .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+        .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
+        .elevation(.e2, cornerRadius: m.radiusLarge)
+        .onAppear { linkFocused = true }
+        .onExitCommand {
+            linkDraft = nil
+            editor.focus()
+        }
     }
 
     private func iconButton(_ icon: String, label: String, circular: Bool = false, action: @escaping () -> Void)
@@ -514,8 +577,31 @@ struct MessageComposer: View {
     }
 }
 
+/// What the caret or selection has on, which the formatting bar shows.
+private struct ComposerFormats: Equatable {
+    var style: MessageTextStyle = []
+    var block: ComposerBlock?
+}
+
+/// The text, range and address the link card edits.
+private struct ComposerLinkDraft: Equatable {
+    var range: NSRange
+    var text: String
+    var url: String
+
+    /// The address as a link, "example.org" meaning https; nil when it's empty or not a safe link.
+    var link: URL? {
+        let address = url.trimmingCharacters(in: .whitespaces)
+        guard !address.isEmpty else { return nil }
+        return MessageBodyRenderer.safeLink(address.contains(":") ? address : "https://" + address)
+    }
+    /// An empty address removes the link.
+    var isValid: Bool { url.trimmingCharacters(in: .whitespaces).isEmpty || link != nil }
+}
+
 @MainActor private final class ComposerEditorState: ObservableObject {
     @Published var isFocused = false
+    @Published var formats = ComposerFormats()
     weak var textView: ComposerTextView?
 
     func focus() { if let textView { textView.window?.makeFirstResponder(textView) } }
@@ -541,7 +627,8 @@ struct MessageComposer: View {
 
     func insertMention(_ member: ChatUser, replacing range: NSRange?) {
         guard let textView else { return }
-        let token = NSMutableAttributedString(string: "@" + member.name, attributes: textView.mention(member.id))
+        let token = NSMutableAttributedString(
+            string: "@" + member.name, attributes: textView.typing(mention: ComposerMention(userID: member.id)))
         token.append(NSAttributedString(string: " ", attributes: textView.typingAttributes))
         insert(token, replacing: range)
     }
@@ -551,67 +638,44 @@ struct MessageComposer: View {
         return storage.attribute(.composerMention, at: location, effectiveRange: nil) != nil
     }
 
-    func wrap(_ marker: String) {
-        guard let textView, let storage = textView.textStorage else { return }
-        let range = textView.selectedRange()
-        let plain = textView.typingAttributes
-        let content =
-            range.length > 0
-            ? storage.attributedSubstring(from: range) : NSAttributedString(string: "text", attributes: plain)
-        let wrapped = NSMutableAttributedString(string: marker, attributes: plain)
-        wrapped.append(content)
-        wrapped.append(NSAttributedString(string: marker, attributes: plain))
-        insert(wrapped, selection: NSRange(location: range.location + marker.utf16.count, length: content.length))
+    func toggle(_ style: MessageTextStyle) {
+        textView?.toggle(style)
+        focus()
     }
 
-    func link() {
-        guard let textView else { return }
-        let range = textView.selectedRange()
-        let selected = (textView.string as NSString).substring(with: range)
-        let title = selected.isEmpty ? "link text" : selected
-        insert(
-            "[\(title)](https://)",
-            selection: NSRange(location: range.location + (title as NSString).length + 3, length: 8))
+    func toggle(block: ComposerBlock) {
+        textView?.toggle(block: block)
+        focus()
     }
 
-    func prefixLines(_ prefix: String) {
-        guard let textView, let storage = textView.textStorage else { return }
-        let text = textView.string as NSString
-        var range = textView.selectedRange()
-        if range.length > 0 && text.substring(with: NSRange(location: NSMaxRange(range) - 1, length: 1)) == "\n" {
-            range.length -= 1
-        }
-        let lines = text.lineRange(for: range)
-        let result = NSMutableAttributedString(attributedString: storage.attributedSubstring(from: lines))
-        // Every line start but the empty one after a trailing newline, last first so earlier offsets hold.
-        var starts = [0]
-        for (offset, unit) in result.string.utf16.enumerated() where unit == 10 && offset + 1 < result.length {
-            starts.append(offset + 1)
-        }
-        for (number, start) in starts.enumerated().reversed() {
-            let marker = prefix == "1. " ? "\(number + 1). " : prefix
-            result.insert(NSAttributedString(string: marker, attributes: textView.typingAttributes), at: start)
-        }
-        insert(result, replacing: lines, selection: NSRange(location: lines.location, length: result.length))
+    func linkDraft() -> ComposerLinkDraft? { textView?.linkDraft() }
+
+    func setLink(_ draft: ComposerLinkDraft) {
+        textView?.setLink(draft)
+        focus()
     }
 }
 
 private struct ComposerNativeEditor: NSViewRepresentable {
     static let minHeight: CGFloat = 60
     static let maxHeight: CGFloat = 160
-    /// Markdown, with mentions as links; the editor shows them as tokens.
+    /// Matrix HTML, as `ComposerFormat` writes it.
     @Binding var text: String
     var state: ComposerEditorState
     /// Names the bare IDs of messages sent before tokens existed.
     var members: [ChatUser]
     var mentionText: NSColor
     var mentionFill: NSColor
+    /// The theme's, for quote bars and code fills; the text itself is the system's, which follows the window.
+    var textColor: NSColor
+    var linkColor: NSColor
     var enabled: Bool
     var acceptsAttachments: Bool
     var onTextChange: (String, NSRange) -> Void
     var onSelectionChange: (String, NSRange) -> Void
     var onSend: () -> Void
     var onSpecialKey: (NSEvent) -> Bool
+    var onLink: () -> Void
     var onAttachments: (ComposerAttachmentInput) -> Bool
     var onAttachmentError: (String) -> Void
 
@@ -640,21 +704,24 @@ private struct ComposerNativeEditor: NSViewRepresentable {
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         let view = ComposerTextView(usingTextLayoutManager: false)
-        view.textContainer?.replaceLayoutManager(PillLayoutManager())
-        view.isRichText = false
+        view.textContainer?.replaceLayoutManager(ComposerLayoutManager())
+        view.textStorage?.delegate = view
+        // Rich, so typing next to bold stays bold; paste reads only plain text and HTML, never fonts or colors.
+        view.isRichText = true
         view.importsGraphics = false
+        view.usesFontPanel = false
         view.drawsBackground = false
         view.isVerticallyResizable = true
         view.isHorizontallyResizable = false
         view.autoresizingMask = [.width]
         view.textContainer?.widthTracksTextView = true
         view.textContainer?.lineFragmentPadding = 0
-        view.textColor = .labelColor
         view.insertionPointColor = .labelColor
         view.isAutomaticQuoteSubstitutionEnabled = false
         view.isAutomaticDashSubstitutionEnabled = false
         view.isAutomaticTextReplacementEnabled = false
         view.isContinuousSpellCheckingEnabled = true
+        view.allowsUndo = true
         view.delegate = context.coordinator
         view.setAccessibilityLabel("Message editor")
         scroll.documentView = view
@@ -674,35 +741,39 @@ private struct ComposerNativeEditor: NSViewRepresentable {
             view.setSelectedRange(NSRange(location: min(previous.location, view.string.utf16.count), length: 0))
             context.coordinator.text = text
             context.coordinator.synchronizing = false
+            // After this update, which mustn't publish.
+            Task { @MainActor in view.publishFormats() }
         }
         view.isEditable = enabled
     }
 
     private func configure(_ view: ComposerTextView, context: Context) {
         let m = context.environment.metrics
-        if view.font?.pointSize != m.size(.body) {
-            view.font = m.nsFont(.body)
-            view.textContainerInset = NSSize(width: m.sp12, height: m.sp8)
-        }
+        let inset = NSSize(width: m.sp12, height: m.sp8)
+        if view.textContainerInset != inset { view.textContainerInset = inset }
         view.onSend = onSend
         view.onSpecialKey = onSpecialKey
+        view.onLink = onLink
         view.acceptsAttachments = acceptsAttachments
         view.onAttachments = onAttachments
         view.onAttachmentError = onAttachmentError
-        view.onBold = { state.wrap("**") }
-        view.onItalic = { state.wrap("_") }
-        view.colorMentions(text: mentionText, fill: mentionFill)
+        view.onFormatsChange = { [weak state] formats in
+            if state?.formats != formats { state?.formats = formats }
+        }
+        view.style(
+            fontSize: m.size(.body), text: textColor, mentionText: mentionText, mentionFill: mentionFill,
+            link: linkColor)
     }
 
     @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerNativeEditor
         var synchronizing = false
-        /// The Markdown the editor last showed or wrote.
+        /// The draft the editor last showed or wrote.
         var text = ""
         init(_ parent: ComposerNativeEditor) { self.parent = parent }
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? ComposerTextView else { return }
-            text = view.markdown
+            text = view.draft
             parent.text = text
             parent.onTextChange(view.string, view.selectedRange())
         }
@@ -717,6 +788,7 @@ private struct ComposerNativeEditor: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard !synchronizing else { return }
             guard let view = notification.object as? ComposerTextView else { return }
+            view.publishFormats()
             parent.onSelectionChange(view.string, view.selectedRange())
         }
     }
@@ -724,6 +796,11 @@ private struct ComposerNativeEditor: NSViewRepresentable {
 
 extension NSAttributedString.Key {
     fileprivate static let composerMention = NSAttributedString.Key("SlatrixComposerMention")
+    /// `MessageTextStyle`'s raw value.
+    fileprivate static let composerStyle = NSAttributedString.Key("SlatrixComposerStyle")
+    /// `ComposerBlock`'s raw value, on every character of its paragraph.
+    fileprivate static let composerBlock = NSAttributedString.Key("SlatrixComposerBlock")
+    fileprivate static let composerLink = NSAttributedString.Key("SlatrixComposerLink")
 }
 
 /// A token's person. An object, so two adjacent tokens for one person stay two tokens.
@@ -732,65 +809,319 @@ private final class ComposerMention: NSObject {
     init(userID: String) { self.userID = userID }
 }
 
-private final class ComposerTextView: NSTextView {
+/// Slack's composer: formatting shows as it will be sent, and no Markdown is ever on screen. The storage holds what
+/// each character is (`.composerStyle`, `.composerBlock`, a link, a mention) and everything else is derived from it.
+private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
     var onSend: (() -> Void)?
     var onSpecialKey: ((NSEvent) -> Bool)?
+    var onLink: (() -> Void)?
+    var onFormatsChange: ((ComposerFormats) -> Void)?
     var acceptsAttachments = true
     var onAttachments: ((ComposerAttachmentInput) -> Bool)?
     var onAttachmentError: ((String) -> Void)?
-    var onBold: (() -> Void)?
-    var onItalic: (() -> Void)?
+    private var fontSize: CGFloat = 0
     private var mentionText = NSColor.linkColor
     private var mentionFill = NSColor.clear
+    private var linkColor = NSColor.linkColor
+    private var themeText = NSColor.textColor
 
-    // MARK: Mention tokens: "@Name" that edits as one piece and is sent as a Markdown link.
+    // MARK: How text looks, from what it is
 
-    func mention(_ userID: String) -> [NSAttributedString.Key: Any] {
-        var attributes = typingAttributes
-        attributes[.foregroundColor] = mentionText
-        attributes[.mentionPill] = mentionFill
-        attributes[.composerMention] = ComposerMention(userID: userID)
+    func style(fontSize: CGFloat, text: NSColor, mentionText: NSColor, mentionFill: NSColor, link: NSColor) {
+        guard
+            fontSize != self.fontSize || mentionText != self.mentionText || mentionFill != self.mentionFill
+                || link != linkColor || text != themeText, let storage = textStorage
+        else { return }
+        self.fontSize = fontSize
+        self.mentionText = mentionText
+        self.mentionFill = mentionFill
+        linkColor = link
+        themeText = text
+        storage.beginEditing()
+        restyle(NSRange(location: 0, length: storage.length))
+        storage.endEditing()
+        typingAttributes = attributes(typingStyle, block: typingBlock)
+    }
+
+    private func attributes(
+        _ style: MessageTextStyle, block: ComposerBlock?, mention: ComposerMention? = nil, link: URL? = nil
+    ) -> [NSAttributedString.Key: Any] {
+        let code = block == .code
+        let monospaced = code || style.contains(.code)
+        let size = monospaced ? max(10, fontSize - 1) : fontSize
+        var font = monospaced ? NSFont.monospacedSystemFont(ofSize: size, weight: .regular) : .systemFont(ofSize: size)
+        var traits = font.fontDescriptor.symbolicTraits
+        if style.contains(.bold) && !code { traits.insert(.bold) }
+        if style.contains(.italic) && !code { traits.insert(.italic) }
+        font = NSFont(descriptor: font.fontDescriptor.withSymbolicTraits(traits), size: size) ?? font
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: font, .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: MessageBlocks.paragraph(
+                quote: block == .quote, list: block == .bullet || block == .ordered ? 1 : 0, code: code,
+                fontSize: fontSize, lineSpacing: 0),
+        ]
+        if !style.isEmpty { attributes[.composerStyle] = Int(style.rawValue) }
+        if let block { attributes[.composerBlock] = block.rawValue }
+        if block == .quote { attributes[.quoteBar] = themeText.withAlphaComponent(0.25) }
+        if code {
+            attributes[.codeBlock] = themeText.withAlphaComponent(0.04)
+        } else {
+            if style.contains(.strike) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+            if style.contains(.underline) { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+            if style.contains(.code) { attributes[.backgroundColor] = themeText.withAlphaComponent(0.07) }
+        }
+        if let mention {
+            attributes[.foregroundColor] = mentionText
+            attributes[.mentionPill] = mentionFill
+            attributes[.composerMention] = mention
+        } else if let link {
+            attributes[.foregroundColor] = linkColor
+            attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            attributes[.composerLink] = link
+        }
         return attributes
     }
 
-    func load(_ markdown: String, members: [ChatUser]) {
-        let parsed = ComposerMentions.tokens(in: markdown) { id in members.first { $0.id == id }?.name }
-        let text = NSMutableAttributedString(string: parsed.display, attributes: typingAttributes)
-        for token in parsed.tokens { text.setAttributes(mention(token.userID), range: token.range) }
-        textStorage?.setAttributedString(text)
+    private func style(_ attributes: [NSAttributedString.Key: Any]) -> MessageTextStyle {
+        MessageTextStyle(rawValue: UInt8(attributes[.composerStyle] as? Int ?? 0))
     }
 
-    var markdown: String {
-        var tokens: [ComposerMentions.Token] = []
-        textStorage?.enumerateAttribute(.composerMention, in: NSRange(location: 0, length: textStorage?.length ?? 0)) {
-            value, range, _ in
-            if let mention = value as? ComposerMention { tokens.append(.init(range: range, userID: mention.userID)) }
+    private func block(_ attributes: [NSAttributedString.Key: Any]) -> ComposerBlock? {
+        (attributes[.composerBlock] as? String).flatMap(ComposerBlock.init)
+    }
+
+    func block(at index: Int) -> ComposerBlock? {
+        guard let storage = textStorage, index < storage.length else { return nil }
+        return block(storage.attributes(at: index, effectiveRange: nil))
+    }
+
+    /// Recomputes how `range` looks from what it is. Callers bracket it with `beginEditing` when not processing.
+    private func restyle(_ range: NSRange) {
+        guard let storage = textStorage, range.length > 0 else { return }
+        storage.enumerateAttributes(in: range) { current, part, _ in
+            storage.setAttributes(
+                attributes(
+                    style(current), block: block(current), mention: current[.composerMention] as? ComposerMention,
+                    link: current[.composerLink] as? URL), range: part)
         }
-        return ComposerMentions.markdown(string, tokens: tokens)
+        // A neighbor's padding depends on whether this range is code too.
+        let start = max(0, range.location - 1)
+        MessageBlocks.padCodeBlocks(
+            storage, in: NSRange(location: start, length: min(storage.length, NSMaxRange(range) + 1) - start),
+            fontSize: fontSize)
     }
 
-    func colorMentions(text: NSColor, fill: NSColor) {
-        guard text != mentionText || fill != mentionFill, let storage = textStorage else { return }
-        mentionText = text
-        mentionFill = fill
-        storage.enumerateAttribute(.composerMention, in: NSRange(location: 0, length: storage.length)) {
-            value, range, _ in
-            guard value != nil else { return }
-            storage.addAttributes([.foregroundColor: text, .mentionPill: fill], range: range)
+    /// A paragraph is one block: when an edit joins two, the first one's wins.
+    func textStorage(
+        _ storage: NSTextStorage, willProcessEditing mask: NSTextStorageEditActions, range: NSRange,
+        changeInLength: Int
+    ) {
+        guard mask.contains(.editedCharacters) else { return }
+        let text = storage.string as NSString
+        let paragraphs = text.paragraphRange(for: range)
+        text.enumerateSubstrings(in: paragraphs, options: [.byParagraphs, .substringNotRequired]) {
+            _, _, paragraph, _ in
+            guard paragraph.length > 0 else { return }
+            var uniform = NSRange()
+            let block = storage.attribute(
+                .composerBlock, at: paragraph.location, longestEffectiveRange: &uniform, in: paragraph)
+            guard uniform != paragraph else { return }
+            if let block {
+                storage.addAttribute(.composerBlock, value: block, range: paragraph)
+            } else {
+                storage.removeAttribute(.composerBlock, range: paragraph)
+            }
+            self.restyle(paragraph)
         }
+        let start = max(0, paragraphs.location - 1)
+        MessageBlocks.padCodeBlocks(
+            storage, in: NSRange(location: start, length: min(storage.length, NSMaxRange(paragraphs) + 1) - start),
+            fontSize: fontSize)
     }
 
-    /// Text typed next to a token is plain text, not more of the token.
+    // MARK: Typing
+
+    private var typingStyle: MessageTextStyle { style(super.typingAttributes) }
+    /// The caret's paragraph's block; an empty last line has no characters, so its block lives in typing attributes.
+    var typingBlock: ComposerBlock? {
+        let paragraph = (string as NSString).paragraphRange(for: NSRange(location: selectedRange().location, length: 0))
+        return paragraph.length > 0 ? block(at: paragraph.location) : block(super.typingAttributes)
+    }
+
+    /// Text typed next to a token or a link is plain text, and it joins the block of the paragraph it lands in.
     override var typingAttributes: [NSAttributedString.Key: Any] {
-        get {
-            var attributes = super.typingAttributes
-            attributes[.composerMention] = nil
-            attributes[.mentionPill] = nil
-            attributes[.foregroundColor] = NSColor.labelColor
-            return attributes
-        }
+        get { attributes(typingStyle, block: typingBlock) }
         set { super.typingAttributes = newValue }
     }
+
+    func typing(mention: ComposerMention) -> [NSAttributedString.Key: Any] {
+        attributes(typingStyle, block: typingBlock, mention: mention)
+    }
+
+    func publishFormats() {
+        let range = selectedRange()
+        var style = typingStyle
+        if range.length > 0, let storage = textStorage {
+            style = MessageTextStyle(rawValue: .max)
+            storage.enumerateAttributes(in: range) { attributes, part, _ in
+                if !(string as NSString).substring(with: part).allSatisfy(\.isNewline) {
+                    style.formIntersection(self.style(attributes))
+                }
+            }
+        }
+        onFormatsChange?(ComposerFormats(style: style, block: typingBlock))
+    }
+
+    // MARK: Formatting commands
+
+    /// Slack's toggle: on for the whole selection unless all of it has it already; at the caret, for what comes next.
+    func toggle(_ style: MessageTextStyle) {
+        let range = selectedRange()
+        guard let storage = textStorage, range.length > 0 else {
+            typingAttributes = attributes(typingStyle.symmetricDifference(style), block: typingBlock)
+            publishFormats()
+            return
+        }
+        var on = false
+        storage.enumerateAttribute(.composerStyle, in: range) { value, part, _ in
+            let current = MessageTextStyle(rawValue: UInt8(value as? Int ?? 0))
+            if !current.contains(style) && !(string as NSString).substring(with: part).allSatisfy(\.isNewline) {
+                on = true
+            }
+        }
+        guard shouldChangeText(in: range, replacementString: nil) else { return }
+        storage.beginEditing()
+        storage.enumerateAttribute(.composerStyle, in: range) { value, part, _ in
+            var current = MessageTextStyle(rawValue: UInt8(value as? Int ?? 0))
+            if on { current.insert(style) } else { current.remove(style) }
+            storage.addAttribute(.composerStyle, value: Int(current.rawValue), range: part)
+        }
+        restyle(range)
+        storage.endEditing()
+        didChangeText()
+        publishFormats()
+    }
+
+    /// Turns the selected paragraphs into `block`, or back into plain paragraphs when they all are already.
+    func toggle(block: ComposerBlock) {
+        guard let storage = textStorage else { return }
+        let paragraphs = (string as NSString).paragraphRange(for: selectedRange())
+        var all = true
+        if paragraphs.length > 0 {
+            storage.enumerateAttribute(.composerBlock, in: paragraphs) { value, _, _ in
+                if value as? String != block.rawValue { all = false }
+            }
+        } else {
+            all = typingBlock == block
+        }
+        let target = all ? nil : block
+        if paragraphs.length > 0 {
+            guard shouldChangeText(in: paragraphs, replacementString: nil) else { return }
+            storage.beginEditing()
+            if let target {
+                storage.addAttribute(.composerBlock, value: target.rawValue, range: paragraphs)
+            } else {
+                storage.removeAttribute(.composerBlock, range: paragraphs)
+            }
+            restyle(paragraphs)
+            storage.endEditing()
+            didChangeText()
+        }
+        typingAttributes = attributes(typingStyle, block: target)
+        if paragraphs.length == 0 {
+            // An empty last line takes its indent from typing attributes, which layout doesn't watch.
+            storage.edited(.editedAttributes, range: paragraphs, changeInLength: 0)
+            needsDisplay = true
+        }
+        publishFormats()
+    }
+
+    func linkDraft() -> ComposerLinkDraft? {
+        guard let storage = textStorage else { return nil }
+        var range = selectedRange()
+        var url: URL?
+        let probe = range.length > 0 ? range.location : range.location - 1
+        if probe >= 0, probe < storage.length {
+            var link = NSRange()
+            url =
+                storage.attribute(
+                    .composerLink, at: probe, longestEffectiveRange: &link,
+                    in: NSRange(location: 0, length: storage.length)) as? URL
+            if url != nil, range.length == 0 || NSIntersectionRange(link, range) == range { range = link }
+        }
+        return ComposerLinkDraft(
+            range: range, text: (string as NSString).substring(with: range), url: url?.absoluteString ?? "")
+    }
+
+    /// Links `draft.text` to its address, or unlinks it when the address is empty.
+    func setLink(_ draft: ComposerLinkDraft) {
+        guard let storage = textStorage, NSMaxRange(draft.range) <= storage.length, draft.isValid else { return }
+        let url = draft.link
+        let text = draft.text.isEmpty ? url?.absoluteString ?? "" : draft.text
+        let current =
+            draft.range.length > 0
+            ? storage.attributes(at: draft.range.location, effectiveRange: nil) : super.typingAttributes
+        let linked = NSAttributedString(
+            string: text, attributes: attributes(style(current), block: typingBlock, link: url))
+        guard shouldChangeText(in: draft.range, replacementString: text) else { return }
+        storage.replaceCharacters(in: draft.range, with: linked)
+        didChangeText()
+        setSelectedRange(NSRange(location: draft.range.location + linked.length, length: 0))
+    }
+
+    // MARK: Drafts
+
+    private func attributed(_ paragraphs: [ComposerFormat.Paragraph]) -> NSMutableAttributedString {
+        let text = NSMutableAttributedString()
+        for (index, paragraph) in paragraphs.enumerated() {
+            for run in paragraph.runs {
+                text.append(
+                    NSAttributedString(
+                        string: run.text,
+                        attributes: attributes(
+                            run.style, block: paragraph.block, mention: run.mention.map(ComposerMention.init),
+                            link: run.mention == nil ? run.link : nil)))
+            }
+            if index < paragraphs.count - 1 {
+                text.append(NSAttributedString(string: "\n", attributes: attributes([], block: paragraph.block)))
+            }
+        }
+        MessageBlocks.padCodeBlocks(text, in: NSRange(location: 0, length: text.length), fontSize: fontSize)
+        return text
+    }
+
+    func load(_ draft: String, members: [ChatUser]) {
+        let paragraphs = ComposerFormat.paragraphs(html: draft).map { paragraph in
+            var named = paragraph
+            named.runs = MessageBodyRenderer.named(paragraph.runs) { id in members.first { $0.id == id }?.name }
+            return named
+        }
+        textStorage?.setAttributedString(attributed(paragraphs))
+        // A cleared or switched draft starts plain, not in the list or quote the last one ended in.
+        typingAttributes = attributes([], block: nil)
+    }
+
+    var draft: String {
+        guard let storage = textStorage else { return "" }
+        let text = storage.string as NSString
+        var paragraphs: [ComposerFormat.Paragraph] = []
+        text.enumerateSubstrings(in: NSRange(location: 0, length: text.length), options: .byParagraphs) {
+            _, content, enclosing, _ in
+            var paragraph = ComposerFormat.Paragraph(block: self.block(at: enclosing.location))
+            storage.enumerateAttributes(in: content) { attributes, range, _ in
+                let mention = attributes[.composerMention] as? ComposerMention
+                paragraph.runs.append(
+                    MessageBodyRun(
+                        text: text.substring(with: range), style: self.style(attributes),
+                        link: mention.flatMap { URL(string: MatrixID.permalink($0.userID)) }
+                            ?? attributes[.composerLink] as? URL, mention: mention?.userID))
+            }
+            paragraphs.append(paragraph)
+        }
+        return ComposerFormat.html(paragraphs)
+    }
+
+    // MARK: Mention tokens: "@Name" that edits as one piece
 
     /// The token that `index` falls strictly inside.
     private func mention(cutAt index: Int) -> NSRange? {
@@ -824,6 +1155,13 @@ private final class ComposerTextView: NSTextView {
         return false
     }
 
+    // MARK: Keys
+
+    private var caretParagraphIsEmpty: Bool {
+        let paragraph = (string as NSString).paragraphRange(for: selectedRange())
+        return (string as NSString).substring(with: paragraph).allSatisfy(\.isNewline)
+    }
+
     override func keyDown(with event: NSEvent) {
         guard !hasMarkedText() else {
             super.keyDown(with: event)
@@ -831,24 +1169,98 @@ private final class ComposerTextView: NSTextView {
         }
         if onSpecialKey?(event) == true { return }
         if (event.keyCode == 36 || event.keyCode == 76) && !event.modifierFlags.contains(.shift) {
-            onSend?()
+            // In a list, quote or code block, Return starts the next line of it, and on an empty line ends it.
+            if let block = typingBlock {
+                if caretParagraphIsEmpty { toggle(block: block) } else { insertNewline(nil) }
+            } else {
+                onSend?()
+            }
             return
         }
         super.keyDown(with: event)
     }
 
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command {
-            if event.charactersIgnoringModifiers == "b" {
-                onBold?()
-                return true
-            }
-            if event.charactersIgnoringModifiers == "i" {
-                onItalic?()
-                return true
-            }
+    /// Backspace at the start of a list item, quote or code line takes the block away before any text.
+    override func deleteBackward(_ sender: Any?) {
+        let range = selectedRange()
+        if range.length == 0, let block = typingBlock,
+            range.location == (string as NSString).paragraphRange(for: range).location
+        {
+            toggle(block: block)
+            return
         }
-        return super.performKeyEquivalent(with: event)
+        super.deleteBackward(sender)
+    }
+
+    /// Slack's markup at the start of a line: "- ", "* ", "1. ", "> " and "```" become the block they stand for.
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        let typed = (string as? String) ?? (string as? NSAttributedString)?.string
+        let caret = selectedRange()
+        let paragraph = (self.string as NSString).paragraphRange(for: caret)
+        if let typed, typed == " " || typed == "`", !hasMarkedText(), replacementRange.location == NSNotFound,
+            caret.length == 0, typingBlock == nil,
+            case let marker = NSRange(location: paragraph.location, length: caret.location - paragraph.location),
+            let block = Self.markup[(self.string as NSString).substring(with: marker) + typed]
+        {
+            breakUndoCoalescing()
+            super.insertText("", replacementRange: marker)
+            toggle(block: block)
+            return
+        }
+        super.insertText(string, replacementRange: replacementRange)
+    }
+    private static let markup: [String: ComposerBlock] = [
+        "- ": .bullet, "* ": .bullet, "1. ": .ordered, "> ": .quote, "```": .code,
+    ]
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.firstResponder === self, !hasMarkedText() else { return super.performKeyEquivalent(with: event) }
+        // The layout's own character, or the US one on a layout without Latin letters, as menus match shortcuts.
+        let typed = event.characters(byApplyingModifiers: [])?.lowercased() ?? ""
+        let key = !typed.isEmpty && typed.allSatisfy(\.isASCII) ? typed : Self.usKeys[event.keyCode] ?? ""
+        switch (event.modifierFlags.intersection([.command, .shift, .option, .control]), key) {
+        case ([.command], "b"): toggle(.bold)
+        case ([.command], "i"): toggle(.italic)
+        case ([.command, .shift], "x"): toggle(.strike)
+        case ([.command, .shift], "c"): toggle(.code)
+        case ([.command, .shift, .option], "c"): toggle(block: .code)
+        case ([.command, .shift], "7"): toggle(block: .ordered)
+        case ([.command, .shift], "8"): toggle(block: .bullet)
+        case ([.command, .shift], "9"): toggle(block: .quote)
+        case ([.command, .shift], "u"): onLink?()
+        default: return super.performKeyEquivalent(with: event)
+        }
+        return true
+    }
+    private static let usKeys: [UInt16: String] = [
+        11: "b", 34: "i", 7: "x", 8: "c", 32: "u", 26: "7", 28: "8", 25: "9",
+    ]
+
+    // MARK: Paste and drop
+
+    /// HTML keeps what a message can carry; anything else arrives as plain text.
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] { [.html, .string] }
+
+    override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        guard type == .html, let html = pboard.string(forType: .html) else {
+            return super.readSelection(from: pboard, type: type)
+        }
+        // A page with markup a message can't carry pastes as the text its source app offers.
+        if MessageBodyRenderer.editable(body: "", html: html).usedPlainTextFallback {
+            return super.readSelection(from: pboard, type: .string)
+        }
+        var paragraphs = ComposerFormat.paragraphs(html: html)
+        // The first line joins the paragraph it lands in.
+        if !paragraphs.isEmpty, paragraphs[0].block == nil { paragraphs[0].block = typingBlock }
+        let fragment = attributed(paragraphs)
+        let range = rangeForUserTextChange
+        guard range.location != NSNotFound, shouldChangeText(in: range, replacementString: fragment.string) else {
+            return false
+        }
+        textStorage?.replaceCharacters(in: range, with: fragment)
+        didChangeText()
+        setSelectedRange(NSRange(location: range.location + fragment.length, length: 0))
+        return true
     }
 
     override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
@@ -880,6 +1292,67 @@ private final class ComposerTextView: NSTextView {
         guard pasteboard.types?.contains(.fileURL) == true else { return [] }
         return (pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL])
             ?? []
+    }
+}
+
+/// Draws list markers in the indent, where they can't be selected or typed into, and the block of an empty last
+/// line, which has no characters to carry it.
+private final class ComposerLayoutManager: PillLayoutManager {
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+        guard let storage = textStorage, let view = firstTextView as? ComposerTextView else { return }
+        let text = storage.string as NSString
+        let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        text.enumerateSubstrings(
+            in: text.paragraphRange(for: characters), options: [.byParagraphs, .substringNotRequired]
+        ) { _, _, paragraph, _ in
+            guard paragraph.length > 0, let block = view.block(at: paragraph.location) else { return }
+            let glyph = self.glyphIndexForCharacter(at: paragraph.location)
+            let line = self.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            self.drawMarker(
+                block, at: paragraph.location, view: view,
+                origin: NSPoint(x: line.minX + origin.x, y: line.minY + self.location(forGlyphAt: glyph).y + origin.y))
+        }
+        guard extraLineFragmentTextContainer != nil, view.selectedRange().location == storage.length,
+            let block = view.typingBlock
+        else { return }
+        let line = extraLineFragmentRect.offsetBy(dx: origin.x, dy: origin.y)
+        let attributes = view.typingAttributes
+        let font = attributes[.font] as? NSFont
+        switch block {
+        case .bullet, .ordered:
+            drawMarker(
+                block, at: storage.length, view: view,
+                origin: NSPoint(x: line.minX, y: line.minY + (font?.ascender ?? line.height)))
+        case .quote, .code:
+            let key: NSAttributedString.Key = block == .quote ? .quoteBar : .codeBlock
+            guard let color = attributes[key] as? NSColor else { return }
+            MessageBlocks.draw(
+                key, color: color, lines: line, style: attributes[.paragraphStyle] as? NSParagraphStyle,
+                fontSize: font?.pointSize ?? NSFont.systemFontSize)
+        }
+    }
+
+    /// `baseline` is where the line's first glyph sits.
+    private func drawMarker(_ block: ComposerBlock, at index: Int, view: ComposerTextView, origin baseline: NSPoint) {
+        guard block == .bullet || block == .ordered, let storage = textStorage else { return }
+        var number = 1
+        if block == .ordered {
+            let text = storage.string as NSString
+            var start = index
+            while start > 0 {
+                let previous = text.paragraphRange(for: NSRange(location: start - 1, length: 0))
+                guard view.block(at: previous.location) == .ordered else { break }
+                number += 1
+                start = previous.location
+            }
+        }
+        let font = view.typingAttributes[.font] as? NSFont ?? .systemFont(ofSize: NSFont.systemFontSize)
+        let marker = NSAttributedString(
+            string: block == .bullet ? "•" : "\(number).",
+            attributes: [.font: NSFont.systemFont(ofSize: font.pointSize), .foregroundColor: NSColor.labelColor])
+        // Where a message's marker text sits, so a list looks the same before and after sending.
+        marker.draw(at: NSPoint(x: baseline.x, y: baseline.y - font.ascender))
     }
 }
 
