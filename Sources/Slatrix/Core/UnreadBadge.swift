@@ -22,8 +22,8 @@ enum UnreadBadge: Equatable {
     /// any row is.
     static func combined(_ rooms: [ChatRoom]) -> UnreadBadge {
         let joined = rooms.filter { $0.membership == "join" && !$0.isSpace }
-        let count = joined.reduce(0) { $0 + count($1) }
-        if count > 0 { return .count(label(count)) }
+        let total = joined.reduce(0) { $0 + count($1) }
+        if total > 0 { return .count(label(total)) }
         return joined.contains { UnreadBadge($0) != .none } ? .bold : .none
     }
 
