@@ -2177,6 +2177,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard message.kind != "m.video" || thumbnailSources[message.eventID] != nil else {
             throw MatrixServiceError.request("This video has no poster.")
         }
+        // The send queue keeps what you send in the media store as whole files; the server has no thumbnail yet.
+        if message.sendState != "sent" {
+            return try await client.getMediaContent(
+                mediaSource: thumbnailSources[message.eventID]?.source ?? original)
+        }
         let limit = MatrixMapping.maximumAutomaticPreviewBytes
         let source: MediaSource
         if let thumbnail = thumbnailSources[message.eventID], thumbnail.source.url() != original.url() {

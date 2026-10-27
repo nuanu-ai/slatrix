@@ -92,13 +92,20 @@ struct AttachmentView: View {
 extension MatrixService {
     /// A decoded still of the attachment already in memory: its thumbnail, a GIF's first frame, a video's poster.
     func cachedMediaImage(_ message: ChatMessage) -> CGImage? {
-        mediaImageKey(message).flatMap { mediaImages.object(forKey: $0) }
+        guard let key = mediaImageKey(message) else { return nil }
+        if let image = mediaImages.object(forKey: key) { return image }
+        // What showed while it was sending is the same file the server now has, so it stays on screen.
+        let sending = Self.sendingKey(message)
+        guard let image = mediaImages.object(forKey: sending) else { return nil }
+        mediaImages.removeObject(forKey: sending)
+        mediaImages.setObject(image, forKey: key, cost: image.bytesPerRow * image.height)
+        return image
     }
 
     /// Loads, decodes and remembers the attachment's still; nil when it has none or it went away meanwhile.
     func loadMediaImage(_ message: ChatMessage) async -> CGImage? {
         guard let key = mediaImageKey(message) else { return nil }
-        if let image = mediaImages.object(forKey: key) { return image }
+        if let image = cachedMediaImage(message) { return image }
         guard let data = try? await thumbnailData(message, width: 960, height: 720) else { return nil }
         let image = await Task.detached(priority: .utility) { Self.decodeStill(data) }.value
         guard let image, mediaImageKey(message) == key else { return nil }
@@ -107,10 +114,15 @@ extension MatrixService {
     }
 
     fileprivate func mediaImageKey(_ message: ChatMessage) -> NSString? {
-        attachmentSourceRevision(message).map {
+        // The send queue swaps its local copy for the uploaded one midway; it's the same picture throughout.
+        if message.sendState != "sent" { return Self.sendingKey(message) }
+        return attachmentSourceRevision(message).map {
             "\(message.eventID)|\(String(decoding: $0, as: UTF8.self))" as NSString
         }
     }
+
+    /// Keyed by the timeline item, which stays the same as the message goes from local echo to remote event.
+    private static func sendingKey(_ message: ChatMessage) -> NSString { "\(message.id)|sending" as NSString }
 
     nonisolated private static func decodeStill(_ data: Data) -> CGImage? {
         guard

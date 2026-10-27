@@ -24,10 +24,8 @@ struct AttachmentPreviewTests {
 
     @Test("Your own image shows while it sends, from the copy being sent, and stays as the server confirms it")
     func sendingImage() async throws {
+        // Only the copy being sent is a picture; the server's thumbnail is empty.
         client.stored = try pngData()
-        // The server has nothing yet: whatever shows came from the copy being sent.
-        client.thumbnails.arm()
-        defer { client.thumbnails.release() }
         show(
             try imageEvent(
                 "photo-transaction", width: 160, height: 90, url: "mxc://send-queue.localhost/photo", sending: true),
