@@ -17,31 +17,47 @@ extension NSAttributedString.Key {
 
 /// Draws `.mentionPill` fills as rounded pills, a little wider than their text and as tall as the line.
 class PillLayoutManager: NSLayoutManager {
+    struct Pill {
+        /// In text container coordinates, one per line the mention spans.
+        var rect: NSRect
+        var radius: CGFloat
+        var fill: NSColor
+    }
+
+    func pills(forCharacterRange characters: NSRange) -> [Pill] {
+        guard let storage = textStorage, let container = textContainers.first else { return [] }
+        var pills: [Pill] = []
+        storage.enumerateAttribute(.mentionPill, in: characters) { value, range, _ in
+            guard let fill = value as? NSColor,
+                let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+            else { return }
+            let spacing =
+                (storage.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle)?
+                .lineSpacing ?? 0
+            // In proportion to the font, so pills scale with zoom: 2 pt of padding and a 3 pt radius at 15 pt.
+            let padding = font.pointSize * 0.13
+            let radius = font.pointSize * 0.2
+            enumerateEnclosingRects(
+                forGlyphRange: glyphRange(forCharacterRange: range, actualCharacterRange: nil),
+                withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: container
+            ) { rect, _ in
+                let pill = NSRect(
+                    x: rect.minX - padding, y: rect.minY, width: rect.width + 2 * padding,
+                    height: rect.height - spacing)
+                pills.append(Pill(rect: pill, radius: radius, fill: fill))
+            }
+        }
+        return pills
+    }
+
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         drawBlocks(forGlyphRange: glyphsToShow, at: origin)
-        if let storage = textStorage, let container = textContainers.first {
-            let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
-            storage.enumerateAttribute(.mentionPill, in: characters) { value, range, _ in
-                guard let fill = value as? NSColor,
-                    let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
-                else { return }
-                let spacing =
-                    (storage.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle)?
-                    .lineSpacing ?? 0
-                // In proportion to the font, so pills scale with zoom: 2 pt of padding and a 3 pt radius at 15 pt.
-                let padding = font.pointSize * 0.13
-                let radius = font.pointSize * 0.2
-                fill.setFill()
-                enumerateEnclosingRects(
-                    forGlyphRange: glyphRange(forCharacterRange: range, actualCharacterRange: nil),
-                    withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: container
-                ) { rect, _ in
-                    let pill = NSRect(
-                        x: rect.minX - padding + origin.x, y: rect.minY + origin.y, width: rect.width + 2 * padding,
-                        height: rect.height - spacing)
-                    NSBezierPath(roundedRect: pill, xRadius: radius, yRadius: radius).fill()
-                }
-            }
+        for pill in pills(forCharacterRange: characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)) {
+            pill.fill.setFill()
+            NSBezierPath(
+                roundedRect: pill.rect.offsetBy(dx: origin.x, dy: origin.y), xRadius: pill.radius,
+                yRadius: pill.radius
+            ).fill()
         }
         // After the pills, so a selection highlight covers them.
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
