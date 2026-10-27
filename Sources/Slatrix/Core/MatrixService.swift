@@ -1622,7 +1622,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         _ = try requireRoom(roomID)
         let content = try MatrixMapping.content(message).withMentions(
-            mentions: Mentions(userIds: message.mentions, room: false))
+            mentions: Mentions(userIds: message.mentions, room: message.mentionsRoom))
         // Thread timelines infer their own relation. Extra JSON cannot override
         // that fallback relation, so an explicit quote must use sendReply.
         if let reply = replyToID {
@@ -2632,6 +2632,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         requestRefresh()
         return destination
     }
+    private nonisolated static func membership(_ state: MembershipState) -> String {
+        switch state {
+        case .join: "join"
+        case .invite: "invite"
+        case .leave: "leave"
+        case .ban: "ban"
+        case .knock: "knock"
+        case .custom(let value): value
+        }
+    }
+
     func loadMembers() async {
         let token = selection
         do {
@@ -2641,7 +2652,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 var result: [ChatUser] = []
                 while !Task.isCancelled, let chunk = iterator.nextChunk(chunkSize: 500), !chunk.isEmpty {
                     result += chunk.map {
-                        ChatUser(id: $0.userId, name: $0.displayName ?? $0.userId, avatarURL: $0.avatarUrl)
+                        ChatUser(
+                            id: $0.userId, name: $0.displayName ?? $0.userId, avatarURL: $0.avatarUrl,
+                            membership: Self.membership($0.membership))
                     }
                 }
                 return result

@@ -19,10 +19,12 @@ enum ComposerFormat {
         /// Nil when nothing is formatted, so the event carries only `body`.
         var html: String?
         var mentions: [String]
+        var mentionsRoom = false
     }
 
     static func message(draft: String) -> Message {
-        var paragraphs = paragraphs(html: draft)
+        let rendered = MessageBodyRenderer.editable(body: stripped(draft), html: draft).runs
+        var paragraphs = paragraphs(rendered)
         while paragraphs.last.map(isBlank) == true { paragraphs.removeLast() }
         while paragraphs.first.map(isBlank) == true { paragraphs.removeFirst() }
         let runs = paragraphs.flatMap(\.runs)
@@ -31,7 +33,8 @@ enum ComposerFormat {
             || runs.contains { !$0.style.isEmpty || $0.link != nil || $0.mention != nil }
         return Message(
             body: plain(paragraphs), html: formatted ? html(paragraphs) : nil,
-            mentions: Set(runs.compactMap(\.mention)).sorted())
+            mentions: Set(runs.compactMap(\.mention)).sorted(),
+            mentionsRoom: rendered.contains { $0.mention == "@room" })
     }
 
     /// A draft's paragraphs, or a pasted fragment's.

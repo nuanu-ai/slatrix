@@ -42,6 +42,8 @@ struct ChatUser: Identifiable, Hashable {
     var id: String
     var name: String
     var avatarURL: String? = nil
+    /// "join", "invite", "leave", "ban" or "knock", as a room's member list has it.
+    var membership = "join"
 }
 
 struct ChatMessage: Identifiable, Hashable {

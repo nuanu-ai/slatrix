@@ -1,10 +1,21 @@
 import AppKit
 import SwiftUI
 
+extension MentionSearch.Candidate {
+    fileprivate var name: String {
+        switch self {
+        case .member(let member): member.name
+        case .room: "@room"
+        }
+    }
+}
+
 struct MessageComposer: View {
     @Binding var text: String
     var placeholder: String
     var members: [ChatUser]
+    /// The conversation's senders, latest first, read as you type an @ query.
+    var recentSenders: () -> [String] = { [] }
     var isEditing: Bool = false
     var onSend: (String, [URL]) async throws -> Void
     var onTyping: (Bool) -> Void
@@ -32,8 +43,7 @@ struct MessageComposer: View {
     @State private var importGeneration = UUID()
     @State private var isActive = true
     @State private var showFormatting = true
-    @State private var mentionQuery: String?
-    @State private var mentionRange: NSRange?
+    @State private var mention: MentionSearch.Suggestions?
     @State private var mentionIndex = 0
     @State private var typingTask: Task<Void, Never>?
     @State private var linkDraft: ComposerLinkDraft?
@@ -64,14 +74,7 @@ struct MessageComposer: View {
     }
     private var colors: AppColors { appearance.colors }
     private var muted: Color { colors.textSecondary }
-    private var mentionMatches: [ChatUser] {
-        guard let query = mentionQuery else { return [] }
-        return Array(
-            members.filter {
-                query.isEmpty || $0.name.localizedCaseInsensitiveContains(query)
-                    || $0.id.localizedCaseInsensitiveContains(query)
-            }.prefix(6))
-    }
+    private var mentionMatches: [MentionSearch.Candidate] { mention?.candidates ?? [] }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -199,9 +202,8 @@ struct MessageComposer: View {
             if focused === editor.textView || (isPrimary && !(focused is ComposerTextView)) { chooseFiles() }
         }
         .onExitCommand {
-            if mentionQuery != nil {
-                mentionQuery = nil
-                mentionRange = nil
+            if mention != nil {
+                mention = nil
             } else if isEditing {
                 onCancelEdit?()
             }
@@ -356,31 +358,48 @@ struct MessageComposer: View {
         }.scrollIndicators(.hidden).padding(.bottom, m.sp8)
     }
 
+    /// Slack's @ list: eight rows at once, the rest by scrolling or the arrow keys, which keep the selection in view.
     private var mentionSuggestions: some View {
-        VStack(alignment: .leading, spacing: m.sp2) {
-            ForEach(Array(mentionMatches.enumerated()), id: \.element.id) { index, member in
-                Button {
-                    chooseMention(member)
-                } label: {
-                    HStack(spacing: m.sp8) {
-                        AvatarView(name: member.name, size: m.avatarMedium)
-                        Text(member.name).font(m.font(.secondary, .medium))
-                        // The ID tells apart people who share a name; otherwise it is noise.
-                        if mentionMatches.filter({ $0.name == member.name }).count > 1 {
-                            Text(member.id).font(m.font(.caption)).foregroundStyle(
-                                index == mentionIndex ? colors.onAccent.opacity(0.8) : muted
-                            ).lineLimit(1)
-                        }
-                        Spacer()
-                        if index == mentionIndex { Image(systemName: "return").font(m.font(.caption)) }
-                    }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8).contentShape(Rectangle())
-                        .background(index == mentionIndex ? colors.accent : .clear)
-                        .foregroundStyle(index == mentionIndex ? colors.onAccent : colors.textPrimary)
-                }.buttonStyle(.row).accessibilityLabel("Mention \(member.name), \(member.id)")
+        ScrollViewReader { proxy in
+            ScrollView {
+                // Lazy, so a bare @ in a big room draws only the rows on screen.
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(mentionMatches.enumerated()), id: \.element) { index, candidate in
+                        mentionRow(candidate, selected: index == mentionIndex).id(index)
+                    }
+                }.padding(m.sp4)
             }
-        }.padding(.vertical, m.sp4).background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
-            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
-            .elevation(.e2, cornerRadius: m.radiusLarge)
+            .scrollBounceBehavior(.basedOnSize)
+            .onChange(of: mentionIndex) { proxy.scrollTo(mentionIndex) }
+        }
+        .frame(height: CGFloat(min(mentionMatches.count, 8)) * m.menuRow + 2 * m.sp4)
+        .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+        .clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
+        .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
+        .elevation(.e2, cornerRadius: m.radiusLarge)
+    }
+
+    @ViewBuilder
+    private func mentionRow(_ candidate: MentionSearch.Candidate, selected: Bool) -> some View {
+        switch candidate {
+        case .member(let member):
+            // The ID tells apart people who share a name; otherwise it is noise.
+            let twin = mentionMatches.contains { $0 != candidate && $0.name == member.name }
+            let detail = [twin ? member.id : nil, member.membership == "invite" ? "Invited" : nil].compactMap { $0 }
+            MenuRow(
+                title: member.name, detail: detail.isEmpty ? nil : detail.joined(separator: " · "), selected: selected
+            ) {
+                chooseMention(candidate)
+            } icon: {
+                AvatarView(name: member.name, size: m.avatarMedium)
+            }
+        case .room:
+            MenuRow(title: "@room", detail: "Notify everyone in this conversation", selected: selected) {
+                chooseMention(candidate)
+            } icon: {
+                Image(systemName: "megaphone").font(m.font(.secondary))
+            }
+        }
     }
 
     private func changed(_ value: String, _ range: NSRange) {
@@ -397,25 +416,18 @@ struct MessageComposer: View {
 
     private func updateMention(_ value: String, _ range: NSRange) {
         let prefix = (value as NSString).substring(to: min(range.location, (value as NSString).length))
-        if let match = prefix.range(of: #"(?:^|\s)@[^\s@]*$"#, options: .regularExpression),
-            let at = prefix[match].lastIndex(of: "@"),
-            case let location = prefix.utf16.distance(from: prefix.utf16.startIndex, to: at),
-            !editor.isMention(at: location)
-        {
-            mentionQuery = String(prefix[prefix.index(after: at)...])
-            mentionRange = NSRange(location: location, length: (prefix as NSString).length - location)
-            mentionIndex = 0
-        } else {
-            mentionQuery = nil
-            mentionRange = nil
-        }
+        let found =
+            prefix.contains("@")
+            ? MentionSearch.suggestions(before: prefix, members: members, recentSenders: recentSenders()) : nil
+        // An @ inside a finished mention starts no query.
+        mention = found.flatMap { editor.isMention(at: $0.range.location) ? nil : $0 }
+        mentionIndex = 0
     }
 
     private func specialKey(_ event: NSEvent) -> Bool {
         if event.keyCode == 53 {
-            if mentionQuery != nil {
-                mentionQuery = nil
-                mentionRange = nil
+            if mention != nil {
+                mention = nil
                 return true
             }
             if isEditing {
@@ -442,10 +454,12 @@ struct MessageComposer: View {
         return onConversationKey(action)
     }
 
-    private func chooseMention(_ member: ChatUser) {
-        editor.insertMention(member, replacing: mentionRange)
-        mentionQuery = nil
-        mentionRange = nil
+    private func chooseMention(_ candidate: MentionSearch.Candidate) {
+        switch candidate {
+        case .member(let member): editor.insertMention(member, replacing: mention?.range)
+        case .room: editor.insert("@room ", replacing: mention?.range)
+        }
+        mention = nil
         editor.focus()
     }
 
@@ -527,7 +541,7 @@ struct MessageComposer: View {
         }
         sending = true
         errorMessage = nil
-        mentionQuery = nil
+        mention = nil
         typingTask?.cancel()
         onTyping(false)
         let body = text
