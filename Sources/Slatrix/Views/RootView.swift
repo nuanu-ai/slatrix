@@ -1013,7 +1013,11 @@ struct RootView: View {
                     onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) }
                 ).id("\(room.id):\(matrix.timelineSelectionID)")
                 VStack(spacing: 0) {
-                    if let target = editTarget, target.surface == .conversation, target.message.roomID == room.id {
+                    if room.canPostMessages == false {
+                        ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp20).padding(.vertical, m.sp4)
+                    } else if let target = editTarget, target.surface == .conversation,
+                        target.message.roomID == room.id
+                    {
                         editComposer(target, room: room).padding(.horizontal, m.sp20).padding(.vertical, m.sp4)
                     } else {
                         BindingScope({ draftBinding(room.id) }) { text in
@@ -1079,6 +1083,7 @@ struct RootView: View {
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
             .dropToUpload(room.isDirect ? "Upload to \(room.name)" : "Upload to #\(room.name)")
     }
+    private static let cannotPost = "You don’t have permission to post in this channel."
     private enum ChannelTab { case messages, pins, files }
     private func openChannelTab(_ tab: ChannelTab) {
         switch tab {
@@ -1169,7 +1174,9 @@ struct RootView: View {
                 onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) }
             ).id(root.eventID)
             VStack(spacing: 0) {
-                if let target = editTarget, target.surface == .thread(rootID: root.eventID),
+                if room.canPostMessages == false {
+                    ComposerNotice(text: Self.cannotPost).padding(m.sp12)
+                } else if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
                 {
                     editComposer(target, room: room).padding(m.sp12)

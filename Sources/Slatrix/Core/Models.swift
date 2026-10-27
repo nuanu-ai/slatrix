@@ -36,6 +36,8 @@ struct ChatRoom: Identifiable, Hashable {
     var isSpace = false
     var directParentSpaceIDs: [String] = []
     var canInvite: Bool? = nil
+    /// nil until the room's power levels are known; the composer shows until then.
+    var canPostMessages: Bool? = nil
 }
 
 struct ChatUser: Identifiable, Hashable {

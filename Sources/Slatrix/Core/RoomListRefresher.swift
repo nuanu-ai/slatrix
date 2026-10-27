@@ -277,6 +277,7 @@ final class RoomListRefresher {
                 membership: info.membership == .invited ? "invite" : "join", avatarURL: info.avatarUrl,
                 pinnedEventIDs: info.pinnedEventIds, canPinMessages: info.powerLevels?.canOwnUserPinUnpin(),
                 fullyReadEventID: info.fullyReadEventId, isSpace: info.isSpace,
-                directParentSpaceIDs: directParents.sorted(), canInvite: info.powerLevels?.canOwnUserInvite()))
+                directParentSpaceIDs: directParents.sorted(), canInvite: info.powerLevels?.canOwnUserInvite(),
+                canPostMessages: info.powerLevels?.canOwnUserSendMessage(message: .roomMessage)))
     }
 }

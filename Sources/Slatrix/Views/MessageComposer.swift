@@ -675,6 +675,19 @@ private struct ComposerLinkDraft: Equatable {
     }
 }
 
+/// Slack's line in place of the composer where you may not post, at the composer's resting height so nothing moves.
+struct ComposerNotice: View {
+    var text: String
+    @EnvironmentObject private var appearance: AppearanceStore
+    @Environment(\.metrics) private var m
+    var body: some View {
+        Text(text).font(m.font(.secondary)).foregroundStyle(appearance.colors.textSecondary)
+            .frame(maxWidth: .infinity)
+            // The formatting row, the empty editor and the send row, as `MessageComposer` stacks them.
+            .frame(height: 2 * m.sp8 + m.iconButton + m.row + m(ComposerNativeEditor.minHeight))
+    }
+}
+
 private struct ComposerNativeEditor: NSViewRepresentable {
     static let minHeight: CGFloat = 60
     static let maxHeight: CGFloat = 160
