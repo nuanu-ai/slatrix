@@ -303,8 +303,9 @@ struct MessageComposer: View {
     }
 
     private func saveLink() {
-        if let linkDraft { editor.setLink(linkDraft) }
-        linkDraft = nil
+        guard let linkDraft, linkDraft.isValid else { return }
+        editor.setLink(linkDraft)
+        self.linkDraft = nil
     }
 
     /// Slack's link card: the text and its address, over the composer.
@@ -318,7 +319,7 @@ struct MessageComposer: View {
                     linkDraft = nil
                     editor.focus()
                 }.buttonStyle(.secondary)
-                Button("Save", action: saveLink).buttonStyle(.primary)
+                Button("Save", action: saveLink).buttonStyle(.primary).disabled(!draft.wrappedValue.isValid)
             }
         }
         .padding(m.sp12).frame(width: m.popoverWidth)
@@ -586,6 +587,15 @@ private struct ComposerLinkDraft: Equatable {
     var range: NSRange
     var text: String
     var url: String
+
+    /// The address as a link, "example.org" meaning https; nil when it's empty or not a safe link.
+    var link: URL? {
+        let address = url.trimmingCharacters(in: .whitespaces)
+        guard !address.isEmpty else { return nil }
+        return MessageBodyRenderer.safeLink(address.contains(":") ? address : "https://" + address)
+    }
+    /// An empty address removes the link.
+    var isValid: Bool { url.trimmingCharacters(in: .whitespaces).isEmpty || link != nil }
 }
 
 @MainActor private final class ComposerEditorState: ObservableObject {
@@ -731,6 +741,8 @@ private struct ComposerNativeEditor: NSViewRepresentable {
             view.setSelectedRange(NSRange(location: min(previous.location, view.string.utf16.count), length: 0))
             context.coordinator.text = text
             context.coordinator.synchronizing = false
+            // After this update, which mustn't publish.
+            Task { @MainActor in view.publishFormats() }
         }
         view.isEditable = enabled
     }
@@ -1043,12 +1055,9 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
 
     /// Links `draft.text` to its address, or unlinks it when the address is empty.
     func setLink(_ draft: ComposerLinkDraft) {
-        guard let storage = textStorage, NSMaxRange(draft.range) <= storage.length else { return }
-        let address = draft.url.trimmingCharacters(in: .whitespaces)
-        let url =
-            address.isEmpty ? nil : MessageBodyRenderer.safeLink(address.contains(":") ? address : "https://" + address)
-        guard address.isEmpty || url != nil else { return }
-        let text = draft.text.isEmpty ? address : draft.text
+        guard let storage = textStorage, NSMaxRange(draft.range) <= storage.length, draft.isValid else { return }
+        let url = draft.link
+        let text = draft.text.isEmpty ? url?.absoluteString ?? "" : draft.text
         let current =
             draft.range.length > 0
             ? storage.attributes(at: draft.range.location, effectiveRange: nil) : super.typingAttributes
@@ -1088,6 +1097,8 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
             return named
         }
         textStorage?.setAttributedString(attributed(paragraphs))
+        // A cleared or switched draft starts plain, not in the list or quote the last one ended in.
+        typingAttributes = attributes([], block: nil)
     }
 
     var draft: String {
@@ -1233,6 +1244,10 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
     override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
         guard type == .html, let html = pboard.string(forType: .html) else {
             return super.readSelection(from: pboard, type: type)
+        }
+        // A page with markup a message can't carry pastes as the text its source app offers.
+        if MessageBodyRenderer.editable(body: "", html: html).usedPlainTextFallback {
+            return super.readSelection(from: pboard, type: .string)
         }
         var paragraphs = ComposerFormat.paragraphs(html: html)
         // The first line joins the paragraph it lands in.
