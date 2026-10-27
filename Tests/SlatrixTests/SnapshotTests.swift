@@ -254,10 +254,11 @@ struct Snapshots {
 
     @Test("The @ list scrolled to its end: an invited person, then @room", arguments: Theme.allCases)
     func mentionList(theme: Theme) async throws {
-        let members = [
-            "Aisha Khan", "AI Agent", "Alex Moreau", "Amelia Hart", "Anders Berg", "Ana Lima", "Arjun Rao",
-            "Ava Chen", "Aaron Price", "Abby Lee",
-        ].map { ChatUser(id: "@\($0.lowercased().prefix { $0 != " " }):example.org", name: $0) }
+        let members =
+            [
+                "Aisha Khan", "AI Agent", "Alex Moreau", "Amelia Hart", "Anders Berg", "Ana Lima", "Arjun Rao",
+                "Ava Chen", "Aaron Price", "Abby Lee",
+            ].map { ChatUser(id: "@\($0.lowercased().prefix { $0 != " " }):example.org", name: $0) }
             + [ChatUser(id: "@adam:example.org", name: "Adam Invited", membership: "invite")]
         let (window, hosting) = try themedWindow(
             MessageComposer(

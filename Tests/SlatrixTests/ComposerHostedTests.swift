@@ -120,7 +120,8 @@ struct ComposerHostedTests {
     func mentionAcrossSpace() throws {
         let draft = Draft()
         let members = [
-            ChatUser(id: "@aisha:example.org", name: "Aisha Khan"), ChatUser(id: "@agent:example.org", name: "AI Agent"),
+            ChatUser(id: "@aisha:example.org", name: "Aisha Khan"),
+            ChatUser(id: "@agent:example.org", name: "AI Agent"),
         ]
         let (editor, window) = try composer(draft, members: members)
         defer { close(window) }

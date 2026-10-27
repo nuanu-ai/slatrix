@@ -36,6 +36,11 @@ struct MentionSearchTests {
         #expect(names(text) == nil)
     }
 
+    @Test("The server name matches no one, since everyone on it shares it")
+    func serverName() {
+        #expect(names("@exam") == nil)
+    }
+
     @Test("The query and its @ are what a chosen mention replaces")
     func range() {
         let suggestions = MentionSearch.suggestions(before: "Hi @AI A", members: team, recentSenders: [])
@@ -58,6 +63,23 @@ struct MentionSearchTests {
         #expect(names("@mia", members: members, recent: recent) == ["Mia Cy", "Mia Bo", "Mia Ann"])
     }
 
+    @Test("A bare @ lists everyone, whoever spoke last first, then by name, whatever order the SDK gave")
+    func bareAt() {
+        let people = [
+            person("alex-salomatov", "alex-salomatov"), person("danil-solomin", "danil-solomin"),
+            person("dmitry", "Dmitry Ukhanov"), person("igor-soldatov", "igor-soldatov"), person("sergey", "sergey"),
+            person("andrei", "Andrei Lavrenov"), person("maria", "Maria"), person("oleg", "Oleg"),
+            person("pavel", "Pavel"), person("deadlock", "deadlock agent"),
+        ]
+        let recent = ["@deadlock:example.org", "@dmitry:example.org", "@deadlock:example.org"]
+        let expected = [
+            "deadlock agent", "Dmitry Ukhanov", "alex-salomatov", "Andrei Lavrenov", "danil-solomin", "igor-soldatov",
+            "Maria", "Oleg", "Pavel", "sergey", "@room",
+        ]
+        #expect(names("@", members: people, recent: recent) == expected)
+        #expect(names("@", members: people.reversed(), recent: recent) == expected)
+    }
+
     @Test("Case and accents don't matter")
     func folding() {
         #expect(names("@jose", members: [person("jose", "JOSÉ Núñez")]) == ["JOSÉ Núñez"])
@@ -73,10 +95,10 @@ struct MentionSearchTests {
         #expect(names("@a", members: members) == ["Am Joined", "Al Invited"])
     }
 
-    @Test("A long list stops at its limit")
-    func limit() {
+    @Test("Everyone a query names is listed, however many")
+    func everyone() {
         let members = (0..<40).map { person("p\($0)", "Person \($0)") }
-        #expect(names("@person", members: members)?.count == MentionSearch.limit)
+        #expect(names("@person", members: members)?.count == members.count)
     }
 
     @Test("@room comes last for what Slack users type: room, channel or here", arguments: ["@ro", "@channel", "@her"])
