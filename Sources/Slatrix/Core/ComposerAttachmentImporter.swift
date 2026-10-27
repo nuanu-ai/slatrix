@@ -79,7 +79,10 @@ enum ComposerAttachmentImporter {
         var errorDescription: String? { message }
     }
 
-    static func stage(_ input: ComposerAttachmentInput, existing: [URL]) async throws -> [URL] {
+    /// `promiseDeadline` is how long another app may take to write promised files.
+    static func stage(_ input: ComposerAttachmentInput, existing: [URL], promiseDeadline: Duration = .seconds(30))
+        async throws -> [URL]
+    {
         try Task.checkCancellation()
         if case .promises(let promises) = input {
             let folder = try newFolder()
