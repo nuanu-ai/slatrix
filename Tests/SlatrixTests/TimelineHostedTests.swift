@@ -348,7 +348,10 @@ struct TimelineHostedTests {
         let scrollView = try #require(harness.scrollView)
         #expect(harness.top(of: "Message 10") == nil)
         harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Message-10")
-        await settle(harness) { harness.top(of: "Message 10") != nil }
+        // In the layout that takes the jump, before the highlight changes any row.
+        harness.layout()
+        #expect(harness.top(of: "Message 10") != nil)
+        await settle(harness)
         #expect(harness.scrollView === scrollView)
         let row = try #require(
             Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }.first { cell in
@@ -358,6 +361,12 @@ struct TimelineHostedTests {
         guard case .message(let entry) = row.entry?.kind else { return }
         #expect(entry.highlighted)
         #expect(ceil(row.height(width: row.frame.width)) == row.frame.height)
+        // Jumping to it again while it is still highlighted, after scrolling away, comes back to it.
+        harness.scroll(toTop: harness.clip.bounds.minY + 4_000)
+        #expect(harness.top(of: "Message 10") == nil)
+        harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Message-10")
+        harness.layout()
+        #expect(harness.top(of: "Message 10") != nil)
     }
 
     @Test("A message at rest offers its whole menu, its VoiceOver actions and the emoji picker")
