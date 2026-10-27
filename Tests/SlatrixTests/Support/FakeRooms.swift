@@ -55,6 +55,9 @@ final class FakeRoom: Room, @unchecked Sendable {
         return memberList
     }
     override func isEncrypted() async -> Bool { true }
+    override func getPowerLevels() async throws -> RoomPowerLevels {
+        throw ClientError.Generic(msg: "fixture has no power levels", details: nil)
+    }
     override func membership() -> Membership { info?.membership ?? .joined }
     override func roomInfo() async throws -> RoomInfo {
         lock.withLock { reads += 1 }

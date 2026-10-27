@@ -62,4 +62,20 @@ struct RoomMembersTests {
         await service.loadMembers()
         #expect(service.members.map(\.membership) == ["join", "invite", "leave", "ban"])
     }
+
+    @Test("@room is offered and notifies only when your power level allows it", arguments: [false, true])
+    func roomNotification(allowed: Bool) async {
+        let room = FakeOpenRoom("!team:example.org", cached: [])
+        room.memberList = [roomMember("@me:example.org")]
+        room.canNotifyRoom = allowed
+        let service = MatrixService()
+        service.configureMessageActionsForChecks(
+            client: FakeClient(rooms: [room]), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
+            selectionID: UUID(), threadID: UUID())
+        service.user = ChatUser(id: "@me:example.org", name: "Me")
+        service.selectedRoomID = room.id()
+        await service.loadMembers()
+        #expect(service.canMentionRoom == allowed)
+        #expect(service.mentions(ComposerFormat.message(draft: "Heads up @room")).room == allowed)
+    }
 }

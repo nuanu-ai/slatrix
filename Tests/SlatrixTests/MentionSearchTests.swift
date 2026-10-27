@@ -14,13 +14,16 @@ private let team = [aisha, agent, bob]
 
 /// Slack's @ autocomplete: which query the caret is in, and who it names, best first.
 struct MentionSearchTests {
-    private func names(_ text: String, members: [ChatUser] = team, recent: [String] = []) -> [String]? {
-        MentionSearch.suggestions(before: text, members: members, recentSenders: recent)?.candidates.map {
-            switch $0 {
-            case .member(let member): member.name
-            case .room: "@room"
+    private func names(
+        _ text: String, members: [ChatUser] = team, recent: [String] = [], offersRoom: Bool = true
+    ) -> [String]? {
+        MentionSearch.suggestions(before: text, members: members, recentSenders: recent, offersRoom: offersRoom)?
+            .candidates.map {
+                switch $0 {
+                case .member(let member): member.name
+                case .room: "@room"
+                }
             }
-        }
     }
 
     @Test("A query keeps matching across a space while the words still name someone")
@@ -43,7 +46,8 @@ struct MentionSearchTests {
 
     @Test("The query and its @ are what a chosen mention replaces")
     func range() {
-        let suggestions = MentionSearch.suggestions(before: "Hi @AI A", members: team, recentSenders: [])
+        let suggestions = MentionSearch.suggestions(
+            before: "Hi @AI A", members: team, recentSenders: [], offersRoom: false)
         #expect(suggestions?.range == NSRange(location: 3, length: 5))
     }
 
@@ -109,5 +113,11 @@ struct MentionSearchTests {
     @Test("@room stays out when the query names only people")
     func noRoom() {
         #expect(names("@bob")?.contains("@room") == false)
+    }
+
+    @Test("@room is offered only to someone whose power level lets them notify the room")
+    func roomNeedsPermission() {
+        #expect(names("@room", offersRoom: false) == nil)
+        #expect(names("@", offersRoom: false)?.contains("@room") == false)
     }
 }
