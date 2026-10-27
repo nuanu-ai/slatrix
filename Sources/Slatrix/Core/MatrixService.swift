@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 import MatrixRustSDK
 import Observation
 import UniformTypeIdentifiers
@@ -2056,10 +2057,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             extraContentJson: relation)
         let kind: AttachmentKind
         if mime.hasPrefix("image/") {
+            let shape = Self.displayedSize(url)
             kind = .image(
                 imageInfo: ImageInfo(
-                    height: nil, width: nil, mimetype: mime, size: values.fileSize.map(UInt64.init), thumbnailInfo: nil,
-                    thumbnailSource: nil, blurhash: nil, isAnimated: nil), thumbnailSource: nil)
+                    height: shape?.height, width: shape?.width, mimetype: mime, size: values.fileSize.map(UInt64.init),
+                    thumbnailInfo: nil, thumbnailSource: nil, blurhash: nil, isAnimated: nil), thumbnailSource: nil)
         } else {
             kind = .file(
                 fileInfo: FileInfo(
@@ -2075,6 +2077,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let handle = try target.sendAttachment(params: parameters, attachment: kind)
         await returnToLive(after: token, threadRootID: threadRootID)
         try await handle.join()
+    }
+
+    /// An image's size upright, from its header alone: EXIF orientations 5 to 8 turn it a quarter, swapping the sides.
+    private static func displayedSize(_ url: URL) -> (width: UInt64, height: UInt64)? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? UInt64,
+            let height = properties[kCGImagePropertyPixelHeight] as? UInt64
+        else { return nil }
+        let orientation = properties[kCGImagePropertyOrientation] as? UInt32 ?? 1
+        return orientation >= 5 ? (height, width) : (width, height)
     }
 
     /// The attachment as an open timeline shows it now, or nil once it was deleted, replaced or left the view.

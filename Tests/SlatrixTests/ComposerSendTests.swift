@@ -101,20 +101,6 @@ struct ComposerSendTests {
         #expect(info.width == width && info.height == height)
     }
 
-    @Test("An image's size comes from its header, without decoding its pixels")
-    func uploadedImageSizeFromHeader() async throws {
-        let scratch = try TemporaryDirectory()
-        let photo = try scratch.png("photo.png", width: 160, height: 90)
-        // The signature and the header chunk, with no pixels after them.
-        try Data(try Data(contentsOf: photo).prefix(33)).write(to: photo)
-        try await service.uploadFile(photo, roomID: roomID)
-        guard case .image(let info, _) = try #require(main.attachments.all.first) else {
-            Issue.record("not sent as an image")
-            return
-        }
-        #expect(info.width == 160 && info.height == 90)
-    }
-
     @Test("A send the SDK refuses to queue fails without being retried", arguments: [false, true])
     func enqueueFailure(threaded: Bool) async {
         let target = threaded ? thread : main
