@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 import ImageIO
@@ -5,6 +6,19 @@ import ImageIO
 enum ComposerAttachmentInput: Sendable {
     case files([URL])
     case image(Data, png: Bool)
+
+    /// What a paste or a drop attaches: its files, else its image's data; nil when it holds neither.
+    init?(pasteboard: NSPasteboard) {
+        let files =
+            pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        if !files.isEmpty {
+            self = .files(files)
+        } else if let type = pasteboard.availableType(from: [.png, .tiff]), let data = pasteboard.data(forType: type) {
+            self = .image(data, png: type == .png)
+        } else {
+            return nil
+        }
+    }
 }
 
 enum ComposerAttachmentImporter {

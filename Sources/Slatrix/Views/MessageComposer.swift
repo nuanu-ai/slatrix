@@ -206,6 +206,7 @@ struct MessageComposer: View {
                 onCancelEdit?()
             }
         }
+        .uploadIntake(isEnabled && !sending && !isEditing && !preparingAttachments ? queueInput as UploadIntake : nil)
     }
 
     private var floating: some View {
@@ -722,7 +723,8 @@ private struct ComposerNativeEditor: NSViewRepresentable {
         view.isContinuousSpellCheckingEnabled = true
         view.allowsUndo = true
         view.delegate = context.coordinator
-        view.registerForDraggedTypes(view.registeredDraggedTypes + [.fileURL, .png, .tiff])
+        // AppKit registers a text view for dragged text only when it becomes editable, and this one starts editable.
+        view.registerForDraggedTypes(view.acceptableDragTypes)
         view.setAccessibilityLabel("Message editor")
         scroll.documentView = view
         state.textView = view
@@ -1276,39 +1278,18 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
         if hasAttachment(.general) { _ = acceptAttachments(.general) } else { super.paste(sender) }
     }
 
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard hasAttachment(sender.draggingPasteboard) else { return super.draggingEntered(sender) }
-        return isEditable && acceptsAttachments ? .copy : []
-    }
-
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        draggingEntered(sender)
-    }
-
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard hasAttachment(sender.draggingPasteboard) else { return super.performDragOperation(sender) }
-        return acceptAttachments(sender.draggingPasteboard)
-    }
-
     private func hasAttachment(_ pasteboard: NSPasteboard) -> Bool {
-        !fileURLs(from: pasteboard).isEmpty || pasteboard.availableType(from: [.png, .tiff]) != nil
+        pasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+            || pasteboard.availableType(from: [.png, .tiff]) != nil
     }
 
     private func acceptAttachments(_ pasteboard: NSPasteboard) -> Bool {
         guard isEditable else { return false }
-        let urls = fileURLs(from: pasteboard)
-        if !urls.isEmpty { return onAttachments?(.files(urls)) ?? false }
-        if let type = pasteboard.availableType(from: [.png, .tiff]), let data = pasteboard.data(forType: type) {
-            return onAttachments?(.image(data, png: type == .png)) ?? false
+        guard let input = ComposerAttachmentInput(pasteboard: pasteboard) else {
+            onAttachmentError?("Couldn’t paste the image. Attach it as a file instead.")
+            return false
         }
-        onAttachmentError?("Couldn’t paste the image. Attach it as a file instead.")
-        return false
-    }
-
-    private func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
-        guard pasteboard.types?.contains(.fileURL) == true else { return [] }
-        return (pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL])
-            ?? []
+        return onAttachments?(input) ?? false
     }
 }
 
