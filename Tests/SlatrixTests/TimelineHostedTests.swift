@@ -288,6 +288,36 @@ struct TimelineHostedTests {
         #expect(harness.showsImage)
     }
 
+    @Test(
+        "Your message keeps its height and place as the server confirms it, with no sending line coming and going",
+        arguments: [true, false])
+    func confirmedSendKeepsLayout(grouped: Bool) async throws {
+        let earlier = Self.messages(0..<10)
+        // The fixture's messages are long past, so this one has been sending long enough to show the slow clock.
+        var echo = ChatMessage(
+            id: "mine", roomID: Self.room.id, senderID: Self.user, senderName: "Reader", body: "On my way",
+            timestamp: earlier[9].timestamp.addingTimeInterval(grouped ? 60 : 3_600))
+        echo.timelineEventID = "mine-transaction"
+        echo.sendState = "sending"
+        let harness = Harness(messages: earlier)
+        defer { harness.close() }
+        await settle(harness) { harness.top(of: "Message 9") != nil }
+        harness.service.messages = earlier + [echo]
+        await settle(harness) { harness.cell(showing: "mine-transaction") != nil }
+        let sending = try #require(harness.cell(showing: "mine-transaction"))
+        let frame = sending.convert(sending.bounds, to: nil)
+        let above = try #require(harness.top(of: "Message 9"))
+
+        var confirmed = echo
+        confirmed.timelineEventID = "$mine"
+        confirmed.sendState = "sent"
+        harness.service.messages = earlier + [confirmed]
+        await settle(harness) { harness.cell(showing: "$mine") != nil }
+        let sent = try #require(harness.cell(showing: "$mine"))
+        #expect(sent.convert(sent.bounds, to: nil) == frame)
+        #expect(harness.top(of: "Message 9") == above)
+    }
+
     @Test("Older history arrives without moving a pixel of what you are reading")
     func prependIsPixelStable() async throws {
         let current = Self.messages(0..<30)
