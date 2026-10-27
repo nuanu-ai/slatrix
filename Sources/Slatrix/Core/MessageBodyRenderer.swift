@@ -369,7 +369,8 @@ final class MessageBodyRenderer: @unchecked Sendable {
                 next.mention = id
                 let name = (element.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let shown = name.isEmpty || name == id ? MatrixID.localpart(id) : String(name.drop { $0 == "@" })
-                try builder.append("@" + shown, context: next)
+                // 0.2.8 and 0.2.9 split each mention into two links before its last letter; the second continues it.
+                try builder.append((builder.runs.last?.mention == id ? "" : "@") + shown, context: next)
                 return
             }
         case "blockquote": next.block.quote += 1
