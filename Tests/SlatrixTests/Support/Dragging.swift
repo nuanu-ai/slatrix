@@ -1,19 +1,20 @@
 import AppKit
 import Testing
 
-/// The view AppKit drops a drag of `types` on at `point` in `window`, or nil when the drag finds nowhere to land.
+/// The view AppKit drops `drag` on at `point` in `window`, or nil when the drag finds nowhere to land.
 ///
 /// Synthetic drags never reach the window server, so this asks AppKit's own lookup. It walks frames and registered
 /// types rather than `hitTest`, which SwiftUI answers itself, so only it shows where a real drop goes.
 @MainActor
-func dropTarget(in window: NSWindow, at point: NSPoint, types: [NSPasteboard.PasteboardType]) throws -> NSView? {
+func dropTarget(of drag: FakeDrag, in window: NSWindow, at point: NSPoint) throws -> NSView? {
     let selector = NSSelectorFromString("_hitTest:dragTypes:")
     let frame = try #require(window.contentView?.superview)
     try #require(frame.responds(to: selector), "AppKit no longer finds drop targets this way")
     typealias Lookup = @convention(c) (NSView, Selector, UnsafeMutablePointer<NSPoint>, NSSet) -> NSView?
     let lookup = unsafeBitCast(frame.method(for: selector), to: Lookup.self)
     var location = frame.convert(point, from: nil)
-    return lookup(frame, selector, &location, NSSet(array: types.map(\.rawValue)))
+    // The pasteboard's own types, legacy names included, as a real drag offers them.
+    return lookup(frame, selector, &location, NSSet(array: (drag.draggingPasteboard.types ?? []).map(\.rawValue)))
 }
 
 /// What AppKit hands a drop target: a drag of files, image data or text over `window`.

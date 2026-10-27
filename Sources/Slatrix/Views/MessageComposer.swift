@@ -723,6 +723,8 @@ private struct ComposerNativeEditor: NSViewRepresentable {
         view.isContinuousSpellCheckingEnabled = true
         view.allowsUndo = true
         view.delegate = context.coordinator
+        // AppKit registers a text view for dragged text only when it becomes editable, and this one starts editable.
+        view.registerForDraggedTypes(view.acceptableDragTypes)
         view.setAccessibilityLabel("Message editor")
         scroll.documentView = view
         state.textView = view

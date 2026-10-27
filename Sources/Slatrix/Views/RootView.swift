@@ -699,14 +699,16 @@ struct RootView: View {
                                     })
                                 inspector(room).layoutIsolated().frame(width: m(width))
                             }
-                        }.background(colors.canvas).clipShape(
-                            UnevenRoundedRectangle(
-                                topLeadingRadius: 0, bottomLeadingRadius: 0, bottomTrailingRadius: m.radiusLarge,
-                                topTrailingRadius: m.radiusLarge
-                            ))
-                    }.clipShape(RoundedRectangle(cornerRadius: m.radiusLarge)).overlay(
-                        RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border)
-                    ).padding(.trailing, m.sp4).padding(.bottom, m.sp4)
+                        }.background(colors.canvas)
+                    }.clipped()
+                        // Rounds the panel by painting the frame over its corners: a rounded clip hosts AppKit views in an
+                        // offset container that AppKit's drag lookup never looks inside, so nothing in it took drops.
+                        .overlay {
+                            OutsideCorners(radius: m.radiusLarge).fill(colors.frame, style: FillStyle(eoFill: true))
+                                .allowsHitTesting(false)
+                        }
+                        .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
+                        .padding(.trailing, m.sp4).padding(.bottom, m.sp4)
                 }
             }
         }
@@ -2833,6 +2835,16 @@ private struct ViewerInvalidation: View {
             .onChange(of: matrix.sharedFiles.items) {
                 if viewer.files != nil { viewer.update(from: matrix.sharedFiles.items.map(\.message)) }
             }
+    }
+}
+
+/// What lies outside a rounded rectangle within its square bounds: its four corners.
+private struct OutsideCorners: Shape {
+    let radius: CGFloat
+    func path(in rect: CGRect) -> Path {
+        var path = Path(rect)
+        path.addPath(RoundedRectangle(cornerRadius: radius).path(in: rect))
+        return path
     }
 }
 

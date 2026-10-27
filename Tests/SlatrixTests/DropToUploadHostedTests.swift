@@ -50,26 +50,27 @@ struct DropToUploadHostedTests {
             x: center(of: messages).x, y: messages.convert(messages.bounds, to: nil).maxY + Metrics().paneHeader / 2)
 
         let points = [center(of: composer), center(of: messages), header]
-        let targets = try points.map { try #require(try dropTarget(in: window, at: $0, types: [.fileURL]), "\($0)") }
+        let files = FakeDrag(files: [URL(fileURLWithPath: #filePath)])
+        let targets = try points.map { try #require(try dropTarget(of: files, in: window, at: $0), "\($0)") }
         #expect(targets.allSatisfy { $0 === targets[0] })
         // An image from a browser or Photos, with no file behind it.
-        #expect(try points.allSatisfy { try dropTarget(in: window, at: $0, types: [.png]) === targets[0] })
+        let image = FakeDrag(png: Data())
+        #expect(try points.allSatisfy { try dropTarget(of: image, in: window, at: $0) === targets[0] })
         // It spans the conversation, so it must not turn it into a handle that moves the window.
         #expect(!targets[0].mouseDownCanMoveWindow)
 
         // Viewing older messages keeps the composer, so the conversation still takes files.
         matrix.focusedEventID = try #require(matrix.messages.first?.eventID)
         hosting.layoutSubtreeIfNeeded()
-        let target = try #require(try dropTarget(in: window, at: center(of: composer), types: [.fileURL]))
-        #expect(
-            (target as? UploadDropView)?.draggingEntered(FakeDrag(files: [URL(fileURLWithPath: #filePath)])) == .copy)
+        let target = try #require(try dropTarget(of: files, in: window, at: center(of: composer)))
+        #expect((target as? UploadDropView)?.draggingEntered(files) == .copy)
     }
 
     @Test("Text dragged over the composer lands in its text view, not on the conversation's drop target")
     func textDropsInComposer() async throws {
         let (_, window, _, composer) = try await conversation()
         defer { close(window) }
-        #expect(try dropTarget(in: window, at: center(of: composer), types: [.string]) === composer)
+        #expect(try dropTarget(of: FakeDrag(text: "On my way"), in: window, at: center(of: composer)) === composer)
     }
 
     private final class Tray { var files: [URL] = [] }
