@@ -145,14 +145,6 @@ struct TimelineHostedTests {
         var showsImage: Bool { Self.views(in: hosting).contains { ($0 as? NSImageView)?.image != nil } }
     }
 
-    private static func png() throws -> Data {
-        let image = try #require(
-            NSBitmapImageRep(
-                bitmapDataPlanes: nil, pixelsWide: 160, pixelsHigh: 90, bitsPerSample: 8, samplesPerPixel: 4,
-                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
-        return try #require(image.representation(using: .png, properties: [:]))
-    }
-
     private static func messages(_ range: Range<Int>, prefix: String = "Message") -> [ChatMessage] {
         range.map { index in
             ChatMessage(
@@ -227,7 +219,7 @@ struct TimelineHostedTests {
     func imageArrivalKeepsLayout() async throws {
         let harness = Harness(messages: [], height: 800)
         defer { harness.close() }
-        harness.client.thumbnail = try Self.png()
+        harness.client.thumbnail = try pngData()
         harness.client.thumbnails.arm()
         harness.service.projectMediaCaptionForChecks(
             [
@@ -256,7 +248,7 @@ struct TimelineHostedTests {
     func sentImageAppearsWhenConfirmed() async throws {
         let harness = Harness(messages: [], height: 800)
         defer { harness.close() }
-        harness.client.thumbnail = try Self.png()
+        harness.client.thumbnail = try pngData()
         let url = "mxc://example.org/photo"
         func show(_ event: EventTimelineItem) {
             harness.service.projectMediaCaptionForChecks(

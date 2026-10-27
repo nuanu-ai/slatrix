@@ -1,5 +1,6 @@
-import Foundation
+import AppKit
 import MatrixRustSDK
+import Testing
 
 /// Like the SDK, its unique ID differs from the event ID and survives a local echo becoming remote.
 final class FakeTimelineItem: TimelineItem, @unchecked Sendable {
@@ -46,6 +47,15 @@ func fileEvent(_ id: String, source: MediaSource?, sender: String = "@owner:exam
         reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000, localSendState: nil, editSendState: nil,
         redactionSendState: nil, localCreatedAt: nil, readReceipts: [:], origin: nil, canBeRepliedTo: true,
         lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
+}
+
+/// A 160×90 PNG.
+func pngData() throws -> Data {
+    let image = try #require(
+        NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 160, pixelsHigh: 90, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+    return try #require(image.representation(using: .png, properties: [:]))
 }
 
 /// A remote image, or with `sending` the reader's own local echo of it, whose `id` is then its transaction ID.
