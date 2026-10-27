@@ -13,9 +13,12 @@ enum MentionSearch {
         var candidates: [Candidate]
     }
 
-    /// `text` is everything before the caret; `recentSenders` the conversation's senders, latest first. Nil when the
-    /// caret isn't in a query that names anyone, so typing on after a finished name is left alone.
-    static func suggestions(before text: String, members: [ChatUser], recentSenders: [String]) -> Suggestions? {
+    /// `text` is everything before the caret; `recentSenders` the conversation's senders, latest first; `offersRoom`
+    /// whether your power level lets you notify the room. Nil when the caret isn't in a query that names anyone, so
+    /// typing on after a finished name is left alone.
+    static func suggestions(
+        before text: String, members: [ChatUser], recentSenders: [String], offersRoom: Bool
+    ) -> Suggestions? {
         let source = text as NSString
         let at = source.range(of: "@", options: .backwards).location
         guard at != NSNotFound,
@@ -23,12 +26,14 @@ enum MentionSearch {
         else { return nil }
         let query = source.substring(from: at + 1)
         guard query.first?.isWhitespace != true, !query.contains(where: \.isNewline) else { return nil }
-        let candidates = matches(fold(query), members: members, recentSenders: recentSenders)
+        let candidates = matches(fold(query), members: members, recentSenders: recentSenders, offersRoom: offersRoom)
         guard !candidates.isEmpty else { return nil }
         return Suggestions(range: NSRange(location: at, length: source.length - at), candidates: candidates)
     }
 
-    private static func matches(_ query: String, members: [ChatUser], recentSenders: [String]) -> [Candidate] {
+    private static func matches(
+        _ query: String, members: [ChatUser], recentSenders: [String], offersRoom: Bool
+    ) -> [Candidate] {
         let recency = Dictionary(recentSenders.enumerated().map { ($1, $0) }, uniquingKeysWith: min)
         let people = members.compactMap { member -> (key: (Int, Int, Int, String, String), member: ChatUser)? in
             guard member.membership == "join" || member.membership == "invite",
@@ -37,7 +42,7 @@ enum MentionSearch {
             let name = fold(member.name)
             return ((rank, member.membership == "join" ? 0 : 1, recency[member.id] ?? .max, name, member.id), member)
         }.sorted { $0.key < $1.key }.map { Candidate.member($0.member) }
-        let room = ["room", "channel", "here"].contains { $0.hasPrefix(query) }
+        let room = offersRoom && ["room", "channel", "here"].contains { $0.hasPrefix(query) }
         return people + (room ? [.room] : [])
     }
 

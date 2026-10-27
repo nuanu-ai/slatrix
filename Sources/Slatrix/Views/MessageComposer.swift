@@ -16,6 +16,8 @@ struct MessageComposer: View {
     var members: [ChatUser]
     /// The conversation's senders, latest first, read as you type an @ query.
     var recentSenders: () -> [String] = { [] }
+    /// Whether the @ list offers @room: only someone whose power level lets them notify the room.
+    var canMentionRoom = false
     var isEditing: Bool = false
     var onSend: (String, [URL]) async throws -> Void
     var onTyping: (Bool) -> Void
@@ -420,7 +422,8 @@ struct MessageComposer: View {
         let prefix = (value as NSString).substring(to: min(range.location, (value as NSString).length))
         let found =
             prefix.contains("@")
-            ? MentionSearch.suggestions(before: prefix, members: members, recentSenders: recentSenders()) : nil
+            ? MentionSearch.suggestions(
+                before: prefix, members: members, recentSenders: recentSenders(), offersRoom: canMentionRoom) : nil
         // An @ inside a finished mention starts no query.
         mention = found.flatMap { editor.isMention(at: $0.range.location) ? nil : $0 }
         mentionIndex = 0
