@@ -31,7 +31,12 @@ struct WindowHostedTests {
                 rootView: AnyView(
                     RootView(matrix: matrix).environmentObject(appearance)
                         .environment(\.metrics, Metrics(zoom: zoom))))
-            window = offscreenWindow(NSSize(width: 1_440, height: 900))
+            // Titled, as `.hiddenTitleBar` sets up the app's window, so it has the window buttons.
+            window = offscreenWindow(
+                NSSize(width: 1_440, height: 900),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
             window.contentView = hosting
             window.orderFrontRegardless()
         }
@@ -100,6 +105,22 @@ struct WindowHostedTests {
             return CGFloat(longest) / scale
         }
 
+        /// The red, green and blue of every pixel in `rect`, a frame in the window, as drawn.
+        func pixels(in rect: CGRect) -> [CGFloat] {
+            hosting.layoutSubtreeIfNeeded()
+            guard let image = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { return [] }
+            hosting.cacheDisplay(in: hosting.bounds, to: image)
+            let scale = CGFloat(image.pixelsWide) / hosting.bounds.width
+            // Bitmap rows run down from the top; window frames up from the bottom.
+            let rows =
+                Int((hosting.bounds.height - rect.maxY) * scale)..<Int((hosting.bounds.height - rect.minY) * scale)
+            return rows.flatMap { y in
+                (Int(rect.minX * scale)..<Int(rect.maxX * scale)).flatMap { x in
+                    image.colorAt(x: x, y: y).map { [$0.redComponent, $0.greenComponent, $0.blueComponent] } ?? []
+                }
+            }
+        }
+
         /// Laid out, so what it finds is what the window shows.
         func shown() -> [NSView] {
             hosting.layoutSubtreeIfNeeded()
@@ -114,9 +135,10 @@ struct WindowHostedTests {
         var conversationLeft: CGFloat? {
             shown().compactMap { $0 as? UploadDropView }.map { $0.convert($0.bounds, to: nil).minX }.min()
         }
-        var searchFieldShown: Bool {
-            shown().contains { ($0 as? NSTextField)?.placeholderString?.hasPrefix("Search ") == true }
+        var searchField: NSView? {
+            shown().first { ($0 as? NSTextField)?.placeholderString?.hasPrefix("Search ") == true }
         }
+        var searchFieldShown: Bool { searchField != nil }
 
         /// Through a message's own context menu, the item a right-click shows.
         func openThread() throws {
@@ -360,5 +382,66 @@ struct WindowHostedTests {
         #expect(await eventually { !harness.sidebarShown && harness.conversationLeft ?? .infinity < Metrics().rail })
         harness.menu("toggle-sidebar")
         #expect(await eventually { harness.sidebarShown && harness.dividers == 1 })
+    }
+
+    @Test("The window buttons sit on the title bar's midline, and stay there through a resize", arguments: [1, 1.5])
+    func windowButtonsCentered(zoom: Double) async throws {
+        let harness = Harness(zoom: zoom)
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let close = try #require(harness.window.standardWindowButton(.closeButton))
+        // The search field is centered in the title bar.
+        func offset() -> CGFloat {
+            guard let search = harness.searchField else { return .infinity }
+            return close.convert(close.bounds, to: nil).midY - search.convert(search.bounds, to: nil).midY
+        }
+        // Titled, the window still never reaches a screen.
+        func offscreen() -> Bool { !NSScreen.screens.contains { $0.frame.intersects(harness.window.frame) } }
+        #expect(offscreen())
+        #expect(await eventually { abs(offset()) <= 1 }, "\(offset())")
+        harness.resize(1_000)
+        #expect(offscreen())
+        #expect(await eventually { abs(offset()) <= 1 }, "\(offset())")
+    }
+
+    @Test("A modal dims the window below the title bar, which looks the same and takes no clicks", arguments: [1, 1.5])
+    func modalLeavesTitleBar(zoom: Double) async throws {
+        let harness = Harness(zoom: zoom)
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let search = try #require(harness.searchField)
+        let field = search.convert(search.bounds, to: nil)
+        // The title bar, centered on its search field: under the window buttons, and from the field to the window's
+        // right edge, past Sign in and help. The AppKit controls between draw as the offscreen window's key state
+        // has them, which a modal changes. A point short of the bar's bottom edge, which can fall inside a pixel.
+        let height = 2 * (harness.hosting.bounds.height - field.midY) - 1
+        let top = harness.hosting.bounds.height - height
+        let zoomButton = try #require(harness.window.standardWindowButton(.zoomButton))
+        let buttons = zoomButton.convert(zoomButton.bounds, to: nil).maxX
+        let stretches = [
+            CGRect(x: 0, y: top, width: buttons, height: height),
+            CGRect(x: field.maxX, y: top, width: harness.hosting.bounds.width - field.maxX, height: height),
+        ]
+        let before = stretches.map(harness.pixels)
+        harness.menu("preferences")
+        // Preferences opens on Appearance, with its profile photos switch.
+        #expect(await eventually { harness.shown().contains { $0 is NSSwitch } })
+
+        // The scrim is in once the window's frame color along its bottom edge, under the panel, is dimmed.
+        let frame = try #require(NSColor(harness.appearance.colors.frame).usingColorSpace(.sRGB))
+        let edge = CGRect(x: 0, y: 0, width: harness.hosting.bounds.width, height: 2)
+        #expect(
+            await eventually {
+                harness.longestRun(in: edge) {
+                    abs($0.redComponent - frame.redComponent) + abs($0.greenComponent - frame.greenComponent)
+                        + abs($0.blueComponent - frame.blueComponent) < 0.03
+                } == 0
+            })
+        // Within a step or two of 255: antialiased edges at 150% land a shade apart from one drawing to the next.
+        for (shown, was) in zip(stretches.map(harness.pixels), before) {
+            #expect(shown.count == was.count && zip(shown, was).allSatisfy { abs($0 - $1) < 0.01 })
+        }
+        let hit = harness.hosting.hitTest(NSPoint(x: field.midX, y: field.midY))
+        #expect(hit.map { $0 !== search && !$0.isDescendant(of: search) } ?? true)
     }
 }

@@ -33,6 +33,16 @@ struct WorkspaceRailTests {
                 == [Self.lab, Self.test, nil])
     }
 
+    @Test("The search field names the open workspace or space, and all conversations when none is open")
+    func searchPrompt() {
+        let workspaces = [Self.lab, Self.test, Self.nested]
+        #expect(WorkspaceRail.searchPrompt(workspaceID: "!lab", workspaces: workspaces) == "Search Harbor")
+        #expect(WorkspaceRail.searchPrompt(workspaceID: "!nested", workspaces: workspaces) == "Search Design")
+        #expect(WorkspaceRail.searchPrompt(workspaceID: nil, workspaces: workspaces) == "Search all conversations")
+        // Remembered from last time, before the workspaces have loaded.
+        #expect(WorkspaceRail.searchPrompt(workspaceID: "!lab", workspaces: []) == "Search all conversations")
+    }
+
     @Test(
         "A workspace icon counts its channels' mentions, or goes bold when one of its channel rows would",
         arguments: [
