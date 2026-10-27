@@ -22,6 +22,7 @@ Use the `ponytail` skill on every change: the smallest change that fully solves 
 - Views build from `Views/DesignSystem`: color roles in `AppColors`, `Elevation` and `Motion` tokens, the `.primary`, `.secondary`, `.destructive`, `.textLink` and `.icon` button styles, `.field` and `SearchField`, `DelayedProgress` and `SkeletonRows`, and `PopoverHost` for anchored cards. The debug build's Window ▸ Component Gallery shows them all.
 - Borderless buttons use `.buttonStyle(.row)`, which makes the whole frame clickable; `scripts/lint.sh` rejects `.plain`.
 - A custom `NSView` that handles the mouse returns `false` from `mouseDownCanMoveWindow`. The window moves by its background, so otherwise the window server takes the drag.
+- CI builds with Xcode 26. A local named like a function called in the same expression (`let count = … count($1)`) builds locally but fails there, so give the local its own name.
 - `scripts/lint.sh` runs swift format, the `.plain` check, and rejects raw colors, off-system button styles, spinners, shadows, literal animations and rounded-border fields outside `Views/DesignSystem`. It runs in CI; run it before committing too.
 
 ## Testing
