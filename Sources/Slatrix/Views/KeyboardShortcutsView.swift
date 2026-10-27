@@ -55,7 +55,7 @@ struct KeyboardShortcutsView: View {
                         shortcut("New channel", keys: "⇧⌘N", spoken: "Command Shift N")
                     }
                     section("View") {
-                        shortcut("Toggle sidebar", keys: "⇧⌘D", spoken: "Command Shift D")
+                        shortcut("Hide sidebar", keys: "⇧⌘D", spoken: "Command Shift D")
                         shortcut("Toggle right pane", keys: "⌘.", spoken: "Command period")
                         shortcut("Zoom in / out", keys: "⌘+ ⌘−", spoken: "Command plus, Command minus")
                         shortcut("Actual size", keys: "⌘0", spoken: "Command zero")

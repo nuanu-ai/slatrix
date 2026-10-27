@@ -17,7 +17,8 @@ struct RailHostedTests {
         let metrics = Metrics(zoom: zoom)
         let hosting = NSHostingView(
             rootView: RootView(matrix: matrix).environmentObject(AppearanceStore()).environment(\.metrics, metrics))
-        let window = offscreenWindow(NSSize(width: 1_440, height: 900))
+        // Wide enough at 200% that the rail stays beside the conversation instead of folding into the drawer.
+        let window = offscreenWindow(NSSize(width: 1_600, height: 900))
         window.contentView = hosting
         defer {
             window.contentView = nil

@@ -38,8 +38,7 @@ struct SlatrixApp: App {
                 Button("Attach file…") { menuAction("attach") }.keyboardShortcut("u")
             }
             CommandGroup(before: .toolbar) {
-                Button("Toggle sidebar") { menuAction("toggle-sidebar") }.keyboardShortcut(
-                    "d", modifiers: [.command, .shift])
+                SidebarMenuItem { menuAction("toggle-sidebar") }
                 Button("Toggle right pane") { menuAction("toggle-pane") }.keyboardShortcut(".")
                 Divider()
                 Button("Actual Size") { appearance.zoom = 1 }.keyboardShortcut("0")
@@ -105,13 +104,25 @@ struct SlatrixApp: App {
         #endif
     }
     private var metrics: Metrics { Metrics(zoom: appearance.zoom) }
-    /// Scales with zoom but never past the screen, so 200% still fits a laptop.
+    /// Scales with zoom but never past the screen, so 200% still fits a laptop. The narrowest is a readable
+    /// conversation alone, the sidebar folded away.
     private var minimumSize: CGSize {
         let screen = NSScreen.main?.visibleFrame.size ?? CGSize(width: CGFloat.infinity, height: .infinity)
-        return CGSize(width: min(metrics(1060), screen.width), height: min(metrics(680), screen.height))
+        return CGSize(
+            width: min(metrics(SidebarLayout.readableWidth), screen.width), height: min(metrics(680), screen.height))
     }
     private func menuAction(_ action: String) {
         NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
+    }
+}
+
+/// Says what ⇧⌘D will do: the window reports whether its sidebar, inline or as the drawer, is showing.
+private struct SidebarMenuItem: View {
+    let action: () -> Void
+    @FocusedValue(\.sidebarShown) private var shown
+    var body: some View {
+        Button(shown == false ? "Show Sidebar" : "Hide Sidebar", action: action)
+            .keyboardShortcut("d", modifiers: [.command, .shift])
     }
 }
 

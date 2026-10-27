@@ -49,4 +49,27 @@ struct UnreadBadgeTests {
     func muted(room: ChatRoom, expected: UnreadBadge) {
         #expect(UnreadBadge(room) == expected)
     }
+
+    @Test(
+        "The collapsed sidebar's button adds up every conversation's count, else goes bold for any unread one",
+        arguments: [
+            ([room(), room(messages: 7, muted: true)], UnreadBadge.none),
+            ([room(), room(messages: 3)], .bold),
+            ([room(messages: 3), room(mentions: 2), room(direct: true, messages: 4)], .count("6")),
+            ([room(mentions: 60), room(direct: true, messages: 60)], .count("99+")),
+        ])
+    func combined(rooms: [ChatRoom], expected: UnreadBadge) {
+        #expect(UnreadBadge.combined(rooms) == expected)
+    }
+
+    @Test("Conversations you have left or not joined, and workspaces, add nothing")
+    func combinedSkipsOthers() {
+        var left = Self.room(mentions: 2)
+        left.membership = "leave"
+        var invited = Self.room(messages: 2)
+        invited.membership = "invite"
+        var space = Self.room(mentions: 2)
+        space.isSpace = true
+        #expect(UnreadBadge.combined([left, invited, space]) == .none)
+    }
 }
