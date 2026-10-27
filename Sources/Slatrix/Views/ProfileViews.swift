@@ -52,7 +52,10 @@ struct ProfilePane: View {
                             }.font(m.font(.body))
                         }
                         ProfileActions(
-                            matrix: matrix, userID: userID, own: own, onOpen: onOpenConversation, onEdit: onEditProfile)
+                            matrix: matrix, userID: userID, own: own, onOpen: onOpenConversation, onEdit: onEditProfile
+                        )
+                        // A failed Message belongs to the person it was for, not the next profile opened in the pane.
+                        .id(userID)
                     }.padding(m.sp20)
                     Divider().overlay(colors.border)
                     VStack(alignment: .leading, spacing: m.sp16) {

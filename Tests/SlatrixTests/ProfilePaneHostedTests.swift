@@ -68,10 +68,16 @@ struct ProfilePaneHostedTests {
         }
         #expect(await eventually { dividers() == 1 })
 
-        // Esc from anywhere else, as the app's key monitor delivers it.
+        // Esc from anywhere else, as the app's key monitor delivers it, even after leaving the conversation.
         try await clickName()
         #expect(await eventually { dividers() == 2 })
-        NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "mark-read"])
+        func menu(_ action: String) {
+            NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
+        }
+        menu("people")
+        await drainMainActor()
+        #expect(dividers() == 2)
+        menu("mark-read")
         #expect(await eventually { dividers() == 1 })
     }
 }
