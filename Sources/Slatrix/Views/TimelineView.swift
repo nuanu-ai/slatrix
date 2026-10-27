@@ -118,9 +118,13 @@ struct TimelineView: View {
                 }, onCancel: { deleting = nil })
         }
         .modal(isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } })) {
+            let failed =
+                cancelling.flatMap { matrix.sendFailure(for: $0)?.shown(offline: matrix.connectionState == .offline) }
+                != nil
             ConfirmModal(
-                title: "Cancel sending this message?", message: "It may already have been delivered.",
-                action: "Cancel sending", cancel: "Keep sending",
+                title: failed ? "Delete message?" : "Cancel sending this message?",
+                message: failed ? "This can’t be undone." : "It may already have been delivered.",
+                action: failed ? "Delete" : "Cancel sending", cancel: failed ? "Cancel" : "Keep sending",
                 onConfirm: {
                     if let message = cancelling { cancelSend(message) }
                     cancelling = nil
@@ -423,6 +427,7 @@ struct MessageRow: View {
     @Environment(\.mentions) private var mentions
     private var colors: AppColors { appearance.colors }
     private var pendingSend: Bool { own && message.sendState != "sent" }
+    private var sending: Bool { pendingSend && sendFailure == nil }
     private var compact: Bool { appearance.density == .compact }
     private var time: String { timeLabel ?? message.timestamp.formatted(.dateTime.hour().minute()) }
     var body: some View {
@@ -441,8 +446,9 @@ struct MessageRow: View {
                 if grouped || !appearance.showAvatars {
                     // One line: "12:00 AM" is wider than the gutter, and a wrap would grow the row on hover.
                     Text(hovered ? time : "").font(m.font(.caption)).lineLimit(1).fixedSize()
-                        .foregroundStyle(colors.textSecondary).frame(width: m.avatar, alignment: .trailing).padding(
-                            .top, m.sp4)
+                        .foregroundStyle(colors.textSecondary).frame(width: m.avatar, alignment: .trailing)
+                        .overlay(alignment: .trailing) { if grouped && sending && !hovered { clock } }
+                        .padding(.top, m.sp4)
                 } else {
                     Button {
                         actions.openProfile?()
@@ -473,10 +479,11 @@ struct MessageRow: View {
                             Text(time).font(m.font(.caption))
                                 .foregroundStyle(colors.textSecondary)
                         }
-                        if own && message.sendState == "sending" { DelayedProgress() }
                         if isSaved {
                             Image(systemName: "bookmark.fill").font(m.font(.caption)).foregroundStyle(colors.accent)
                         }
+                    }.overlay(alignment: .trailing) {
+                        if sending { clock.padding(.leading, m.sp8).frame(width: 0, alignment: .leading) }
                     }
                 }
                 if message.isRedacted {
@@ -490,9 +497,11 @@ struct MessageRow: View {
                         Label(message.body, systemImage: "lock").font(m.font(.secondary)).italic()
                             .foregroundStyle(colors.textSecondary)
                     } else if message.showsMessageBody {
+                        // Slack draws a message that hasn't reached the server lighter, and nothing else.
                         NativeMessageBody(
                             body: message.body, formattedBody: message.formattedBody, edited: message.isEdited,
-                            menuCommands: actions.menu)
+                            menuCommands: actions.menu
+                        ).opacity(pendingSend ? 0.5 : 1)
                     }
                     if message.isEdited && (!message.showsMessageBody || message.kind == "m.room.encrypted") {
                         Text("(edited)").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
@@ -505,32 +514,41 @@ struct MessageRow: View {
                             count: message.replyCount, lastReply: message.lastReply, avatar: replierAvatar,
                             action: actions.thread)
                     }
-                    if pendingSend {
-                        VStack(alignment: .leading, spacing: m.sp8) {
-                            if let failure = sendFailure {
-                                Label(failure.message, systemImage: "exclamationmark.circle").font(m.font(.caption))
-                                    .foregroundStyle(colors.warning)
-                                HStack(spacing: m.sp12) {
-                                    if failure.canRetry {
-                                        Button(
-                                            failure.kind == .recoverable ? "Resume sending" : "Retry",
-                                            action: actions.retrySend
-                                        ).buttonStyle(.row).foregroundStyle(colors.accent).disabled(sendBusy)
-                                    }
-                                    Button("Cancel sending…", action: actions.cancelSend).buttonStyle(.row)
-                                        .foregroundStyle(colors.textSecondary).disabled(sendBusy)
-                                    if sendBusy { DelayedProgress() }
-                                }.font(m.font(.caption))
-                            } else {
-                                Label("Sending…", systemImage: "clock").font(m.font(.caption)).foregroundStyle(
-                                    colors.textSecondary)
+                    if pendingSend, let failure = sendFailure {
+                        VStack(alignment: .leading, spacing: m.sp4) {
+                            HStack(alignment: .firstTextBaseline, spacing: m.sp12) {
+                                Label("Not delivered", systemImage: "exclamationmark.circle.fill")
+                                    .foregroundStyle(colors.destructive)
+                                if failure.canRetry {
+                                    Button("Retry", action: actions.retrySend).buttonStyle(.textLink)
+                                }
+                                Button("Delete", role: .destructive, action: actions.cancelSend).buttonStyle(.textLink)
+                            }.disabled(sendBusy).overlay(alignment: .trailing) {
+                                if sendBusy {
+                                    DelayedProgress().padding(.leading, m.sp8).frame(width: 0, alignment: .leading)
+                                }
                             }
-                        }.padding(.top, m.sp2)
+                            // A network failure needs only Retry; the others say what to do first.
+                            if failure.kind != .recoverable {
+                                Text(failure.message).foregroundStyle(colors.textSecondary)
+                            }
+                        }.font(m.font(.caption)).padding(.top, m.sp2)
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.padding(.horizontal, m.sp20).padding(.top, grouped || compact ? 3 : 12).padding(.bottom, m.sp4)
     }
+    /// Slack's clock for a send still going after a few seconds. It takes no space, so the row never moves for it.
+    private var clock: some View {
+        let since = message.timestamp
+        let delay = LoadingPresentation.sendingClockDelay / .seconds(1)
+        return SwiftUI.TimelineView(.explicit([since.addingTimeInterval(delay)])) { _ in
+            let shown = LoadingPresentation.showsSendingClock(sendingFor: .seconds(Date().timeIntervalSince(since)))
+            Image(systemName: "clock").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                .opacity(shown ? 1 : 0).accessibilityHidden(!shown).accessibilityLabel("Sending")
+        }.fixedSize()
+    }
+
     private var reactions: some View {
         HStack(spacing: m.sp4) {
             ForEach(message.reactions, id: \.key) { reaction in
@@ -763,14 +781,13 @@ extension TimelineRowContext {
             if let failure = row.sendFailure, failure.canRetry {
                 commands.append(
                     MessageMenuCommand(
-                        id: "retry-send", title: failure.kind == .recoverable ? "Resume sending" : "Retry sending",
-                        isEnabled: !row.sendBusy, perform: actions.retrySend))
+                        id: "retry-send", title: "Retry", isEnabled: !row.sendBusy, perform: actions.retrySend))
             }
             commands.append(copyText)
             commands.append(
                 MessageMenuCommand(
-                    id: "cancel-send", title: "Cancel sending…", isEnabled: !row.sendBusy, isDestructive: true,
-                    perform: actions.cancelSend))
+                    id: "cancel-send", title: row.sendFailure == nil ? "Cancel sending…" : "Delete message…",
+                    isEnabled: !row.sendBusy, isDestructive: true, perform: actions.cancelSend))
             return commands
         }
         if let openProfile = actions.openProfile {

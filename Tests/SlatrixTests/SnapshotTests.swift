@@ -654,6 +654,34 @@ struct Snapshots {
         try write(await settledImage(hosting), "new-line-\(theme.rawValue)")
     }
 
+    @Test("Your messages sending, sending slowly and not delivered", arguments: Theme.allCases)
+    func sendStates(theme: Theme) async throws {
+        func message(_ body: String, sentAgo: TimeInterval, state: String = "sending") -> ChatMessage {
+            var message = ChatMessage(
+                id: body, roomID: "!room:example.org", senderID: "@me:example.org", senderName: "Dmitry", body: body,
+                timestamp: Date().addingTimeInterval(-sentAgo))
+            message.sendState = state
+            return message
+        }
+        let network = MessageSendFailure(kind: .recoverable, message: "Couldn’t send. Retry to resume.")
+        let verify = MessageSendFailure(kind: .verification, message: "Verify the device or person, then retry.")
+        let (window, hosting) = try themedWindow(
+            VStack(spacing: 0) {
+                MessageRow(message: message("Heading out now", sentAgo: 10), own: true, timeLabel: "10:42 AM")
+                MessageRow(message: message("On my way", sentAgo: 0), grouped: true, own: true)
+                MessageRow(message: message("Grabbing coffee first", sentAgo: 10), grouped: true, own: true)
+                MessageRow(
+                    message: message("Running late", sentAgo: 10, state: "failed"), grouped: true, own: true,
+                    sendFailure: network)
+                MessageRow(
+                    message: message("See you there", sentAgo: 10, state: "failed"), grouped: true, own: true,
+                    sendFailure: verify)
+            }.frame(width: 560),
+            theme: theme)
+        defer { window.close() }
+        try write(await settledImage(hosting), "send-states-\(theme.rawValue)")
+    }
+
     @Test(
         "Profiles: someone with a photo and status, someone in a call without one, and you", arguments: Theme.allCases)
     func profiles(theme: Theme) async throws {

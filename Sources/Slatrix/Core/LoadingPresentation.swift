@@ -10,6 +10,11 @@ enum LoadingPresentation {
 
     static func showsConnectionNotice(downFor: Duration) -> Bool { downFor >= connectionNoticeDelay }
 
+    /// Most sends land well within this; only a slow one gets Slack's clock beside it.
+    static let sendingClockDelay = Duration.seconds(2)
+
+    static func showsSendingClock(sendingFor: Duration) -> Bool { sendingFor >= sendingClockDelay }
+
     /// Offline, a network wait lasts until the connection returns; the connection notice says so instead.
     static func showsIndicator(waited: Duration, hasContent: Bool, offline: Bool = false) -> Bool {
         !hasContent && !offline && waited >= indicatorDelay
