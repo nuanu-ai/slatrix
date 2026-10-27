@@ -6,6 +6,8 @@ import ImageIO
 enum ComposerAttachmentInput: Sendable {
     case files([URL])
     case image(Data, png: Bool)
+    /// Files another app writes only when asked, as Photos, Mail and browsers offer them in a drag.
+    case promises(FilePromises)
 
     /// What a paste or a drop attaches: its files, else its image's data; nil when it holds neither.
     init?(pasteboard: NSPasteboard) {
@@ -19,6 +21,11 @@ enum ComposerAttachmentInput: Sendable {
             return nil
         }
     }
+}
+
+/// AppKit's receivers aren't Sendable; only the main actor touches them.
+struct FilePromises: @unchecked Sendable {
+    let receivers: [NSFilePromiseReceiver]
 }
 
 enum ComposerAttachmentImporter {
@@ -216,7 +223,7 @@ enum ComposerAttachmentImporter {
         case .files(let urls):
             var seen = Set<URL>()
             files = urls.filter { seen.insert($0).inserted }
-        case .image: files = []
+        case .image, .promises: files = []
         }
         let count: Int
         if case .image = input { count = 1 } else { count = files.count }
@@ -235,7 +242,7 @@ enum ComposerAttachmentImporter {
             return folder.appendingPathComponent(name)
         }
         switch input {
-        case .files:
+        case .files, .promises:
             for source in files {
                 try Task.checkCancellation()
                 let output = try destination(source.lastPathComponent)

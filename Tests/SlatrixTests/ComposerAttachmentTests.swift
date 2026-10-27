@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Testing
 
 @testable import Slatrix
@@ -8,6 +8,32 @@ private typealias Importer = ComposerAttachmentImporter
 private let mebibyte = 1_024 * 1_024
 private let onePixelPNG = Data(
     base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6qZsAAAAASUVORK5CYII=")!
+
+/// What another app does with a file promise: writes `name` into the folder it is given, then reports it, or reports
+/// `reported` instead.
+private final class FakePromise: NSFilePromiseReceiver, @unchecked Sendable {
+    let name: String
+    let reported: URL?
+    var written: URL?
+    init(_ name: String, reporting reported: URL? = nil) {
+        self.name = name
+        self.reported = reported
+        super.init()
+    }
+    required init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) { nil }
+    override var fileTypes: [String] { ["public.plain-text"] }
+    override func receivePromisedFiles(
+        atDestination destinationDir: URL, options: [AnyHashable: Any] = [:], operationQueue: OperationQueue,
+        reader: @escaping (URL, (any Error)?) -> Void
+    ) {
+        let file = destinationDir.appendingPathComponent(name)
+        written = file
+        operationQueue.addOperation {
+            try? Data("Promised content\n".utf8).write(to: file)
+            reader(self.reported ?? file, nil)
+        }
+    }
+}
 
 struct ComposerAttachmentTests {
     @Test("An attached file is queued once as a private copy that later edits to the original do not change")
@@ -55,6 +81,27 @@ struct ComposerAttachmentTests {
         case .oversized: input = try scratch.sparse("oversized.bin", bytes: 100 * mebibyte + 1)
         }
         await #expect(throws: Importer.Failure.self) { try await Importer.stage(.files([input]), existing: []) }
+    }
+
+    @Test("A promised file is queued as a private copy, and the folder the other app wrote it to is removed")
+    @MainActor func stagesPromisedFile() async throws {
+        let promise = FakePromise("IMG_0001.HEIC")
+        let staged = try await Importer.stage(.promises(FilePromises(receivers: [promise])), existing: [])
+        defer { Importer.discard(staged) }
+        #expect(staged.map(\.lastPathComponent) == ["IMG_0001.HEIC"])
+        #expect(try Data(contentsOf: staged[0]) == Data("Promised content\n".utf8))
+        let written = try #require(promise.written)
+        #expect(!FileManager.default.fileExists(atPath: written.deletingLastPathComponent().path))
+    }
+
+    @Test("A promise that reports a file outside the folder it was given is refused, and that file is not read")
+    @MainActor func refusesPromiseElsewhere() async throws {
+        let scratch = try TemporaryDirectory()
+        let elsewhere = try scratch.file("private.txt")
+        let promise = FakePromise("IMG_0001.HEIC", reporting: elsewhere)
+        await #expect(throws: Importer.Failure.self) {
+            try await Importer.stage(.promises(FilePromises(receivers: [promise])), existing: [])
+        }
     }
 
     @Test("A full queue takes no more files")

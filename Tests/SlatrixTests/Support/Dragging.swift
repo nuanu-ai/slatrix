@@ -17,20 +17,28 @@ func dropTarget(of drag: FakeDrag, in window: NSWindow, at point: NSPoint) throw
     return lookup(frame, selector, &location, NSSet(array: (drag.draggingPasteboard.types ?? []).map(\.rawValue)))
 }
 
-/// What AppKit hands a drop target: a drag of files, image data or text over `window`.
+/// What AppKit hands a drop target: a drag of files, image data, a file promise of type `promise` or text over
+/// `window`.
 final class FakeDrag: NSObject, NSDraggingInfo {
     let draggingPasteboard = NSPasteboard(name: NSPasteboard.Name("SlatrixTests-" + UUID().uuidString))
+    /// Never asked to write: a promise is kept only when its target receives it.
+    private let promiser = Promiser()
     let draggingDestinationWindow: NSWindow?
     var draggingFormation: NSDraggingFormation = .default
     var animatesToDestination = false
     var numberOfValidItemsForDrop = 0
 
-    @MainActor init(files: [URL] = [], png: Data? = nil, text: String? = nil, over window: NSWindow? = nil) {
+    @MainActor init(
+        files: [URL] = [], png: Data? = nil, promise: String? = nil, text: String? = nil, over window: NSWindow? = nil
+    ) {
         draggingDestinationWindow = window
         super.init()
         draggingPasteboard.clearContents()
         if !files.isEmpty { draggingPasteboard.writeObjects(files as [NSURL]) }
         if let png { draggingPasteboard.setData(png, forType: .png) }
+        if let promise {
+            draggingPasteboard.writeObjects([NSFilePromiseProvider(fileType: promise, delegate: promiser)])
+        }
         if let text { draggingPasteboard.setString(text, forType: .string) }
     }
 
@@ -48,4 +56,13 @@ final class FakeDrag: NSObject, NSDraggingInfo {
         searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:],
         using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
     ) {}
+}
+
+private final class Promiser: NSObject, NSFilePromiseProviderDelegate {
+    func filePromiseProvider(_ provider: NSFilePromiseProvider, fileNameForType fileType: String) -> String {
+        "Promised"
+    }
+    func filePromiseProvider(
+        _ provider: NSFilePromiseProvider, writePromiseTo url: URL, completionHandler: @escaping (Error?) -> Void
+    ) { completionHandler(CocoaError(.featureUnsupported)) }
 }
