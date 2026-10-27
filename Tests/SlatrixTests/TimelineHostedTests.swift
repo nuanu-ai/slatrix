@@ -142,6 +142,14 @@ struct TimelineHostedTests {
                 return entry.message.eventID == eventID
             }
         }
+        var showsWelcome: Bool {
+            layout()
+            return Self.views(in: hosting).contains { view in
+                guard let cell = view as? TimelineCell, cell.window != nil, case .welcome = cell.entry?.kind
+                else { return false }
+                return true
+            }
+        }
         var showsImage: Bool { Self.views(in: hosting).contains { ($0 as? NSImageView)?.image != nil } }
     }
 
@@ -728,6 +736,25 @@ extension TimelineHostedTests {
         }
         #expect(steps > 1_000)
         #expect(worst < .milliseconds(300), "\(worst)")
+    }
+
+    @Test("A conversation whose loaded history shows nothing loads the rest and shows its intro")
+    func emptyConversationShowsIntro() async throws {
+        let harness = Harness(messages: [])
+        defer { harness.close() }
+        harness.timeline.onPage = { true }
+        await settle(harness)
+        #expect(await eventually { harness.showsWelcome })
+        #expect(!harness.service.hasMoreHistory)
+    }
+
+    @Test("A conversation whose older pages never show anything stops loading them and shows its intro")
+    func hiddenHistoryShowsIntro() async throws {
+        let harness = Harness(messages: [])
+        defer { harness.close() }
+        await settle(harness)
+        #expect(await eventually { harness.showsWelcome })
+        #expect(harness.service.hasMoreHistory && !harness.service.loadsMoreHistory)
     }
 
     @Test("Scrolling up through history at a reading pace never reaches the loading row")

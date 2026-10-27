@@ -43,8 +43,10 @@ struct TimelineView: View {
     /// A conversation opened at an older message is not live: it neither follows new messages nor is remembered.
     private var live: Bool { thread || matrix.focusedEventID == nil }
     private var hasOlder: Bool {
-        !matrix.isPreview && (thread ? matrix.hasMoreThreadHistory : matrix.hasMoreHistory)
+        !matrix.isPreview && (thread ? matrix.hasMoreThreadHistory : matrix.loadsMoreHistory)
     }
+    /// The intro tops a conversation loaded back to its start, or one with nothing else to show.
+    private var reachedStart: Bool { matrix.isPreview || !matrix.hasMoreHistory }
     private var hasNewer: Bool { !thread && matrix.focusedEventID != nil && matrix.hasMoreForwardHistory }
 
     var body: some View {
@@ -150,7 +152,8 @@ struct TimelineView: View {
         let offline = matrix.connectionState == .offline
         let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
         let inputs = TimelineLayoutCache.EntryInputs(
-            rows: rows, hasOlder: hasOlder, hasNewer: hasNewer, loadingHistory: loadingHistory, welcome: welcome,
+            rows: rows, hasOlder: hasOlder, reachedStart: reachedStart, hasNewer: hasNewer,
+            loadingHistory: loadingHistory, welcome: welcome,
             pinned: room.pinnedEventIDs,
             canPin: canPinMessages, savedIDs: savedIDs, highlighted: highlighted,
             sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
@@ -170,7 +173,7 @@ struct TimelineView: View {
         entries.reserveCapacity(rows.count + 2)
         if hasOlder {
             entries.append(TimelineEntry(id: "older", kind: .loading(loadingHistory)))
-        } else if !thread {
+        } else if !thread && (reachedStart || rows.isEmpty) {
             entries.append(
                 TimelineEntry(
                     id: "welcome",
@@ -344,6 +347,7 @@ struct TimelineView: View {
     struct EntryInputs: Equatable {
         var rows: [TimelineLayout.Row]
         var hasOlder: Bool
+        var reachedStart: Bool
         var hasNewer: Bool
         var loadingHistory: Bool
         var welcome: TimelineWelcome

@@ -746,8 +746,9 @@ struct TimelineTable: NSViewRepresentable {
         checkHistory()
     }
 
+    /// Also before the table opens: history of only hidden events leaves nothing to open at until a page shows some.
     private func checkHistory() {
-        guard opened, let configuration else { return }
+        guard let configuration else { return }
         let viewport = viewport
         if configuration.canLoadOlder && Policy.needsOlder(viewport) {
             DispatchQueue.main.async { configuration.onLoadOlder() }
