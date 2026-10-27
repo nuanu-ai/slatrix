@@ -217,6 +217,20 @@ struct MessageBodyRendererTests {
         #expect(runs.first { $0.text == "@Alice" }?.mention == "@alice:example.org")
     }
 
+    @Test(
+        "Links to one person with nothing between them are one pill; a space or another person keeps pills apart",
+        arguments: [
+            // As 0.2.8 and 0.2.9 sent a mention: split before its last letter.
+            ([("dl", "deadlock agen"), ("dl", "t")], "", ["@deadlock agent"]),
+            ([("dl", "deadlock agent"), ("dl", "deadlock agent")], " ", ["@deadlock agent", "@deadlock agent"]),
+            ([("alice", "Alice"), ("bob", "Bob")], "", ["@Alice", "@Bob"]),
+        ])
+    func adjacentPersonLinks(links: [(String, String)], between: String, pills: [String]) {
+        let html = links.map { "<a href=\"https://matrix.to/#/@\($0):example.org\">\($1)</a>" }
+            .joined(separator: between)
+        #expect(render(html).runs.filter { $0.mention != nil }.map(\.text) == pills)
+    }
+
     @Test("A bare ID reads @ and its localpart, and @room mentions everyone")
     func bareMentions() {
         let runs = render(nil, body: "@room ping @alice:example.org.").runs

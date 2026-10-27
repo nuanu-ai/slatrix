@@ -141,6 +141,15 @@ struct ComposerFormatTests {
         #expect(restored[8].runs.first?.link?.absoluteString == "https://example.org")
     }
 
+    @Test("A draft with a mention split as 0.2.8 and 0.2.9 saved it reopens as one token and sends as one link")
+    func splitMentionDraft() {
+        let link = "https://matrix.to/#/@dl:example.org"
+        let draft = "<a href=\"\(link)\">deadlock agen</a><a href=\"\(link)\">t</a> "
+        let mentions = ComposerFormat.paragraphs(html: draft).flatMap(\.runs).filter { $0.mention != nil }
+        #expect(mentions.map(\.text) == ["@deadlock agent"])
+        #expect(ComposerFormat.message(draft: draft).html == "<a href=\"\(link)\">deadlock agent</a>")
+    }
+
     @Test("A message from Element opens for editing with its formatting")
     func editsElementMessage() {
         let draft = ComposerFormat.draft(
