@@ -75,6 +75,37 @@ struct Snapshots {
         try write(await settledImage(hosting), "profile-\(name)")
     }
 
+    @Test("A message jumped to, in the live conversation and at an older message", arguments: Theme.allCases)
+    func jump(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let window = offscreenWindow(NSSize(width: 1440, height: 900))
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        _ = try await settledImage(hosting)
+        let room = try #require(matrix.selectedRoomID)
+        matrix.jump = MessageJump(roomID: room, eventID: "preview.share")
+        // The highlight fades after a moment; settling would wait it out.
+        try await Task.sleep(for: .milliseconds(800))
+        try write(Self.image(window), "jump-live-\(theme.rawValue)")
+        matrix.focusedEventID = "preview.share"
+        matrix.jump = MessageJump(roomID: room, eventID: "preview.share")
+        try await Task.sleep(for: .milliseconds(800))
+        try write(Self.image(window), "jump-older-\(theme.rawValue)")
+    }
+
     @Test("Sidebar", arguments: SidebarPalette.allCases, Theme.allCases)
     func sidebar(palette: SidebarPalette, theme: Theme) async throws {
         _ = NSApplication.shared
@@ -502,11 +533,7 @@ struct Snapshots {
         var unchanged = 0
         for _ in 0..<400 {
             view.layoutSubtreeIfNeeded()
-            // Nil until the window server has the window's first frame. Options: including window (8); ignore
-            // framing (1) and best resolution (8).
-            let image = Self.windowImage(.null, 8, UInt32(window.windowNumber), 1 | 8)?.takeRetainedValue()
-            let png =
-                image.flatMap { NSBitmapImageRep(cgImage: $0).representation(using: .png, properties: [:]) } ?? Data()
+            let png = Self.image(window)
             unchanged = png == previous ? unchanged + 1 : 0
             if unchanged == 6 && !png.isEmpty { return png }
             previous = png
@@ -514,6 +541,13 @@ struct Snapshots {
         }
         Issue.record("Rendering never settled")
         return previous
+    }
+
+    /// The window as the window server composites it now; empty until it has the window's first frame.
+    private static func image(_ window: NSWindow) -> Data {
+        // Options: including window (8); ignore framing (1) and best resolution (8).
+        let image = windowImage(.null, 8, UInt32(window.windowNumber), 1 | 8)?.takeRetainedValue()
+        return image.flatMap { NSBitmapImageRep(cgImage: $0).representation(using: .png, properties: [:]) } ?? Data()
     }
 
     /// `CGWindowListCreateImage`, unavailable in the SDK but still in the OS; reading the process's own window needs

@@ -32,6 +32,8 @@ struct TimelineView: View {
     @State private var sendActions = Set<String>()
     @State private var linkCopy: LinkCopy?
     @State private var jumpVisible = false
+    /// The message jumped to, while its highlight lasts.
+    @State private var highlighted: String?
     @State private var layout = TimelineLayoutCache()
     @State private var rowContext = TimelineRowContext()
     @State private var scroller = TimelineScroller()
@@ -47,9 +49,9 @@ struct TimelineView: View {
     var body: some View {
         TimelineTable(
             entries: entries, context: updatedContext, live: live, bottomAligned: !thread,
-            focusedEventID: thread ? nil : matrix.focusedEventID, startsAtUnread: startsAtUnread,
-            memoryKey: live
-                ? "\(matrix.notificationSessionID)|\(room.id)|\(thread ? threadRootID ?? "" : "")" : nil,
+            focusedEventID: thread ? nil : matrix.jump?.eventID ?? matrix.focusedEventID,
+            jumpID: thread ? nil : matrix.jump?.id, startsAtUnread: startsAtUnread,
+            memoryKey: "\(matrix.notificationSessionID)|\(room.id)|\(thread ? threadRootID ?? "" : "")",
             canLoadOlder: hasOlder && !loadingHistory,
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
@@ -79,6 +81,12 @@ struct TimelineView: View {
             }
         }
         .animation(Motion.overlay, value: jumpVisible)
+        .task(id: thread ? nil : matrix.jump?.id) {
+            highlighted = thread ? nil : matrix.jump?.eventID
+            // Held long enough to find, then faded by the row.
+            guard highlighted != nil, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
+            highlighted = nil
+        }
         .background(colors.canvas)
         // Every message redraws the timeline; it fills what it is given, so that never lays out the window.
         .layoutIsolated()
@@ -139,7 +147,7 @@ struct TimelineView: View {
         let inputs = TimelineLayoutCache.EntryInputs(
             rows: rows, hasOlder: hasOlder, hasNewer: hasNewer, loadingHistory: loadingHistory, welcome: welcome,
             pinned: room.pinnedEventIDs,
-            canPin: canPinMessages, savedIDs: savedIDs, highlighted: thread ? nil : matrix.focusedEventID,
+            canPin: canPinMessages, savedIDs: savedIDs, highlighted: highlighted,
             sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
             context: context, collapsedMedia: matrix.collapsedMedia)
         return layout.entries(for: inputs) { buildEntries(rows, context: context, failures: failures) }
@@ -165,7 +173,6 @@ struct TimelineView: View {
         }
         // Read once: each read of a published property costs more than the lookups below.
         let pinned = Set(room.pinnedEventIDs)
-        let highlighted = thread ? nil : matrix.focusedEventID
         let pending = matrix.pendingSendActions
         let collapsed = matrix.collapsedMedia
         for row in rows {
@@ -418,7 +425,12 @@ struct MessageRow: View {
     private var time: String { timeLabel ?? message.timestamp.formatted(.dateTime.hour().minute()) }
     var body: some View {
         layout
-            .background(hovered ? colors.hover : highlighted ? colors.accent.opacity(0.12) : .clear)
+            .background(hovered ? colors.hover : .clear)
+            .background {
+                // A cell shows another message after a scroll; that one's highlight starts afresh, never fading in.
+                colors.highlight.opacity(highlighted ? 1 : 0)
+                    .animation(highlighted ? nil : Motion.highlight, value: highlighted).id(message.id)
+            }
             .contentShape(Rectangle())
     }
     private var layout: some View {

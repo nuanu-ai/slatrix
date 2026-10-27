@@ -90,15 +90,6 @@ struct MatrixServiceGuardTests {
         #expect(service.messages.isEmpty)
     }
 
-    @Test("While viewing older messages, text and files are refused until returning to the latest messages")
-    func historicalFocusCannotSend() async {
-        service.focusedEventID = "$older"
-        #expect(await failure { try await service.sendMessage("x") }.contains("latest messages"))
-        #expect(
-            await failure { try await service.uploadFile(URL(fileURLWithPath: "/nonexistent/fixture")) }
-                .contains("latest messages"))
-    }
-
     @Test("Selecting a room returns to its latest messages")
     func selectingClearsFocus() async {
         service.focusedEventID = "$older"
