@@ -31,6 +31,17 @@ struct KeyboardShortcutsView: View {
                         shortcut("Browse channels", keys: "⇧⌘L", spoken: "Command Shift L")
                         shortcut("Switch workspace", keys: "⌘1–9", spoken: "Command 1 through 9")
                     }
+                    section("Format") {
+                        shortcut("Bold", keys: "⌘B", spoken: "Command B")
+                        shortcut("Italic", keys: "⌘I", spoken: "Command I")
+                        shortcut("Strikethrough", keys: "⇧⌘X", spoken: "Command Shift X")
+                        shortcut("Link", keys: "⇧⌘U", spoken: "Command Shift U")
+                        shortcut("Numbered list", keys: "⇧⌘7", spoken: "Command Shift 7")
+                        shortcut("Bulleted list", keys: "⇧⌘8", spoken: "Command Shift 8")
+                        shortcut("Quote", keys: "⇧⌘9", spoken: "Command Shift 9")
+                        shortcut("Code", keys: "⇧⌘C", spoken: "Command Shift C")
+                        shortcut("Code block", keys: "⌥⇧⌘C", spoken: "Command Option Shift C")
+                    }
                 }
                 Rectangle().fill(colors.border).frame(width: 1)
                 VStack(alignment: .leading, spacing: m.sp20) {

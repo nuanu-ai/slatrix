@@ -9,12 +9,23 @@ struct MessageTextStyle: OptionSet, Hashable, Sendable {
     static let underline = Self(rawValue: 1 << 4)
 }
 
+/// Where a run sits among a message's blocks, which rows indent and decorate.
+struct MessageBlock: Hashable, Sendable {
+    var quote = 0
+    var list = 0
+    /// Inside `<pre>`.
+    var code = false
+}
+
 struct MessageBodyRun: Hashable, Sendable {
     var text: String
     var style: MessageTextStyle = []
     var link: URL? = nil
     /// The user ID a mention names, or "@room".
     var mention: String? = nil
+    var block = MessageBlock()
+    /// A list item's "• " or "3. ".
+    var marker = false
 }
 
 struct RenderedMessageBody: Sendable {
@@ -83,6 +94,13 @@ final class MessageBodyRenderer: @unchecked Sendable {
         return result
     }
 
+    /// For the composer: spoilers shown, typed IDs as mentions, addresses left as typed, and nothing cached.
+    static func editable(body: String, html: String) -> RenderedMessageBody {
+        var result = parse(body: body, html: html, revealSpoilers: true)
+        result.runs = mentioned(result.runs)
+        return result
+    }
+
     static func safeLink(_ source: String) -> URL? {
         guard source.count <= 4_096,
             !source.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
@@ -128,23 +146,27 @@ final class MessageBodyRenderer: @unchecked Sendable {
         guard let expression else { return runs }
         var result: [MessageBodyRun] = []
         for run in runs {
-            guard run.link == nil, run.mention == nil, !run.style.contains(.code), run.text.contains(marker) else {
+            guard run.link == nil, run.mention == nil, !run.marker, !run.style.contains(.code),
+                run.text.contains(marker)
+            else {
                 result.append(run)
                 continue
             }
             let text = run.text as NSString
             var cursor = 0
             for match in expression.matches(in: run.text, range: NSRange(location: 0, length: text.length)) {
-                guard let replaced = replace(match, text.substring(with: match.range), run.style) else { continue }
+                guard var replaced = replace(match, text.substring(with: match.range), run.style) else { continue }
                 if match.range.location > cursor {
                     let before = NSRange(location: cursor, length: match.range.location - cursor)
-                    result.append(MessageBodyRun(text: text.substring(with: before), style: run.style))
+                    result.append(
+                        MessageBodyRun(text: text.substring(with: before), style: run.style, block: run.block))
                 }
+                replaced.block = run.block
                 result.append(replaced)
                 cursor = NSMaxRange(match.range)
             }
             if cursor < text.length {
-                result.append(MessageBodyRun(text: text.substring(from: cursor), style: run.style))
+                result.append(MessageBodyRun(text: text.substring(from: cursor), style: run.style, block: run.block))
             }
         }
         return result
@@ -182,9 +204,8 @@ final class MessageBodyRenderer: @unchecked Sendable {
         var style: MessageTextStyle = []
         var link: URL? = nil
         var mention: String? = nil
-        var preformatted = false
-        var listDepth = 0
-        var quoteDepth = 0
+        var block = MessageBlock()
+        var marker = false
     }
 
     private struct Builder {
@@ -198,15 +219,12 @@ final class MessageBodyRenderer: @unchecked Sendable {
             var normalized = ""
             var previous = lastCharacter
             for character in value {
-                if !literal && !context.preformatted && [" ", "\n", "\r", "\t", "\u{000C}"].contains(character) {
+                if !literal && !context.block.code && [" ", "\n", "\r", "\t", "\u{000C}"].contains(character) {
                     if previous != nil && previous != " " && previous != "\n" {
                         normalized.append(" ")
                         previous = " "
                     }
                 } else {
-                    if (previous == nil || previous == "\n") && character != "\n" && context.quoteDepth > 0 {
-                        normalized += String(repeating: "› ", count: context.quoteDepth)
-                    }
                     normalized.append(character)
                     previous = character
                 }
@@ -214,20 +232,24 @@ final class MessageBodyRenderer: @unchecked Sendable {
             guard !normalized.isEmpty else { return }
             outputUnits += normalized.utf16.count
             guard outputUnits <= MessageBodyRenderer.maximumOutputUnits else { throw ParseFailure.limit }
-            if let last = runs.indices.last, runs[last].style == context.style && runs[last].link == context.link,
-                runs[last].mention == context.mention
+            let run = MessageBodyRun(
+                text: normalized, style: context.style, link: context.link, mention: context.mention,
+                block: context.block, marker: context.marker)
+            if let last = runs.indices.last, !run.marker, !runs[last].marker, runs[last].style == run.style,
+                runs[last].link == run.link, runs[last].mention == run.mention, runs[last].block == run.block
             {
                 runs[last].text += normalized
             } else {
-                runs.append(
-                    MessageBodyRun(text: normalized, style: context.style, link: context.link, mention: context.mention)
-                )
+                runs.append(run)
             }
         }
 
+        /// A line break belongs to the line it ends, so a quote's or code block's lines stay one block.
         mutating func newline(force: Bool = false) throws {
             trimEnd(spacesOnly: true)
-            if !runs.isEmpty && (force || lastCharacter != "\n") { try append("\n", context: Context(), literal: true) }
+            if !runs.isEmpty && (force || lastCharacter != "\n") {
+                try append("\n", context: Context(block: runs.last?.block ?? MessageBlock()), literal: true)
+            }
         }
 
         mutating func trimEnd(spacesOnly: Bool = false) {
@@ -274,6 +296,8 @@ final class MessageBodyRenderer: @unchecked Sendable {
             of: "<mx-reply>", with: "<div data-slatrix-reply-fallback=\"true\">", options: .caseInsensitive
         )
         .replacingOccurrences(of: "</mx-reply>", with: "</div>", options: .caseInsensitive)
+        // It also takes <del> for a block and eats the space after it; <s> means the same and stays inline.
+        .replacingOccurrences(of: #"(?i)<(/?)del(?=[\s>])"#, with: "<$1s", options: .regularExpression)
         guard !prepared.localizedCaseInsensitiveContains("<mx-reply"),
             !prepared.localizedCaseInsensitiveContains("</mx-reply")
         else {
@@ -327,14 +351,18 @@ final class MessageBodyRenderer: @unchecked Sendable {
         }
         var next = context
         switch name {
-        case "b", "strong": next.style.insert(.bold)
+        case "b", "strong":
+            // Google Docs wraps everything it copies in <b style="font-weight:normal">.
+            if element.attribute(forName: "style")?.stringValue?.contains("font-weight:normal") != true {
+                next.style.insert(.bold)
+            }
         case "i", "em": next.style.insert(.italic)
         case "s", "strike", "del": next.style.insert(.strike)
         case "u": next.style.insert(.underline)
         case "code", "tt": next.style.insert(.code)
         case "pre":
             next.style.insert(.code)
-            next.preformatted = true
+            next.block.code = true
         case "a":
             next.link = element.attribute(forName: "href").flatMap { safeLink($0.stringValue ?? "") }
             if let id = mentionedUser(next.link) {
@@ -344,7 +372,7 @@ final class MessageBodyRenderer: @unchecked Sendable {
                 try builder.append("@" + shown, context: next)
                 return
             }
-        case "blockquote": next.quoteDepth += 1
+        case "blockquote": next.block.quote += 1
         case "br":
             try builder.newline(force: true)
             return
@@ -369,10 +397,11 @@ final class MessageBodyRenderer: @unchecked Sendable {
                 builder.visitedNodes += 1
                 guard builder.visitedNodes <= maximumNodes, depth + 1 <= maximumDepth else { throw ParseFailure.limit }
                 try builder.newline()
-                let prefix = String(repeating: "  ", count: context.listDepth) + (name == "ol" ? "\(number). " : "• ")
-                try builder.append(prefix, context: context, literal: true)
                 var nested = next
-                nested.listDepth += 1
+                nested.block.list += 1
+                try builder.append(
+                    name == "ol" ? "\(number). " : "• ", context: Context(block: nested.block, marker: true),
+                    literal: true)
                 for child in item.children ?? [] {
                     try walk(
                         child, context: nested, depth: depth + 2, revealSpoilers: revealSpoilers, builder: &builder)

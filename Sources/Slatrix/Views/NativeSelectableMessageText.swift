@@ -16,8 +16,9 @@ extension NSAttributedString.Key {
 }
 
 /// Draws `.mentionPill` fills as rounded pills, a little wider than their text and as tall as the line.
-final class PillLayoutManager: NSLayoutManager {
+class PillLayoutManager: NSLayoutManager {
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        drawBlocks(forGlyphRange: glyphsToShow, at: origin)
         if let storage = textStorage, let container = textContainers.first {
             let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
             storage.enumerateAttribute(.mentionPill, in: characters) { value, range, _ in
@@ -164,8 +165,9 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         mentions: MentionPalette? = nil
     ) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = fontSize / 5  // 3 pt at the 15 pt body, scaling with zoom.
+        let lineSpacing = fontSize / 5  // 3 pt at the 15 pt body, scaling with zoom.
+        var paragraph = NSParagraphStyle()
+        var lineStart = true
         for run in runs {
             let size = run.style.contains(.code) ? max(10, fontSize - 1) : fontSize
             var font =
@@ -175,12 +177,15 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             if run.style.contains(.bold) { traits.insert(.bold) }
             if run.style.contains(.italic) { traits.insert(.italic) }
             font = NSFont(descriptor: font.fontDescriptor.withSymbolicTraits(traits), size: size) ?? font
-            var attributes: [NSAttributedString.Key: Any] = [
-                .font: font, .foregroundColor: textColor, .paragraphStyle: paragraph,
-            ]
+            var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
             if run.style.contains(.strike) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if run.style.contains(.underline) { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
-            if run.style.contains(.code) { attributes[.backgroundColor] = textColor.withAlphaComponent(0.07) }
+            if run.block.code {
+                attributes[.codeBlock] = textColor.withAlphaComponent(0.04)
+            } else if run.style.contains(.code) {
+                attributes[.backgroundColor] = textColor.withAlphaComponent(0.07)
+            }
+            if run.block.quote > 0 { attributes[.quoteBar] = textColor.withAlphaComponent(0.25) }
             if let link = run.link.flatMap({ MessageBodyRenderer.safeLink($0.absoluteString) }) {
                 attributes[.link] = link
                 attributes[.foregroundColor] = linkColor
@@ -192,8 +197,35 @@ struct NativeSelectableMessageText: NSViewRepresentable {
                 attributes[.underlineStyle] = nil
                 attributes[.mentionPill] = own ? mentions.ownFill : mentions.fill
             }
-            result.append(NSAttributedString(string: run.text, attributes: attributes))
+            let style = { (marker: Bool) in
+                MessageBlocks.paragraph(
+                    quote: run.block.quote > 0, list: run.block.list, code: run.block.code, hangingMarker: marker,
+                    fontSize: fontSize, lineSpacing: lineSpacing)
+            }
+            if lineStart { paragraph = style(run.marker) }
+            attributes[.paragraphStyle] = paragraph
+            if run.marker, let space = run.text.last {
+                // The marker fills the list indent, so a wrapped line starts under the item's first word.
+                let width = NSAttributedString(string: run.text, attributes: attributes).size().width
+                result.append(NSAttributedString(string: String(run.text.dropLast()), attributes: attributes))
+                attributes[.kern] = max(0, MessageBlocks.listIndent(fontSize) - width)
+                result.append(NSAttributedString(string: String(space), attributes: attributes))
+                lineStart = false
+                continue
+            }
+            // The run's later lines are lines of their own, which never start with a marker.
+            let text = run.text as NSString
+            let firstBreak = text.range(of: "\n")
+            let head = firstBreak.location == NSNotFound ? text.length : NSMaxRange(firstBreak)
+            result.append(NSAttributedString(string: text.substring(to: head), attributes: attributes))
+            if head < text.length {
+                paragraph = style(false)
+                attributes[.paragraphStyle] = paragraph
+                result.append(NSAttributedString(string: text.substring(from: head), attributes: attributes))
+            }
+            lineStart = run.text.hasSuffix("\n")
         }
+        MessageBlocks.padCodeBlocks(result, in: NSRange(location: 0, length: result.length), fontSize: fontSize)
         return result
     }
 }
