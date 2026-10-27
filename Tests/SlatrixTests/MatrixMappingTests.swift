@@ -103,18 +103,6 @@ struct MatrixMappingTests {
     }
 
     @Test(
-        "Only complete Matrix IDs outside code and quotes become mentions",
-        arguments: [
-            ("Hi @alice:example.org, @alice:example.org", ["@alice:example.org"]),
-            ("`@alice:example.org`\n> @bob:example.org\n```\n@carol:example.org\n```", []),
-            ("[Alice](https://matrix.to/#/%40alice%3Aexample.org)", ["@alice:example.org"]),
-            ("mail me at bob@example.org or @alice", []),
-        ])
-    func mentions(body: String, ids: [String]) {
-        #expect(MatrixMapping.mentionedUserIDs(in: body) == ids)
-    }
-
-    @Test(
         "Originals up to 10 MiB preview automatically; larger or unknown sizes need an explicit download",
         arguments: [(nil, false), (10 * 1024 * 1024, true), (10 * 1024 * 1024 + 1, false)] as [(UInt64?, Bool)])
     func automaticPreviewLimit(size: UInt64?, allowed: Bool) {

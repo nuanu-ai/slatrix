@@ -25,6 +25,13 @@ struct MessageBodyRendererTests {
         #expect(runs.contains { $0.style.contains(.code) && $0.text.contains("  let y = 2") })
     }
 
+    @Test("Struck text keeps the space after it, as Element sends it")
+    func strikeSpacing() {
+        let rendered = render("<del>struck</del> and <DEL>more</DEL>")
+        #expect(rendered.plainText == "struck and more")
+        #expect(rendered.runs.filter { $0.style.contains(.strike) }.map(\.text) == ["struck", "more"])
+    }
+
     @Test("Malformed HTML still renders its text")
     func malformed() {
         #expect(render("<p>Unclosed <strong>bold").plainText.contains("Unclosed bold"))
@@ -32,8 +39,10 @@ struct MessageBodyRendererTests {
 
     @Test("Ordered lists keep their start number and nested lists indent")
     func lists() {
-        let text = render("<ol start='3'><li>one<ul><li>nested</li></ul></li><li>two</li></ol>").plainText
-        #expect(text.contains("3. one") && text.contains("  • nested") && text.contains("4. two"))
+        let runs = render("<ol start='3'><li>one<ul><li>nested</li></ul></li><li>two</li></ol>").runs
+        #expect(runs.filter(\.marker).map(\.text) == ["3. ", "• ", "4. "])
+        #expect(runs.filter(\.marker).map(\.block.list) == [1, 2, 1])
+        #expect(runs.first { $0.text.hasPrefix("nested") }?.block.list == 2)
     }
 
     @Test("A legacy reply fallback is not shown")
@@ -158,11 +167,13 @@ struct MessageBodyRendererTests {
         #expect(render("one<br><br>two").plainText == "one\n\ntwo")
     }
 
-    @Test("Every line of a quote is marked, nested quotes twice, and the text after it is not")
+    @Test("A quote's lines, line breaks included, carry its depth instead of a marker; the text after it has none")
     func quotes() {
-        let text = render("<blockquote>first<br>second<blockquote>inner</blockquote></blockquote><p>after</p>")
-            .plainText
-        #expect(text == "› first\n› second\n› › inner\nafter")
+        let rendered = render("<blockquote>first<br>second<blockquote>inner</blockquote></blockquote><p>after</p>")
+        #expect(rendered.plainText == "first\nsecond\ninner\nafter")
+        let depths = rendered.runs.flatMap { run in run.text.map { _ in run.block.quote } }
+        #expect(
+            depths == Array(repeating: 1, count: 13) + Array(repeating: 2, count: 6) + Array(repeating: 0, count: 5))
     }
 
     @Test("Table cells are separated by tabs")
