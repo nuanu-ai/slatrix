@@ -9,7 +9,6 @@ struct MatrixConnectionFeedback: Equatable {
     let state: MatrixConnectionState
     let isRetrying: Bool
     let canRetry: Bool
-    let detail: String
     let errorMessage: String?
 }
 
@@ -46,7 +45,7 @@ final class ConnectionRecovery {
     private var failures = 0
     private var wakeObserver: NSObjectProtocol?
     private(set) var feedback = MatrixConnectionFeedback(
-        state: .idle, isRetrying: false, canRetry: false, detail: "Disconnected", errorMessage: nil)
+        state: .idle, isRetrying: false, canRetry: false, errorMessage: nil)
 
     func attach(
         _ service: SyncService, client: Client? = nil, onUpdate: @escaping (MatrixConnectionFeedback) -> Void
@@ -162,7 +161,7 @@ final class ConnectionRecovery {
         revision = 0
         sdkState = nil
         feedback = MatrixConnectionFeedback(
-            state: .idle, isRetrying: false, canRetry: false, detail: "Disconnected", errorMessage: nil)
+            state: .idle, isRetrying: false, canRetry: false, errorMessage: nil)
         onUpdate = nil
         // Cancelling a Swift Task cannot stop its UniFFI future. Stopping only
         // after start returns prevents an old start from resurrecting sync.
@@ -171,39 +170,19 @@ final class ConnectionRecovery {
     }
 
     private func publish() {
-        let state: MatrixConnectionState
-        let detail: String
-        let error: String?
-        switch sdkState {
-        case .running:
-            state = .running
-            detail = "Connected"
-            error = nil
-        case .offline:
-            state = .offline
-            detail = "Offline"
-            error = "You’re offline. Check your connection."
-        case .terminated:
-            state = .stopped
-            detail = "Disconnected"
-            error = "Disconnected. Retry to reconnect."
-        case .error:
-            state = .failed
-            detail = "Disconnected"
-            error = "Couldn’t connect. Retry, or sign in again."
-        case .idle:
-            state = .idle
-            detail = "Paused"
-            error = nil
-        case nil:
-            state = .connecting
-            detail = "Connecting…"
-            error = nil
-        }
+        let (state, error): (MatrixConnectionState, String?) =
+            switch sdkState {
+            case .running: (.running, nil)
+            case .offline: (.offline, "You’re offline. Check your connection.")
+            case .terminated: (.stopped, "Disconnected. Retry to reconnect.")
+            case .error: (.failed, "Couldn’t connect. Retry, or sign in again.")
+            case .idle: (.idle, nil)
+            case nil: (.connecting, nil)
+            }
         let busy = attempt != nil
         feedback = MatrixConnectionFeedback(
             state: state, isRetrying: busy, canRetry: service != nil && !busy && state != .running,
-            detail: busy ? "Reconnecting…" : detail, errorMessage: error)
+            errorMessage: error)
         onUpdate?(feedback)
     }
 }

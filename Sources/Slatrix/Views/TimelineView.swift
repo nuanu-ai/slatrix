@@ -7,6 +7,7 @@ struct TimelineView: View {
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     @Environment(Popovers.self) private var popovers: Popovers?
+    @Environment(Toasts.self) private var toasts: Toasts?
     let room: ChatRoom
     var thread = false
     var threadRootID: String? = nil
@@ -252,6 +253,7 @@ struct TimelineView: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(link, forType: .string)
                 linkCopy = nil
+                toasts?.show("Link copied")
             } catch is CancellationError {} catch {
                 guard linkCopy?.attempt == attempt, matrix.isCurrentMessagePermalink(target) else { return }
                 linkCopy?.error = MatrixService.safeError(error)

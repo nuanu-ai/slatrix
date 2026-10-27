@@ -224,6 +224,47 @@ struct Snapshots {
         try write(await settledImage(hosting), "header-dm-\(theme.rawValue)")
     }
 
+    @Test("The offline banner, and a toast over the conversation", arguments: Theme.allCases)
+    func bannerAndToast(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let window = offscreenWindow(NSSize(width: 1440, height: 900))
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        _ = try await settledImage(hosting)
+        matrix.applyConnection(
+            MatrixConnectionFeedback(
+                state: .offline, isRetrying: false, canRetry: true,
+                errorMessage: "You’re offline. Check your connection."
+            ))
+        // The banner waits out a brief drop first.
+        try await Task.sleep(for: LoadingPresentation.connectionNoticeDelay)
+        try write(await settledImage(hosting), "banner-offline-\(theme.rawValue)")
+        matrix.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
+
+        let message = try #require(textViews(in: hosting).last { !$0.isEditable && !$0.string.isEmpty })
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let save = try #require(message.menu(for: event)?.items.first { $0.identifier?.rawValue == "save" })
+        _ = save.target?.perform(save.action, with: save)
+        try write(await settledImage(hosting), "toast-\(theme.rawValue)")
+    }
+
     @Test("Sidebar", arguments: SidebarPalette.allCases, Theme.allCases)
     func sidebar(palette: SidebarPalette, theme: Theme) async throws {
         _ = NSApplication.shared

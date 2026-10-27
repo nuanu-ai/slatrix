@@ -103,6 +103,7 @@ private struct ProfileDetails {
 /// Slack's row of outlined buttons: Message for someone else, Edit profile for you, then ⋮. Message opens or creates
 /// the direct message; its spinner waits like every other, and a failure shows under the row.
 private struct ProfileActions: View {
+    @Environment(Toasts.self) private var toasts: Toasts?
     let matrix: MatrixService
     let userID: String
     let own: Bool
@@ -165,14 +166,15 @@ private struct ProfileActions: View {
 
     /// A native menu, as everywhere.
     private func showMenu() {
-        let copy = { (text: String) in
+        let copy = { [toasts] (text: String, confirmation: String) in
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
+            toasts?.show(confirmation)
         }
         let commands = [
-            MessageMenuCommand(id: "copy-id", title: "Copy member ID") { [userID] in copy(userID) },
+            MessageMenuCommand(id: "copy-id", title: "Copy member ID") { [userID] in copy(userID, "Member ID copied") },
             MessageMenuCommand(id: "copy-link", title: "Copy link to profile") { [userID] in
-                copy(MatrixID.permalink(userID))
+                copy(MatrixID.permalink(userID), "Link copied")
             },
         ]
         NativeMessageMenu.make(commands: commands).popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)

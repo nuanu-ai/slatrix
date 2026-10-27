@@ -81,6 +81,7 @@ struct RootView: View {
     @State private var matrixLinkTask: Task<Void, Never>?
     @State private var channelDetails: ChannelDetailsSelection?
     @State private var leaving: ChatRoom?
+    @State private var toasts = Toasts()
     @State private var showPins = false
     @State private var pinPermissionRoomID: String?
     @State private var pinPermission = false
@@ -270,7 +271,7 @@ struct RootView: View {
             if !shown { openPendingNotification() }
         }) {
             PopoverHost(popovers: popovers) {
-                windowContent.environment(popovers)
+                windowContent.environment(popovers).environment(toasts)
             } card: { kind in
                 popoverCard(kind)
             }
@@ -673,13 +674,10 @@ struct RootView: View {
                             }
                             // A composer that grows or a message that arrives lays out this column, not the window.
                             .layoutIsolated()
-                            // Transient states float over the conversation instead of pushing it down.
+                            // Banners float over the conversation instead of pushing it down.
                             .overlay(alignment: .top) {
-                                transientBanners.padding(.horizontal, m.sp16)
-                                    .padding(
-                                        .top,
-                                        (route == .home && room != nil ? m.paneHeader + m.sp40 : m.paneHeader) + 1
-                                            + m.sp8)
+                                banners.padding(
+                                    .top, (route == .home && room != nil ? m.paneHeader + m.sp40 : m.paneHeader) + 1)
                             }
                             // Too narrow to sit beside: the pane lies over the conversation's right side, as in Slack.
                             .overlay(alignment: .trailing) {
@@ -727,68 +725,57 @@ struct RootView: View {
         .background(colors.frame).foregroundStyle(colors.textBody).ignoresSafeArea(.container, edges: .top)
     }
 
-    /// Connection, loading and error states, as toasts over the conversation.
-    private var transientBanners: some View {
-        VStack(spacing: m.sp8) {
+    /// What needs attention until it resolves, across the top of the pane: the connection, waits that can be
+    /// cancelled, and errors.
+    private var banners: some View {
+        VStack(spacing: 0) {
+            ConnectionBanner(matrix: matrix, onRetry: retryConnection)
             if pendingMatrixLink != nil {
-                HStack(spacing: m.sp8) {
-                    DelayedProgress()
-                    Text("Opening…").font(m.font(.meta))
-                    Spacer()
+                Banner(text: "Opening…", tone: .neutral) {
                     Button("Cancel") {
                         cancelMatrixLink()
                         openPendingNotification()
-                    }.buttonStyle(.textLink)
-                }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.linkLoading)
+                    }
+                }.loadingInterval(.linkLoading)
             }
             if let request = pendingThreadOpen, isCurrentThreadOpen(request) {
-                HStack(spacing: m.sp8) {
-                    if let threadOpenError {
-                        Text(threadOpenError).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                if let threadOpenError {
+                    Banner(text: threadOpenError, symbol: "exclamationmark.triangle.fill") {
                         Button("Retry") {
                             if isCurrentThreadOpen(request) { openThread(request.message) }
-                        }.buttonStyle(.textLink)
-                    } else {
-                        DelayedProgress(interval: .threadLoading)
-                        Text("Opening thread…").font(m.font(.meta))
+                        }
+                        Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
                     }
-                    Spacer()
-                    Button("Cancel") {
-                        if pendingThreadOpen?.id == request.id { cancelThreadOpen() }
-                    }.buttonStyle(.textLink)
-                }.padding(m.sp12).modifier(Toast(colors: colors))
+                } else {
+                    Banner(text: "Opening thread…", tone: .neutral) {
+                        Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
+                    }.loadingInterval(.threadLoading)
+                }
             }
-            ErrorToast(matrix: matrix)
+            ErrorBanner(matrix: matrix)
             if let navigationNotice {
-                InlineErrorView(message: navigationNotice, dismiss: { self.navigationNotice = nil }).modifier(
-                    Toast(colors: colors))
+                Banner(
+                    text: navigationNotice, symbol: "exclamationmark.triangle.fill",
+                    onDismiss: { self.navigationNotice = nil })
             }
             if let target = platform.pendingNotification, target.accountID == matrix.user?.id {
-                HStack(spacing: m.sp8) {
-                    DelayedProgress()
-                    Text("Opening…").font(m.font(.meta))
-                    Spacer()
+                Banner(text: "Opening…", tone: .neutral) {
                     Button("Cancel") { PlatformIntegration.shared.consumeNotification(target) }
-                        .buttonStyle(.textLink).font(m.font(.meta))
-                }.padding(m.sp12).modifier(Toast(colors: colors)).loadingInterval(.linkLoading)
+                }.loadingInterval(.linkLoading)
             }
             if let localError {
-                HStack {
-                    InlineErrorView(message: localError)
+                Banner(text: localError, symbol: "exclamationmark.circle.fill", tone: .destructive) {
                     Button("Retry") {
                         if localAccess == nil { loadLocalData(retry: true) } else { saveLocalData() }
-                    }.buttonStyle(.textLink).padding(.trailing, m.sp16)
-                }.modifier(Toast(colors: colors))
+                    }
+                }
             }
             if let error = attachmentDrafts.errorMessage {
-                HStack {
-                    InlineErrorView(message: error)
-                    Button("Retry saving") { retryAttachmentDrafts() }.buttonStyle(.textLink).padding(
-                        .trailing, m.sp16)
-                }.modifier(Toast(colors: colors))
+                Banner(text: error, symbol: "exclamationmark.circle.fill", tone: .destructive) {
+                    Button("Retry saving") { retryAttachmentDrafts() }
+                }
             }
         }
-        .font(m.font(.meta))
     }
 
     @ViewBuilder private func inspector(_ room: ChatRoom?) -> some View {
@@ -975,10 +962,7 @@ struct RootView: View {
                     visited: history, onPick: pickSearch
                 ).frame(maxWidth: m(Self.searchWidth))
             }.disabled(matrix.user == nil)
-            // An overlay, so the notice coming and going never moves the search field.
-            Spacer(minLength: 0).overlay(alignment: .trailing) {
-                ConnectionNotice(matrix: matrix, onRetry: retryConnection).padding(.trailing, m.sp8)
-            }
+            Spacer(minLength: 0)
             if matrix.isPreview {
                 // The preview's one way out: everything else in it is the real interface.
                 Button("Sign in") {
@@ -1077,15 +1061,18 @@ struct RootView: View {
                         .padding(.horizontal, m.sp20).padding(.top, m.sp4).padding(.bottom, m.sp4)
                     }
                 }
-                // Floats above the composer, so a reply or attachment notice never resizes it or moves the timeline.
+                // Floats above the composer, so a toast, reply or attachment notice never resizes it or moves the
+                // timeline.
                 .overlay(alignment: .top) {
-                    composerAccessories(
-                        reply: replyTarget.flatMap {
-                            $0.message.roomID == room.id && ($0.threadID == nil || $0.threadID != threadRoot?.eventID)
-                                ? $0 : nil
-                        },
-                        drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil
-                    ).padding(.horizontal, m.sp20).alignmentGuide(.top) { $0[.bottom] }
+                    VStack(spacing: m.sp8) {
+                        ToastHost(toasts: toasts)
+                        composerAccessories(
+                            reply: replyTarget.flatMap {
+                                $0.message.roomID == room.id
+                                    && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
+                            },
+                            drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil)
+                    }.padding(.horizontal, m.sp20).alignmentGuide(.top) { $0[.bottom] }
                 }
                 TypingLine(matrix: matrix)
             }
@@ -1148,6 +1135,7 @@ struct RootView: View {
                 let link = try await matrix.roomPermalink(room.id)
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(link, forType: .string)
+                toasts.show("Link copied")
             }
         case .search: handleMenu("search-conversation")
         case .leave: leaving = room
@@ -1163,11 +1151,8 @@ struct RootView: View {
             }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
             Divider().overlay(colors.border)
             if let threadLoadError {
-                HStack {
-                    InlineErrorView(message: threadLoadError)
-                    Button("Retry") { [open = openThreadAction] in open(root) }.buttonStyle(.textLink).font(
-                        m.font(.meta)
-                    ).padding(.trailing, m.sp12)
+                Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
+                    Button("Retry") { [open = openThreadAction] in open(root) }
                 }
             }
             TimelineView(
@@ -1291,6 +1276,7 @@ struct RootView: View {
             case .home: EmptyView()
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottom) { ToastHost(toasts: toasts).padding(.bottom, m.sp24) }
     }
     private var savedCollection: some View {
         SavedMessagesView(
@@ -1298,6 +1284,7 @@ struct RootView: View {
             onOpen: { item in selectRoom(item.roomID, record: true, eventID: item.eventID) },
             onRemove: { item in
                 saved.removeAll { $0.id == item.id }
+                toasts.show("Removed from Later")
                 saveLocalData()
             }, onOpenProfile: openProfile
         ).id(composerGeneration)
@@ -1344,8 +1331,10 @@ struct RootView: View {
                 DelayedProgress()
                 Text("Restoring attachments…")
                 Spacer()
-            }.font(m.font(.meta)).foregroundStyle(colors.textSecondary).padding(m.sp12).modifier(Toast(colors: colors))
-                .loadingInterval(.attachmentsLoading)
+            }.font(m.font(.meta)).foregroundStyle(colors.textSecondary).padding(m.sp12).modifier(
+                ComposerCard(colors: colors)
+            )
+            .loadingInterval(.attachmentsLoading)
         }
         if localReady && attachmentDrafts.needsReview(address) {
             HStack(alignment: .top, spacing: m.sp8) {
@@ -1353,7 +1342,7 @@ struct RootView: View {
                 Text("Upload interrupted; it may have sent.")
                 Spacer()
                 Button("Send anyway") { attachmentDrafts.allowResend(address) }.buttonStyle(.textLink)
-            }.font(m.font(.meta)).padding(m.sp12).modifier(Toast(colors: colors))
+            }.font(m.font(.meta)).padding(m.sp12).modifier(ComposerCard(colors: colors))
         }
         ForEach(localReady ? attachmentDrafts.files[address, default: []].filter { $0.url == nil } : []) { file in
             HStack(alignment: .top, spacing: m.sp8) {
@@ -1364,7 +1353,7 @@ struct RootView: View {
                 }
                 Spacer()
                 Button("Remove") { attachmentDrafts.removeUnavailable(file, at: address) }.buttonStyle(.textLink)
-            }.font(m.font(.meta)).padding(m.sp12).modifier(Toast(colors: colors))
+            }.font(m.font(.meta)).padding(m.sp12).modifier(ComposerCard(colors: colors))
         }
     }
     private func retryAttachmentDrafts() {
@@ -1535,7 +1524,7 @@ struct RootView: View {
                 }.font(m.font(.meta))
             }
         }.padding(.horizontal, m.sp16).padding(.vertical, m.sp8).frame(maxWidth: .infinity, alignment: .leading)
-            .modifier(Toast(colors: colors))
+            .modifier(ComposerCard(colors: colors))
     }
     private func composerAccessories(reply: MessageReplyTarget?, drafts: AttachmentDraftAddress?) -> some View {
         VStack(alignment: .leading, spacing: m.sp4) {
@@ -2257,8 +2246,10 @@ struct RootView: View {
         let reference = SavedMessageReference(roomID: message.roomID, eventID: message.eventID)
         if savedIDs.contains(reference.id) {
             saved.removeAll { $0.id == reference.id }
+            toasts.show("Removed from Later")
         } else {
             saved.insert(reference, at: 0)
+            toasts.show("Message saved for later")
         }
         saveLocalData()
     }
@@ -2788,26 +2779,21 @@ private struct TitleSearch<Field: View>: View {
     }
 }
 
-/// A lost connection, in the title bar once it has lasted a moment; it covers nothing and moves nothing.
-private struct ConnectionNotice: View {
+/// A lost connection, once it has lasted a moment. On its own, so connection changes redraw only the banner.
+private struct ConnectionBanner: View {
     let matrix: MatrixService
     let onRetry: () -> Void
-    @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
     @State private var shown = false
     var body: some View {
         let message = matrix.connectionErrorMessage
         ZStack {
             if shown, let message {
-                HStack(spacing: m.sp8) {
-                    Image(systemName: "wifi.exclamationmark").foregroundStyle(appearance.colors.warning)
-                    Text(message).lineLimit(1)
+                Banner(text: message, symbol: "wifi.slash") {
                     if matrix.canRetryConnection || matrix.isRetryingConnection {
                         Button(matrix.isRetryingConnection ? "Reconnecting…" : "Retry", action: onRetry)
-                            .buttonStyle(.textLink).disabled(matrix.isRetryingConnection)
+                            .disabled(matrix.isRetryingConnection)
                     }
-                }.font(m.font(.caption)).foregroundStyle(appearance.colors.textSecondary).fixedSize().transition(
-                    .opacity)
+                }.transition(.opacity)
             }
         }
         .animation(Motion.overlay, value: shown)
@@ -2822,13 +2808,12 @@ private struct ConnectionNotice: View {
     }
 }
 
-private struct ErrorToast: View {
+private struct ErrorBanner: View {
     let matrix: MatrixService
-    @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
         if let error = matrix.errorMessage {
-            InlineErrorView(message: error, dismiss: { matrix.errorMessage = nil })
-                .modifier(Toast(colors: appearance.colors))
+            Banner(
+                text: error, symbol: "exclamationmark.triangle.fill", onDismiss: { matrix.errorMessage = nil })
         }
     }
 }
@@ -2943,8 +2928,8 @@ private struct OutsideCorners: Shape {
     }
 }
 
-/// A transient state floating over content: it never moves what is under it.
-private struct Toast: ViewModifier {
+/// A card floating above the composer: it never moves what is under it.
+private struct ComposerCard: ViewModifier {
     @Environment(\.metrics) private var m
     let colors: AppColors
     func body(content: Content) -> some View {

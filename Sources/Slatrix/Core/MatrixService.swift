@@ -486,7 +486,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var lastAutomaticReceipt: ReadReceiptTarget?
     var timelineSelectionID: UUID { selection }
     var status: ConnectionStatus = .signedOut
-    var connectionDetail = "Opening your workspace…"
     private(set) var connectionErrorMessage: String?
     private(set) var connectionState = MatrixConnectionState.idle
     private(set) var isRetryingConnection = false
@@ -844,7 +843,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let account = sessionGeneration
         status = .connecting
         errorMessage = nil
-        connectionDetail = "Signing in…"
         let storeID = UUID().uuidString
         var storeSaved = false
         do {
@@ -885,7 +883,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let account = sessionGeneration
         do {
             status = .connecting
-            connectionDetail = "Restoring your session…"
             let saved = try await Task.detached(priority: .userInitiated) { try SecureSessionStore.load() }.value
             try validateAuthentication(account)
             SessionStores.removeAll(except: saved?.storeID)
@@ -893,11 +890,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 status = .signedOut
                 return
             }
-            connectionDetail = "Opening encrypted history…"
             let (newClient, delegate) = try await buildClient(
                 homeserver: stored.homeserverUrl, storeID: stored.storeID, storeKey: stored.storeKey,
                 initialSession: stored)
-            connectionDetail = "Connecting…"
             try validateAuthentication(account)
             try await newClient.restoreSession(
                 session: Session(
@@ -923,7 +918,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         persistence = delegate
         isPreview = false
         status = .syncing
-        connectionDetail = "Loading your conversations…"
         roomListRefresher.attach(newClient)
         people.attach(newClient)
         pinnedMessages.attach(newClient)
@@ -961,17 +955,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         roomSubscriptions.attach(service.roomListService())
         try await connectionRecovery.attach(service, client: newClient) { [weak self] feedback in
             guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
-            self.connectionDetail = feedback.detail
-            self.connectionErrorMessage = feedback.errorMessage
-            self.connectionState = feedback.state
-            self.isRetryingConnection = feedback.isRetrying
-            self.canRetryConnection = feedback.canRetry
-            switch feedback.state {
-            case .running: self.status = .ready
-            case .failed: self.status = .error
-            case .idle, .connecting, .offline, .stopped: self.status = .syncing
-            }
-            self.requestRefresh()
+            self.applyConnection(feedback)
         }
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         let allRooms = try await service.roomListService().allRooms()
@@ -2636,6 +2620,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         requestRefresh()
         return destination
+    }
+    func applyConnection(_ feedback: MatrixConnectionFeedback) {
+        connectionErrorMessage = feedback.errorMessage
+        connectionState = feedback.state
+        isRetryingConnection = feedback.isRetrying
+        canRetryConnection = feedback.canRetry
+        switch feedback.state {
+        case .running: status = .ready
+        case .failed: status = .error
+        case .idle, .connecting, .offline, .stopped: status = .syncing
+        }
+        requestRefresh()
     }
     /// Servers honor a room mention only from someone with the power level for it; for anyone else "@room" is text.
     func mentions(_ message: ComposerFormat.Message) -> Mentions {
