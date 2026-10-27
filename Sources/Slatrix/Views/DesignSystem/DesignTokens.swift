@@ -89,6 +89,8 @@ struct Metrics: Equatable {
     var controlSmall: CGFloat { 28 * zoom }
     /// Modal footers and sign-in.
     var controlLarge: CGFloat { 36 * zoom }
+    /// Where a tooltip's text wraps, so a long one makes a bubble about as wide as Slack's.
+    var tooltipText: CGFloat { 200 * zoom }
     /// Anchored cards such as the emoji picker.
     var popoverWidth: CGFloat { 320 * zoom }
     /// Modal widths: confirmations, forms, and tabbed or two-column modals.
