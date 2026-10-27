@@ -86,13 +86,9 @@ final class UploadDropView: NSView {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         onTargeted(false)
-        let pasteboard = sender.draggingPasteboard
-        guard let intake else { return false }
-        let files =
-            pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        if !files.isEmpty { return intake(.files(files)) }
-        guard let type = pasteboard.availableType(from: [.png, .tiff]), let data = pasteboard.data(forType: type)
-        else { return false }
-        return intake(.image(data, png: type == .png))
+        guard let intake, let input = ComposerAttachmentInput(pasteboard: sender.draggingPasteboard) else {
+            return false
+        }
+        return intake(input)
     }
 }

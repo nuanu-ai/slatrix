@@ -1276,24 +1276,17 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
     }
 
     private func hasAttachment(_ pasteboard: NSPasteboard) -> Bool {
-        !fileURLs(from: pasteboard).isEmpty || pasteboard.availableType(from: [.png, .tiff]) != nil
+        pasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+            || pasteboard.availableType(from: [.png, .tiff]) != nil
     }
 
     private func acceptAttachments(_ pasteboard: NSPasteboard) -> Bool {
         guard isEditable else { return false }
-        let urls = fileURLs(from: pasteboard)
-        if !urls.isEmpty { return onAttachments?(.files(urls)) ?? false }
-        if let type = pasteboard.availableType(from: [.png, .tiff]), let data = pasteboard.data(forType: type) {
-            return onAttachments?(.image(data, png: type == .png)) ?? false
+        guard let input = ComposerAttachmentInput(pasteboard: pasteboard) else {
+            onAttachmentError?("Couldn’t paste the image. Attach it as a file instead.")
+            return false
         }
-        onAttachmentError?("Couldn’t paste the image. Attach it as a file instead.")
-        return false
-    }
-
-    private func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
-        guard pasteboard.types?.contains(.fileURL) == true else { return [] }
-        return (pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL])
-            ?? []
+        return onAttachments?(input) ?? false
     }
 }
 
