@@ -93,16 +93,24 @@ struct TimelineScrollPolicyTests {
     }
 
     @Test(
-        "Jump to latest shows only away from the newest message",
+        "Jump to recent shows once the reader scrolls more than two screens from the newest message themselves",
         arguments: [
-            (Viewport(top: 400, height: 600, contentHeight: 1_000), true, false),
-            (Viewport(top: 200, height: 600, contentHeight: 1_000), true, false),
-            (Viewport(top: 99, height: 600, contentHeight: 1_000), true, true),
-            (Viewport(top: 390, height: 600, contentHeight: 1_000), false, true),
-            (Viewport(top: 400, height: 600, contentHeight: 1_000), false, false),
+            (Viewport(top: 5_400, height: 600, contentHeight: 6_000), true, false),
+            (Viewport(top: 4_200, height: 600, contentHeight: 6_000), true, false),
+            (Viewport(top: 4_199, height: 600, contentHeight: 6_000), true, true),
+            // Where the app put the view, at the unread line or a linked message, the reader needs no way out.
+            (Viewport(top: 0, height: 600, contentHeight: 6_000), false, false),
         ])
-    func jumpToLatest(viewport: Viewport, live: Bool, shows: Bool) {
-        #expect(Policy.showsJumpToLatest(viewport, live: live) == shows)
+    func jumpToRecentLive(viewport: Viewport, scrolledByReader: Bool, shows: Bool) {
+        #expect(Policy.showsJumpToLatest(viewport, live: true, scrolledByReader: scrolledByReader) == shows)
+    }
+
+    @Test("Jump to recent always shows in a timeline opened at an older message, which never shows new ones")
+    func jumpToRecentFocused() {
+        for top: CGFloat in [0, 5_400] {
+            let viewport = Viewport(top: top, height: 600, contentHeight: 6_000)
+            #expect(Policy.showsJumpToLatest(viewport, live: false, scrolledByReader: false))
+        }
     }
 
     @Test("History loads within three screens of either end")

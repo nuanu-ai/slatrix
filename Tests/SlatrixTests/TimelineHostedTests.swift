@@ -340,6 +340,26 @@ struct TimelineHostedTests {
         #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
     }
 
+    @Test("Jumping to a loaded message scrolls it into view in the same table and highlights it at its own height")
+    func jumpToLoaded() async throws {
+        let harness = Harness(messages: Self.messages(0..<80))
+        defer { harness.close() }
+        await settle(harness)
+        let scrollView = try #require(harness.scrollView)
+        #expect(harness.top(of: "Message 10") == nil)
+        harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Message-10")
+        await settle(harness) { harness.top(of: "Message 10") != nil }
+        #expect(harness.scrollView === scrollView)
+        let row = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }.first { cell in
+                guard cell.window != nil, case .message(let entry) = cell.entry?.kind else { return false }
+                return entry.message.eventID == "Message-10"
+            })
+        guard case .message(let entry) = row.entry?.kind else { return }
+        #expect(entry.highlighted)
+        #expect(ceil(row.height(width: row.frame.width)) == row.frame.height)
+    }
+
     @Test("A message at rest offers its whole menu, its VoiceOver actions and the emoji picker")
     func restingRowActions() async throws {
         let harness = Harness(
