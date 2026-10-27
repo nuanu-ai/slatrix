@@ -952,15 +952,6 @@ struct RootView: View {
                     onOpen: { message in selectRoom(message.roomID, record: true, eventID: message.eventID) },
                     onOpenProfile: openProfile)
             } else {
-                if matrix.focusedEventID != nil {
-                    HStack(spacing: m.sp8) {
-                        Text("Viewing older messages")
-                        Spacer()
-                        Button("Jump to recent") { selectRoom(room.id) }.buttonStyle(.row).foregroundStyle(
-                            colors.accent)
-                    }.font(m.font(.meta)).padding(.horizontal, m.sp24).frame(height: m.control).background(
-                        colors.raised)
-                }
                 TimelineView(
                     matrix: matrix, room: room, savedIDs: savedIDs,
                     onThread: openThreadAction,
@@ -982,9 +973,6 @@ struct RootView: View {
                 VStack(spacing: 0) {
                     if let target = editTarget, target.surface == .conversation, target.message.roomID == room.id {
                         editComposer(target, room: room).padding(.horizontal, m.sp20).padding(.vertical, m.sp4)
-                    } else if matrix.focusedEventID != nil {
-                        Button("Jump to recent") { selectRoom(room.id) }.buttonStyle(.textLink).font(m.font(.meta))
-                            .padding(m.sp20)
                     } else {
                         BindingScope({ draftBinding(room.id) }) { text in
                             MessageComposer(
@@ -1036,8 +1024,7 @@ struct RootView: View {
                             $0.message.roomID == room.id && ($0.threadID == nil || $0.threadID != threadRoot?.eventID)
                                 ? $0 : nil
                         },
-                        drafts: editTarget == nil && matrix.focusedEventID == nil
-                            ? AttachmentDraftAddress(roomID: room.id) : nil
+                        drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil
                     ).padding(.horizontal, m.sp20).alignmentGuide(.top) { $0[.bottom] }
                 }
                 TypingLine(matrix: matrix)
@@ -1222,8 +1209,7 @@ struct RootView: View {
                         )
                     }
                     .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(m.sp12).disabled(
-                        !localReady || !attachmentDrafts.ready || matrix.focusedEventID != nil
-                            || threadReadyID != root.eventID
+                        !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
                             || matrix.selectedRoomID != root.roomID)
                 }
             }

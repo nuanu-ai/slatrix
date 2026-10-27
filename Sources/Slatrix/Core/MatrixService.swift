@@ -568,7 +568,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var searchHasMore = false
     private(set) var searchIndexingState: SearchIndexingState = .idle
     let publicDirectory = PublicRoomDirectoryService()
+    /// Set while the main timeline is one loaded around an older message rather than the live one.
     var focusedEventID: String?
+    /// The message the open conversation scrolls to and highlights.
+    var jump: MessageJump?
     private(set) var homeserverURL: String?
     var notificationHandler: ((DesktopMessageNotification) -> Void)?
     var notificationSessionID: UUID { sessionGeneration }
@@ -1072,6 +1075,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         searchIndexing.reset()
         searchIndexingState = .idle
         focusedEventID = nil
+        jump = nil
         sessionGeneration = UUID()
         selection = UUID()
         notificationRetries.reset()
@@ -1233,16 +1237,34 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func requestRefresh() { roomListRefresher.request() }
 
     func selectRoom(_ id: String) async {
+        jump = nil
         if showRecentRoom(id) { return }
         await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil)
     }
 
-    /// Opens a conversation with unread messages at its unread line: live from the cache when the cache reaches the
-    /// line, else at the line from the server.
+    /// Opens a conversation with unread messages at its unread line.
     func resumeRoom(_ id: String, at anchor: String) async {
-        if showRecentRoom(id, containing: anchor) { return }
-        if await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil, containing: anchor) { return }
-        await jumpToMessage(roomID: id, eventID: anchor)
+        jump = nil
+        await open(id, at: anchor)
+    }
+
+    /// Opens a conversation scrolled to a message, which it highlights.
+    func jumpToMessage(roomID: String, eventID: String) async {
+        jump = MessageJump(roomID: roomID, eventID: eventID)
+        await open(roomID, at: eventID)
+    }
+
+    /// Live, as Slack does, when the live timeline open or in the cache holds `eventID`; else loaded around it.
+    private func open(_ id: String, at eventID: String) async {
+        guard eventID.hasPrefix("$") else {
+            errorMessage = "This message hasn’t been sent yet."
+            return
+        }
+        if showRecentRoom(id, containing: eventID) { return }
+        if await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil, containing: eventID) { return }
+        let focus = TimelineFocus.event(
+            eventId: eventID, numContextEvents: 30, threadMode: .automatic(hideThreadedEvents: false))
+        await setupRoom(id, focus: focus, eventID: eventID)
     }
 
     /// Shows a conversation whose live timeline is still open, rows and all, in the frame of the click. False when
@@ -1293,17 +1315,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             let room = try? client.getRoom(roomId: roomID)
         else { return false }
         return room.membership() == .joined
-    }
-
-    func jumpToMessage(roomID: String, eventID: String) async {
-        guard eventID.hasPrefix("$") else {
-            errorMessage = "This message hasn’t been sent yet."
-            return
-        }
-        await setupRoom(
-            roomID,
-            focus: .event(eventId: eventID, numContextEvents: 30, threadMode: .automatic(hideThreadedEvents: false)),
-            eventID: eventID)
     }
 
     private static func contains(_ items: [TimelineItem], _ eventID: String) -> Bool {
@@ -1607,10 +1618,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         async throws
     {
         try assertDestination(roomID)
-        guard focusedEventID == nil else {
-            throw MatrixServiceError.request("Jump to the latest messages to send.")
-        }
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let token = selection
         let target: Timeline
         if let threadRootID {
             _ = try requireClient()
@@ -1631,6 +1640,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         } else {
             _ = try await target.send(msg: content)
         }
+        await returnToLive(after: token, threadRootID: threadRootID)
+    }
+
+    /// Any timeline sends into the room's queue; a message sent from one loaded around an older message then shows
+    /// in the live timeline, as sending in Slack takes you to the present.
+    private func returnToLive(after token: UUID, threadRootID: String?) async {
+        guard threadRootID == nil, focusedEventID != nil, selection == token, let id = selectedRoomID else { return }
+        await selectRoom(id)
     }
 
     func loadMore() async throws -> Bool {
@@ -2033,9 +2050,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     func uploadFile(_ url: URL, threadRootID: String? = nil, roomID: String? = nil) async throws {
         try assertDestination(roomID)
-        guard focusedEventID == nil else {
-            throw MatrixServiceError.request("Jump to the latest messages to send.")
-        }
+        let token = selection
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
@@ -2069,6 +2084,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             target = try requireTimeline()
         }
         let handle = try target.sendAttachment(params: parameters, attachment: kind)
+        await returnToLive(after: token, threadRootID: threadRootID)
         try await handle.join()
     }
 

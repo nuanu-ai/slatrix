@@ -127,6 +127,8 @@ enum Motion {
     static var overlay: Animation? { reduced ? nil : .easeOut(duration: 0.12) }
     /// Photos fading in over initials, scroll-to.
     static var content: Animation? { reduced ? nil : .easeOut(duration: 0.12) }
+    /// A message jumped to losing its highlight, slowly enough to follow.
+    static var highlight: Animation? { reduced ? nil : .easeOut(duration: 1) }
     /// Side panes easing in beside the conversation.
     static var pane: Animation? { reduced ? nil : .easeOut(duration: 0.15) }
     private static var reduced: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }

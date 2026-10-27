@@ -82,6 +82,14 @@ struct ChatMessage: Identifiable, Hashable {
     var supportsTextEditing: Bool { kind == "m.text" && attachment == nil }
 }
 
+/// A message the reader asked to see, from pins, Later, search or a reply quote. Each jump is new, so jumping to the
+/// same message again scrolls back to it.
+struct MessageJump: Equatable {
+    let roomID: String
+    let eventID: String
+    let id = UUID()
+}
+
 struct ChatReplyPreview: Hashable {
     enum State: String, Hashable { case unavailable, pending, ready, failed }
     var state: State

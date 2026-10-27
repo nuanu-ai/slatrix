@@ -42,12 +42,14 @@ struct TimelineHostedTests {
         let popovers: Popovers
         let atBottom: (Bool) -> Void
         var zoom: CGFloat = 1
+        /// A new timeline of the same conversation, as the app opens one at an older message and back.
+        var timeline = 0
         var body: some View {
             TimelineView(
                 matrix: service, room: room, savedIDs: [], onThread: { _ in },
                 onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onBottomVisibilityChange: atBottom
             )
-            .id(room.id)
+            .id("\(room.id):\(timeline)")
             .environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom)).environment(popovers)
         }
     }
@@ -318,6 +320,53 @@ struct TimelineHostedTests {
         harness.hosting.rootView = harness.fixture(Self.room)
         await settle(harness) { harness.top(of: reading) != nil }
         #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
+    }
+
+    @Test("Leaving an older message for the newest ones lands at the newest, wherever the reader had been")
+    func returnFromOlderLandsAtNewest() async throws {
+        let harness = Harness(messages: Self.messages(0..<40))
+        defer { harness.close() }
+        await settle(harness)
+        harness.scroll(toTop: harness.clip.bounds.minY - 700)
+        var fixture = harness.fixture(Self.room)
+        fixture.timeline = 1
+        harness.service.focusedEventID = "Message-5"
+        harness.hosting.rootView = fixture
+        await settle(harness) { harness.top(of: "Message 5") != nil }
+        fixture.timeline = 2
+        harness.service.focusedEventID = nil
+        harness.hosting.rootView = fixture
+        await settle(harness) { harness.top(of: "Message 39") != nil }
+        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+    }
+
+    @Test("Jumping to a loaded message scrolls it into view in the same table and highlights it at its own height")
+    func jumpToLoaded() async throws {
+        let harness = Harness(messages: Self.messages(0..<80))
+        defer { harness.close() }
+        await settle(harness)
+        let scrollView = try #require(harness.scrollView)
+        #expect(harness.top(of: "Message 10") == nil)
+        harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Message-10")
+        // In the layout that takes the jump, before the highlight changes any row.
+        harness.layout()
+        #expect(harness.top(of: "Message 10") != nil)
+        await settle(harness)
+        #expect(harness.scrollView === scrollView)
+        let row = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }.first { cell in
+                guard cell.window != nil, case .message(let entry) = cell.entry?.kind else { return false }
+                return entry.message.eventID == "Message-10"
+            })
+        guard case .message(let entry) = row.entry?.kind else { return }
+        #expect(entry.highlighted)
+        #expect(ceil(row.height(width: row.frame.width)) == row.frame.height)
+        // Jumping to it again while it is still highlighted, after scrolling away, comes back to it.
+        harness.scroll(toTop: harness.clip.bounds.minY + 4_000)
+        #expect(harness.top(of: "Message 10") == nil)
+        harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Message-10")
+        harness.layout()
+        #expect(harness.top(of: "Message 10") != nil)
     }
 
     @Test("A message at rest offers its whole menu, its VoiceOver actions and the emoji picker")
