@@ -33,4 +33,9 @@ enum SidebarLayout {
             preferred.isFinite && preferred > 0 ? min(max(preferred, minimumPaneWidth), maximumPaneWidth) : ideal
         return min(wanted, space)
     }
+
+    /// The conversations a section lists.
+    static func sectionRooms(_ rooms: [ChatRoom], collapsed: Bool, selectedID: String?) -> [ChatRoom] {
+        collapsed ? [] : rooms
+    }
 }
