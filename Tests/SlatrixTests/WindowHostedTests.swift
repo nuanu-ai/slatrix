@@ -476,7 +476,9 @@ struct WindowHostedTests {
         #expect(await eventually { harness.sidebarShown && harness.dividers == 1 })
     }
 
-    @Test("The window buttons sit on the title bar's midline, and stay there through a resize", arguments: [1, 1.5])
+    @Test(
+        "The window buttons sit on the title bar's midline, and hold there on every frame of a resize from any edge",
+        arguments: [1, 1.5])
     func windowButtonsCentered(zoom: Double) async throws {
         let harness = Harness(zoom: zoom)
         defer { harness.close() }
@@ -491,12 +493,25 @@ struct WindowHostedTests {
         func offscreen() -> Bool { !NSScreen.screens.contains { $0.frame.intersects(harness.window.frame) } }
         #expect(offscreen())
         #expect(await eventually { abs(offset()) <= 1 }, "\(offset())")
-        harness.resize(1_000)
+
+        // A live resize sets the window's frame and draws it in one go, so each frame is checked as it is drawn,
+        // before SwiftUI lays the window out again. Dragging the left edge changes the width, the top edge the
+        // height, and the top left corner both.
+        let search = try #require(harness.searchField)
+        for (edge, width, height) in [("left", -20.0, 0.0), ("top", 0, -20), ("corner", -20, -20)] {
+            for step in 1...3 {
+                let frame = harness.window.frame
+                harness.window.setFrame(
+                    NSRect(
+                        x: frame.minX - width, y: frame.minY, width: frame.width + width,
+                        height: frame.height + height), display: true)
+                let offset = close.convert(close.bounds, to: nil).midY - search.convert(search.bounds, to: nil).midY
+                #expect(abs(offset) <= 1, "\(edge), step \(step): \(offset)")
+            }
+        }
         #expect(offscreen())
-        #expect(await eventually { abs(offset()) <= 1 }, "\(offset())")
 
         // The buttons' container now reaches down the whole bar, and a click on the field still lands in it.
-        let search = try #require(harness.searchField)
         let field = search.convert(search.bounds, to: nil)
         let hit = harness.window.contentView?.superview?.hitTest(NSPoint(x: field.midX, y: field.minY + 1))
         #expect(hit.map { $0 === search || $0.isDescendant(of: search) } == true)
