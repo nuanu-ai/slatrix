@@ -409,6 +409,32 @@ final class SharedFilesTests {
         await service.open(roomID: "!room:example.org")
         #expect(service.items.isEmpty && service.state == "error")
     }
+
+    @Test("Refresh reads the conversation's timeline again instead of the kept list")
+    func refreshRebuilds() async {
+        await open()
+        room.setupGate.arm()
+        let refreshing = Task { await service.reload(roomID: "!room:example.org") }
+        #expect(await eventually { self.room.setupGate.isWaiting })
+        room.setupGate.release()
+        await refreshing.value
+    }
+
+    @Test("A list left while a page was loading is read afresh, so two pages never load at once")
+    func midPageNotKept() async {
+        await open()
+        room.history.pageGate.arm()
+        let page = Task { await service.loadMore() }
+        #expect(await eventually { self.room.history.pageGate.isWaiting })
+        service.close()
+        room.setupGate.arm()
+        let opening = Task { await service.open(roomID: "!room:example.org") }
+        #expect(await eventually { self.room.setupGate.isWaiting })
+        room.setupGate.release()
+        room.history.pageGate.release()
+        await page.value
+        await opening.value
+    }
     private func expectNoRowsWhileOpening(_ roomID: String) async {
         room.setupGate.arm()
         let opening = Task { await service.open(roomID: roomID) }
