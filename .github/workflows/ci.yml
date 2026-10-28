@@ -56,7 +56,9 @@ jobs:
           path: ~/Library/Logs/DiagnosticReports/
           if-no-files-found: ignore
 
+      # Pull requests skip the release build: main makes one after every merge, and tags ship from release.yml.
       - name: Build app
+        if: github.event_name != 'pull_request'
         run: scripts/build-app.sh
 
       - name: Red-green

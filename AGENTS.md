@@ -55,7 +55,9 @@ The README and anything else a visitor reads should sound like a person wrote it
 ## Workflow
 
 - Branch per change, small commits with imperative subjects, a pull request, green CI before merge. Pull requests merge as one squashed commit, so `main` stays green and bisectable while the pull request keeps the red-then-green record.
-- Review your own diff with `code-review` and `ponytail-review` before asking for a merge. Hard bugs go through `diagnosing-bugs`.
+- Open pull requests with auto-merge on (`gh pr merge --auto --squash`), so green CI merges them.
+- Match the process to the change. Small fixes (a visual tweak, a wrong condition, a few lines) go together in one pull request: one red test and the fix for each, the protected line mutated once by hand, and no `scripts/mutate.sh`, hosted runs, snapshots or review skills unless the fix is in their area. New features, hard bugs and anything touching sync, storage or encryption get the full process.
+- Review a larger diff with `code-review` and `ponytail-review` before it merges. Hard bugs go through `diagnosing-bugs`.
 - Subagents run on Opus. Give open-ended work high effort: architecture, cross-cutting refactors, hard bugs, UI that needs judgment. Narrow tasks with a known shape get medium: a bug with a known cause, a mechanical sweep, a port.
 - Debug builds keep their data and credentials in `~/Library/Application Support/Slatrix Dev`, so they never touch the daily-driver app's session.
 - Never send messages, invitations or reactions from a real account unless the owner set up that account and room for testing.
