@@ -1,0 +1,57 @@
+{
+  "about": "How a conversation's row shows it is unread, as in Slack: a red count for mentions and for unread direct messages, a bold name for any other unread channel. A muted conversation shows only mentions, or a name marked unread by hand. Room fields default to false, 0 and \"join\": messages is the unread message count, notifications the server's notification count, mentions its highlight count, markedUnread m.marked_unread. A badge is \"none\", \"bold\" or the red count's label.",
+  "badge": [
+    { "name": "A read channel shows nothing", "room": {}, "badge": "none" },
+    { "name": "Unread messages make a channel's name bold", "room": { "messages": 3 }, "badge": "bold" },
+    { "name": "Notifications make a channel's name bold", "room": { "notifications": 2 }, "badge": "bold" },
+    { "name": "Mentions show a red count", "room": { "messages": 5, "mentions": 2 }, "badge": "2" },
+    { "name": "A count reads up to 99", "room": { "mentions": 99 }, "badge": "99" },
+    { "name": "Above 99 it reads 99+", "room": { "mentions": 100 }, "badge": "99+" },
+    { "name": "Marked unread goes bold", "room": { "markedUnread": true }, "badge": "bold" },
+    { "name": "Unread direct messages show a red count", "room": { "direct": true, "messages": 3 }, "badge": "3" },
+    { "name": "A direct conversation counts notifications", "room": { "direct": true, "notifications": 2 }, "badge": "2" },
+    {
+      "name": "A direct conversation counts the larger of messages and notifications",
+      "room": { "direct": true, "messages": 4, "notifications": 2 },
+      "badge": "4"
+    },
+    { "name": "A direct count above 99 reads 99+", "room": { "direct": true, "messages": 120 }, "badge": "99+" },
+    { "name": "A direct conversation marked unread goes bold", "room": { "direct": true, "markedUnread": true }, "badge": "bold" },
+    { "name": "A muted channel hides unread messages", "room": { "messages": 7, "muted": true }, "badge": "none" },
+    {
+      "name": "A muted direct conversation hides unread messages",
+      "room": { "direct": true, "messages": 7, "muted": true },
+      "badge": "none"
+    },
+    { "name": "A muted channel still counts mentions", "room": { "messages": 7, "mentions": 1, "muted": true }, "badge": "1" },
+    {
+      "name": "A muted direct conversation counts only mentions",
+      "room": { "direct": true, "messages": 7, "mentions": 1, "muted": true },
+      "badge": "1"
+    },
+    { "name": "A muted conversation marked unread goes bold", "room": { "muted": true, "markedUnread": true }, "badge": "bold" }
+  ],
+  "combined": [
+    {
+      "name": "Nothing unread but a muted channel shows nothing",
+      "rooms": [{}, { "messages": 7, "muted": true }],
+      "badge": "none"
+    },
+    { "name": "Any bold row makes it bold", "rooms": [{}, { "messages": 3 }], "badge": "bold" },
+    {
+      "name": "Counts add up",
+      "rooms": [{ "messages": 3 }, { "mentions": 2 }, { "direct": true, "messages": 4 }],
+      "badge": "6"
+    },
+    { "name": "A total above 99 reads 99+", "rooms": [{ "mentions": 60 }, { "direct": true, "messages": 60 }], "badge": "99+" },
+    {
+      "name": "Left and invited conversations and workspaces add nothing",
+      "rooms": [
+        { "mentions": 2, "membership": "leave" },
+        { "messages": 2, "membership": "invite" },
+        { "mentions": 2, "space": true }
+      ],
+      "badge": "none"
+    }
+  ]
+}

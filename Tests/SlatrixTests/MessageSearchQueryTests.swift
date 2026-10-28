@@ -3,44 +3,78 @@ import Testing
 
 @testable import Slatrix
 
+/// Message search, from the shared cases in `spec/search-query.json`.
 struct MessageSearchQueryTests {
-    @Test(
-        "Blank input never creates an SDK query", arguments: MessageSearchQuery.Mode.allCases,
-        ["", " ", "\t\n\r", "\u{00a0}"])
-    func blankInput(mode: MessageSearchQuery.Mode, input: String) {
-        #expect(MessageSearchQuery(input, mode: mode).sdkQuery() == nil)
+    struct Room: Decodable {
+        var id: String
+        var name: String
     }
 
-    @Test("Surrounding whitespace is trimmed in both modes", arguments: MessageSearchQuery.Mode.allCases)
-    func trimsSurroundingWhitespace(mode: MessageSearchQuery.Mode) {
-        #expect(MessageSearchQuery("  two words\n", mode: mode).text == "two words")
+    struct Parse: Decodable, CustomTestStringConvertible {
+        var name: String
+        var input: String
+        var text: String
+        var roomID: String?
+        var senderID: String?
+        var testDescription: String { name }
     }
 
-    @Test(
-        "Query mode passes SDK boolean, quote, field and escape syntax through",
-        arguments: [
-            ("  Browser AND sync OR \"two words\"  ", "Browser AND sync OR \"two words\""),
-            (#"body:word\*"#, #"body:word\*"#),
-        ])
-    func queryModePassesSyntaxThrough(input: String, expected: String) {
-        let query = MessageSearchQuery(input)
-        #expect(query.mode == .query)
-        #expect(query.sdkQuery() == expected)
+    struct Query: Decodable, CustomTestStringConvertible {
+        var name: String
+        var text: String
+        var mode: String
+        var senderID: String?
+        var roomID: String?
+        var date: String?
+        var now: String?
+        var query: String?
+        var testDescription: String { name }
     }
 
-    @Test(
-        "Phrase mode escapes quotes and backslashes inside one quoted literal",
-        arguments: [
-            ("Browser sync check", "\"Browser sync check\""),
-            ("a\"b", "\"a\\\"b\""),
-            (#"C:\temp\file"#, #""C:\\temp\\file""#),
-            (#"trailing\"#, #""trailing\\""#),
-            ("'single'", "\"'single'\""),
-            ("a\nb\tc", "\"a\nb\tc\""),
-            ("!!!", "\"!!!\""),
-        ])
-    func phraseModeEscaping(input: String, expected: String) {
-        #expect(MessageSearchQuery(input, mode: .phrase).sdkQuery() == expected)
+    struct Highlights: Decodable, CustomTestStringConvertible {
+        var name: String
+        var text: String
+        var mode: String
+        var body: String
+        var words: [String]
+        var testDescription: String { name }
+    }
+
+    struct Spec: Decodable {
+        var parse: [Parse]
+        var rooms: [Room]
+        var me: String
+        var query: [Query]
+        var highlights: [Highlights]
+    }
+
+    private static let spec = Result { try SharedSpec.decode("spec/search-query.json", as: Spec.self) }
+    private static let modes: [String: MessageSearchQuery.Mode] = ["query": .query, "phrase": .phrase]
+    private static let dates: [String: SearchDate] = ["today": .today, "week": .week, "month": .month, "year": .year]
+
+    @Test("Slack's in: and from:", arguments: try spec.get().parse)
+    func parse(spec: Parse) throws {
+        let shared = try Self.spec.get()
+        let rooms = shared.rooms.map { ChatRoom(id: $0.id, name: $0.name) }
+        let parsed = MessageSearchQuery.parse(spec.input, rooms: rooms, me: shared.me)
+        #expect(parsed == MessageSearchQuery(spec.text, roomID: spec.roomID, senderID: spec.senderID))
+    }
+
+    @Test("The index query", arguments: try spec.get().query)
+    func query(spec: Query) throws {
+        let mode = try #require(Self.modes[spec.mode])
+        let date = try spec.date.map { try #require(Self.dates[$0]) }
+        let now = try spec.now.map { try #require(ISO8601DateFormatter().date(from: $0)) } ?? Date()
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let query = MessageSearchQuery(spec.text, mode: mode, roomID: spec.roomID, senderID: spec.senderID, date: date)
+        #expect(query.sdkQuery(now: now, calendar: utc) == spec.query)
+    }
+
+    @Test("Highlighted words", arguments: try spec.get().highlights)
+    func highlights(spec: Highlights) throws {
+        let query = MessageSearchQuery(spec.text, mode: try #require(Self.modes[spec.mode]))
+        #expect(query.highlights(in: spec.body).map { String(spec.body[$0]) } == spec.words)
     }
 
     @Test(
@@ -56,65 +90,6 @@ struct MessageSearchQueryTests {
         let query = MessageSearchQuery(input, mode: .phrase)
         let sdkQuery = try #require(query.sdkQuery())
         #expect(parsePhrase(sdkQuery) == query.text)
-    }
-
-    private static let utc: Calendar = {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        return calendar
-    }()
-    private static let now = Date(timeIntervalSince1970: 1_793_016_000)  // 2026-10-26 12:00 UTC
-
-    @Test(
-        "From and date filters become required clauses on the index's sender and date fields",
-        arguments: [
-            (
-                MessageSearchQuery("budget OR plan", senderID: "@alice:example.org", date: .today),
-                #"+(budget OR plan) +sender:"@alice:example.org" +date:[2026-10-26T00:00:00Z TO *]"#
-            ),
-            (
-                MessageSearchQuery("two words", mode: .phrase, date: .week),
-                #"+"two words" +date:[2026-10-19T00:00:00Z TO *]"#
-            ),
-            (MessageSearchQuery(" ", senderID: "@alice:example.org"), #"+sender:"@alice:example.org""#),
-        ])
-    func filtersBecomeClauses(query: MessageSearchQuery, expected: String) {
-        #expect(query.sdkQuery(now: Self.now, calendar: Self.utc) == expected)
-    }
-
-    @Test("The In filter narrows the hits, not the query, so it can't search on its own")
-    func inFilterStaysOutOfTheQuery() {
-        #expect(MessageSearchQuery("budget", roomID: "!design:example.org").sdkQuery() == "budget")
-        #expect(MessageSearchQuery("", roomID: "!design:example.org").sdkQuery() == nil)
-    }
-
-    private static let rooms = [
-        ChatRoom(id: "!design:example.org", name: "Design"),
-        ChatRoom(id: "!product:example.org", name: "Product design"),
-    ]
-
-    @Test(
-        "Slack's in: and from: become filters; anything they can't resolve stays in the text",
-        arguments: [
-            (
-                "in:#design from:@alice:example.org budget",
-                MessageSearchQuery("budget", roomID: "!design:example.org", senderID: "@alice:example.org")
-            ),
-            (#"plan in:"Product design""#, MessageSearchQuery("plan", roomID: "!product:example.org")),
-            ("FROM:me plan", MessageSearchQuery("plan", senderID: "@me:example.org")),
-            ("in:#nowhere from:alice plan", MessageSearchQuery("in:#nowhere from:alice plan")),
-        ])
-    func parsesModifiers(input: String, expected: MessageSearchQuery) {
-        #expect(MessageSearchQuery.parse(input, rooms: Self.rooms, me: "@me:example.org") == expected)
-    }
-
-    @Test("Highlights cover whole words the index matched, in any case, and skip operators")
-    func highlights() {
-        let body = "Sync the async SYNC job and plan"
-        let ranges = MessageSearchQuery("sync AND plan").highlights(in: body)
-        #expect(ranges.map { String(body[$0]) } == ["Sync", "SYNC", "plan"])
-        let phrase = MessageSearchQuery("the async", mode: .phrase).highlights(in: body)
-        #expect(phrase.map { String(body[$0]) } == ["the", "async"])
     }
 
     @Test("Mode is part of request identity, so switching modes invalidates pending pages")

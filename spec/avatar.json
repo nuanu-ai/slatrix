@@ -1,0 +1,20 @@
+{
+  "about": "A person or conversation without a photo shows initials on a color, both from its display name. Initials: drop a leading @, # or !, split at whitespace, dots, underscores and hyphens, and take the first character of the first two parts, uppercased. Color: the index into avatarColors in design/tokens.json is the djb2 hash of the name's UTF-8 bytes (start at 5381, then hash * 33 + byte, wrapping at 64 bits, unsigned) modulo 6.",
+  "cases": [
+    { "value": "Alice Liddell", "initials": "AL", "color": 1 },
+    { "value": "bob", "initials": "B", "color": 2 },
+    { "value": "#design", "initials": "D", "color": 2 },
+    { "value": "!room", "initials": "R", "color": 1 },
+    { "value": "jean-luc picard", "initials": "JL", "color": 5 },
+    { "value": "a.b_c-d", "initials": "AB", "color": 1 },
+    { "value": "deploy-bot", "initials": "DB", "color": 2 },
+    { "value": "Ops Team", "initials": "OT", "color": 4 },
+    { "value": "Привет Мир", "initials": "ПМ", "color": 4 },
+    { "value": "Émile Zola", "initials": "ÉZ", "color": 2 },
+    { "value": "Q", "initials": "Q", "color": 0 },
+    { "value": "x", "initials": "X", "color": 3 },
+    { "value": "Julia", "initials": "J", "color": 4 },
+    { "value": "", "initials": "", "color": 5 },
+    { "value": "A very long display name that wraps the hash many times over", "initials": "AV", "color": 3 }
+  ]
+}

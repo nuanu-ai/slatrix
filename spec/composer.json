@@ -1,0 +1,173 @@
+{
+  "about": "What the composer sends for a draft. A draft is HTML from the Matrix spec's tag list, the way the composer stores it. body is the event's plain body, html its formatted_body or null when nothing is formatted, mentions the user IDs for m.mentions, sorted, and mentionsRoom whether it notifies the room. A mention is a matrix.to link to a user, or a complete user ID typed outside code; @room typed outside code notifies the room.",
+  "send": [
+    {
+      "name": "Text without formatting sends only a body, with Markdown characters kept as typed",
+      "draft": "2 * 3 = **six** &amp; &lt;done&gt;<br>&gt; not a quote",
+      "body": "2 * 3 = **six** & <done>\n> not a quote",
+      "html": null,
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "A mention twice notifies its person once",
+      "draft": "<a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a> and <a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a>",
+      "body": "@Alice Liddell and @Alice Liddell",
+      "html": "<a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a> and <a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a>",
+      "mentions": [
+        "@alice:example.org"
+      ],
+      "mentionsRoom": false
+    },
+    {
+      "name": "Plain text mentions no one",
+      "draft": "nobody",
+      "body": "nobody",
+      "html": null,
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "Bold",
+      "draft": "Hi <strong>there</strong>",
+      "body": "Hi there",
+      "html": "Hi <strong>there</strong>",
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "Italic",
+      "draft": "<em>soft</em>",
+      "body": "soft",
+      "html": "<em>soft</em>",
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "Strikethrough",
+      "draft": "<del>gone</del>",
+      "body": "gone",
+      "html": "<del>gone</del>",
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "Inline code, with its body in backticks",
+      "draft": "<code>a &lt; b</code>",
+      "body": "`a < b`",
+      "html": "<code>a &lt; b</code>",
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "A link, with its address after the text in the body",
+      "draft": "<a href=\"https://example.org/a?b=1&amp;c\">docs</a>",
+      "body": "docs (https://example.org/a?b=1&c)",
+      "html": "<a href=\"https://example.org/a?b=1&amp;c\">docs</a>",
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "A bulleted list",
+      "draft": "<ul><li>one</li><li>two</li></ul>",
+      "body": "- one\n- two",
+      "html": "<ul><li>one</li><li>two</li></ul>",
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "A numbered list",
+      "draft": "<ol><li>one</li><li>two</li></ol>",
+      "body": "1. one\n2. two",
+      "html": "<ol><li>one</li><li>two</li></ol>",
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "A quote, line by line",
+      "draft": "<blockquote>said<br>this</blockquote>",
+      "body": "> said\n> this",
+      "html": "<blockquote>said<br>this</blockquote>",
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "A code block, fenced in the body",
+      "draft": "<pre><code>if a &lt; b {\n  go()</code></pre>",
+      "body": "```\nif a < b {\n  go()\n```",
+      "html": "<pre><code>if a &lt; b {\n  go()</code></pre>",
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "A mention links to its person and reads @Name in the body",
+      "draft": "Thanks <a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a>",
+      "body": "Thanks @Alice Liddell",
+      "html": "Thanks <a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a>",
+      "mentions": [
+        "@alice:example.org"
+      ],
+      "mentionsRoom": false
+    },
+    {
+      "name": "@room typed outside code notifies the room",
+      "draft": "Heads up @room",
+      "body": "Heads up @room",
+      "html": null,
+      "mentions": [],
+      "mentionsRoom": true
+    },
+    {
+      "name": "@room inside code notifies no one",
+      "draft": "<code>@room</code>",
+      "body": "`@room`",
+      "html": "<code>@room</code>",
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "A word that starts with @room notifies no one",
+      "draft": "@roommate",
+      "body": "@roommate",
+      "html": null,
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "A complete Matrix ID typed outside code mentions its person once",
+      "draft": "Hi @alice:example.org, @alice:example.org",
+      "body": "Hi @alice, @alice",
+      "html": "Hi <a href=\"https://matrix.to/#/@alice:example.org\">alice</a>, <a href=\"https://matrix.to/#/@alice:example.org\">alice</a>",
+      "mentions": [
+        "@alice:example.org"
+      ],
+      "mentionsRoom": false
+    },
+    {
+      "name": "Matrix IDs inside code mention no one",
+      "draft": "<code>@alice:example.org</code><pre><code>@carol:example.org</code></pre>",
+      "body": "`@alice:example.org`\n```\n@carol:example.org\n```",
+      "html": "<code>@alice:example.org</code><pre><code>@carol:example.org</code></pre>",
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "An email address or an incomplete ID mentions no one",
+      "draft": "mail me at bob@example.org or @alice",
+      "body": "mail me at bob@example.org or @alice",
+      "html": null,
+      "mentions": [],
+      "mentionsRoom": false
+    },
+    {
+      "name": "A mention split across two links sends as one",
+      "draft": "<a href=\"https://matrix.to/#/@dl:example.org\">deadlock agen</a><a href=\"https://matrix.to/#/@dl:example.org\">t</a> ",
+      "body": "@deadlock agent",
+      "html": "<a href=\"https://matrix.to/#/@dl:example.org\">deadlock agent</a>",
+      "mentions": [
+        "@dl:example.org"
+      ],
+      "mentionsRoom": false
+    }
+  ]
+}
