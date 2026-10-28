@@ -4,27 +4,20 @@ import Testing
 
 @testable import Slatrix
 
-/// The SDK's member iterator is synchronous. This one stalls its first chunk until the main actor answers.
-private final class StallingMembers: RoomMembersIterator, @unchecked Sendable {
+/// The SDK's member iterator is synchronous, so it must run off the main thread. This one notes where it ran.
+private final class ThreadRecordingMembers: RoomMembersIterator, @unchecked Sendable {
     private let lock = NSLock()
-    private let answered = DispatchSemaphore(value: 0)
-    private var stalled = false
     private var served = false
-    private var mainWasBlocked = false
-    var isStalled: Bool { lock.withLock { stalled } }
-    var blockedMain: Bool { lock.withLock { mainWasBlocked } }
+    private var onMain = false
+    var ranOnMain: Bool { lock.withLock { onMain } }
     init() { super.init(noHandle: .init()) }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
-    func answer() { answered.signal() }
     override func nextChunk(chunkSize: UInt32) -> [RoomMember]? {
-        guard lock.withLock({ !served }) else { return nil }
-        lock.withLock { stalled = true }
-        let timedOut = answered.wait(timeout: .now() + 2) == .timedOut
         lock.withLock {
-            mainWasBlocked = timedOut
-            served = true
+            onMain = onMain || Thread.isMainThread
+            defer { served = true }
+            return served ? nil : [roomMember("@alice:example.org", name: "Alice")]
         }
-        return [roomMember("@alice:example.org", name: "Alice")]
     }
 }
 
@@ -32,7 +25,7 @@ private final class StallingMembers: RoomMembersIterator, @unchecked Sendable {
 struct RoomMembersTests {
     @Test("Loading a room's members never blocks the main thread")
     func membersLoadOffMain() async {
-        let members = StallingMembers()
+        let members = ThreadRecordingMembers()
         let room = FakeRoom(roomInfo(id: "!large:example.org"))
         room.memberList = members
         let service = MatrixService()
@@ -40,10 +33,8 @@ struct RoomMembersTests {
             client: FakeClient(rooms: [room]), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
             selectionID: UUID(), threadID: UUID())
         service.selectedRoomID = room.id()
-        let load = Task { await service.loadMembers() }
-        if await eventually({ members.isStalled }) { members.answer() }
-        await load.value
-        #expect(!members.blockedMain)
+        await service.loadMembers()
+        #expect(!members.ranOnMain)
         #expect(service.members.map(\.name) == ["Alice"])
     }
 
