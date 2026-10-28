@@ -136,6 +136,8 @@ struct AppColors {
     var mediaShade: Color { Color.black.opacity(0.5) }
     /// Text and icons over media and in the media viewer.
     var onMedia: Color { .white }
+    /// A thin edge around white lines over a photo, such as the crop frame, so they still show against white.
+    var onMediaEdge: Color { Color.black.opacity(0.4) }
     /// A file card's type tile, under a white glyph in either theme.
     func file(_ kind: FileKind) -> Color {
         switch kind {
