@@ -891,7 +891,8 @@ final class TimelineScrollView: NSScrollView {
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
-        onPointer?(nil)
+        // Rows and the toolbar pass their controls' exits up the responder chain; only this one means it left.
+        if event.trackingArea === tracking { onPointer?(nil) }
     }
 
     // Takes the hover, and any tooltip over the window, along when the timeline goes.
