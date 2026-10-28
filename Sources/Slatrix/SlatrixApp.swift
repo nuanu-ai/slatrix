@@ -3,10 +3,17 @@ import SwiftUI
 
 @main enum SlatrixEntry {
     @MainActor static func main() {
+        registerDefaults(.standard)
         Performance.startLaunch()
         Performance.watchMainThread()
         SDKLogging.start()
         SlatrixApp.main()
+    }
+
+    /// macOS guesses what a field is for and offers AutoFill under it, such as contacts under Find members. Only the
+    /// sign-in fields want AutoFill, and their content types still ask for it.
+    static func registerDefaults(_ defaults: UserDefaults) {
+        defaults.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
     }
 }
 
