@@ -132,6 +132,8 @@ struct AppColors {
     var mediaBackdrop: Color { Color(hex: 0x1a1b1e) }
     /// Chips over a photo or video: play, duration and the GIF tag.
     var mediaControl: Color { Color.black.opacity(0.6) }
+    /// Over the part of a photo left out, such as outside the crop frame; half black, as in Slack, in either theme.
+    var mediaShade: Color { Color.black.opacity(0.5) }
     /// Text and icons over media and in the media viewer.
     var onMedia: Color { .white }
     /// A file card's type tile, under a white glyph in either theme.

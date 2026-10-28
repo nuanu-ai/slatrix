@@ -8,6 +8,8 @@ struct PhotoCropper: View {
     let onCancel: () -> Void
     let onSave: (CGRect) -> Void
     @State private var crop: CGRect
+    /// At 100% zoom, so a tall photo leaves the window room around the modal.
+    private static let maxHeight: CGFloat = 400
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
@@ -23,8 +25,9 @@ struct PhotoCropper: View {
             title: "Crop your photo", onClose: onCancel, secondary: ModalAction("Cancel", action: onCancel),
             primary: ModalAction("Save") { onSave(crop) }
         ) {
-            // The medium modal's body, and no taller than leaves the window room around the modal.
-            let scale = min((m.modalMedium - 2 * m.sp24) / CGFloat(image.width), m(400) / CGFloat(image.height))
+            // As wide as the medium modal's body.
+            let scale = min(
+                (m.modalMedium - 2 * m.sp24) / CGFloat(image.width), m(Self.maxHeight) / CGFloat(image.height))
             frame(scale: scale)
                 .frame(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
                 .frame(maxWidth: .infinity)
@@ -38,23 +41,27 @@ struct PhotoCropper: View {
         let colors = appearance.colors
         let square = CGRect(
             x: crop.minX * scale, y: crop.minY * scale, width: crop.width * scale, height: crop.height * scale)
-        let handle = m.sp8
+        let mark = m.sp4
         return ZStack(alignment: .topLeading) {
             Image(decorative: image, scale: 1).resizable()
             GeometryReader { proxy in
                 Path {
                     $0.addRect(CGRect(origin: .zero, size: proxy.size))
                     $0.addRect(square)
-                }.fill(colors.scrim, style: FillStyle(eoFill: true))
+                }.fill(colors.mediaShade, style: FillStyle(eoFill: true))
             }
             Rectangle().strokeBorder(colors.onMedia, lineWidth: 1)
                 .frame(width: square.width, height: square.height).offset(x: square.minX, y: square.minY)
-            ForEach(PhotoCrop.Corner.allCases, id: \.self) { corner in
-                Rectangle().fill(colors.onMedia).frame(width: handle, height: handle)
-                    .offset(
-                        x: (corner.right ? square.maxX : square.minX) - handle / 2,
-                        y: (corner.bottom ? square.maxY : square.minY) - handle / 2)
-            }
+            // An L inside each corner, so none hangs off the photo.
+            Path { path in
+                for corner in PhotoCrop.Corner.allCases {
+                    let x = corner.right ? square.maxX - mark / 2 : square.minX + mark / 2
+                    let y = corner.bottom ? square.maxY - mark / 2 : square.minY + mark / 2
+                    path.move(to: CGPoint(x: x + (corner.right ? -1 : 1) * m.sp16, y: y))
+                    path.addLine(to: CGPoint(x: x, y: y))
+                    path.addLine(to: CGPoint(x: x, y: y + (corner.bottom ? -1 : 1) * m.sp16))
+                }
+            }.stroke(colors.onMedia, lineWidth: mark)
             CropSurface(crop: crop, image: image, scale: scale, grab: m.sp16) { crop = $0 }
         }
     }
