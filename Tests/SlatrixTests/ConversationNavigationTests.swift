@@ -102,4 +102,20 @@ struct ConversationNavigationTests {
     func invalidDirection(direction: Int) {
         #expect(next(nil, direction: direction) == nil)
     }
+
+    @Test(
+        "A conversation picked from #a's Files leaves Files up until it shows, never #a's messages in between",
+        arguments: [
+            // Still reading its cached rows.
+            ("a", "b", ChannelTab.files),
+            ("b", "b", .messages),
+            // "View in conversation" goes to #a's messages at once.
+            ("a", "a", .messages),
+            ("a", nil, .messages),
+        ] as [(String?, String?, ChannelTab)])
+    func screenWhileOpening(showing: String?, opening: String?, expected: ChannelTab) {
+        #expect(
+            ConversationNavigation.shown(.messages, left: ChannelTab.files, showing: showing, opening: opening)
+                == expected)
+    }
 }
