@@ -2,18 +2,34 @@ import Foundation
 import MatrixRustSDK
 import Observation
 
+/// A thread as the thread list last reported it; `root` and `latest` are placeholders until their previews hydrate.
 struct ThreadFeedItem: Identifiable, Hashable {
-    enum PreviewState: String, Hashable { case snapshot, loading, ready, failed }
     var id: String
     var roomID: String
     var roomName: String
+    var isDirect = false
     var root: ChatMessage
     var latest: ChatMessage?
     var replyCount: Int
-    var rootPreviewState: PreviewState = .snapshot
-    var latestPreviewState: PreviewState = .snapshot
-    var previewError: String? = nil
     var lastActivityAt: Date { latest?.timestamp ?? root.timestamp }
+}
+
+/// One thread message's current content. Hydration changes only this, so only the row showing it redraws.
+@MainActor
+@Observable final class ThreadPreview {
+    enum State: String, Hashable { case snapshot, loading, ready, failed }
+    fileprivate(set) var state = State.snapshot
+    fileprivate(set) var message: ChatMessage?
+    fileprivate(set) var error: String?
+
+    /// What a row shows for `snapshot`, the thread list's placeholder for this message.
+    func shown(_ snapshot: ChatMessage) -> ChatMessage {
+        guard var message else {
+            return state == .failed ? ThreadFeedService.placeholder(snapshot, failed: true) : snapshot
+        }
+        message.replyCount = snapshot.replyCount
+        return message
+    }
 }
 
 struct ThreadFeedRoomState: Identifiable, Hashable {
@@ -57,7 +73,7 @@ enum ThreadFeedMapping {
             root.replyCount = Int(value.numReplies)
             let id = ActivityService.key(roomID: room.id, eventID: root.eventID)
             let item = ThreadFeedItem(
-                id: id, roomID: room.id, roomName: room.name, root: root,
+                id: id, roomID: room.id, roomName: room.name, isDirect: room.isDirect, root: root,
                 latest: value.latestEvent.map { message($0, roomID: room.id) }, replyCount: Int(value.numReplies))
             if unique[id].map({ $0.lastActivityAt > item.lastActivityAt }) != true { unique[id] = item }
         }
@@ -221,7 +237,9 @@ final class RoomSubscriptionCoordinator {
         let service: ThreadListService
         let token = UUID()
         var handles: [TaskHandle] = []
-        var values: [ThreadListItem] = []
+        var values: [ThreadListItem] = [] { didSet { projected = nil } }
+        /// `values` as rows, kept until they or the room change; projecting every room on each page is the cost.
+        var projected: [ThreadFeedItem]?
         var revision = 0
         var paginationRevision = 0
         init(_ service: ThreadListService) { self.service = service }
@@ -233,7 +251,7 @@ final class RoomSubscriptionCoordinator {
     private var records: [String: Record] = [:]
     private final class Preview {
         let token = UUID()
-        var state = ThreadFeedItem.PreviewState.loading
+        var state = ThreadPreview.State.loading
         var message: ChatMessage?
         var error: String?
         var revision = 0
@@ -250,6 +268,7 @@ final class RoomSubscriptionCoordinator {
     }
     private var previews: [String: Preview] = [:]
     private var previewOrder: [String] = []
+    @ObservationIgnored private var shownPreviews: [String: ThreadPreview] = [:]
 
     func open(
         client: Client, rooms: [ChatRoom], workspaceID: String?,
@@ -283,6 +302,7 @@ final class RoomSubscriptionCoordinator {
         for item in previews.values { item.cancel() }
         previews = [:]
         previewOrder = []
+        shownPreviews = [:]
         client = nil
         subscriptions = nil
         rooms = []
@@ -302,13 +322,19 @@ final class RoomSubscriptionCoordinator {
 
     func updateRooms(_ candidates: [ChatRoom]) {
         guard isActive else { return }
-        rooms = candidates.filter { ThreadFeedMapping.isInScope($0, workspaceID: workspaceID) }
+        let next = candidates.filter { ThreadFeedMapping.isInScope($0, workspaceID: workspaceID) }
             .sorted { lhs, rhs in
                 if (lhs.mentions > 0) != (rhs.mentions > 0) { return lhs.mentions > 0 }
                 if lhs.favorite != rhs.favorite { return lhs.favorite }
                 return lhs.name == rhs.name
                     ? lhs.id < rhs.id : lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
+        // The room list refreshes with every unread change; the feed shows only which rooms, in order, and how.
+        if next.elementsEqual(rooms, by: { $0.id == $1.id && $0.name == $1.name && $0.isDirect == $1.isDirect }) {
+            return
+        }
+        rooms = next
+        for record in records.values { record.projected = nil }
         let allowed = Set(rooms.map(\.id))
         for id in records.keys.filter({ !allowed.contains($0) }) { records.removeValue(forKey: id)?.cancel() }
         let oldLiveRooms = Set(subscriptionOrder.suffix(32))
@@ -354,6 +380,26 @@ final class RoomSubscriptionCoordinator {
         await paginate(roomIDs: [roomID])
     }
 
+    /// Each thread's root, current where its preview has hydrated.
+    var roots: [ChatMessage] {
+        items.map { item in
+            var root =
+                previews[ActivityService.key(roomID: item.roomID, eventID: item.root.eventID)]?.message ?? item.root
+            root.replyCount = item.replyCount
+            return root
+        }
+    }
+
+    /// The current content of a thread message, for the row that shows it.
+    func preview(roomID: String, eventID: String) -> ThreadPreview {
+        let id = ActivityService.key(roomID: roomID, eventID: eventID)
+        if let shown = shownPreviews[id] { return shown }
+        let shown = ThreadPreview()
+        shownPreviews[id] = shown
+        show(id)
+        return shown
+    }
+
     func hydratePreview(_ item: ThreadFeedItem, retry: Bool = false) async {
         guard isActive, rooms.contains(where: { $0.id == item.roomID }) else { return }
         let token = generation
@@ -384,6 +430,7 @@ final class RoomSubscriptionCoordinator {
         while previewOrder.count > 64 {
             let removed = previewOrder.removeFirst()
             previews.removeValue(forKey: removed)?.cancel()
+            show(removed)
         }
         let previewToken = preview.token
         preview.task = Task { [weak self] in
@@ -425,11 +472,11 @@ final class RoomSubscriptionCoordinator {
                 preview.state = .failed
                 preview.message = nil
                 preview.error = MatrixService.safeError(error)
-                self.publishItems()
+                self.show(id)
             }
             if self.generation == token, self.previews[id]?.token == previewToken { preview.task = nil }
         }
-        publishItems()
+        show(id)
         await preview.task?.value
     }
 
@@ -460,7 +507,7 @@ final class RoomSubscriptionCoordinator {
             preview.state = .failed
             preview.error = MatrixService.safeError(error)
         }
-        publishItems()
+        show(id)
     }
 
     private func record(for roomID: String, client: Client) throws -> Record {
@@ -572,30 +619,32 @@ final class RoomSubscriptionCoordinator {
     }
 
     private func publishItems() {
-        items = rooms.flatMap { room in ThreadFeedMapping.project(records[room.id]?.values ?? [], room: room) }.map {
-            item in
-            var item = item
-            let root = previews[ActivityService.key(roomID: item.roomID, eventID: item.root.eventID)]
-            item.rootPreviewState = root?.state ?? .snapshot
-            item.previewError = root?.error
-            if let current = root?.message {
-                item.root = current
-                item.root.replyCount = item.replyCount
-            } else {
-                item.root = Self.placeholder(item.root, failed: item.rootPreviewState == .failed)
+        items = rooms.flatMap { room -> [ThreadFeedItem] in
+            guard let record = records[room.id] else { return [] }
+            if let projected = record.projected { return projected }
+            let projected = ThreadFeedMapping.project(record.values, room: room).map {
+                var item = $0
+                item.root = Self.placeholder(item.root, failed: false)
+                item.latest = item.latest.map { Self.placeholder($0, failed: false) }
+                return item
             }
-            if let latest = item.latest {
-                let current = previews[ActivityService.key(roomID: item.roomID, eventID: latest.eventID)]
-                item.latestPreviewState = current?.state ?? .snapshot
-                item.previewError = item.previewError ?? current?.error
-                item.latest = current?.message ?? Self.placeholder(latest, failed: item.latestPreviewState == .failed)
-            }
-            return item
+            record.projected = projected
+            return projected
         }
         .sorted { $0.lastActivityAt == $1.lastActivityAt ? $0.id < $1.id : $0.lastActivityAt > $1.lastActivityAt }
     }
 
-    private static func placeholder(_ message: ChatMessage, failed: Bool) -> ChatMessage {
+    /// Copies a message's preview to the row showing it, if one does.
+    private func show(_ id: String) {
+        guard let shown = shownPreviews[id] else { return }
+        let preview = previews[id]
+        let state = preview?.state ?? .snapshot
+        if shown.state != state { shown.state = state }
+        if shown.message != preview?.message { shown.message = preview?.message }
+        if shown.error != preview?.error { shown.error = preview?.error }
+    }
+
+    static func placeholder(_ message: ChatMessage, failed: Bool) -> ChatMessage {
         var result = message
         result.body = failed ? "Preview unavailable. Open the thread to read this message." : "Loading current preview…"
         result.formattedBody = nil

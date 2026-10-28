@@ -24,18 +24,24 @@ struct ThreadPreviewTests {
         return try #require(feed.items.first)
     }
 
+    private func preview(_ eventID: String) -> ThreadPreview { feed.preview(roomID: chatRoom.id, eventID: eventID) }
+
     @Test("Before hydration, a row never shows the thread list's original snapshot as current")
     func snapshotIsPlaceholder() async throws {
         let row = try await open()
-        #expect(row.rootPreviewState == .snapshot && !row.root.body.contains("Original snapshot"))
+        let shown = preview("$root")
+        #expect(shown.state == .snapshot && !shown.shown(row.root).body.contains("Original snapshot"))
     }
 
     @Test("Hydration shows the SDK's current edit of the root and deletion of the latest reply")
     func hydrationAppliesEditsAndRedactions() async throws {
-        await feed.hydratePreview(try await open())
-        let row = try #require(feed.items.first)
-        #expect(row.root.body == "Edited successfully" && row.root.isEdited)
-        #expect(row.latest?.isRedacted == true && row.latest?.body == "This message was deleted")
+        let row = try await open()
+        let (shownRoot, shownLatest) = (preview("$root"), preview("$reply"))
+        await feed.hydratePreview(row)
+        let root = shownRoot.shown(row.root)
+        let latest = shownLatest.shown(try #require(row.latest))
+        #expect(root.body == "Edited successfully" && root.isEdited && root.replyCount == 9)
+        #expect(latest.isRedacted && latest.body == "This message was deleted")
     }
 
     @Test("Hydration reads each event alone, without receipts, decryption reports, pagination or read markers")
@@ -66,11 +72,13 @@ struct ThreadPreviewTests {
     @Test("A late thread-list snapshot cannot undo a live deletion of the root")
     func lateSnapshotKeepsLiveRedaction() async throws {
         await feed.hydratePreview(try await open())
+        let shown = preview("$root")
         root.emit(textEvent("$root", body: "Original must stay hidden", redacted: true))
-        #expect(await eventually { feed.items.first?.root.isRedacted == true })
+        #expect(await eventually { shown.message?.isRedacted == true })
         room.threads.replaySnapshot()
         await drainMainActor()
-        #expect(feed.items.first?.root.isRedacted == true && feed.items.first?.rootPreviewState == .ready)
+        let row = try #require(feed.items.first)
+        #expect(shown.shown(row.root).isRedacted && shown.state == .ready)
     }
 
     @Test("Closing the feed stops every preview listener and ignores late updates")
@@ -100,10 +108,11 @@ struct ThreadPreviewTests {
         room.fail = true
         let row = try await open()
         await feed.hydratePreview(row)
-        #expect(feed.items[0].rootPreviewState == .failed && !feed.items[0].root.body.contains("Original snapshot"))
+        let shown = preview("$root")
+        #expect(shown.state == .failed && !shown.shown(row.root).body.contains("Original snapshot"))
         room.fail = false
-        await feed.hydratePreview(feed.items[0], retry: true)
-        #expect(feed.items[0].rootPreviewState == .ready)
+        await feed.hydratePreview(row, retry: true)
+        #expect(shown.state == .ready)
     }
 }
 
@@ -123,12 +132,15 @@ struct ThreadPreviewCacheTests {
             client: FakeThreadClient(room), rooms: [ChatRoom(id: "!room:example.org", name: "Room")], workspaceID: nil
         ) { _ in }
         for row in feed.items { await feed.hydratePreview(row) }
-        let evicted = feed.items.filter { $0.rootPreviewState == .snapshot }
+        func state(_ row: ThreadFeedItem) -> ThreadPreview.State {
+            feed.preview(roomID: row.roomID, eventID: row.root.eventID).state
+        }
+        let evicted = feed.items.filter { state($0) == .snapshot }
         #expect(evicted.count == 1)
         let row = try #require(evicted.first)
         await feed.hydratePreview(row)
-        #expect(feed.items.first { $0.id == row.id }?.rootPreviewState == .ready)
-        #expect(feed.items.filter { $0.rootPreviewState == .snapshot }.count == 1)
+        #expect(state(row) == .ready)
+        #expect(feed.items.filter { state($0) == .snapshot }.count == 1)
         #expect(timelines[row.root.id]?.allListenersCancelled == false)
         feed.close()
     }
