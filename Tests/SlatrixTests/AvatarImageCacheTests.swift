@@ -36,6 +36,14 @@ struct AvatarImageCacheTests {
         #expect(cache.cachedImage(for: "mxc://example.org/face") != nil)
     }
 
+    @Test("A photo for the profile pane keeps the detail of its large thumbnail")
+    func largeAvatarStaysSharp() async throws {
+        let cache = AvatarImageCache()
+        let thumbnail = try AvatarDecodingTests.png(width: 400, height: 400)
+        let image = try #require(await cache.image(for: "mxc://example.org/face#large", pixels: 512) { thumbnail })
+        #expect(image.width == 400)
+    }
+
     private static func png() throws -> Data {
         let context = try #require(
             CGContext(
@@ -55,7 +63,7 @@ struct AvatarImageCacheTests {
 
 @MainActor
 struct AvatarDecodingTests {
-    private static func png(width: Int, height: Int) throws -> Data {
+    static func png(width: Int, height: Int) throws -> Data {
         let context = try #require(
             CGContext(
                 data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
