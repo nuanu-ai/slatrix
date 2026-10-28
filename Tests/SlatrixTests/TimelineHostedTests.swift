@@ -839,6 +839,50 @@ struct MessageRowLayoutTests {
     }
 }
 
+/// The timeline's pointer tracking on its own: no window needed.
+@MainActor
+struct TimelineHoverTests {
+    enum Inside: CaseIterable { case row, toolbar }
+
+    /// AppKit's exit event for one tracking area, as it hands it to the area's owner.
+    private func exit(_ area: NSTrackingArea) throws -> NSEvent {
+        try #require(
+            NSEvent.enterExitEvent(
+                with: .mouseExited, location: NSPoint(x: 100, y: 100), modifierFlags: [], timestamp: 0,
+                windowNumber: 0, context: nil, eventNumber: 0,
+                trackingNumber: Int(bitPattern: Unmanaged.passUnretained(area).toOpaque()), userData: nil))
+    }
+
+    @Test(
+        "The pointer leaving a control in a message, like the replies bar, or one on the hover toolbar keeps the hover",
+        arguments: Inside.allCases)
+    func innerExitKeepsHover(inside: Inside) throws {
+        let scrollView = TimelineScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        // A row's SwiftUI content, and the toolbar floating over the rows.
+        let row = NSHostingView(rootView: Color.clear)
+        row.frame = scrollView.bounds
+        scrollView.documentView = row
+        let toolbar = TimelineToolbarView(rootView: nil)
+        scrollView.addSubview(toolbar)
+        scrollView.updateTrackingAreas()
+        var hovering = true
+        scrollView.onPointer = { hovering = $0 != nil }
+
+        // SwiftUI tracks the pointer for a control's hover in an area its hosting view owns.
+        let view: NSView = inside == .row ? row : toolbar
+        let control = NSTrackingArea(
+            rect: NSRect(x: 0, y: 0, width: 80, height: 30), options: [.mouseEnteredAndExited, .activeInActiveApp],
+            owner: view)
+        view.mouseExited(with: try exit(control))
+        #expect(hovering)
+
+        // Leaving the timeline itself ends it.
+        let timeline = try #require(scrollView.trackingAreas.first { $0.owner === scrollView })
+        scrollView.mouseExited(with: try exit(timeline))
+        #expect(!hovering)
+    }
+}
+
 @MainActor
 struct ReplyPreviewLayoutTests {
     @Test(
