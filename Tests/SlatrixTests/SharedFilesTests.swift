@@ -1,5 +1,6 @@
-import Foundation
+import AppKit
 import MatrixRustSDK
+import SwiftUI
 import Testing
 
 @testable import Slatrix
@@ -360,13 +361,51 @@ final class SharedFilesTests {
         #expect(service.items.isEmpty && service.errorMessage == nil)
     }
 
-    @Test("Rows from before the history was reopened cannot act")
+    @Test("Rows from another conversation's list cannot act")
     func reopenedScope() async throws {
         await open()
         let old = try #require(service.items.first { $0.message.id == "$old" })
         service.close()
-        await open()
+        await service.open(roomID: "!other:example.org")
         await #expect(throws: MatrixServiceError.self) { _ = try await self.service.thumbnailData(old) }
+    }
+
+    @Test("Coming back to a conversation's files shows its rows without waiting, then follows its timeline")
+    func reopenShowsKeptRows() async throws {
+        await open()
+        #expect(await eventually { self.service.items.count == 2 })
+        service.close()
+        room.setupGate.arm()
+        defer { room.setupGate.release() }
+        let reopening = Task { await service.open(roomID: "!room:example.org") }
+        #expect(await eventually { self.service.items.map(\.message.id) == ["$link", "$old"] })
+        let row = try #require(service.items.first { $0.message.id == "$old" })
+        #expect(matrix.attachmentSourceRevision(row.message) != nil)
+        room.setupGate.release()
+        await reopening.value
+        await show([file("$new", source: source, name: "new.txt")]) {
+            self.service.items.map(\.message.id) == ["$new"]
+        }
+    }
+
+    @Test("Kept rows never show for another conversation, or after the account changes")
+    func keptRowsStayTheirs() async {
+        await open()
+        #expect(await eventually { self.service.items.count == 2 })
+        // Another conversation, then the same one under a new sign-in, each still reading its timeline.
+        service.close()
+        await expectNoRowsWhileOpening("!other:example.org")
+        await open()
+        service.attach(client)
+        await expectNoRowsWhileOpening("!room:example.org")
+    }
+    private func expectNoRowsWhileOpening(_ roomID: String) async {
+        room.setupGate.arm()
+        let opening = Task { await service.open(roomID: roomID) }
+        #expect(await eventually { self.room.setupGate.isWaiting })
+        #expect(service.items.isEmpty)
+        room.setupGate.release()
+        await opening.value
     }
 
     @Test("Signing out during a download cancels it without surfacing the old account's error")
@@ -396,6 +435,61 @@ final class SharedFilesTests {
         await setup.value
         #expect(service.state == "idle" && service.errorMessage == nil && service.items.isEmpty)
         #expect(room.history.allCancelled && room.history.receipts.all.isEmpty)
+    }
+}
+
+/// A channel's Files tab in a real offscreen window, over SDK fakes; needs an awake display.
+@MainActor
+@Suite(
+    .serialized, .tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
+final class SharedFilesReopenHostedTests {
+    private let temp: TemporaryDirectory
+    private let room = SharedRoom([file("$guide", source: Source("mxc://example.org/guide"), name: "guidelines.pdf")])
+    private let matrix = MatrixService()
+
+    init() throws {
+        temp = try TemporaryDirectory()
+        matrix.sharedFiles.attach(SharedClient(room, folder: temp.url))
+    }
+
+    @Test("Coming back to a channel's Files draws its files in the first frame")
+    func reopenDrawsRowsAtOnce() async throws {
+        _ = NSApplication.shared
+        let window = offscreenWindow(NSSize(width: 900, height: 700))
+        defer {
+            room.setupGate.release()
+            window.contentView = nil
+            window.close()
+        }
+        func mount() -> NSView {
+            let hosting = NSHostingView(
+                rootView: SharedFilesView(
+                    matrix: matrix, service: matrix.sharedFiles, workspaceID: nil, channelID: "!room:example.org",
+                    onOpen: { _ in }, onOpenMedia: { _, _ in }
+                ).frame(width: 900, height: 700).environmentObject(AppearanceStore()))
+            window.contentView = hosting
+            return hosting
+        }
+        let first = mount()
+        #expect(await eventually { Self.drawsPDFTile(first) })
+
+        window.contentView = nil
+        // The timeline behind the list now takes as long as it likes.
+        room.setupGate.arm()
+        #expect(Self.drawsPDFTile(mount()))
+    }
+
+    /// Whether the view draws a clear red, as only a PDF's tile does here.
+    private static func drawsPDFTile(_ view: NSView) -> Bool {
+        view.layoutSubtreeIfNeeded()
+        guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return false }
+        view.cacheDisplay(in: view.bounds, to: image)
+        return stride(from: 0, to: image.pixelsHigh, by: 2).contains { y in
+            stride(from: 0, to: image.pixelsWide, by: 2).contains { x in
+                guard let pixel = image.colorAt(x: x, y: y) else { return false }
+                return pixel.redComponent - pixel.greenComponent > 0.4 && pixel.redComponent - pixel.blueComponent > 0.4
+            }
+        }
     }
 }
 
