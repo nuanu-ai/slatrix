@@ -144,4 +144,27 @@ struct ThreadPreviewCacheTests {
         #expect(timelines[row.root.id]?.allListenersCancelled == false)
         feed.close()
     }
+
+    @Test("Hydrating one row leaves the rows the feed has already built as they were")
+    func otherRowHydrates() async throws {
+        let ids = ["$first", "$second"]
+        let room = FakeThreadRoom(
+            threads: FakeThreadList(
+                ids.map { ThreadListItem(rootEvent: threadEvent($0), latestEvent: nil, numReplies: 1) }),
+            timelines: Dictionary(
+                uniqueKeysWithValues: ids.map { ($0, FakeEventTimeline(textEvent($0, body: "Current"))) }))
+        let feed = ThreadFeedService()
+        let chatRoom = ChatRoom(id: "!room:example.org", name: "Room")
+        await feed.open(client: FakeThreadClient(room), rooms: [chatRoom], workspaceID: nil) { _ in }
+        let changes = Recorder<Void>()
+        // As the feed's body builds a row.
+        withObservationTracking {
+            _ = feed.preview(roomID: chatRoom.id, eventID: "$second")
+        } onChange: {
+            changes.append(())
+        }
+        await feed.hydratePreview(try #require(feed.items.first { $0.root.eventID == "$first" }))
+        #expect(changes.all.isEmpty)
+        feed.close()
+    }
 }
