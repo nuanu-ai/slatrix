@@ -1,0 +1,211 @@
+{
+  "about": "Slack's @ autocomplete. before is the composer's text up to the caret; recentSenders the conversation's senders, latest first; offersRoom whether your power level lets you notify the room. suggestions lists who the query names, best first, as user IDs and \"@room\", or null when the caret isn't in a query that names anyone. Ranking: the name starts with the query, then a later word of it does, then the user ID's localpart does, then either contains it; case and accents never matter. Within a rank, joined before invited, then whoever spoke here last, then by name. range, when given, is what a chosen mention replaces: [UTF-16 offset of the @, UTF-16 length].",
+  "cases": [
+    {
+      "name": "A query keeps matching across a space while the words still name someone",
+      "before": "Hi @AI A",
+      "members": [
+        { "id": "@aisha:example.org", "name": "Aisha Khan" },
+        { "id": "@agent:example.org", "name": "AI Agent" },
+        { "id": "@bob:example.org", "name": "Bob Stone" }
+      ],
+      "offersRoom": true,
+      "range": [3, 5],
+      "suggestions": ["@agent:example.org"]
+    },
+    {
+      "name": "A later word of a name matches",
+      "before": "Hi @Agent",
+      "members": [
+        { "id": "@aisha:example.org", "name": "Aisha Khan" },
+        { "id": "@agent:example.org", "name": "AI Agent" },
+        { "id": "@bob:example.org", "name": "Bob Stone" }
+      ],
+      "offersRoom": true,
+      "suggestions": ["@agent:example.org"]
+    },
+    {
+      "name": "Typing on after a finished name opens nothing",
+      "before": "@AI Agent thanks",
+      "members": [{ "id": "@agent:example.org", "name": "AI Agent" }],
+      "offersRoom": true,
+      "suggestions": null
+    },
+    {
+      "name": "An email address opens nothing",
+      "before": "mail sam@example.org",
+      "members": [{ "id": "@sam:example.org", "name": "Sam" }],
+      "offersRoom": true,
+      "suggestions": null
+    },
+    {
+      "name": "A line break ends the query",
+      "before": "@bob\nnext",
+      "members": [{ "id": "@bob:example.org", "name": "Bob Stone" }],
+      "offersRoom": true,
+      "suggestions": null
+    },
+    {
+      "name": "A space right after the @ opens nothing",
+      "before": "@ ",
+      "members": [{ "id": "@bob:example.org", "name": "Bob Stone" }],
+      "offersRoom": true,
+      "suggestions": null
+    },
+    {
+      "name": "The server name matches no one, since everyone on it shares it",
+      "before": "@exam",
+      "members": [
+        { "id": "@aisha:example.org", "name": "Aisha Khan" },
+        { "id": "@bob:example.org", "name": "Bob Stone" }
+      ],
+      "offersRoom": true,
+      "suggestions": null
+    },
+    {
+      "name": "A name that starts with the query comes first, then a later word, then the user ID, then anywhere",
+      "before": "@mia",
+      "members": [
+        { "id": "@zed:example.org", "name": "Mia Zed" },
+        { "id": "@lou:example.org", "name": "Lou Mial" },
+        { "id": "@miagi:example.org", "name": "Kay Lee" },
+        { "id": "@ann:example.org", "name": "Mia Ann" },
+        { "id": "@tom:example.org", "name": "Tom Amiato" }
+      ],
+      "offersRoom": true,
+      "suggestions": [
+        "@ann:example.org", "@zed:example.org", "@lou:example.org", "@miagi:example.org", "@tom:example.org"
+      ]
+    },
+    {
+      "name": "Within a rank, people who spoke here lately come first, the latest first",
+      "before": "@mia",
+      "members": [
+        { "id": "@ann:example.org", "name": "Mia Ann" },
+        { "id": "@bo:example.org", "name": "Mia Bo" },
+        { "id": "@cy:example.org", "name": "Mia Cy" }
+      ],
+      "recentSenders": ["@cy:example.org", "@bo:example.org", "@cy:example.org"],
+      "offersRoom": true,
+      "suggestions": ["@cy:example.org", "@bo:example.org", "@ann:example.org"]
+    },
+    {
+      "name": "A bare @ lists everyone, whoever spoke last first, then by name, then @room",
+      "before": "@",
+      "members": [
+        { "id": "@alex:example.org", "name": "alex-kim" },
+        { "id": "@dana:example.org", "name": "dana-lee" },
+        { "id": "@dora:example.org", "name": "Dora Ito" },
+        { "id": "@ivan:example.org", "name": "ivan-novak" },
+        { "id": "@sam:example.org", "name": "sam" },
+        { "id": "@anna:example.org", "name": "Anna Berg" },
+        { "id": "@maria:example.org", "name": "Maria" },
+        { "id": "@oleg:example.org", "name": "Oleg" },
+        { "id": "@pavel:example.org", "name": "Pavel" },
+        { "id": "@build:example.org", "name": "build agent" }
+      ],
+      "recentSenders": ["@build:example.org", "@dora:example.org", "@build:example.org"],
+      "offersRoom": true,
+      "suggestions": [
+        "@build:example.org", "@dora:example.org", "@alex:example.org", "@anna:example.org", "@dana:example.org",
+        "@ivan:example.org", "@maria:example.org", "@oleg:example.org", "@pavel:example.org", "@sam:example.org",
+        "@room"
+      ]
+    },
+    {
+      "name": "The order doesn't depend on the order members arrive in",
+      "before": "@",
+      "members": [
+        { "id": "@build:example.org", "name": "build agent" },
+        { "id": "@pavel:example.org", "name": "Pavel" },
+        { "id": "@oleg:example.org", "name": "Oleg" },
+        { "id": "@maria:example.org", "name": "Maria" },
+        { "id": "@anna:example.org", "name": "Anna Berg" },
+        { "id": "@sam:example.org", "name": "sam" },
+        { "id": "@ivan:example.org", "name": "ivan-novak" },
+        { "id": "@dora:example.org", "name": "Dora Ito" },
+        { "id": "@dana:example.org", "name": "dana-lee" },
+        { "id": "@alex:example.org", "name": "alex-kim" }
+      ],
+      "recentSenders": ["@build:example.org", "@dora:example.org", "@build:example.org"],
+      "offersRoom": true,
+      "suggestions": [
+        "@build:example.org", "@dora:example.org", "@alex:example.org", "@anna:example.org", "@dana:example.org",
+        "@ivan:example.org", "@maria:example.org", "@oleg:example.org", "@pavel:example.org", "@sam:example.org",
+        "@room"
+      ]
+    },
+    {
+      "name": "Case and accents don't matter",
+      "before": "@jose",
+      "members": [{ "id": "@jose:example.org", "name": "JOSÉ Núñez" }],
+      "offersRoom": true,
+      "suggestions": ["@jose:example.org"]
+    },
+    {
+      "name": "Accents don't matter in a later word either",
+      "before": "@nun",
+      "members": [{ "id": "@jose:example.org", "name": "JOSÉ Núñez" }],
+      "offersRoom": true,
+      "suggestions": ["@jose:example.org"]
+    },
+    {
+      "name": "Joined members come before invited ones; people who left or were banned never show",
+      "before": "@a",
+      "members": [
+        { "id": "@al:example.org", "name": "Al Invited", "membership": "invite" },
+        { "id": "@am:example.org", "name": "Am Joined" },
+        { "id": "@an:example.org", "name": "An Left", "membership": "leave" },
+        { "id": "@ao:example.org", "name": "Ao Banned", "membership": "ban" }
+      ],
+      "offersRoom": true,
+      "suggestions": ["@am:example.org", "@al:example.org"]
+    },
+    {
+      "name": "@room comes up for room",
+      "before": "@ro",
+      "members": [{ "id": "@bob:example.org", "name": "Bob Stone" }],
+      "offersRoom": true,
+      "suggestions": ["@room"]
+    },
+    {
+      "name": "@room comes up for channel, as Slack users type it",
+      "before": "@channel",
+      "members": [{ "id": "@bob:example.org", "name": "Bob Stone" }],
+      "offersRoom": true,
+      "suggestions": ["@room"]
+    },
+    {
+      "name": "@room comes up for here, as Slack users type it",
+      "before": "@her",
+      "members": [{ "id": "@bob:example.org", "name": "Bob Stone" }],
+      "offersRoom": true,
+      "suggestions": ["@room"]
+    },
+    {
+      "name": "@room stays out when the query names only people",
+      "before": "@bob",
+      "members": [{ "id": "@bob:example.org", "name": "Bob Stone" }],
+      "offersRoom": true,
+      "suggestions": ["@bob:example.org"]
+    },
+    {
+      "name": "@room needs the power level to notify the room",
+      "before": "@room",
+      "members": [{ "id": "@bob:example.org", "name": "Bob Stone" }],
+      "offersRoom": false,
+      "suggestions": null
+    },
+    {
+      "name": "A bare @ leaves @room out without that power level",
+      "before": "@",
+      "members": [
+        { "id": "@aisha:example.org", "name": "Aisha Khan" },
+        { "id": "@agent:example.org", "name": "AI Agent" },
+        { "id": "@bob:example.org", "name": "Bob Stone" }
+      ],
+      "offersRoom": false,
+      "suggestions": ["@agent:example.org", "@aisha:example.org", "@bob:example.org"]
+    }
+  ]
+}

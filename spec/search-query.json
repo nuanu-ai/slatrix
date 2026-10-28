@@ -1,0 +1,113 @@
+{
+  "about": "Message search, as Slack writes it, turned into the query the SDK's search index parses (Tantivy's query grammar, with body, sender and date fields). parse reads Slack's in: and from: out of typed text: a room by its sidebar name, with an optional # or @ and quotes around spaces; a person by Matrix ID or me. What doesn't resolve stays in the text. query turns text, a mode, and the From, In and date filters into the index query, or null when there is nothing to search; the In filter narrows hits rather than the query. Dates count from the start of the day that far back, computed here in UTC from now. highlights lists the words of body a search would mark, in order: whole words the query names, in any case, without AND, OR and NOT in query mode.",
+  "parse": [
+    {
+      "name": "in: and from: become filters",
+      "input": "in:#design from:@alice:example.org budget",
+      "text": "budget",
+      "roomID": "!design:example.org",
+      "senderID": "@alice:example.org"
+    },
+    {
+      "name": "A room name with spaces goes in quotes",
+      "input": "plan in:\"Product design\"",
+      "text": "plan",
+      "roomID": "!product:example.org"
+    },
+    { "name": "from:me is you, in any case", "input": "FROM:me plan", "text": "plan", "senderID": "@me:example.org" },
+    {
+      "name": "What doesn't resolve stays in the text",
+      "input": "in:#nowhere from:alice plan",
+      "text": "in:#nowhere from:alice plan"
+    }
+  ],
+  "rooms": [
+    { "id": "!design:example.org", "name": "Design" },
+    { "id": "!product:example.org", "name": "Product design" }
+  ],
+  "me": "@me:example.org",
+  "query": [
+    { "name": "Empty text searches nothing", "text": "", "mode": "query", "query": null },
+    { "name": "A space searches nothing", "text": " ", "mode": "query", "query": null },
+    { "name": "Line breaks and tabs search nothing", "text": "\t\n\r", "mode": "query", "query": null },
+    { "name": "A no-break space searches nothing", "text": "\u00a0", "mode": "query", "query": null },
+    { "name": "Empty text searches nothing as a phrase", "text": "", "mode": "phrase", "query": null },
+    { "name": "A space searches nothing as a phrase", "text": " ", "mode": "phrase", "query": null },
+    { "name": "Line breaks and tabs search nothing as a phrase", "text": "\t\n\r", "mode": "phrase", "query": null },
+    { "name": "A no-break space searches nothing as a phrase", "text": "\u00a0", "mode": "phrase", "query": null },
+    { "name": "Surrounding whitespace is trimmed", "text": "  two words\n", "mode": "query", "query": "two words" },
+    { "name": "Surrounding whitespace is trimmed from a phrase", "text": "  two words\n", "mode": "phrase", "query": "\"two words\"" },
+    {
+      "name": "Query mode passes boolean and quote syntax through",
+      "text": "  Browser AND sync OR \"two words\"  ",
+      "mode": "query",
+      "query": "Browser AND sync OR \"two words\""
+    },
+    { "name": "Query mode passes fields and escapes through", "text": "body:word\\*", "mode": "query", "query": "body:word\\*" },
+    { "name": "A phrase is one quoted literal", "text": "Browser sync check", "mode": "phrase", "query": "\"Browser sync check\"" },
+    { "name": "A phrase escapes quotes", "text": "a\"b", "mode": "phrase", "query": "\"a\\\"b\"" },
+    { "name": "A phrase escapes backslashes", "text": "C:\\temp\\file", "mode": "phrase", "query": "\"C:\\\\temp\\\\file\"" },
+    { "name": "A phrase escapes a trailing backslash", "text": "trailing\\", "mode": "phrase", "query": "\"trailing\\\\\"" },
+    { "name": "A phrase keeps single quotes", "text": "'single'", "mode": "phrase", "query": "\"'single'\"" },
+    { "name": "A phrase keeps inner line breaks and tabs", "text": "a\nb\tc", "mode": "phrase", "query": "\"a\nb\tc\"" },
+    { "name": "A phrase keeps punctuation", "text": "!!!", "mode": "phrase", "query": "\"!!!\"" },
+    {
+      "name": "From and date filters become required clauses",
+      "text": "budget OR plan",
+      "mode": "query",
+      "senderID": "@alice:example.org",
+      "date": "today",
+      "now": "2026-10-26T12:00:00Z",
+      "query": "+(budget OR plan) +sender:\"@alice:example.org\" +date:[2026-10-26T00:00:00Z TO *]"
+    },
+    {
+      "name": "A phrase with a date filter",
+      "text": "two words",
+      "mode": "phrase",
+      "date": "week",
+      "now": "2026-10-26T12:00:00Z",
+      "query": "+\"two words\" +date:[2026-10-19T00:00:00Z TO *]"
+    },
+    {
+      "name": "The last 30 days",
+      "text": "plan",
+      "mode": "query",
+      "date": "month",
+      "now": "2026-10-26T12:00:00Z",
+      "query": "+(plan) +date:[2026-09-26T00:00:00Z TO *]"
+    },
+    {
+      "name": "The last 12 months",
+      "text": "plan",
+      "mode": "query",
+      "date": "year",
+      "now": "2026-10-26T12:00:00Z",
+      "query": "+(plan) +date:[2025-10-26T00:00:00Z TO *]"
+    },
+    {
+      "name": "A From filter searches on its own",
+      "text": " ",
+      "mode": "query",
+      "senderID": "@alice:example.org",
+      "query": "+sender:\"@alice:example.org\""
+    },
+    { "name": "The In filter stays out of the query", "text": "budget", "mode": "query", "roomID": "!design:example.org", "query": "budget" },
+    { "name": "The In filter can't search on its own", "text": "", "mode": "query", "roomID": "!design:example.org", "query": null }
+  ],
+  "highlights": [
+    {
+      "name": "Whole words in any case, without operators",
+      "text": "sync AND plan",
+      "mode": "query",
+      "body": "Sync the async SYNC job and plan",
+      "words": ["Sync", "SYNC", "plan"]
+    },
+    {
+      "name": "A phrase marks each of its words",
+      "text": "the async",
+      "mode": "phrase",
+      "body": "Sync the async SYNC job and plan",
+      "words": ["the", "async"]
+    }
+  ]
+}

@@ -15,89 +15,84 @@ struct ComposerFormatTests {
     }
 
     @Test(
-        "Each format sends standard HTML and a natural plain body",
+        "Each format writes standard HTML",
         arguments: [
             (
                 [Paragraph(runs: [.init(text: "Hi "), .init(text: "there", style: .bold)])],
-                "Hi <strong>there</strong>", "Hi there"
+                "Hi <strong>there</strong>"
             ),
-            ([Paragraph(runs: [.init(text: "soft", style: .italic)])], "<em>soft</em>", "soft"),
-            ([Paragraph(runs: [.init(text: "gone", style: .strike)])], "<del>gone</del>", "gone"),
-            ([Paragraph(runs: [.init(text: "a < b", style: .code)])], "<code>a &lt; b</code>", "`a < b`"),
+            ([Paragraph(runs: [.init(text: "soft", style: .italic)])], "<em>soft</em>"),
+            ([Paragraph(runs: [.init(text: "gone", style: .strike)])], "<del>gone</del>"),
+            ([Paragraph(runs: [.init(text: "a < b", style: .code)])], "<code>a &lt; b</code>"),
             (
                 [Paragraph(runs: [.init(text: "docs", link: URL(string: "https://example.org/a?b=1&c"))])],
-                "<a href=\"https://example.org/a?b=1&amp;c\">docs</a>", "docs (https://example.org/a?b=1&c)"
+                "<a href=\"https://example.org/a?b=1&amp;c\">docs</a>"
             ),
             (
                 [
                     Paragraph(block: .bullet, runs: [.init(text: "one")]),
                     Paragraph(block: .bullet, runs: [.init(text: "two")]),
                 ],
-                "<ul><li>one</li><li>two</li></ul>", "- one\n- two"
+                "<ul><li>one</li><li>two</li></ul>"
             ),
             (
                 [
                     Paragraph(block: .ordered, runs: [.init(text: "one")]),
                     Paragraph(block: .ordered, runs: [.init(text: "two")]),
                 ],
-                "<ol><li>one</li><li>two</li></ol>", "1. one\n2. two"
+                "<ol><li>one</li><li>two</li></ol>"
             ),
             (
                 [
                     Paragraph(block: .quote, runs: [.init(text: "said")]),
                     Paragraph(block: .quote, runs: [.init(text: "this")]),
                 ],
-                "<blockquote>said<br>this</blockquote>", "> said\n> this"
+                "<blockquote>said<br>this</blockquote>"
             ),
             (
                 [
                     Paragraph(block: .code, runs: [.init(text: "if a < b {")]),
                     Paragraph(block: .code, runs: [.init(text: "  go()")]),
                 ],
-                "<pre><code>if a &lt; b {\n  go()</code></pre>", "```\nif a < b {\n  go()\n```"
+                "<pre><code>if a &lt; b {\n  go()</code></pre>"
             ),
             (
                 [Paragraph(runs: [.init(text: "Thanks "), alice])],
-                "Thanks <a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a>", "Thanks @Alice Liddell"
+                "Thanks <a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a>"
             ),
-        ] as [([Paragraph], String, String)])
-    private func format(paragraphs: [Paragraph], html: String, body: String) {
-        let message = sent(paragraphs)
-        #expect(message.html == html)
-        #expect(message.body == body)
+            (
+                [
+                    Paragraph(runs: [.init(text: "2 * 3 = **six** & <done>")]),
+                    Paragraph(runs: [.init(text: "> not a quote")]),
+                ],
+                "2 * 3 = **six** &amp; &lt;done&gt;<br>&gt; not a quote"
+            ),
+        ] as [([Paragraph], String)])
+    private func format(paragraphs: [Paragraph], html: String) {
+        #expect(ComposerFormat.html(paragraphs) == html)
     }
 
-    @Test("Text without formatting sends only a body, with Markdown characters kept as typed")
-    func plainText() {
-        let message = sent([
-            Paragraph(runs: [.init(text: "2 * 3 = **six** & <done>")]), Paragraph(runs: [.init(text: "> not a quote")]),
-        ])
-        #expect(message.html == nil)
-        #expect(message.body == "2 * 3 = **six** & <done>\n> not a quote")
+    struct Send: Decodable, CustomTestStringConvertible {
+        var name: String
+        var draft: String
+        var body: String
+        var html: String?
+        var mentions: [String]
+        var mentionsRoom: Bool
+        var testDescription: String { name }
     }
 
-    @Test("A mention notifies its person through m.mentions")
-    func mentions() {
-        #expect(sent([Paragraph(runs: [alice, .init(text: " and "), alice])]).mentions == ["@alice:example.org"])
-        #expect(sent([Paragraph(runs: [.init(text: "nobody")])]).mentions.isEmpty)
-    }
-
-    @Test(
-        "@room typed outside code notifies the room",
-        arguments: [("Heads up @room", true), ("<code>@room</code>", false), ("@roommate", false)])
-    func roomMention(draft: String, notifies: Bool) {
-        #expect(ComposerFormat.message(draft: draft).mentionsRoom == notifies)
-    }
+    struct Spec: Decodable { var send: [Send] }
 
     @Test(
-        "A complete Matrix ID typed outside code mentions its person",
-        arguments: [
-            ("Hi @alice:example.org, @alice:example.org", ["@alice:example.org"]),
-            ("<code>@alice:example.org</code><pre><code>@carol:example.org</code></pre>", []),
-            ("mail me at bob@example.org or @alice", []),
-        ])
-    func typedMentions(draft: String, ids: [String]) {
-        #expect(ComposerFormat.message(draft: draft).mentions == ids)
+        "What a draft sends, from spec/composer.json",
+        arguments: try SharedSpec.decode("spec/composer.json", as: Spec.self).send)
+    func send(spec: Send) {
+        let message = ComposerFormat.message(draft: spec.draft)
+        #expect(message.body == spec.body)
+        #expect(message.html == spec.html)
+        #expect(message.mentions == spec.mentions)
+        #expect(message.mentionsRoom == spec.mentionsRoom)
     }
 
     @Test("Every tag the composer sends is on the Matrix spec's list")
@@ -141,13 +136,12 @@ struct ComposerFormatTests {
         #expect(restored[8].runs.first?.link?.absoluteString == "https://example.org")
     }
 
-    @Test("A draft with a mention split as 0.2.8 and 0.2.9 saved it reopens as one token and sends as one link")
+    @Test("A draft with a mention split as 0.2.8 and 0.2.9 saved it reopens as one token")
     func splitMentionDraft() {
         let link = "https://matrix.to/#/@dl:example.org"
         let draft = "<a href=\"\(link)\">deadlock agen</a><a href=\"\(link)\">t</a> "
         let mentions = ComposerFormat.paragraphs(html: draft).flatMap(\.runs).filter { $0.mention != nil }
         #expect(mentions.map(\.text) == ["@deadlock agent"])
-        #expect(ComposerFormat.message(draft: draft).html == "<a href=\"\(link)\">deadlock agent</a>")
     }
 
     @Test("A message from Element opens for editing with its formatting")
