@@ -7,8 +7,7 @@ import Testing
 
 /// The Threads feed in a real offscreen window at the scale of a busy account: 600 threads across 50 conversations,
 /// every root and latest reply hydrating to its current body, formatted or plain. Needs an awake display. Budgets sit
-/// near three times an M4 Pro debug run (about 1 s, 60 ms and 18 ms); before rows observed their own previews, every
-/// preview update and room-list refresh rebuilt the whole feed, at 220–320 ms and 2–3 s.
+/// near three times an M4 Pro debug run: about 1 s, 40 ms, 60 ms and 18 ms.
 @MainActor
 @Suite(
     .serialized, .tags(.hosted, .budget),
@@ -125,11 +124,13 @@ struct ThreadsFeedHostedTests {
             }
         }
 
-        /// Opens the feed and scrolls halfway down, where the rows above are only estimated.
-        func openHalfway() async throws {
+        /// Opens the feed and scrolls halfway down, where the rows above are only estimated. Returns the main-thread
+        /// time from the scroll until the rows there show their current messages.
+        @discardableResult func openHalfway() async throws -> Duration {
             open()
             #expect(await eventually(timeout: .seconds(60)) { settled() })
             let scroll = try #require(Self.views(in: hosting!).compactMap { $0 as? NSScrollView }.first)
+            let start = threadCPUTime()
             scroll.contentView.scroll(to: NSPoint(x: 0, y: (scroll.documentView?.frame.height ?? 0) / 2))
             scroll.reflectScrolledClipView(scroll.contentView)
             #expect(
@@ -137,6 +138,7 @@ struct ThreadsFeedHostedTests {
                     render()
                     return shownBodies().count >= 4
                 })
+            return threadCPUTime() - start
         }
     }
 
@@ -149,6 +151,14 @@ struct ThreadsFeedHostedTests {
         #expect(await eventually(timeout: .seconds(60)) { harness.settled() })
         let time = threadCPUTime() - start
         #expect(time < .seconds(3), "\(time)")
+    }
+
+    @Test("Scrolling halfway down a busy Threads feed shows the rows there, current, within budget")
+    func hydrationBudget() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        let time = try await harness.openHalfway()
+        #expect(time < .milliseconds(120), "\(time)")
     }
 
     @Test("100 room-list updates halfway down a busy Threads feed hold the main thread within budget")
