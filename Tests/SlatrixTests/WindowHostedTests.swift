@@ -27,10 +27,7 @@ struct WindowHostedTests {
                 ChatRoom(
                     id: "!busy\($0):example.org", name: "Busy \($0)", unread: $0 % 3, spaceIDs: ["preview.workspace"])
             }
-            hosting = NSHostingView(
-                rootView: AnyView(
-                    RootView(matrix: matrix).environmentObject(appearance)
-                        .environment(\.metrics, Metrics(zoom: zoom))))
+            hosting = NSHostingView(rootView: Self.root(matrix, appearance, zoom: zoom))
             // Titled, as `.hiddenTitleBar` sets up the app's window, so it has the window buttons.
             window = offscreenWindow(
                 NSSize(width: 1_440, height: 900),
@@ -40,6 +37,13 @@ struct WindowHostedTests {
             window.contentView = hosting
             window.orderFrontRegardless()
         }
+
+        static func root(_ matrix: MatrixService, _ appearance: AppearanceStore, zoom: Double) -> AnyView {
+            AnyView(RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom)))
+        }
+
+        /// As ⌘= and ⌘- change it, with the window open.
+        func zoom(_ zoom: Double) { hosting.rootView = Self.root(matrix, appearance, zoom: zoom) }
 
         func close() {
             window.contentView = nil
@@ -476,30 +480,49 @@ struct WindowHostedTests {
         #expect(await eventually { harness.sidebarShown && harness.dividers == 1 })
     }
 
-    @Test("The window buttons sit on the title bar's midline, and stay there through a resize", arguments: [1, 1.5])
+    @Test(
+        "The window buttons hold the title bar's midline on every frame of a resize from any edge, and through a zoom",
+        arguments: [1, 1.5])
     func windowButtonsCentered(zoom: Double) async throws {
         let harness = Harness(zoom: zoom)
         defer { harness.close() }
         #expect(await harness.settle())
         let close = try #require(harness.window.standardWindowButton(.closeButton))
         // The search field is centered in the title bar.
-        func offset() -> CGFloat {
-            guard let search = harness.searchField else { return .infinity }
+        func offset(_ search: NSView?) -> CGFloat {
+            guard let search else { return .infinity }
             return close.convert(close.bounds, to: nil).midY - search.convert(search.bounds, to: nil).midY
         }
         // Titled, the window still never reaches a screen.
         func offscreen() -> Bool { !NSScreen.screens.contains { $0.frame.intersects(harness.window.frame) } }
         #expect(offscreen())
-        #expect(await eventually { abs(offset()) <= 1 }, "\(offset())")
-        harness.resize(1_000)
+        #expect(await eventually { abs(offset(harness.searchField)) <= 1 }, "\(offset(harness.searchField))")
+
+        // A live resize sets the window's frame and draws it in one go, so each frame is checked as it is drawn,
+        // with no turn of the run loop between, and against the field found before, since finding it lays the window
+        // out. Dragging the left edge changes the width, the top edge the height, and the top left corner both. Only
+        // the size reaches the views, so the right and bottom edges and the other corners take the same path.
+        let search = try #require(harness.searchField)
+        for (edge, widthChange, heightChange) in [("left", -20.0, 0.0), ("top", 0, -20), ("corner", -20, -20)] {
+            for step in 1...3 {
+                let frame = harness.window.frame
+                harness.window.setFrame(
+                    NSRect(
+                        x: frame.minX - widthChange, y: frame.minY, width: frame.width + widthChange,
+                        height: frame.height + heightChange), display: true)
+                #expect(abs(offset(search)) <= 1, "\(edge), step \(step): \(offset(search))")
+            }
+        }
         #expect(offscreen())
-        #expect(await eventually { abs(offset()) <= 1 }, "\(offset())")
 
         // The buttons' container now reaches down the whole bar, and a click on the field still lands in it.
-        let search = try #require(harness.searchField)
         let field = search.convert(search.bounds, to: nil)
         let hit = harness.window.contentView?.superview?.hitTest(NSPoint(x: field.midX, y: field.minY + 1))
         #expect(hit.map { $0 === search || $0.isDescendant(of: search) } == true)
+
+        // Zooming in or out changes the bar's height under the buttons.
+        harness.zoom(zoom == 1 ? 1.5 : 1)
+        #expect(await eventually { abs(offset(harness.searchField)) <= 1 }, "\(offset(harness.searchField))")
     }
 
     @Test("A modal dims the window below the title bar, which looks the same and takes no clicks", arguments: [1, 1.5])
