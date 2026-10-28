@@ -2842,6 +2842,19 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             throw error
         }
     }
+    /// Reads your profile again, for a name or photo changed on another device. On failure what's shown stays.
+    func refreshOwnProfile() async {
+        guard !isPreview, connectionStopTask == nil, let client, let id = user?.id else { return }
+        let generation = sessionGeneration
+        let names = profileRevision
+        let avatars = avatarRevision
+        guard let profile = try? await client.getProfile(userId: id),
+            sessionGeneration == generation, user?.id == id
+        else { return }
+        // An edit saved here meanwhile is newer than what the server just said.
+        if profileRevision == names { user?.name = profile.displayName ?? id }
+        if avatarRevision == avatars { user?.avatarURL = profile.avatarUrl }
+    }
     /// Uploads `photo` as your profile photo, or removes yours when nil.
     func setProfilePhoto(_ photo: ProfilePhoto?) async throws {
         guard connectionStopTask == nil else { throw CancellationError() }

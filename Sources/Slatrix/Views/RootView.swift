@@ -378,6 +378,10 @@ struct RootView: View {
                         if notification.name == NSWindow.didEndSheetNotification { openPendingNotification() }
                     }
                 }
+                // Sync doesn't say when your profile changes elsewhere, so coming back to Slatrix checks.
+                if notification.name == NSApplication.didBecomeActiveNotification {
+                    Task { await matrix.refreshOwnProfile() }
+                }
             }
             .background(
                 ReadTracking(

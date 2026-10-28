@@ -65,6 +65,35 @@ struct ProfileEditingTests {
         #expect(matrix.user?.avatarURL == nil)
     }
 
+    @Test("A name and photo changed on another device show once Slatrix is back in front")
+    func refreshFromAnotherDevice() async {
+        let client = ProfileClient()
+        client.name = "Ana Lima"
+        client.avatar = "mxc://example.org/new"
+        let matrix = signedIn(client)
+
+        await matrix.refreshOwnProfile()
+
+        #expect(matrix.user?.name == "Ana Lima")
+        #expect(matrix.user?.avatarURL == "mxc://example.org/new")
+    }
+
+    @Test("A refresh that started before you saved a photo here doesn't bring the old one back")
+    func refreshDoesNotUndoAnEdit() async throws {
+        let client = ProfileClient()
+        client.avatar = "mxc://example.org/old"
+        let matrix = signedIn(client)
+        client.profiles.arm()
+        let refresh = Task { await matrix.refreshOwnProfile() }
+        #expect(await eventually { client.profiles.isWaiting })
+
+        try await matrix.setProfilePhoto(nil)
+        client.profiles.release()
+        await refresh.value
+
+        #expect(matrix.user?.avatarURL == nil)
+    }
+
     @Test("Your own profile shows your latest name and photo, not a room's older copy")
     func ownProfileIsCurrent() {
         let me = ChatUser(id: "@ana:example.org", name: "Ana Lima")
@@ -102,7 +131,9 @@ struct ProfileEditingTests {
 /// A homeserver's profile: the photo it was sent, and where it says that photo now is.
 private final class ProfileClient: Client, @unchecked Sendable {
     private let lock = NSLock()
-    private var stored: (data: Data?, avatar: String?) = (nil, nil)
+    private var stored: (data: Data?, avatar: String?, name: String?) = (nil, nil, nil)
+    /// Holds `getProfile`'s answer, read when asked, once armed, for an edit to land before it arrives.
+    let profiles = Gate()
     init() { super.init(noHandle: .init()) }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
 
@@ -112,8 +143,17 @@ private final class ProfileClient: Client, @unchecked Sendable {
         set { lock.withLock { stored.avatar = newValue } }
     }
     override func uploadAvatar(mimeType: String, data: Data) async throws {
-        lock.withLock { stored = (data, "mxc://example.org/" + UUID().uuidString) }
+        lock.withLock { stored = (data, "mxc://example.org/" + UUID().uuidString, stored.name) }
     }
     override func removeAvatar() async throws { avatar = nil }
     override func avatarUrl() async throws -> String? { avatar }
+    var name: String? {
+        get { lock.withLock { stored.name } }
+        set { lock.withLock { stored.name = newValue } }
+    }
+    override func getProfile(userId: String) async throws -> UserProfile {
+        let profile = UserProfile(userId: userId, displayName: name, avatarUrl: avatar, status: nil, call: nil)
+        await profiles.wait()
+        return profile
+    }
 }

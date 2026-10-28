@@ -19,7 +19,10 @@ final class AvatarImageCache {
     /// A decoded avatar, if one is already in memory, for drawing it on a row's first frame.
     func cachedImage(for source: String) -> CGImage? { images.object(forKey: source as NSString) }
 
-    func image(for source: String, load: @escaping @MainActor () async throws -> Data) async -> CGImage? {
+    /// `pixels` caps the decoded image's longer side: a row's avatar needs far less than the profile photo.
+    func image(for source: String, pixels: Int = 128, load: @escaping @MainActor () async throws -> Data) async
+        -> CGImage?
+    {
         if let image = images.object(forKey: source as NSString) { return image }
         if failed.contains(source) { return nil }
         if let request = requests[source] { return await request.value }
@@ -27,7 +30,8 @@ final class AvatarImageCache {
         let request = Task { [weak self] () -> CGImage? in
             defer { if self?.generation == token { self?.requests[source] = nil } }
             let data = try? await load()
-            let image = await Task.detached(priority: .utility) { data.flatMap(Self.decode) }.value
+            let image = await Task.detached(priority: .utility) { data.flatMap { Self.decode($0, pixels: pixels) } }
+                .value
             guard !Task.isCancelled, let self, self.generation == token else { return nil }
             guard let image else {
                 self.failed.insert(source)
@@ -48,7 +52,7 @@ final class AvatarImageCache {
         images.removeAllObjects()
     }
 
-    nonisolated static func decode(_ data: Data) -> CGImage? {
+    nonisolated static func decode(_ data: Data, pixels: Int = 128) -> CGImage? {
         guard !data.isEmpty, data.count <= 2 * 1_024 * 1_024,
             let source = CGImageSourceCreateWithData(
                 data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
@@ -59,7 +63,7 @@ final class AvatarImageCache {
             [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 128,
+                kCGImageSourceThumbnailMaxPixelSize: pixels,
                 kCGImageSourceShouldCacheImmediately: true,
             ] as CFDictionary)
     }

@@ -921,7 +921,7 @@ struct Snapshots {
         matrix.isPreview = false
         matrix.user = ChatUser(id: "@dmitry:harbor.example", name: "Dmitry")
         let photo = "mxc://harbor.example/julia"
-        _ = await matrix.avatarImages.image(for: photo + "#large") { try Self.samplePhoto() }
+        _ = await matrix.avatarImages.image(for: photo + "#large", pixels: 512) { try Self.samplePhoto() }
         let people = PeopleService()
         people.attach(ProfileClient(photo: photo))
         for (id, name) in [
