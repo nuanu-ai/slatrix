@@ -103,6 +103,20 @@ struct ThreadPreviewTests {
         #expect(changes.all.isEmpty)
     }
 
+    @Test("Building a row hands it its preview without tying the feed to that preview")
+    func buildingRowLeavesFeed() async throws {
+        let row = try await open()
+        let changes = Recorder<Void>()
+        // As the feed's body builds the row; the row, not the feed, reads the preview.
+        withObservationTracking {
+            _ = preview("$root")
+        } onChange: {
+            changes.append(())
+        }
+        await feed.hydratePreview(row)
+        #expect(changes.all.isEmpty && preview("$root").state == .ready)
+    }
+
     @Test("A failed preview shows a placeholder until an explicit retry succeeds")
     func failureThenRetry() async throws {
         room.fail = true
