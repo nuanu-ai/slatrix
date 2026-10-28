@@ -4,7 +4,11 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 
 - Kotlin and Jetpack Compose, in one Gradle project in this folder.
 - The reference is Slack's Android app, not a smaller Slatrix for Mac: its tabs, navigation, gestures and wording. When unsure, do what Slack's Android app does.
-- Matrix work goes through the Kotlin bindings of the SDK this repository builds with its patches, never Element's published `matrix-rust-components-kotlin`, which lacks them.
+- Matrix work goes through the SDK from `scripts/build-sdk.sh --android`, never Element's published `matrix-rust-components-kotlin`, which lacks our patches. Gradle takes its `kotlin` folder as a source set and its `jniLibs` as native libraries; minSdk is 24 or higher. The bindings need:
+  - JNA as `net.java.dev.jna:jna:5.18.1@aar`, plus `kotlinx-coroutines-core` and `androidx.annotation`;
+  - `org.matrix.rustsdk.Android.init(applicationContext)` before `initPlatform`, or TLS verification fails;
+  - rustls's `rustls-platform-verifier` at the version the package's `Cargo.lock` pins, with its ProGuard keep rule;
+  - a 4–6 GB Gradle heap, since the generated Kotlin is large.
 - Colors and radii come from `design/tokens.json`, spelled out once in Kotlin, with a unit test that checks them against the file. Screens use roles, never raw colors or literal sizes, and a lint rule rejects them as `scripts/lint.sh` does on the Mac.
 - Product rules pass every case in `spec/`, with a unit test per file that reads it.
 - Notifications arrive through Firebase Cloud Messaging and a Sygnal push gateway.

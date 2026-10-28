@@ -15,7 +15,7 @@ Slatrix is a Matrix client that should feel like Slack to someone who has used S
 
 - `design/tokens.json` holds the color roles for light and dark and every sidebar palette, the file and avatar colors, and the corner radii. Each app spells them out in its own code, and a test on each side checks them against the file, so a color changes in the file and in both apps in one pull request. Type sizes and spacing stay per platform.
 - `spec/` holds product rules as cases, each an input and its expected result: unread badges, @ suggestions, search queries, what the composer sends, and avatar initials and colors. Each app's tests run every case, so the apps can't drift apart. Change a rule by changing its cases first, then each app until they pass. When a rule one app has comes to the other, its cases move into `spec/`.
-- Both apps use the same pinned `matrix-rust-sdk` with the patches in `Support/MatrixSDK/patches`. Send each patch upstream and drop it once a release includes it.
+- Both apps use the same pinned `matrix-rust-sdk` with the patches in `Support/MatrixSDK/patches`: `scripts/build-sdk.sh` puts the Mac's in `.build/native-sdk-package`, and `scripts/build-sdk.sh --android` puts the Kotlin bindings with `arm64-v8a` and `x86_64` libraries in `.build/native-sdk-android`. Each downloads the package CI published for the current pin and patches. Send each patch upstream and drop it once a release includes it.
 - Skills live in `.claude/skills`. An agent that doesn't load skills reads the `SKILL.md` it names.
 
 ## Code
