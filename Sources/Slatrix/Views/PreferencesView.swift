@@ -133,7 +133,9 @@ struct PreferencesView: View {
             }
             VStack(alignment: .leading, spacing: m.sp12) {
                 sectionTitle("Sidebar theme")
-                HStack(spacing: m.sp12) {
+                // Slack's eight themes, in two rows of four.
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: m.sp12), count: 4), spacing: m.sp16)
+                {
                     ForEach(SidebarPalette.allCases) { palette in
                         choiceTile(label: palette.name, selected: appearance.palette == palette) {
                             appearance.palette = palette
