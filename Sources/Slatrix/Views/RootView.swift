@@ -1603,7 +1603,7 @@ struct RootView: View {
                 if let rootID = target.threadID {
                     root = try await ThreadRootResolver.resolve(
                         roomID: target.message.roomID, rootID: rootID,
-                        candidates: matrix.messages + matrix.threadMessages + matrix.threadFeed.items.map(\.root),
+                        candidates: matrix.messages + matrix.threadMessages + matrix.threadFeed.roots,
                         load: { try await matrix.messagePreview(roomID: $0, eventID: $1) },
                         validate: { guard isCurrent() else { throw CancellationError() } })
                     guard isCurrent() else { return }
@@ -1780,7 +1780,7 @@ struct RootView: View {
             matrix.rooms.contains(where: { $0.id == message.roomID && $0.membership == "join" })
         else { return }
         let rootID = message.threadRootID ?? message.eventID
-        let candidates = [message] + matrix.messages + matrix.threadMessages + matrix.threadFeed.items.map(\.root)
+        let candidates = [message] + matrix.messages + matrix.threadMessages + matrix.threadFeed.roots
         if matrix.isPreview {
             guard let root = candidates.first(where: { $0.eventID == rootID && $0.roomID == message.roomID }) else {
                 return

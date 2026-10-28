@@ -91,15 +91,17 @@ final class FakeThreadRoom: Room, @unchecked Sendable {
     }
 }
 
-/// Answers every room lookup with the same room.
+/// Answers a room lookup with that room in `rooms`, or else with `room`.
 final class FakeThreadClient: Client, @unchecked Sendable {
     let room: FakeThreadRoom
-    init(_ room: FakeThreadRoom) {
+    let rooms: [String: FakeThreadRoom]
+    init(_ room: FakeThreadRoom, rooms: [String: FakeThreadRoom] = [:]) {
         self.room = room
+        self.rooms = rooms
         super.init(noHandle: .init())
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
-    override func getRoom(roomId: String) throws -> Room? { room }
+    override func getRoom(roomId: String) throws -> Room? { rooms[roomId] ?? room }
 }
 
 func threadEvent(_ id: String, timestamp: UInt64 = 1_000, content: TimelineItemContent? = nil) -> ThreadListItemEvent {
