@@ -145,7 +145,8 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
     }
 
     func close() {
-        if let roomID, let room, let timeline, let observer, let timelineHandle, state == "ready",
+        // A page still loading would finish into the kept list, and coming back could start another beside it.
+        if let roomID, let room, let timeline, let observer, let timelineHandle, state == "ready", !isLoadingMore,
             room.membership() == .joined
         {
             let entry = Kept(
@@ -265,6 +266,13 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
             roomHandle = nil
             timeline = nil
         }
+    }
+
+    /// Refresh: the conversation's timeline read again, not its kept list.
+    func reload(roomID id: String) async {
+        close()
+        kept.take(id)?.cancel()
+        await open(roomID: id)
     }
 
     private func restore(_ entry: Kept, roomID id: String) {
