@@ -1,6 +1,6 @@
 name: SDK
 
-# Publishes the package scripts/build-sdk.sh downloads, once per SDK pin and patch set.
+# Publishes the packages scripts/build-sdk.sh downloads (macOS, and Android with --android), once per SDK pin and patch set.
 on:
   push:
     branches: [main]
@@ -45,3 +45,27 @@ jobs:
           # A prerelease, so releases/latest keeps pointing at the app and its appcast.
           gh release create "sdk-${{ steps.key.outputs.key }}" MatrixRustSDK.tar.gz --prerelease --latest=false \
             --title "Matrix SDK ${{ steps.key.outputs.key }}" --notes "The package scripts/build-sdk.sh downloads."
+
+  publish-android:
+    # The image ships the Android SDK and the NDK that scripts/build-sdk.sh pins.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the package key
+        id: key
+        run: |
+          key=$(scripts/build-sdk.sh --android --key)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          if gh release view "sdk-android-$key" > /dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Build and publish
+        if: steps.key.outputs.exists != 'true'
+        run: |
+          SLATRIX_SDK_FROM_SOURCE=1 scripts/build-sdk.sh --android
+          tar -czf MatrixRustSDK-android.tar.gz -C .build native-sdk-android
+          gh release create "sdk-android-${{ steps.key.outputs.key }}" MatrixRustSDK-android.tar.gz --prerelease --latest=false \
+            --title "Matrix SDK for Android ${{ steps.key.outputs.key }}" --notes "The package scripts/build-sdk.sh --android downloads."
