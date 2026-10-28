@@ -17,13 +17,18 @@ final class TemporaryDirectory {
         return file
     }
 
-    /// A PNG filled with one red, which a pixel check can find on screen. `orientation` is its EXIF orientation.
-    func png(_ name: String, width: Int, height: Int, orientation: Int = 1) throws -> URL {
+    /// A PNG filled with one red, which a pixel check can find on screen, or blue on its right half when `halves`.
+    /// `orientation` is its EXIF orientation.
+    func png(_ name: String, width: Int, height: Int, orientation: Int = 1, halves: Bool = false) throws -> URL {
         let context = CGContext(
             data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         context.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        if halves {
+            context.setFillColor(red: 0, green: 0, blue: 1, alpha: 1)
+            context.fill(CGRect(x: width / 2, y: 0, width: width - width / 2, height: height))
+        }
         let file = path(name)
         let destination = CGImageDestinationCreateWithURL(file as CFURL, "public.png" as CFString, 1, nil)!
         CGImageDestinationAddImage(
