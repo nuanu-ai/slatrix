@@ -649,6 +649,51 @@ extension TimelineHostedTests {
         harness.scrollView?.onPointer?(nil)
         #expect(tooltip(harness) == nil)
     }
+
+    @Test("The pointer over a day divider or the New line hovers the message below it, as if the line weren't there")
+    func dividersLetThePointerThrough() async throws {
+        let context = TimelineRowContext()
+        context.matrix = MatrixService()
+        context.appearance = AppearanceStore()
+        func message(_ index: Int) -> TimelineEntry {
+            let message = Self.actionable(index..<index + 1)[0]
+            return TimelineEntry(
+                id: message.id,
+                kind: .message(
+                    TimelineMessageEntry(
+                        message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false,
+                        canPin: false, highlighted: false, sendBusy: false)))
+        }
+        let entries = [
+            TimelineEntry(id: "day", kind: .day("Today")), message(0), message(1),
+            TimelineEntry(id: "unread", kind: .unread), message(2),
+        ]
+        let window = offscreenWindow(NSSize(width: 620, height: 400))
+        let hosting = NSHostingView(
+            rootView: TimelineTable(
+                entries: entries, context: context, live: true, bottomAligned: true, focusedEventID: nil, jumpID: nil,
+                startsAtUnread: false, memoryKey: nil, canLoadOlder: false, canLoadNewer: false,
+                scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {}, onScroll: { _, _ in }))
+        window.contentView = hosting
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        func cells() -> [TimelineCell] {
+            hosting.layoutSubtreeIfNeeded()
+            return Harness.views(in: hosting).compactMap { $0 as? TimelineCell }.filter { $0.window != nil }
+        }
+        _ = await eventually { cells().count == entries.count + 2 }
+        let scrollView = try #require(Harness.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
+        for (divider, below) in [("day", message(0).id), ("unread", message(2).id)] {
+            let line = try #require(cells().first { $0.entry?.id == divider })
+            let frame = line.convert(line.bounds, to: nil)
+            // Wide of the "Today" pill and the "New" label.
+            scrollView.onPointer?(NSPoint(x: frame.minX + frame.width / 4, y: frame.midY))
+            #expect(cells().filter { $0.row?.hovered == true }.map(\.entry?.id) == [below], "\(divider)")
+            #expect(scrollView.subviews.contains { $0 is TimelineToolbarView && !$0.isHidden }, "\(divider)")
+        }
+    }
 }
 
 /// Budgets for the table at the scale of a busy room; see `PerformanceBudgetTests`.
