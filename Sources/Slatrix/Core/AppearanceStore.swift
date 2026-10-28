@@ -5,10 +5,16 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var name: String { rawValue.capitalized }
 }
+/// Slack's single-color themes, in Slack's order. Three keep the raw value they were saved under before Slack's names.
 enum SidebarPalette: String, CaseIterable, Identifiable {
-    case slate, aubergine, ocean, forest
+    case aubergine, clementine, banana
+    case jade = "forest"
+    case lagoon = "ocean"
+    case barbra
+    case gray = "slate"
+    case moodIndigo
     var id: String { rawValue }
-    var name: String { rawValue.capitalized }
+    var name: String { self == .moodIndigo ? "Mood Indigo" : String(describing: self).capitalized }
 }
 enum MessageDensity: String, CaseIterable, Identifiable {
     case comfortable, compact
@@ -19,7 +25,7 @@ enum MessageDensity: String, CaseIterable, Identifiable {
     @Published var mode = AppTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.mode") ?? "dark") ?? .dark
     { didSet { save(mode.rawValue, "mode") } }
     @Published var palette =
-        SidebarPalette(rawValue: UserDefaults.standard.string(forKey: "appearance.palette") ?? "slate") ?? .slate
+        SidebarPalette(rawValue: UserDefaults.standard.string(forKey: "appearance.palette") ?? "slate") ?? .gray
     { didSet { save(palette.rawValue, "palette") } }
     @Published var density =
         MessageDensity(rawValue: UserDefaults.standard.string(forKey: "appearance.density") ?? "comfortable")

@@ -39,27 +39,39 @@ struct AppColors {
     var sidebar: Color {
         guard dark else { return Color(hex: 0xf8f8f8) }
         return switch palette {
-        case .slate: Color(hex: 0x17181a)
         case .aubergine: Color(hex: 0x211323)
-        case .ocean: Color(hex: 0x13212b)
-        case .forest: Color(hex: 0x15231d)
+        case .clementine: Color(hex: 0x24170e)
+        case .banana: Color(hex: 0x211e0f)
+        case .jade: Color(hex: 0x15231d)
+        case .lagoon: Color(hex: 0x13212b)
+        case .barbra: Color(hex: 0x25121b)
+        case .gray: Color(hex: 0x17181a)
+        case .moodIndigo: Color(hex: 0x161833)
         }
     }
     /// The window around the panels: title bar and rail.
     var frame: Color {
         guard dark else {
             return switch palette {
-            case .slate: Color(hex: 0xf0f0f0)
             case .aubergine: Color(hex: 0xede4ef)
-            case .ocean: Color(hex: 0xe2edf4)
-            case .forest: Color(hex: 0xe4eee7)
+            case .clementine: Color(hex: 0xf8e9dd)
+            case .banana: Color(hex: 0xf7f1d9)
+            case .jade: Color(hex: 0xe4eee7)
+            case .lagoon: Color(hex: 0xe2edf4)
+            case .barbra: Color(hex: 0xf6e4ec)
+            case .gray: Color(hex: 0xf0f0f0)
+            case .moodIndigo: Color(hex: 0xe6e7f6)
             }
         }
         return switch palette {
-        case .slate: Color(hex: 0x202124)
         case .aubergine: Color(hex: 0x350d36)
-        case .ocean: Color(hex: 0x0e293b)
-        case .forest: Color(hex: 0x142b23)
+        case .clementine: Color(hex: 0x4a2410)
+        case .banana: Color(hex: 0x3a3210)
+        case .jade: Color(hex: 0x142b23)
+        case .lagoon: Color(hex: 0x0e293b)
+        case .barbra: Color(hex: 0x3f1328)
+        case .gray: Color(hex: 0x202124)
+        case .moodIndigo: Color(hex: 0x1e2154)
         }
     }
 
@@ -77,19 +89,27 @@ struct AppColors {
     /// A quiet tint for what is picked on the canvas: my reactions, search results, the open Preferences tab.
     var selection: Color {
         switch palette {
-        case .slate: Color(hex: dark ? 0x293b94 : 0xe7ebff)
         case .aubergine: Color(hex: dark ? 0x713783 : 0xf0e6f4)
-        case .ocean: Color(hex: dark ? 0x195b7c : 0xdceef8)
-        case .forest: Color(hex: dark ? 0x2d6654 : 0xdeeee5)
+        case .clementine: Color(hex: dark ? 0x8a4a1f : 0xfbe9dc)
+        case .banana: Color(hex: dark ? 0x6b5a12 : 0xfaf2cf)
+        case .jade: Color(hex: dark ? 0x2d6654 : 0xdeeee5)
+        case .lagoon: Color(hex: dark ? 0x195b7c : 0xdceef8)
+        case .barbra: Color(hex: dark ? 0x7a2a52 : 0xf9e4ee)
+        case .gray: Color(hex: dark ? 0x293b94 : 0xe7ebff)
+        case .moodIndigo: Color(hex: dark ? 0x3a3f99 : 0xe6e8fb)
         }
     }
     /// The open conversation in the sidebar: Slack's strong fill, under `selectionText`.
     var selectionStrong: Color {
         switch palette {
-        case .slate: Color(hex: 0x1164a3)
         case .aubergine: Color(hex: dark ? 0x7c3085 : 0x611f69)
-        case .ocean: Color(hex: dark ? 0x0f7aa8 : 0x0b5c8a)
-        case .forest: Color(hex: dark ? 0x2a7d5f : 0x1d6b50)
+        case .clementine: Color(hex: dark ? 0xb35418 : 0xa84c12)
+        case .banana: Color(hex: dark ? 0x8f6c00 : 0x8a6a00)
+        case .jade: Color(hex: dark ? 0x2a7d5f : 0x1d6b50)
+        case .lagoon: Color(hex: dark ? 0x0f7aa8 : 0x0b5c8a)
+        case .barbra: Color(hex: dark ? 0xb0306a : 0x9e2a5e)
+        case .gray: Color(hex: 0x1164a3)
+        case .moodIndigo: Color(hex: dark ? 0x4b52c9 : 0x3a40b0)
         }
     }
     var selectionText: Color { .white }

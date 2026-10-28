@@ -21,7 +21,7 @@ struct TooltipTests {
         "A tooltip is a dark bubble with light text in both themes, darker than the conversation in dark mode",
         arguments: [false, true])
     func darkBubble(dark: Bool) {
-        let colors = AppColors(dark: dark, palette: .slate)
+        let colors = AppColors(dark: dark, palette: .gray)
         let bubble = luminance(colors.tooltip)
         #expect(bubble < luminance(colors.canvas))
         // WCAG AAA for small text.
