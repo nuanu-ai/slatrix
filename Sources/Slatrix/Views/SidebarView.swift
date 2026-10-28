@@ -132,8 +132,9 @@ struct SidebarView: View {
                 railItems
                 ScrollView { railItems }.scrollIndicators(.hidden)
             }.frame(maxHeight: .infinity, alignment: .top)
-            IconButton(symbol: appearance.mode == .dark ? "moon" : "sun.max", label: "Appearance") { onPreferences() }
-                .padding(m.sp4).background(colors.textPrimary.opacity(0.1), in: Circle())
+            IconButton(symbol: appearance.mode == .dark ? "moon" : "sun.max", label: "Appearance", round: true) {
+                onPreferences()
+            }
             Menu {
                 Text(matrix.user?.name ?? "Slatrix")
                 if let id = matrix.user?.id { Text(id) }
@@ -154,9 +155,9 @@ struct SidebarView: View {
                 ForEach(WorkspaceRail.entries(workspaces: matrix.workspaces, rooms: matrix.rooms), id: \.self) {
                     workspaceIcon($0)
                 }
-                IconButton(symbol: "plus", label: "Create a workspace", role: .header) {
+                IconButton(symbol: "plus", label: "Create a workspace", role: .header, round: true) {
                     onCreate(.workspace)
-                }.padding(m.sp4).background(colors.textPrimary.opacity(0.1), in: Circle())
+                }
             }
             Rectangle().fill(colors.border).frame(width: m.sp24, height: 1)
             ForEach([AppRoute.home, .directMessages, .activity, .files, .saved], id: \.self) { item in

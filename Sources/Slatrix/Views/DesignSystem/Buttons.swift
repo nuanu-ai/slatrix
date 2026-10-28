@@ -112,27 +112,36 @@ struct ButtonChrome<Label: View>: View {
 /// An icon-only button's look: a square that fills on hover and press.
 struct IconChrome<Label: View>: View {
     let state: InteractionState
+    /// The rail's round buttons: a tinted circle that hover and press light whole.
+    var round = false
     @ViewBuilder let label: Label
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
     var body: some View {
         let colors = appearance.colors
-        label.contentShape(Rectangle())
-            .background(
-                state == .pressed ? colors.pressed : state == .hover ? colors.hover : .clear,
-                in: RoundedRectangle(cornerRadius: m.radius)
-            )
-            .opacity(state == .disabled ? 0.4 : 1)
-            .focusRing(state == .focused, cornerRadius: m.radius)
+        let fill = state == .pressed ? colors.pressed : state == .hover ? colors.hover : .clear
+        Group {
+            if round {
+                label.padding(m.sp4).contentShape(Circle()).background(fill, in: Circle())
+                    .background(colors.textPrimary.opacity(0.1), in: Circle())
+            } else {
+                label.contentShape(Rectangle()).background(fill, in: RoundedRectangle(cornerRadius: m.radius))
+            }
+        }
+        .opacity(state == .disabled ? 0.4 : 1)
+        // A radius past half the side rounds the ring into a circle.
+        .focusRing(state == .focused, cornerRadius: round ? m.iconButton : m.radius)
     }
 }
 
 struct IconButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View { StyledIcon(configuration: configuration) }
+    var round = false
+    func makeBody(configuration: Configuration) -> some View { StyledIcon(configuration: configuration, round: round) }
 
     private struct StyledIcon: View {
         let configuration: Configuration
+        let round: Bool
         @Environment(\.isEnabled) private var enabled
         @Environment(\.isFocused) private var focusedWithin
         @State private var hovering = false
@@ -140,7 +149,7 @@ struct IconButtonStyle: ButtonStyle {
             IconChrome(
                 state: InteractionState(
                     enabled: enabled, pressed: configuration.isPressed, focused: keyboardFocused(focusedWithin),
-                    hovering: hovering)
+                    hovering: hovering), round: round
             ) { configuration.label }
             .onHover { hovering = $0 }
         }
@@ -159,6 +168,7 @@ struct IconButton: View {
     var role: TextRole = .title
     /// Square side at 100% zoom; the standard icon button when nil.
     var side: CGFloat? = nil
+    var round = false
     var action: () -> Void
     var body: some View {
         Button(action: action) {
@@ -166,7 +176,7 @@ struct IconButton: View {
                 width: side.map(m.callAsFunction) ?? m.iconButton, height: side.map(m.callAsFunction) ?? m.iconButton
             )
         }
-        .buttonStyle(.icon).help(label).accessibilityLabel(label)
+        .buttonStyle(IconButtonStyle(round: round)).help(label).accessibilityLabel(label)
     }
 }
 
