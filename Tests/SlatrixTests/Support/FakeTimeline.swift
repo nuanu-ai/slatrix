@@ -86,20 +86,24 @@ func imageEvent(
 }
 
 func textEvent(
-    _ id: String, body: String, sender: String = "@alice:example.org", edited: Bool = false, redacted: Bool = false
+    _ id: String, body: String, formatted: String? = nil, sender: String = "@alice:example.org", edited: Bool = false,
+    redacted: Bool = false, timestamp: UInt64 = 1_000
 ) -> EventTimelineItem {
     let kind: MsgLikeKind =
         redacted
         ? .redacted
         : .message(
             content: MessageContent(
-                msgType: .text(content: TextMessageContent(body: body, formatted: nil)), body: body, isEdited: edited,
+                msgType: .text(
+                    content: TextMessageContent(
+                        body: body, formatted: formatted.map { FormattedBody(format: .html, body: $0) })), body: body,
+                isEdited: edited,
                 mentions: nil))
     return EventTimelineItem(
         isRemote: true, eventOrTransactionId: .eventId(eventId: id), sender: sender, senderProfile: .unavailable,
         forwarder: nil, forwarderProfile: nil, isOwn: false, isEditable: false,
         content: .msgLike(content: MsgLikeContent(kind: kind, inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
-        reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000, localSendState: nil, editSendState: nil,
+        reactions: [], eventTypeRaw: "m.room.message", timestamp: timestamp, localSendState: nil, editSendState: nil,
         redactionSendState: nil, localCreatedAt: nil, readReceipts: [:], origin: nil, canBeRepliedTo: true,
         lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
 }

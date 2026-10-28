@@ -82,6 +82,19 @@ struct ThreadPreviewTests {
         #expect(feed.items.isEmpty && root.allListenersCancelled && latest.allListenersCancelled)
     }
 
+    @Test("Hydrating a row's preview leaves the feed's list of threads as it was")
+    func hydrationKeepsList() async throws {
+        let row = try await open()
+        let changes = Recorder<Void>()
+        withObservationTracking {
+            _ = feed.items
+        } onChange: {
+            changes.append(())
+        }
+        await feed.hydratePreview(row)
+        #expect(changes.all.isEmpty)
+    }
+
     @Test("A failed preview shows a placeholder until an explicit retry succeeds")
     func failureThenRetry() async throws {
         room.fail = true
