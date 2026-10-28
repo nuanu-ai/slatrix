@@ -22,6 +22,12 @@ struct ThreadFeedItem: Identifiable, Hashable {
     fileprivate(set) var message: ChatMessage?
     fileprivate(set) var error: String?
 
+    fileprivate init(state: State, message: ChatMessage?, error: String?) {
+        self.state = state
+        self.message = message
+        self.error = error
+    }
+
     /// What a row shows for `snapshot`, the thread list's placeholder for this message.
     func shown(_ snapshot: ChatMessage) -> ChatMessage {
         guard var message else {
@@ -388,9 +394,10 @@ final class RoomSubscriptionCoordinator {
     func preview(roomID: String, eventID: String) -> ThreadPreview {
         let id = ActivityService.key(roomID: roomID, eventID: eventID)
         if let shown = shownPreviews[id] { return shown }
-        let shown = ThreadPreview()
+        // Filled without reading it: the feed's body calls this, and only the row may observe the preview.
+        let preview = previews[id]
+        let shown = ThreadPreview(state: preview?.state ?? .snapshot, message: preview?.message, error: preview?.error)
         shownPreviews[id] = shown
-        show(id)
         return shown
     }
 
