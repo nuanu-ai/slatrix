@@ -65,12 +65,13 @@ private final class SharedRoom: Room, @unchecked Sendable {
     let setupGate = Gate()
     let configurations = Recorder<TimelineConfiguration>()
     var fail = false
+    var joined = Membership.joined
     init(_ values: [TimelineItem]) {
         history = History(values)
         super.init(noHandle: .init())
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
-    override func membership() -> Membership { .joined }
+    override func membership() -> Membership { joined }
     override func subscribeToRoomInfoUpdates(listener: RoomInfoListener) -> TaskHandle {
         FakeCancellableHandle(noHandle: .init())
     }
@@ -399,6 +400,15 @@ final class SharedFilesTests {
         service.attach(client)
         await expectNoRowsWhileOpening("!room:example.org")
     }
+
+    @Test("A conversation left while its list was kept opens without the old rows")
+    func keptRowsGoWhenLeft() async {
+        await open()
+        service.close()
+        room.joined = .left
+        await service.open(roomID: "!room:example.org")
+        #expect(service.items.isEmpty && service.state == "error")
+    }
     private func expectNoRowsWhileOpening(_ roomID: String) async {
         room.setupGate.arm()
         let opening = Task { await service.open(roomID: roomID) }
@@ -428,7 +438,8 @@ final class SharedFilesTests {
         service.close()
         room.setupGate.arm()
         room.fail = true
-        let setup = Task { await service.open(roomID: "!room:example.org") }
+        // Another conversation, so the first one's list is kept and signing out must close it too.
+        let setup = Task { await service.open(roomID: "!other:example.org") }
         #expect(await eventually { self.room.setupGate.isWaiting })
         service.attach(nil)
         room.setupGate.release()
