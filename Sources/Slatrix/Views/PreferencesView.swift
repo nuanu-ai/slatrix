@@ -11,9 +11,8 @@ struct PreferencesView: View {
     var onClose: () -> Void
     var onLogout: () -> Void
     var onRecovery: () -> Void
+    var onEditProfile: () -> Void
     @State var tab = Tab.appearance
-    @State private var profileName = ""
-    @State private var saving = false
     @State private var requestingNotifications = false
     @State private var notificationStatus: DesktopNotificationStatus?
     @State private var notificationStatusError: String?
@@ -23,7 +22,6 @@ struct PreferencesView: View {
     @State private var isPresented = false
     @State private var openAtLogin = false
     @State private var error: String?
-    @State private var savedProfile = false
     private var colors: AppColors { appearance.colors }
 
     enum Tab: String, CaseIterable, Identifiable, Hashable {
@@ -93,7 +91,6 @@ struct PreferencesView: View {
         .preferredColorScheme(appearance.preferredColorScheme)
         .onAppear {
             isPresented = true
-            profileName = matrix.user?.name ?? ""
             openAtLogin = PlatformIntegration.shared.openAtLogin
         }
         .task(id: notificationStatusContext) {
@@ -254,20 +251,11 @@ struct PreferencesView: View {
                     Text(matrix.isPreview ? "Preview" : matrix.user?.id ?? "")
                         .font(m.font(.meta)).foregroundStyle(colors.textSecondary).textSelection(.enabled)
                 }
+                Spacer(minLength: 0)
+                Button("Edit profile", action: onEditProfile).buttonStyle(.secondary)
+                    .disabled(matrix.isPreview || matrix.user == nil)
             }
             Divider().overlay(colors.border)
-            VStack(alignment: .leading, spacing: m.sp8) {
-                sectionTitle("Display name")
-                HStack(spacing: m.sp12) {
-                    TextField("Your name", text: $profileName).textFieldStyle(.field).onChange(of: profileName) {
-                        _, _ in savedProfile = false
-                    }
-                    Button(savedProfile ? "Saved" : saving ? "Saving…" : "Save") { saveProfile() }.disabled(
-                        saving || matrix.isPreview || matrix.user == nil
-                            || profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || profileName == matrix.user?.name)
-                }
-            }
             VStack(alignment: .leading, spacing: m.sp12) {
                 sectionTitle("Security")
                 DeviceVerificationSettings(
@@ -368,20 +356,6 @@ struct PreferencesView: View {
             }
             requestingNotifications = false
             await refreshNotificationStatus()
-        }
-    }
-
-    private func saveProfile() {
-        let name = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        saving = true
-        Task { @MainActor in
-            defer { saving = false }
-            do {
-                try await matrix.setProfile(name: name)
-                profileName = name
-                savedProfile = true
-            } catch { self.error = error.localizedDescription }
         }
     }
 }

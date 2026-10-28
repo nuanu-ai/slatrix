@@ -16,7 +16,7 @@ struct ProfilePane: View {
     @EnvironmentObject private var appearance: AppearanceStore
 
     var body: some View {
-        let person = ProfileDetails(people: people, userID: userID, fallback: fallback)
+        let person = ShownProfile(people: people, userID: userID, fallback: fallback, me: matrix.user)
         let own = userID == matrix.user?.id
         let colors = appearance.colors
         VStack(spacing: 0) {
@@ -83,18 +83,24 @@ struct ProfilePane: View {
     }
 }
 
-/// The name, photo and status to show: the fetched profile once it is in, the room's member until then.
-private struct ProfileDetails {
+/// The name, photo and status to show: the fetched profile once it is in, the room's member until then. Your own name
+/// and photo come from your account, so an edit shows at once.
+struct ShownProfile {
     let name: String
     let avatarURL: String?
     let status: String?
     let inCall: Bool
 
-    @MainActor init(people: PeopleService, userID: String, fallback: ChatUser?) {
+    @MainActor init(people: PeopleService, userID: String, fallback: ChatUser?, me: ChatUser?) {
         let profile = people.profile?.id == userID ? people.profile : nil
         let known = fallback?.id == userID ? fallback : nil
-        name = profile?.name ?? known?.name ?? userID
-        avatarURL = profile?.avatarURL ?? known?.avatarURL
+        if let me, me.id == userID {
+            name = me.name
+            avatarURL = me.avatarURL
+        } else {
+            name = profile?.name ?? known?.name ?? userID
+            avatarURL = profile?.avatarURL ?? known?.avatarURL
+        }
         status = people.statusSupported ? profile?.status : nil
         inCall = profile?.inCall ?? false
     }

@@ -66,6 +66,7 @@ struct RootView: View {
     @State private var modalShown = false
     @State private var publicDirectory: PublicDirectorySelection?
     @State private var showRecovery = false
+    @State private var editingProfile = false
     @State private var creation: CreationKind?
     @State private var inviteTargetRoomID: String?
     /// Anchored cards such as the emoji picker; like `modals`, read only by its host.
@@ -302,6 +303,10 @@ struct RootView: View {
                 onRecovery: {
                     closeModal()
                     showRecovery = true
+                },
+                onEditProfile: {
+                    closeModal()
+                    editingProfile = true
                 }, tab: tab
             ).onAppear { Performance.finishOnScreen(.preferencesOpen) }
         case .switcher:
@@ -551,6 +556,9 @@ struct RootView: View {
             .modal(isPresented: $showRecovery) {
                 EncryptionRecoveryView(matrix: matrix, onClose: { showRecovery = false })
             }
+            .modal(isPresented: $editingProfile) {
+                ProfileEditor(matrix: matrix, onClose: { editingProfile = false })
+            }
             .modal(item: $roomDetails) { selection in
                 RoomDetailsEditor(matrix: matrix, roomID: selection.id, onClose: { roomDetails = nil })
             }
@@ -788,10 +796,7 @@ struct RootView: View {
                     self.profilePane = nil
                     selectRoom(id)
                 },
-                onEditProfile: {
-                    Performance.start(.preferencesOpen)
-                    modals.current = .preferences(.account)
-                }, onClose: { self.profilePane = nil })
+                onEditProfile: { editingProfile = true }, onClose: { self.profilePane = nil })
         } else if let room, let root = threadRoot {
             threadPanel(root: root, room: room)
         }

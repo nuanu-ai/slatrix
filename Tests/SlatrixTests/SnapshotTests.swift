@@ -912,7 +912,8 @@ struct Snapshots {
     }
 
     @Test(
-        "Profiles: someone with a photo and status, someone in a call without one, and you", arguments: Theme.allCases)
+        "Profiles: someone with a photo and status, someone in a call without one, you, and editing yours",
+        arguments: Theme.allCases)
     func profiles(theme: Theme) async throws {
         let matrix = MatrixService()
         matrix.enterPreview()
@@ -935,6 +936,15 @@ struct Snapshots {
             defer { window.close() }
             try write(await settledImage(hosting), "profile-pane-\(name)-\(theme.rawValue)")
         }
+        matrix.user?.avatarURL = photo
+        let (window, hosting) = try themedWindow(
+            ModalHost {
+                Color.clear.frame(width: 900, height: 560).modal(isPresented: .constant(true)) {
+                    ProfileEditor(matrix: matrix, onClose: {})
+                }
+            }, theme: theme)
+        defer { window.close() }
+        try write(await settledImage(hosting), "profile-editor-\(theme.rawValue)")
     }
 
     /// A soft gradient standing in for someone's photo.
