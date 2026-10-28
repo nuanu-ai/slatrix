@@ -477,7 +477,7 @@ struct WindowHostedTests {
     }
 
     @Test(
-        "The window buttons sit on the title bar's midline, and hold there on every frame of a resize from any edge",
+        "The window buttons hold the title bar's midline on every frame of a resize from any edge, and through a zoom",
         arguments: [1, 1.5])
     func windowButtonsCentered(zoom: Double) async throws {
         let harness = Harness(zoom: zoom)
@@ -495,8 +495,8 @@ struct WindowHostedTests {
         #expect(await eventually { abs(offset()) <= 1 }, "\(offset())")
 
         // A live resize sets the window's frame and draws it in one go, so each frame is checked as it is drawn,
-        // before SwiftUI lays the window out again. Dragging the left edge changes the width, the top edge the
-        // height, and the top left corner both.
+        // with no turn of the run loop between. Dragging the left edge changes the width, the top edge the height,
+        // and the top left corner both.
         let search = try #require(harness.searchField)
         for (edge, width, height) in [("left", -20.0, 0.0), ("top", 0, -20), ("corner", -20, -20)] {
             for step in 1...3 {
@@ -515,6 +515,12 @@ struct WindowHostedTests {
         let field = search.convert(search.bounds, to: nil)
         let hit = harness.window.contentView?.superview?.hitTest(NSPoint(x: field.midX, y: field.minY + 1))
         #expect(hit.map { $0 === search || $0.isDescendant(of: search) } == true)
+
+        // Zooming in or out with the window open changes the bar's height under the buttons.
+        harness.hosting.rootView = AnyView(
+            RootView(matrix: harness.matrix).environmentObject(harness.appearance)
+                .environment(\.metrics, Metrics(zoom: zoom == 1 ? 1.5 : 1)))
+        #expect(await eventually { abs(offset()) <= 1 }, "\(offset())")
     }
 
     @Test("A modal dims the window below the title bar, which looks the same and takes no clicks", arguments: [1, 1.5])

@@ -74,9 +74,9 @@ struct WindowDragArea: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
-/// Centers the window's close, minimize and zoom buttons on this view's midline, as Slack's title bar does at every
-/// zoom. AppKit's own title bar is shorter and fixed, and AppKit lays it out again on a resize, a full screen change and
-/// whenever else it likes, so each time it does, this lays the buttons back out.
+/// Centers the window's close, minimize and zoom buttons in this view, the title bar along the window's top edge, as
+/// Slack's title bar does at every zoom. AppKit's own title bar is shorter and fixed, and AppKit lays it out again on a
+/// resize, a full screen change and whenever else it likes, so each time it does, this lays the buttons back out.
 struct WindowButtonsCentering: NSViewRepresentable {
     func makeNSView(context: Context) -> CenteringView { CenteringView() }
     func updateNSView(_ view: CenteringView, context: Context) {}
@@ -91,8 +91,10 @@ struct WindowButtonsCentering: NSViewRepresentable {
             observers.forEach(NotificationCenter.default.removeObserver)
             observers = []
             guard let window, let close = window.standardWindowButton(.closeButton) else { return }
+            // Not at once: AppKit moves a button from inside the button's own move, which ignores another until it
+            // returns. The window lays out before it draws, so the buttons never show where AppKit put them.
             let recenter: @Sendable (Notification) -> Void = { [weak self] _ in
-                MainActor.assumeIsolated { self?.center() }
+                MainActor.assumeIsolated { self?.needsLayout = true }
             }
             let laidOut = [close, close.superview?.superview].compactMap { $0 }
             for view in laidOut { view.postsFrameChangedNotifications = true }
@@ -104,29 +106,23 @@ struct WindowButtonsCentering: NSViewRepresentable {
             observers.append(
                 NotificationCenter.default.addObserver(
                     forName: NSWindow.didExitFullScreenNotification, object: window, queue: nil, using: recenter))
-            center()
+            needsLayout = true
         }
 
-        // Zoom changes the title bar's height.
-        override func setFrameSize(_ size: NSSize) {
-            super.setFrameSize(size)
-            center()
-        }
-
-        private func center() {
+        override func layout() {
+            super.layout()
             // In full screen the buttons drop down with the menu bar, where AppKit places them.
             guard let window, !window.styleMask.contains(.fullScreen), !bounds.isEmpty,
-                let close = window.standardWindowButton(.closeButton), let titlebar = close.superview,
-                let container = titlebar.superview, let frame = container.superview,
-                frame === window.contentView?.superview
+                let close = window.standardWindowButton(.closeButton), let container = close.superview?.superview,
+                let frame = container.superview, frame === window.contentView?.superview
             else { return }
             // As tall as the title bar, so the buttons' container still takes their clicks.
-            let height = 2 * (frame.bounds.height - convert(bounds, to: nil).midY)
-            let bar = NSRect(x: 0, y: frame.bounds.height - height, width: frame.bounds.width, height: height)
+            let bar = NSRect(
+                x: 0, y: frame.bounds.height - bounds.height, width: frame.bounds.width, height: bounds.height)
             if container.frame != bar { container.frame = bar }
             for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
                 guard let button = window.standardWindowButton(type) else { continue }
-                let y = ((titlebar.bounds.height - button.frame.height) / 2).rounded()
+                let y = ((bar.height - button.frame.height) / 2).rounded()
                 if button.frame.minY != y { button.setFrameOrigin(NSPoint(x: button.frame.minX, y: y)) }
             }
         }
