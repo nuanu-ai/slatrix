@@ -76,8 +76,10 @@ struct AvatarView: View {
                 let images = matrix.avatarImages
                 let key = large ? largeKey ?? source : source
                 guard images.cachedImage(for: key) == nil else { return }
-                let side: UInt64 = large ? 512 : 128
-                let image = await images.image(for: key) { try await matrix.avatarThumbnail(source, side: side) }
+                let side = large ? 512 : 128
+                let image = await images.image(for: key, pixels: side) {
+                    try await matrix.avatarThumbnail(source, side: UInt64(side))
+                }
                 guard !Task.isCancelled, let image else { return }
                 // Only a photo that was not cached fades in over its initials; a cached one is on the first frame.
                 withAnimation(Motion.content) { loaded = Loaded(request: request, image: image) }
