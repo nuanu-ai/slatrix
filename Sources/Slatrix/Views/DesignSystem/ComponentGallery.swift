@@ -174,6 +174,15 @@ struct ComponentGallery: View {
                 }
             }
             HStack(spacing: m.sp12) {
+                caption("round").frame(width: m(84), alignment: .leading)
+                ForEach(states, id: \.self) { state in
+                    IconChrome(state: state, round: true) {
+                        Image(systemName: "moon").font(m.font(.title))
+                            .frame(width: m.iconButton, height: m.iconButton)
+                    }.frame(width: m(104), alignment: .leading)
+                }
+            }
+            HStack(spacing: m.sp12) {
                 caption("sizes").frame(width: m(84), alignment: .leading)
                 ForEach([ControlSize.small, .regular, .large], id: \.self) { size in
                     ButtonChrome(kind: .primary, state: .rest) { Text("Sign in") }.controlSize(size)

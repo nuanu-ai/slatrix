@@ -401,6 +401,30 @@ struct DesignSystemHostedTests {
         #expect(visited == [1, 2, 1])
     }
 
+    @Test("A round rail button lights its whole circle when pressed, not a square inside it")
+    func roundButtonPress() throws {
+        func pixels(_ state: InteractionState) throws -> (edge: NSColor, corner: NSColor) {
+            let host = Host(
+                IconChrome(state: state, round: true) { Image(systemName: "moon").frame(width: 28, height: 28) }
+                    .frame(width: 36, height: 36),
+                size: CGSize(width: 36, height: 36))
+            defer { host.close() }
+            host.hosting.layoutSubtreeIfNeeded()
+            let image = try #require(host.hosting.bitmapImageRepForCachingDisplay(in: host.hosting.bounds))
+            host.hosting.cacheDisplay(in: host.hosting.bounds, to: image)
+            let scale = CGFloat(image.pixelsWide) / host.hosting.bounds.width
+            func color(_ x: CGFloat, _ y: CGFloat) throws -> NSColor {
+                try #require(image.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB))
+            }
+            // Inside the circle near its top, outside the icon's square; and the frame's corner, outside the circle.
+            return (try color(18, 2), try color(1, 1))
+        }
+        let rest = try pixels(.rest)
+        let pressed = try pixels(.pressed)
+        #expect(pressed.edge != rest.edge)
+        #expect(pressed.corner == rest.corner)
+    }
+
     @Test("A toast stays dark in the dark theme, darker than the conversation under it, as a tooltip does")
     func darkToast() throws {
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
