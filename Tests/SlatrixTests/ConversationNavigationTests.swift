@@ -115,7 +115,7 @@ struct ConversationNavigationTests {
         ] as [(String?, String?, ChannelTab)])
     func screenWhileOpening(showing: String?, opening: String?, expected: ChannelTab) {
         #expect(
-            ConversationNavigation.shown(.messages, left: ChannelTab.files, showing: showing, opening: opening)
+            ConversationNavigation.shown(.messages, from: ChannelTab.files, showing: showing, opening: opening)
                 == expected)
     }
 }

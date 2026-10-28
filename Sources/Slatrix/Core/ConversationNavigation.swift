@@ -32,10 +32,11 @@ enum ConversationNavigation {
 enum ChannelTab: Hashable { case messages, pins, files }
 
 extension ConversationNavigation {
-    /// What the window shows while `opening`, picked from the screen `left`, reads its cached rows: `left`, until
-    /// that conversation replaces it, so no frame shows the conversation open before. One already open shows at once.
-    static func shown<Screen>(_ current: Screen, left: Screen?, showing roomID: String?, opening: String?) -> Screen {
-        guard let left, let opening, opening != roomID else { return current }
-        return left
+    /// The screen to draw while a conversation picked on screen `from` opens. Its cached rows take a moment to read,
+    /// and until it is the one on screen, `from` stays up, so the conversation open before never flashes back in
+    /// between. A conversation already on screen shows `current` at once.
+    static func shown<Screen>(_ current: Screen, from: Screen?, showing roomID: String?, opening: String?) -> Screen {
+        guard let from, let opening, opening != roomID else { return current }
+        return from
     }
 }

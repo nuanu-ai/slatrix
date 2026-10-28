@@ -84,8 +84,8 @@ struct RootView: View {
     @State private var leaving: ChatRoom?
     @State private var toasts = Toasts()
     @State private var channelTab = ChannelTab.messages
-    /// Where a click on a conversation came from; it stays up until that conversation can replace it.
-    @State private var leftScreen: Screen?
+    /// The screen a conversation was picked on, which stays up until that conversation can replace it.
+    @State private var pickedFrom: Screen?
     @State private var pinPermissionRoomID: String?
     @State private var pinPermission = false
     @State private var threadRoot: ChatMessage?
@@ -171,7 +171,7 @@ struct RootView: View {
     }
     private var screen: Screen {
         ConversationNavigation.shown(
-            Screen(route: route, tab: channelTab), left: leftScreen, showing: room?.id, opening: pendingRoomID)
+            Screen(route: route, tab: channelTab), from: pickedFrom, showing: room?.id, opening: pendingRoomID)
     }
     /// Opened at its unread line, from the cache or at the line from the server.
     private var isResumingUnread: Bool {
@@ -1655,7 +1655,7 @@ struct RootView: View {
             history.append(id)
             historyIndex = history.count - 1
         }
-        leftScreen = screen
+        pickedFrom = screen
         pendingRoomID = id
         if let target = matrix.rooms.first(where: { $0.id == id }) {
             if !target.isDirect, let current = workspaceID, !target.spaceIDs.contains(current) {
