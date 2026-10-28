@@ -147,7 +147,7 @@ struct SharedFilesView: View {
                 if channelID == nil { conversationMenu }
                 Spacer()
                 IconButton(symbol: "arrow.clockwise", label: "Refresh shared files and links", role: .body) {
-                    if let id = roomID { Task { await service.open(roomID: id) } }
+                    if let id = roomID { Task { await service.reload(roomID: id) } }
                 }.disabled(service.state == "loading" || service.isLoadingMore || matrix.isPreview || roomID == nil)
             }.padding(.vertical, m.sp16)
             TabBar(tabs: ContentFilter.allCases.map { .init(value: $0, title: $0.rawValue) }, selection: $filter)

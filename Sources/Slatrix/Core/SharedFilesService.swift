@@ -68,6 +68,7 @@ private final class SharedFilesTimelineObserver: TimelineListener, @unchecked Se
     private var revision = 0
     let callback: @Sendable ([TimelineItem], Int) -> Void
     init(_ callback: @escaping @Sendable ([TimelineItem], Int) -> Void) { self.callback = callback }
+    var snapshot: (values: [TimelineItem], revision: Int) { lock.withLock { (values, revision) } }
     func onUpdate(diff: [TimelineDiff]) {
         lock.lock()
         values.apply(diff.map(\.change))
@@ -103,11 +104,30 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
         let thumbnailSize: UInt64?
         let fingerprint: Data
     }
+    /// A list left while it was whole, still following its timeline, so coming back shows its rows at once.
+    private struct Kept {
+        let scope: UUID
+        let room: Room
+        let timeline: Timeline
+        let observer: SharedFilesTimelineObserver
+        let timelineHandle: TaskHandle
+        let roomHandle: TaskHandle?
+        let items: [SharedContentItem]
+        let media: [String: Media]
+        let hasMore: Bool
+        let historyLoads: Int
+        func cancel() {
+            timelineHandle.cancel()
+            roomHandle?.cancel()
+        }
+    }
     private var client: Client?
     private var room: Room?
     private var timeline: Timeline?
+    private var observer: SharedFilesTimelineObserver?
     private var timelineHandle: TaskHandle?
     private var roomHandle: TaskHandle?
+    private var kept = RecentTimelines<Kept>()
     private var account = UUID()
     private var scope = UUID()
     private var revision = 0
@@ -118,20 +138,34 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
 
     func attach(_ client: Client?) {
         close()
+        // Another account's lists never come back.
+        for entry in kept.removeAll() { entry.cancel() }
         account = UUID()
         self.client = client
     }
 
     func close() {
+        // A page still loading would finish into the kept list, and coming back could start another beside it.
+        if let roomID, let room, let timeline, let observer, let timelineHandle, state == "ready", !isLoadingMore,
+            room.membership() == .joined
+        {
+            let entry = Kept(
+                scope: scope, room: room, timeline: timeline, observer: observer,
+                timelineHandle: timelineHandle, roomHandle: roomHandle, items: items, media: media, hasMore: hasMore,
+                historyLoads: historyLoads)
+            for dropped in kept.keep(entry, for: roomID) { dropped.cancel() }
+        } else {
+            timelineHandle?.cancel()
+            roomHandle?.cancel()
+        }
         mediaFiles.removeAll()
         scope = UUID()
         projection?.cancel()
         projection = nil
-        timelineHandle?.cancel()
-        roomHandle?.cancel()
         timelineHandle = nil
         roomHandle = nil
         timeline = nil
+        observer = nil
         room = nil
         roomID = nil
         revision = 0
@@ -165,6 +199,10 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
 
     func open(roomID id: String) async {
         close()
+        if let entry = kept.take(id) {
+            if entry.room.membership() == .joined { return restore(entry, roomID: id) }
+            entry.cancel()
+        }
         roomID = id
         state = "loading"
         hasMore = true
@@ -192,26 +230,27 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
             }
             try validate(session, token)
             timeline = created
-            let handle = await created.addListener(
-                listener: SharedFilesTimelineObserver { [weak self] values, revision in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.account == session, self.scope == token, revision > self.revision else {
-                            return
-                        }
-                        guard room.membership() == .joined else {
-                            self.close()
-                            return
-                        }
-                        self.receive(
-                            values, revision: revision, roomID: id, ownID: try? client.userId(), session: session,
-                            token: token)
+            let listener = SharedFilesTimelineObserver { [weak self] values, revision in
+                Task { @MainActor [weak self] in
+                    guard let self, self.account == session, self.scope == token, revision > self.revision else {
+                        return
                     }
-                })
+                    guard room.membership() == .joined else {
+                        self.close()
+                        return
+                    }
+                    self.receive(
+                        values, revision: revision, roomID: id, ownID: try? client.userId(), session: session,
+                        token: token)
+                }
+            }
+            let handle = await created.addListener(listener: listener)
             do { try validate(session, token) } catch {
                 handle.cancel()
                 throw error
             }
             timelineHandle = handle
+            observer = listener
             await loadPage(session: session, token: token)
         } catch {
             guard account == session, scope == token else { return }
@@ -227,6 +266,33 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
             roomHandle = nil
             timeline = nil
         }
+    }
+
+    /// Refresh: the conversation's timeline read again, not its kept list.
+    func reload(roomID id: String) async {
+        close()
+        kept.take(id)?.cancel()
+        await open(roomID: id)
+    }
+
+    private func restore(_ entry: Kept, roomID id: String) {
+        scope = entry.scope
+        roomID = id
+        room = entry.room
+        timeline = entry.timeline
+        observer = entry.observer
+        timelineHandle = entry.timelineHandle
+        roomHandle = entry.roomHandle
+        items = entry.items
+        media = entry.media
+        hasMore = entry.hasMore
+        historyLoads = entry.historyLoads
+        state = "ready"
+        // Whatever changed while the list was away lands quietly over the kept rows.
+        let snapshot = entry.observer.snapshot
+        receive(
+            snapshot.values, revision: snapshot.revision, roomID: id, ownID: try? client?.userId(), session: account,
+            token: scope)
     }
 
     func loadMore() async {
