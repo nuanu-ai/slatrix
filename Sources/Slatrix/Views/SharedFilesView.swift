@@ -8,6 +8,8 @@ struct SharedFilesView: View {
     let matrix: MatrixService
     let service: SharedFilesService
     let workspaceID: String?
+    /// A channel's Files tab: that channel's files, with no conversation to pick.
+    var channelID: String? = nil
     /// Goes to the message in its conversation.
     let onOpen: (ChatMessage) -> Void
     /// Opens a file in the viewer, which steps through the list's files in order.
@@ -36,6 +38,7 @@ struct SharedFilesView: View {
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
     private var roomID: String? {
+        if let channelID { return channelID }
         if rooms.contains(where: { $0.id == selectedRoomID }) { return selectedRoomID }
         if let current = matrix.selectedRoomID, rooms.contains(where: { $0.id == current }) { return current }
         return rooms.first?.id
@@ -141,7 +144,7 @@ struct SharedFilesView: View {
         VStack(spacing: 0) {
             HStack(spacing: m.sp12) {
                 SearchField(prompt: "Search files and links", text: $query).frame(maxWidth: m(Self.filterMaxWidth))
-                conversationMenu
+                if channelID == nil { conversationMenu }
                 Spacer()
                 IconButton(symbol: "arrow.clockwise", label: "Refresh shared files and links", role: .body) {
                     if let id = roomID { Task { await service.open(roomID: id) } }

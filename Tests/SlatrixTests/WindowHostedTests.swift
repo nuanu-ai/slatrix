@@ -152,6 +152,51 @@ struct WindowHostedTests {
             _ = item.target?.perform(item.action, with: item)
         }
 
+        /// The channel header's tabs, left to right: the runs of ink in the row above the timeline, where the gap
+        /// between two tabs is wider than any inside one.
+        func tabs() throws -> [CGRect] {
+            let timeline = try timeline()
+            // Past the divider, and short of the underline and the row's edges.
+            let row = CGRect(x: timeline.minX, y: timeline.maxY + 6, width: timeline.width / 2, height: 30)
+            hosting.layoutSubtreeIfNeeded()
+            let image = try #require(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+            hosting.cacheDisplay(in: hosting.bounds, to: image)
+            let scale = CGFloat(image.pixelsWide) / hosting.bounds.width
+            let rows = Int((hosting.bounds.height - row.maxY) * scale)..<Int((hosting.bounds.height - row.minY) * scale)
+            let paper = try #require(image.colorAt(x: Int(row.minX * scale) + 1, y: rows.lowerBound))
+            var runs: [ClosedRange<CGFloat>] = []
+            for x in Int(row.minX * scale)..<Int(row.maxX * scale) {
+                let inked = rows.contains { y in
+                    image.colorAt(x: x, y: y).map {
+                        abs($0.redComponent - paper.redComponent) + abs($0.greenComponent - paper.greenComponent)
+                            + abs($0.blueComponent - paper.blueComponent) > 0.3
+                    } ?? false
+                }
+                guard inked else { continue }
+                let point = CGFloat(x) / scale
+                if let last = runs.last, point - last.upperBound < 12 {
+                    runs[runs.count - 1] = last.lowerBound...point
+                } else {
+                    runs.append(point...point)
+                }
+            }
+            return runs.map {
+                CGRect(x: $0.lowerBound, y: row.minY, width: $0.upperBound - $0.lowerBound, height: row.height)
+            }
+        }
+
+        func click(_ frame: CGRect) async throws {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                await drainMainActor()
+                window.sendEvent(
+                    try #require(
+                        NSEvent.mouseEvent(
+                            with: type, location: NSPoint(x: frame.midX, y: frame.midY), modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+            }
+        }
+
         func resize(_ width: CGFloat) { window.setContentSize(NSSize(width: width, height: 900)) }
 
         func menu(_ action: String) {
@@ -232,6 +277,24 @@ struct WindowHostedTests {
                     ($0 as? NSTextField)?.placeholderString == "Find members"
                 }
             })
+    }
+
+    @Test("Files & links shows the channel's files under its header, and Messages brings its messages back")
+    func filesTab() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        func filesShown() -> Bool {
+            harness.shown().contains { ($0 as? NSTextField)?.placeholderString == "Search files and links" }
+        }
+
+        // Messages, Pins, then Files & links.
+        let tabs = try harness.tabs()
+        try #require(tabs.count == 3, "\(tabs)")
+        try await harness.click(tabs[2])
+        #expect(await eventually { filesShown() })
+        try await harness.click(tabs[0])
+        #expect(await eventually { !filesShown() && (try? harness.newest().window) != nil })
     }
 
     @Test("Saving a message for later confirms it with a toast above the composer that leaves on its own")

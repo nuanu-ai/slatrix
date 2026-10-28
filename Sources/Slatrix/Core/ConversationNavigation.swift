@@ -27,3 +27,16 @@ enum ConversationNavigation {
         return nil
     }
 }
+
+/// The tabs under a channel's header, as in Slack.
+enum ChannelTab: Hashable { case messages, pins, files }
+
+extension ConversationNavigation {
+    /// The screen to draw while a conversation picked on screen `from` opens. Its cached rows take a moment to read,
+    /// and until it is the one on screen, `from` stays up, so the conversation open before never flashes back in
+    /// between. A conversation already on screen shows `current` at once.
+    static func shown<Screen>(_ current: Screen, from: Screen?, showing roomID: String?, opening: String?) -> Screen {
+        guard let from, let opening, opening != roomID else { return current }
+        return from
+    }
+}
