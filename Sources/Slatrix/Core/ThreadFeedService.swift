@@ -266,8 +266,9 @@ final class RoomSubscriptionCoordinator {
             timeline = nil
         }
     }
-    private var previews: [String: Preview] = [:]
-    private var previewOrder: [String] = []
+    // Rows build their previews in the feed's body; observing these would tie every row to every hydration.
+    @ObservationIgnored private var previews: [String: Preview] = [:]
+    @ObservationIgnored private var previewOrder: [String] = []
     @ObservationIgnored private var shownPreviews: [String: ThreadPreview] = [:]
 
     func open(
@@ -381,14 +382,7 @@ final class RoomSubscriptionCoordinator {
     }
 
     /// Each thread's root, current where its preview has hydrated.
-    var roots: [ChatMessage] {
-        items.map { item in
-            var root =
-                previews[ActivityService.key(roomID: item.roomID, eventID: item.root.eventID)]?.message ?? item.root
-            root.replyCount = item.replyCount
-            return root
-        }
-    }
+    var roots: [ChatMessage] { items.map { preview(roomID: $0.roomID, eventID: $0.root.eventID).shown($0.root) } }
 
     /// The current content of a thread message, for the row that shows it.
     func preview(roomID: String, eventID: String) -> ThreadPreview {
