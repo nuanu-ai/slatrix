@@ -945,6 +945,18 @@ struct Snapshots {
             }, theme: theme)
         defer { window.close() }
         try write(await settledImage(hosting), "profile-editor-\(theme.rawValue)")
+
+        let source = try #require(CGImageSourceCreateWithData(try Self.samplePhoto() as CFData, nil))
+        let landscape = try #require(
+            CGImageSourceCreateImageAtIndex(source, 0, nil)?.cropping(to: CGRect(x: 0, y: 96, width: 512, height: 320)))
+        let (cropWindow, cropHosting) = try themedWindow(
+            ModalHost {
+                Color.clear.frame(width: 900, height: 640).modal(isPresented: .constant(true)) {
+                    PhotoCropper(image: landscape, onCancel: {}, onSave: { _ in })
+                }
+            }, theme: theme)
+        defer { cropWindow.close() }
+        try write(await settledImage(cropHosting), "profile-crop-\(theme.rawValue)")
     }
 
     /// A soft gradient standing in for someone's photo.

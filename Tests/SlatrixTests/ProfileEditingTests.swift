@@ -16,26 +16,94 @@ struct ProfileEditingTests {
         let original = try noisePNG(folder.path("photo.png"), side: 1_500)
         #expect(AvatarImageCache.decode(try Data(contentsOf: original)) == nil)
 
-        let photo = try ProfilePhoto(contentsOf: original)
+        let image = try ProfilePhoto.image(contentsOf: original)
+        let photo = try ProfilePhoto(image, crop: PhotoCrop.centered(in: size(of: image)))
 
         #expect(AvatarImageCache.decode(photo.data) != nil)
     }
 
-    @Test("A sideways photo uploads upright")
+    @Test("The upload is the square you chose")
+    func chosenSquare() throws {
+        let folder = try TemporaryDirectory()
+        let image = try ProfilePhoto.image(contentsOf: folder.png("photo.png", width: 400, height: 200, halves: true))
+
+        let photo = try ProfilePhoto(image, crop: CGRect(x: 200, y: 0, width: 200, height: 200))
+
+        let pixels = try rgba(photo.data)
+        #expect(pixels.width == pixels.height)
+        #expect(pixels.allBlue)
+    }
+
+    @Test("A sideways photo crops as it is shown")
     func sidewaysPhoto() throws {
         let folder = try TemporaryDirectory()
-        // EXIF 6: stored landscape, shown rotated a quarter turn.
-        let photo = try ProfilePhoto(contentsOf: folder.png("photo.png", width: 300, height: 200, orientation: 6))
+        // EXIF 6: stored landscape and shown a quarter turn clockwise, so its red left half shows on top.
+        let image = try ProfilePhoto.image(
+            contentsOf: folder.png("photo.png", width: 400, height: 200, orientation: 6, halves: true))
 
-        let source = try #require(CGImageSourceCreateWithData(photo.data as CFData, nil))
-        let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
-        #expect(image.width < image.height)
+        let photo = try ProfilePhoto(image, crop: CGRect(x: 0, y: 200, width: 200, height: 200))
+
+        let pixels = try rgba(photo.data)
+        #expect(pixels.width == pixels.height)
+        #expect(pixels.allBlue)
     }
 
     @Test("A file that isn't an image is refused")
     func notAnImage() throws {
         let folder = try TemporaryDirectory()
-        #expect(throws: ProfilePhoto.Failure.self) { try ProfilePhoto(contentsOf: folder.file("notes.txt")) }
+        #expect(throws: ProfilePhoto.Failure.self) { try ProfilePhoto.image(contentsOf: folder.file("notes.txt")) }
+    }
+
+    @Test("The crop frame starts as the largest square in the middle")
+    func centeredCrop() {
+        #expect(PhotoCrop.centered(in: CGSize(width: 300, height: 200)) == CGRect(x: 50, y: 0, width: 200, height: 200))
+        #expect(PhotoCrop.centered(in: CGSize(width: 200, height: 300)) == CGRect(x: 0, y: 50, width: 200, height: 200))
+    }
+
+    @Test("Dragging the crop frame stops at the photo's edges")
+    func moveCrop() {
+        let photo = CGSize(width: 400, height: 300)
+        let square = CGRect(x: 100, y: 100, width: 100, height: 100)
+
+        #expect(
+            PhotoCrop.moved(square, by: CGSize(width: 20, height: -30), in: photo) == square.offsetBy(dx: 20, dy: -30))
+        #expect(
+            PhotoCrop.moved(square, by: CGSize(width: 900, height: -900), in: photo)
+                == CGRect(x: 300, y: 0, width: 100, height: 100))
+        #expect(
+            PhotoCrop.moved(square, by: CGSize(width: -900, height: 900), in: photo)
+                == CGRect(x: 0, y: 200, width: 100, height: 100))
+    }
+
+    @Test("A corner resizes the crop frame around the opposite corner, square and inside the photo")
+    func resizeCrop() {
+        let photo = CGSize(width: 400, height: 300)
+        let square = CGRect(x: 100, y: 100, width: 100, height: 100)
+
+        #expect(
+            PhotoCrop.resized(square, from: .topLeft, by: CGSize(width: -30, height: -30), in: photo)
+                == CGRect(x: 70, y: 70, width: 130, height: 130))
+        // Below, the photo ends 200 pixels from the top-left corner that stays put.
+        #expect(
+            PhotoCrop.resized(square, from: .bottomRight, by: CGSize(width: 500, height: 20), in: photo)
+                == CGRect(x: 100, y: 100, width: 200, height: 200))
+        #expect(
+            PhotoCrop.resized(square, from: .topRight, by: CGSize(width: 20, height: -20), in: photo)
+                == CGRect(x: 100, y: 80, width: 120, height: 120))
+    }
+
+    @Test("The crop frame shrinks only so far")
+    func smallestCrop() {
+        let photo = CGSize(width: 400, height: 300)
+        let square = CGRect(x: 100, y: 100, width: 100, height: 100)
+
+        let smallest = PhotoCrop.resized(square, from: .bottomLeft, by: CGSize(width: 900, height: -900), in: photo)
+
+        #expect(smallest.width > 0)
+        #expect(
+            smallest == PhotoCrop.resized(smallest, from: .bottomLeft, by: CGSize(width: 50, height: -50), in: photo))
+        #expect(smallest.maxX == square.maxX)
+        #expect(smallest.minY == square.minY)
     }
 
     @Test("A new photo becomes yours once the server has it")
@@ -43,7 +111,9 @@ struct ProfileEditingTests {
         let folder = try TemporaryDirectory()
         let client = ProfileClient()
         let matrix = signedIn(client)
-        let photo = try ProfilePhoto(contentsOf: folder.png("photo.png", width: 64, height: 64))
+        let photo = try ProfilePhoto(
+            ProfilePhoto.image(contentsOf: folder.png("photo.png", width: 64, height: 64)),
+            crop: CGRect(x: 0, y: 0, width: 64, height: 64))
 
         try await matrix.setProfilePhoto(photo)
 
@@ -112,6 +182,23 @@ struct ProfileEditingTests {
             threadID: UUID())
         matrix.user = ChatUser(id: "@ana:example.org", name: "Ana")
         return matrix
+    }
+
+    private func size(of image: CGImage) -> CGSize { CGSize(width: image.width, height: image.height) }
+
+    /// `data` decoded to 8-bit RGBA, and whether every pixel is blue, allowing for compression.
+    private func rgba(_ data: Data) throws -> (width: Int, height: Int, allBlue: Bool) {
+        let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+        let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let context = try #require(
+            CGContext(
+                data: &bytes, width: image.width, height: image.height, bitsPerComponent: 8,
+                bytesPerRow: image.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let allBlue = stride(from: 0, to: bytes.count, by: 4).allSatisfy { bytes[$0] < 30 && bytes[$0 + 2] > 225 }
+        return (image.width, image.height, allBlue)
     }
 
     private func noisePNG(_ url: URL, side: Int) throws -> URL {

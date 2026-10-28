@@ -10,6 +10,8 @@ struct ProfileEditor: View {
     private let account: String?
     @State private var name: String
     @State private var photo: PhotoChange?
+    /// A photo just picked, being cropped.
+    @State private var picked: PickedPhoto?
     @State private var preparing = false
     @State private var saving = false
     @State private var error: String?
@@ -18,8 +20,14 @@ struct ProfileEditor: View {
 
     /// What Save Changes does to the photo; nil keeps it.
     private enum PhotoChange {
-        case upload(ProfilePhoto, NSImage)
+        /// The square of the picked photo to upload, in its pixels.
+        case upload(CGImage, crop: CGRect)
         case remove
+    }
+
+    private struct PickedPhoto: Identifiable {
+        let id = UUID()
+        let image: CGImage
     }
 
     init(matrix: MatrixService, onClose: @escaping () -> Void) {
@@ -71,6 +79,15 @@ struct ProfileEditor: View {
                 }.frame(width: m.profilePhoto)
             }
         }
+        .modal(item: $picked) { picked in
+            PhotoCropper(
+                image: picked.image, onCancel: { self.picked = nil },
+                onSave: {
+                    photo = .upload(picked.image, crop: $0)
+                    error = nil
+                    self.picked = nil
+                })
+        }
     }
 
     private func label(_ text: String) -> some View {
@@ -81,8 +98,8 @@ struct ProfileEditor: View {
         let side = m.profilePhoto
         let shownName = matrix.user?.name ?? name
         switch photo {
-        case .upload(_, let image):
-            Image(nsImage: image).resizable().scaledToFill().frame(width: side, height: side)
+        case .upload(let image, let crop):
+            Image(decorative: image.cropping(to: crop) ?? image, scale: 1).resizable().frame(width: side, height: side)
                 .clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
         case .remove: AvatarView(name: shownName, size: side, cornerRadius: m.radiusLarge)
         case nil:
@@ -102,11 +119,10 @@ struct ProfileEditor: View {
                 defer { preparing = false }
                 do {
                     // A large photo takes a moment to scale down.
-                    let prepared = try await Task.detached(priority: .userInitiated) {
-                        try ProfilePhoto(contentsOf: url)
+                    let image = try await Task.detached(priority: .userInitiated) {
+                        try ProfilePhoto.image(contentsOf: url)
                     }.value
-                    photo = .upload(prepared, NSImage(data: prepared.data) ?? NSImage())
-                    error = nil
+                    picked = PickedPhoto(image: image)
                 } catch {
                     self.error = ProfilePhoto.Failure().message
                 }
@@ -129,7 +145,11 @@ struct ProfileEditor: View {
             do {
                 if let newName { try await matrix.setProfile(name: newName) }
                 switch change {
-                case .upload(let prepared, _): try await matrix.setProfilePhoto(prepared)
+                case .upload(let image, let crop):
+                    let prepared = try await Task.detached(priority: .userInitiated) {
+                        try ProfilePhoto(image, crop: crop)
+                    }.value
+                    try await matrix.setProfilePhoto(prepared)
                 case .remove: try await matrix.setProfilePhoto(nil)
                 case nil: break
                 }
