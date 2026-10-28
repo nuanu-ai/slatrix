@@ -493,6 +493,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private let connectionRecovery = ConnectionRecovery()
     private var profileLoadTask: Task<Void, Never>?
     private var profileRevision: UInt64 = 0
+    private var avatarRevision: UInt64 = 0
     private var roomDetailsSaves = Set<String>()
     private var connectionStopTask: (id: UUID, task: Task<Void, Never>)?
     private(set) var sessionCleanupPending = false
@@ -984,6 +985,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         // Cached rooms and sync can become usable without waiting on profile
         // HTTP requests. A late profile response belongs only to this account.
         let loadedProfileRevision = profileRevision
+        let loadedAvatarRevision = avatarRevision
         Task { [weak self] in await self?.loadRecentEmoji() }
         profileLoadTask = Task { [weak self] in
             do {
@@ -991,7 +993,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 let avatar = try await newClient.avatarUrl()
                 guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
                 if self.profileRevision == loadedProfileRevision { self.user?.name = name }
-                self.user?.avatarURL = avatar
+                if self.avatarRevision == loadedAvatarRevision { self.user?.avatarURL = avatar }
             } catch {
                 guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
                 if self.errorMessage == nil {
@@ -2835,6 +2837,28 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
             profileRevision &+= 1
             user?.name = name
+        } catch {
+            guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+            throw error
+        }
+    }
+    /// Uploads `photo` as your profile photo, or removes yours when nil.
+    func setProfilePhoto(_ photo: ProfilePhoto?) async throws {
+        guard connectionStopTask == nil else { throw CancellationError() }
+        let client = try requireClient()
+        let generation = sessionGeneration
+        do {
+            var avatar: String?
+            if let photo {
+                try await client.uploadAvatar(mimeType: photo.mimeType, data: photo.data)
+                // The upload doesn't say where the photo landed.
+                avatar = try await client.avatarUrl()
+            } else {
+                try await client.removeAvatar()
+            }
+            guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+            avatarRevision &+= 1
+            user?.avatarURL = avatar
         } catch {
             guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
             throw error
