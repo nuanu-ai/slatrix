@@ -789,9 +789,9 @@ struct TimelineTable: NSViewRepresentable {
         if let point, !toolbar.isHidden, toolbar.frame.contains(scrollView.convert(point, from: nil)) { return }
         var row = point.map { table.row(at: table.convert($0, from: nil)) } ?? -1
         // Slack's dividers let the pointer through: over one, it hovers the message the divider introduces.
-        while row >= 0, row < rows.count, rows[row].isDivider { row += 1 }
+        while rows.indices.contains(row), rows[row].isDivider { row += 1 }
         let id: String? =
-            if row >= 0, row < rows.count, case .message = rows[row].kind { rows[row].id } else { nil }
+            if rows.indices.contains(row), case .message = rows[row].kind { rows[row].id } else { nil }
         guard id != hoveredID else { return }
         let previous = hoveredID.flatMap { index[$0] }
         hoveredID = id
@@ -863,7 +863,7 @@ extension TimelineEntry {
     fileprivate var isDivider: Bool {
         switch kind {
         case .day, .unread: true
-        default: false
+        case .spacer, .loading, .welcome, .message, .end: false
         }
     }
 }
@@ -900,8 +900,9 @@ final class TimelineScrollView: NSScrollView {
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
-        // Rows and the toolbar pass their controls' exits up the responder chain; only this one means it left.
-        if event.trackingArea === tracking { onPointer?(nil) }
+        // Rows and the toolbar pass their controls' exits up the responder chain; only one from an area of this view
+        // (the current one, or one an update replaced) means the pointer left.
+        if event.trackingArea?.owner === self { onPointer?(nil) }
     }
 
     // Takes the hover, and any tooltip over the window, along when the timeline goes.

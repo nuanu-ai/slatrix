@@ -652,6 +652,7 @@ extension TimelineHostedTests {
 
     @Test("The pointer over a day divider or the New line hovers the message below it, as if the line weren't there")
     func dividersLetThePointerThrough() async throws {
+        // The table on its own, as `Harness` has no way to put the New line in.
         let context = TimelineRowContext()
         context.matrix = MatrixService()
         context.appearance = AppearanceStore()
@@ -683,7 +684,8 @@ extension TimelineHostedTests {
             hosting.layoutSubtreeIfNeeded()
             return Harness.views(in: hosting).compactMap { $0 as? TimelineCell }.filter { $0.window != nil }
         }
-        _ = await eventually { cells().count == entries.count + 2 }
+        // The table adds a spacer row above the entries and an end row below them.
+        #expect(await eventually { cells().count == entries.count + 2 })
         let scrollView = try #require(Harness.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
         for (divider, below) in [("day", message(0).id), ("unread", message(2).id)] {
             let line = try #require(cells().first { $0.entry?.id == divider })
@@ -887,7 +889,7 @@ struct MessageRowLayoutTests {
 /// The timeline's pointer tracking on its own: no window needed.
 @MainActor
 struct TimelineHoverTests {
-    enum Inside: CaseIterable { case row, toolbar }
+    enum ExitSource: CaseIterable { case row, toolbar }
 
     /// AppKit's exit event for one tracking area, as it hands it to the area's owner.
     private func exit(_ area: NSTrackingArea) throws -> NSEvent {
@@ -900,8 +902,8 @@ struct TimelineHoverTests {
 
     @Test(
         "The pointer leaving a control in a message, like the replies bar, or one on the hover toolbar keeps the hover",
-        arguments: Inside.allCases)
-    func innerExitKeepsHover(inside: Inside) throws {
+        arguments: ExitSource.allCases)
+    func innerExitKeepsHover(source: ExitSource) throws {
         let scrollView = TimelineScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         // A row's SwiftUI content, and the toolbar floating over the rows.
         let row = NSHostingView(rootView: Color.clear)
@@ -914,7 +916,7 @@ struct TimelineHoverTests {
         scrollView.onPointer = { hovering = $0 != nil }
 
         // SwiftUI tracks the pointer for a control's hover in an area its hosting view owns.
-        let view: NSView = inside == .row ? row : toolbar
+        let view: NSView = source == .row ? row : toolbar
         let control = NSTrackingArea(
             rect: NSRect(x: 0, y: 0, width: 80, height: 30), options: [.mouseEnteredAndExited, .activeInActiveApp],
             owner: view)
