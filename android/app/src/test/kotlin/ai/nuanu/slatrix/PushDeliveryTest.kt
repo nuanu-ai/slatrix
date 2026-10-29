@@ -17,8 +17,7 @@ class PushDeliveryTest {
     @Test fun firebaseDeliveryReachesThePrivateApplicationService() {
         val application = ApplicationProvider.getApplicationContext<Application>()
         val intent = Intent("com.google.firebase.MESSAGING_EVENT").setPackage(application.packageName)
-        val services = application.packageManager.queryIntentServices(intent, PackageManager.GET_META_DATA)
-        val service = services.single().serviceInfo
+        val service = application.packageManager.resolveService(intent, PackageManager.GET_META_DATA)!!.serviceInfo
 
         assertEquals("ai.nuanu.slatrix.push.PushMessagingService", service.name)
         assertFalse(service.exported)
