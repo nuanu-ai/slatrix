@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.PeopleOutline
 import androidx.compose.material.icons.outlined.PersonAddAlt
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -49,12 +50,14 @@ data class ChannelDetailsActions(
     val invite: suspend (userId: String) -> Unit = {},
     val notifications: suspend () -> NotificationSetting = { NotificationSetting(NotificationChoice.Default, NotificationChoice.All) },
     val setNotifications: suspend (NotificationChoice) -> Unit = {},
+    /** The room's pinned messages, read while the Pinned messages page shows. */
     val pins: @Composable () -> PinnedMessages = { PinnedMessages() },
 )
 
+/** A conversation's pinned messages as they load, and unpinning one. */
 data class PinnedMessages(val state: ConversationState = ConversationState(), val onUnpin: (ConversationMessage) -> Unit = {})
 
-private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeople }
+private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeople, Pins }
 
 /**
  * Slack Android's channel details, opened from the conversation's header: its name and description, notifications,
@@ -80,6 +83,7 @@ fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetails
         DetailsPage.Notifications -> NotificationsPage(notifications, actions, scope, { notifications = Result.success(it) },
             { loads++ }, details)
         DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener }
+        DetailsPage.Pins -> PinsPage(room, me, actions.pins(), onOpenMessage, details)
     }
 }
 
@@ -131,6 +135,10 @@ private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, 
                     onPage(DetailsPage.Members)
                 }
                 if (room.canInvite) DetailsRow(Icons.Outlined.PersonAddAlt, "Add people", chevron = false) { onPage(DetailsPage.AddPeople) }
+                HorizontalDivider(color = colors.border)
+                DetailsRow(Icons.Outlined.PushPin, "Pinned messages", room.pinned.size.takeIf { it > 0 }?.toString()) {
+                    onPage(DetailsPage.Pins)
+                }
                 HorizontalDivider(color = colors.border)
                 DetailsRow(Icons.AutoMirrored.Outlined.Logout, "Leave ${noun(room)}", color = colors.destructive, chevron = false,
                     enabled = !leaving) { confirmLeave = true }
@@ -259,6 +267,45 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
                 }
             }
             else -> item { DelayedProgress() }
+        }
+    }
+}
+
+/** Slack's pinned list, the latest pin first; a tap opens the message where it is. */
+@Composable
+private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpenMessage: (String) -> Unit, onBack: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    val messages = remember(pins.state.rows, room.pinned) {
+        pins.state.rows.filterIsInstance<ConversationMessage>().filter { it.eventId in room.pinned }
+            .sortedByDescending { room.pinned.indexOf(it.eventId) }
+    }
+    PushedPage("Pinned messages", onBack) {
+        items(messages, key = { it.id }) { message ->
+            Row(Modifier.fillMaxWidth().clickable { message.eventId?.let(onOpenMessage) }
+                .padding(start = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapMedium),
+                horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+                LiveAvatar(message.initials, message.colorIndex)
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                        Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${dayLabel(message.timestamp)} at ${timeLabel(message.timestamp)}", style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary, maxLines = 1)
+                    }
+                    MessageBody(message, colors.textBody, me)
+                }
+                // Holds its place without the power to unpin, so rows line up either way.
+                Box(Modifier.size(UiMetrics.Touch), contentAlignment = Alignment.Center) {
+                    if (room.canPin) IconButton(onClick = { pins.onUnpin(message) }) {
+                        Icon(Icons.Outlined.PushPin, "Unpin", Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
+                    }
+                }
+            }
+        }
+        when {
+            messages.isNotEmpty() -> Unit
+            pins.state.loading && room.pinned.isNotEmpty() -> item { DelayedProgress() }
+            else -> item { ErrorLine(pins.state.error ?: "No pinned messages", colors.textSecondary) }
         }
     }
 }
