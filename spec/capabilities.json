@@ -56,7 +56,7 @@
     {"id": "composer.drafts", "what": "An unsent message stays in its conversation's composer.", "mac": "done", "android": "done"},
     {"id": "composer.mentions", "what": "Mention someone by picking them from an @ list.", "mac": "done", "android": "done"},
     {"id": "composer.attachments", "what": "Attach files and images with +, by dragging or by pasting.", "mac": "done", "android": "done"},
-    {"id": "composer.typing", "what": "Others see when you're typing.", "mac": "done", "android": "missing"},
+    {"id": "composer.typing", "what": "Others see when you're typing.", "mac": "done", "android": "done"},
     {"id": "composer.up-to-edit", "what": "Press ↑ in an empty composer to edit your last message.", "mac": "done", "android": "n/a: phone keyboards have no arrow keys"},
 
     {"id": "message.rich-text", "what": "Formatted messages show bold, italic, code, lists, quotes, links and spoilers.", "mac": "done", "android": "done"},
