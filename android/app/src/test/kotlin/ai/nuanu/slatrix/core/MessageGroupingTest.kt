@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class MessageGroupingTest {
+    // capability: conversation.grouping
     @Test fun `grouping matches every shared case`() {
         val spec = JsonParser.parseString(File(System.getProperty("slatrix.root"), "spec/message-grouping.json").readText()).asJsonObject
         for (item in spec["cases"].asJsonArray) {

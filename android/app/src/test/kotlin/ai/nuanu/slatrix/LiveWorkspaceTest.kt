@@ -49,6 +49,7 @@ class LiveWorkspaceTest {
         compose.runOnIdle { assertEquals("!team:example.org", opened) }
     }
 
+    // capability: home.workspace-switcher
     @Test fun choosingATestWorkspaceHidesOtherWorkspacesChannels() {
         val nuanu = RoomSummary("!work:example.org", "Work channel", false, "", UnreadBadge.None, "W", 0, setOf("!nuanu:example.org"))
         val test = RoomSummary("!test:example.org", "Test channel", false, "", UnreadBadge.None, "T", 1, setOf("!studio:example.org"))
@@ -66,6 +67,7 @@ class LiveWorkspaceTest {
         compose.onNodeWithText("Work channel").assertDoesNotExist()
     }
 
+    // capability: composer.send
     @Test fun theComposerStaysEditableWhileThePreviousMessageIsSending() {
         val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
         val draft = mutableStateOf(ComposerState(text = "First message", loading = false))
@@ -83,6 +85,7 @@ class LiveWorkspaceTest {
         compose.runOnIdle { assertEquals("Another thought", draft.value.text) }
     }
 
+    // capability: conversation.read
     @Test fun onlyTheLatestVisibleMessageIsReadWhileTheActivityIsResumed() {
         val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
         fun message(id: String) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", id, null,

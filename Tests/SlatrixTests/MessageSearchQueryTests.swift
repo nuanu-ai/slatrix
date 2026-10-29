@@ -52,6 +52,7 @@ struct MessageSearchQueryTests {
     private static let modes: [String: MessageSearchQuery.Mode] = ["query": .query, "phrase": .phrase]
     private static let dates: [String: SearchDate] = ["today": .today, "week": .week, "month": .month, "year": .year]
 
+    // capability: search.messages
     @Test("Slack's in: and from:", arguments: try spec.get().parse)
     func parse(spec: Parse) throws {
         let shared = try Self.spec.get()

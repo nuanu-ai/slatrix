@@ -5,6 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AvatarContrastTest {
+    // capability: people.avatars
     @Test fun initialsMeetTheContrastRequirementAcrossEveryAvatarColor() {
         val minimum = 4.5f
         val foreground = DesignTokens.colors(false, SidebarPalette.Aubergine).getValue("onAccent").luminance()

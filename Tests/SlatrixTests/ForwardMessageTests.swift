@@ -47,6 +47,7 @@ private final class Forwarding {
 
 @MainActor
 struct ForwardMessageTests {
+    // capability: message.forward
     @Test("Forwarding a thread root sends its typed content once to a live destination timeline")
     func forwardsThreadRoot() async throws {
         let forwarding = Forwarding()
@@ -321,6 +322,7 @@ struct ForwardMediaTests {
         #expect(try Self.copied(Self.changing(original, field)) != Self.copied(original))
     }
 
+    // capability: message.forward
     @Test(
         "Own and incoming media forward with their caption and upload, without downloading anything",
         arguments: [false, true], [false, true])

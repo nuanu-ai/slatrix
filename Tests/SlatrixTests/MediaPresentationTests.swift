@@ -35,6 +35,7 @@ struct MediaPresentationTests {
                 ? nil : MessageAttachment(name: id, url: "mxc://example.org/\(id)", mimeType: mime))
     }
 
+    // capability: message.media-viewer
     @Test("The viewer steps through images and videos in timeline order, skipping text, files and deleted media")
     func navigation() {
         let messages = [

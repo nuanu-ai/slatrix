@@ -26,6 +26,7 @@ struct SearchIndexTests {
         case sender, date, senderAndDate, oddSender, oddSenderAlone
     }
 
+    // capability: search.messages
     @Test("Search filters narrow hits in a real index", arguments: Case.allCases)
     func filters(_ kind: Case) async throws {
         let query =

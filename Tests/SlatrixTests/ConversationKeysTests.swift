@@ -4,6 +4,7 @@ import Testing
 @testable import Slatrix
 
 struct ConversationKeysTests {
+    // capability: composer.up-to-edit
     @Test("↑ edits your last message only from an empty composer")
     func upEditsOnlyWhenEmpty() {
         #expect(ConversationKeys.action(.up, shift: false, otherModifiers: false, composerText: "") == .editLastMessage)
@@ -13,6 +14,7 @@ struct ConversationKeysTests {
         #expect(ConversationKeys.action(.up, shift: false, otherModifiers: false, composerText: nil) == nil)
     }
 
+    // capability: conversation.mark-read
     @Test("Esc marks the conversation read, ⇧Esc marks everything read")
     func escapeMarksRead() {
         #expect(ConversationKeys.action(.escape, shift: false, otherModifiers: false, composerText: "x") == .markRead)

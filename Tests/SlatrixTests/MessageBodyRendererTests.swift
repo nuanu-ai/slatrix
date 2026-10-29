@@ -14,6 +14,7 @@ struct MessageBodyRendererTests {
         #expect(text.contains("& \u{00A0} 👋") && text.contains("\nnext"))
     }
 
+    // capability: message.rich-text
     @Test("Inline styles and preformatted whitespace survive rendering")
     func inlineStyles() {
         let runs = render(
@@ -37,6 +38,7 @@ struct MessageBodyRendererTests {
         #expect(render("<p>Unclosed <strong>bold").plainText.contains("Unclosed bold"))
     }
 
+    // capability: message.rich-text
     @Test("Ordered lists keep their start number and nested lists indent")
     func lists() {
         let runs = render("<ol start='3'><li>one<ul><li>nested</li></ul></li><li>two</li></ol>").runs
@@ -69,6 +71,7 @@ struct MessageBodyRendererTests {
         #expect(rendered.usedPlainTextFallback && rendered.plainText == "literal")
     }
 
+    // capability: message.rich-text
     @Test("Spoilers stay hidden until revealed")
     func spoilers() {
         let hidden = render("<span data-mx-spoiler='ending'>secret</span>", body: "secret")

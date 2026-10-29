@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.*
@@ -50,6 +51,7 @@ import java.util.Locale
 private enum class HomeTab(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Outlined.Home),
     Dms("DMs", Icons.AutoMirrored.Outlined.Chat),
+    Activity("Activity", Icons.Outlined.Notifications),
 }
 
 /** Shows [cover], such as a conversation, in Home's place, and gives Home back its tab, search and scroll position after. */
@@ -61,7 +63,7 @@ fun LiveWorkspace(cover: (@Composable () -> Unit)?, home: @Composable () -> Unit
 
 @Composable
 fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Unit, onYou: () -> Unit, onRetry: () -> Unit,
-    selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}) {
+    selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}, activity: @Composable () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     var query by rememberSaveable { mutableStateOf("") }
     val homeList = rememberLazyListState()
@@ -92,6 +94,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                         when (tab) {
                             HomeTab.Home -> HomeList(homeList, state, query, { query = it }, selectedSpaceId, onRoom)
                             HomeTab.Dms -> DirectList(directList, state, query, { query = it }, onRoom)
+                            HomeTab.Activity -> activity()
                         }
                         state.error?.let { message ->
                             Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
@@ -142,6 +145,7 @@ private fun HomeHeader(tab: HomeTab, userId: String, state: RoomListState, selec
                         }
                     }
                     HomeTab.Dms -> HeaderTitle("Direct messages")
+                    HomeTab.Activity -> HeaderTitle("Activity")
                 }
             }
             Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
@@ -282,7 +286,7 @@ private fun Modifier.unreadState(room: RoomSummary): Modifier {
 }
 
 @Composable
-private fun latestTime(timestamp: Long): String {
+internal fun latestTime(timestamp: Long): String {
     val locale = LocalConfiguration.current.locales[0]
     return remember(timestamp, locale) {
         val date = Date(timestamp)

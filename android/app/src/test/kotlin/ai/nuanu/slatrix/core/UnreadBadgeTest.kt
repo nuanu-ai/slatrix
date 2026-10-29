@@ -7,6 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class UnreadBadgeTest {
+    // capability: home.unread-badges
     @Test fun `room and combined badges match every shared case`() {
         val spec = JsonParser.parseString(File(System.getProperty("slatrix.root"), "spec/unread-badge.json").readText()).asJsonObject
         for (item in spec["badge"].asJsonArray) {

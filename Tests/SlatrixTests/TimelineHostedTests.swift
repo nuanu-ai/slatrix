@@ -178,6 +178,7 @@ struct TimelineHostedTests {
         }
     }
 
+    // capability: conversation.history
     @Test("A conversation opens at its newest message in its first layout")
     func opensAtBottom() async throws {
         let harness = Harness(messages: Self.messages(0..<40))
@@ -232,6 +233,7 @@ struct TimelineHostedTests {
         #expect(harness.distanceFromBottom > 900)
     }
 
+    // capability: message.image
     @Test("An image's row keeps the height it reserved when the image arrives, so nothing around it moves")
     func imageArrivalKeepsLayout() async throws {
         let harness = Harness(messages: [], height: 800)
@@ -335,6 +337,7 @@ struct TimelineHostedTests {
         #expect(harness.top(of: "Message 9") == above)
     }
 
+    // capability: conversation.history
     @Test("Older history arrives without moving a pixel of what you are reading")
     func prependIsPixelStable() async throws {
         let current = Self.messages(0..<30)
@@ -397,6 +400,7 @@ struct TimelineHostedTests {
         #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
     }
 
+    // capability: conversation.keep-position
     @Test("Leaving a conversation and coming back returns to where you were reading")
     func restoresPosition() async throws {
         let messages = Self.messages(0..<40)
@@ -484,6 +488,7 @@ struct TimelineHostedTests {
         #expect(zip(after, before).allSatisfy { abs($0 - $1) < 0.5 } && after.count == before.count)
     }
 
+    // capability: conversation.jump-to-message
     @Test("Jumping to a loaded message scrolls it into view in the same table and highlights it at its own height")
     func jumpToLoaded() async throws {
         let harness = Harness(messages: Self.messages(0..<80))
@@ -513,6 +518,8 @@ struct TimelineHostedTests {
         #expect(harness.top(of: "Message 10") != nil)
     }
 
+    // capability: message.react.picker
+    // capability: message.copy-text
     @Test("A message at rest offers its whole menu, its VoiceOver actions and the emoji picker")
     func restingRowActions() async throws {
         let harness = Harness(
@@ -846,6 +853,7 @@ extension TimelineHostedTests {
         #expect(worst < .milliseconds(300), "\(worst)")
     }
 
+    // capability: conversation.intro
     @Test("A conversation whose loaded history shows nothing loads the rest and shows its intro")
     func emptyConversationShowsIntro() async throws {
         let harness = Harness(messages: [])

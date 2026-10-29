@@ -32,6 +32,7 @@ struct ChannelHeaderTests {
         ChannelHeader.menu(for: room, isPreview: isPreview, perform: run)
     }
 
+    // capability: home.star-toggle
     @Test("⋮ stars and unstars the channel")
     func star() throws {
         var ran: [ChannelHeader.Action] = []
@@ -44,6 +45,7 @@ struct ChannelHeaderTests {
         #expect(titles.contains("Unstar channel") && !titles.contains("Star channel"))
     }
 
+    // capability: channel.leave
     @Test("Every ⋮ item does something of its own, and Leave comes last behind a separator")
     func items() {
         var ran: [ChannelHeader.Action] = []

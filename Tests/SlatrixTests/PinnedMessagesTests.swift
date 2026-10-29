@@ -146,6 +146,7 @@ struct PinnedMessagesTests {
         #expect(await eventually { service.state == "ready" })
     }
 
+    // capability: conversation.pins
     @Test("Pins show in SDK order with edits and deletions applied, skipping other events and duplicates")
     func opensPins() async throws {
         await open()
@@ -184,6 +185,7 @@ struct PinnedMessagesTests {
         #expect(room.pins.writes.all.isEmpty)
     }
 
+    // capability: message.pin
     @Test("Pin and unpin use the SDK's pin methods once the current power levels allow it")
     func pinAndUnpin() async throws {
         await open()

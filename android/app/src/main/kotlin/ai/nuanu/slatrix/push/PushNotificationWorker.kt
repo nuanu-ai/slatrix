@@ -47,6 +47,8 @@ class PushNotificationWorker(context: Context, parameters: WorkerParameters) : C
                     val identity = PushNotifications.knownIdentity(runtime.identity.filterNotNull().first().state)
                     if ((runtime.account.state.value as? AccountState.Connected)?.client === account.client) {
                         notifications.deliver(account.client, account.userId, roomId, eventId, status, identity)
+                        // Activity also lists what arrived while the app was in the background.
+                        (status as? NotificationStatus.Event)?.let { runtime.activity.value?.receive(it.item, roomId) }
                     }
                 } finally {
                     status?.destroy()

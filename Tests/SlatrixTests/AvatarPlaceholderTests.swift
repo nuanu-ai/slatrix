@@ -15,6 +15,7 @@ struct AvatarPlaceholderTests {
     struct Spec: Decodable { var cases: [Case] }
     struct Tokens: Decodable { var avatarColors: [String] }
 
+    // capability: people.avatars
     @Test("Shared case", arguments: try SharedSpec.decode("spec/avatar.json", as: Spec.self).cases)
     func placeholder(spec: Case) throws {
         let colors = try SharedSpec.decode("design/tokens.json", as: Tokens.self).avatarColors

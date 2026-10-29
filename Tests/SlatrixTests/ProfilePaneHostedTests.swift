@@ -9,6 +9,7 @@ import Testing
 @Suite(
     .serialized, .tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
 struct ProfilePaneHostedTests {
+    // capability: people.profile
     @Test("A click on a sender's name opens their profile in the side pane, and Esc closes it")
     func senderNameOpensPane() async throws {
         _ = NSApplication.shared

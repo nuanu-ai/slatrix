@@ -77,6 +77,7 @@ struct AvatarDecodingTests {
         return encoded as Data
     }
 
+    // capability: people.avatars
     @Test("Avatars decode to a small thumbnail that keeps the aspect ratio")
     func decodesThumbnail() throws {
         let image = try #require(AvatarImageCache.decode(Self.png(width: 512, height: 256)))
