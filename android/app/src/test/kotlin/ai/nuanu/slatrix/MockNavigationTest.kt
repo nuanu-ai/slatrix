@@ -5,6 +5,7 @@ import ai.nuanu.slatrix.ui.mockups.MockScreen
 import android.app.Application
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -63,5 +64,16 @@ class MockNavigationTest {
         compose.onNodeWithText("Thread").assertIsDisplayed()
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Threads").assertIsSelected()
+    }
+    @Test fun youChangesAndRetainsTheAppearance() {
+        compose.setContent { SlatrixMockups() }
+        compose.onNodeWithContentDescription("You").performClick()
+        compose.onNodeWithText("Jordan Lee").assertIsDisplayed()
+        compose.onNodeWithText("Dark mode").performScrollTo().performClick().assertIsOn()
+        compose.onNodeWithText("Lagoon").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("You").performClick()
+        compose.onNodeWithText("Dark mode").assertIsOn()
+        compose.onNodeWithText("Lagoon").assertIsSelected()
     }
 }
