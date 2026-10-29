@@ -74,6 +74,16 @@ class MessageActionSheetTest {
         compose.runOnIdle { assertEquals(listOf("Ship it" to "👍"), reactions) }
     }
 
+    // capability: conversation.mark-unread
+    @Test fun markUnreadMarksTheConversationUnreadFromAMessage() {
+        val marked = mutableListOf<String>()
+        show(MessageActions(onMarkUnread = { marked += it.body }))
+        open("Ship it")
+        compose.onNodeWithText("Mark unread").performClick()
+        compose.runOnIdle { assertEquals(listOf("Ship it"), marked) }
+        compose.onNodeWithText("Mark unread").assertDoesNotExist()
+    }
+
     // capability: message.copy-link
     @Test fun copyLinkPutsTheMessagesLinkOnTheClipboard() {
         show(MessageActions(link = { "https://matrix.to/#/!design:example.org/${it.eventId}" }))

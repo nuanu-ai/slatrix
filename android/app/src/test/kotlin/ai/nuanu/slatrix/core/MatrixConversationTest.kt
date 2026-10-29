@@ -406,6 +406,20 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.mark-unread
+    @Test fun aConversationMarkedUnreadFromAMessageStaysUnreadWhileItIsOpen() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        val room = ConversationRoom(timeline).apply { markedUnread = false }
+        val conversation = MatrixConversation(backgroundScope, room)
+        conversation.state.first { it.rows.isNotEmpty() }
+
+        assertTrue(conversation.markUnread())
+        assertTrue(room.markedUnread)
+        assertFalse("Its newest message on screen doesn't read it again", conversation.markRead("\$one"))
+        assertTrue(timeline.receipts.tryReceive().isFailure)
+        conversation.close()
+    }
+
     // capability: conversation.read
     @Test fun onlyVisibleLatestMessagesAreReadAndClosedTimelinesRejectLateUpdates() = runTest {
         val divider = object : TimelineItem(NoHandle) {

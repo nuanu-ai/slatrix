@@ -154,6 +154,50 @@ class LiveHomeScreenTest {
         compose.onNodeWithText("Star channel").assertDoesNotExist()
     }
 
+    // capability: conversation.mark-read
+    // capability: conversation.mark-unread
+    @Test fun longPressingAConversationMarksItReadOrUnreadAtOnceOrEveryConversationRead() {
+        val marked = mutableListOf<Pair<String, Boolean>>()
+        var all = 0
+        val rooms = listOf(channel("!general:example.org", "general").copy(unread = UnreadBadge.Bold),
+            channel("!random:example.org", "random"))
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
+                    onMarkUnread = { id, unread -> marked += id to unread; true }, onMarkAllRead = { all++; true })
+            }
+        }
+        compose.onNodeWithText("general").performTouchInput { longClick() }
+        compose.onNodeWithText("Mark unread").assertDoesNotExist()
+        compose.onNodeWithText("Mark as read").performClick()
+        // Read at once, though the server hasn't answered.
+        compose.onNodeWithText("general").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        compose.onNodeWithText("random").performTouchInput { longClick() }
+        compose.onNodeWithText("Mark unread").performClick()
+        compose.onNodeWithText("random").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Unread"))
+        compose.onNodeWithText("random").performTouchInput { longClick() }
+        compose.onNodeWithText("Mark all as read").performClick()
+
+        compose.runOnIdle {
+            assertEquals(listOf("!general:example.org" to false, "!random:example.org" to true), marked)
+            assertEquals(1, all)
+        }
+    }
+
+    @Test fun aReadStateThatDoesNotSaveSaysSoAndGoesBack() {
+        val rooms = listOf(channel("!general:example.org", "general").copy(unread = UnreadBadge.Bold))
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
+                    onMarkUnread = { _, _ -> false })
+            }
+        }
+        compose.onNodeWithText("general").performTouchInput { longClick() }
+        compose.onNodeWithText("Mark as read").performClick()
+        compose.onNodeWithText("Couldn’t mark general as read.").assertIsDisplayed()
+        compose.onNodeWithText("general").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Unread"))
+    }
+
     @Test fun aStarredConversationMovesToStarredBeforeTheServerAnswers() {
         val saved = CompletableDeferred<Boolean>()
         val rooms = listOf(channel("!general:example.org", "general"), channel("!random:example.org", "random"))

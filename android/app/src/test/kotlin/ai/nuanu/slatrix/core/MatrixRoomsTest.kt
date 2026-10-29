@@ -156,6 +156,38 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: conversation.mark-read
+    // capability: conversation.mark-unread
+    @Test fun markingAConversationReadSendsItsReceiptsAndClearsItsFlagAndMarkingItUnreadSetsIt() = runTest {
+        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha", messages = 3u))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(alpha)))
+
+        assertTrue(rooms.setUnread("!a:example.org", false))
+        assertEquals(listOf("read", "fully read", "unread false"), alpha.writes)
+        assertTrue(rooms.setUnread("!a:example.org", true))
+        assertEquals("unread true", alpha.writes.last())
+        alpha.failWrites = true
+        assertFalse(rooms.setUnread("!a:example.org", false))
+        rooms.close()
+    }
+
+    // capability: conversation.mark-read
+    @Test fun markingEverythingReadReadsOnlyTheUnreadConversations() = runTest {
+        val unread = TestRoom(roomInfo("!a:example.org", "Alpha", messages = 3u))
+        val read = TestRoom(roomInfo("!b:example.org", "Beta"))
+        val marked = TestRoom(roomInfo("!c:example.org", "Gamma").copy(isMarkedUnread = true))
+        val client = RoomsClient(listOf(unread, read, marked))
+        client.services.trySend(RoomsSync())
+        val rooms = MatrixRooms(backgroundScope, client)
+        rooms.state.first { it.rooms.size == 3 }
+
+        assertTrue(rooms.markAllRead())
+        assertEquals("unread false", unread.writes.last())
+        assertEquals("unread false", marked.writes.last())
+        assertEquals(emptyList<String>(), read.writes)
+        rooms.close()
+    }
+
     @Test fun anAccountWithNoRoomsFinishesLoading() = runTest {
         val rooms = MatrixRooms(backgroundScope, RoomsClient(emptyList()))
         assertEquals(emptyList<RoomSummary>(), rooms.state.first { !it.loading && it.spacesKnown }.rooms)
@@ -406,6 +438,16 @@ private class TestRoom(var info: RoomInfo, var latest: LatestEventValue = Latest
     var unreadable = false
     var favourite: Boolean? = null
     var failFavourite = false
+    val writes = mutableListOf<String>()
+    var failWrites = false
+    override suspend fun markAsRead(receiptType: ReceiptType) {
+        if (failWrites) throw IllegalStateException("Offline")
+        writes += if (receiptType == ReceiptType.READ) "read" else "fully read"
+    }
+    override suspend fun setUnreadFlag(newValue: Boolean) {
+        if (failWrites) throw IllegalStateException("Offline")
+        writes += "unread $newValue"
+    }
     override suspend fun setIsFavourite(isFavourite: Boolean, tagOrder: Double?) {
         if (failFavourite) throw IllegalStateException("Offline")
         favourite = isFavourite
