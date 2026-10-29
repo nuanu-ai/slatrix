@@ -10,6 +10,34 @@ import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 
 class MatrixWorkspaceTest {
+    @Test fun failedDraftSaveKeepsTheChannelOpenUntilTheDraftCanBeSaved() = runTest {
+        val client = WorkspaceClient().also { it.failSaves = true }
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+        workspace.open(alpha)
+        runCurrent()
+        val composer = requireNotNull(workspace.selected.value?.composer)
+        composer.state.first { !it.loading }
+        composer.edit("Keep this even while storage is unavailable")
+        composer.state.first { it.error != null }
+
+        workspace.back()
+        runCurrent()
+        assertEquals("A failed save must keep the draft editable", composer, workspace.selected.value?.composer)
+        assertEquals("Keep this even while storage is unavailable", workspace.selected.value?.composer?.state?.value?.text)
+
+        client.failSaves = false
+        composer.retry()
+        workspace.back()
+        runCurrent()
+        assertNull(workspace.selected.value)
+        workspace.open(alpha)
+        runCurrent()
+        val restored = requireNotNull(workspace.selected.value?.composer)
+        assertEquals("Keep this even while storage is unavailable", restored.state.first { !it.loading }.text)
+        workspace.close()
+    }
+
     @Test fun queuedBackAndRepeatedOpenKeepTheLatestChannelLive() = runTest {
         val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
         workspace.open(workspaceRoom("!alpha:example.org", "Alpha"))
@@ -71,6 +99,7 @@ class MatrixWorkspaceTest {
 private class WorkspaceClient : Client(NoHandle) {
     private val drafts = mutableMapOf<String, ComposerDraft>()
     val handles = mutableListOf<Room>()
+    var failSaves = false
     override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
         override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
             object : Timeline(NoHandle) {
@@ -80,7 +109,10 @@ private class WorkspaceClient : Client(NoHandle) {
                 override suspend fun paginateBackwards(numEvents: UShort): Boolean = true
             }
         override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = drafts[roomId]
-        override suspend fun saveComposerDraft(draft: ComposerDraft, threadRoot: String?) { drafts[roomId] = draft }
+        override suspend fun saveComposerDraft(draft: ComposerDraft, threadRoot: String?) {
+            check(!failSaves) { "Storage is unavailable" }
+            drafts[roomId] = draft
+        }
         override suspend fun clearComposerDraft(threadRoot: String?) { drafts.remove(roomId) }
     }.also(handles::add)
 }
