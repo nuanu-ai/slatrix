@@ -148,7 +148,7 @@ class MatrixAccount(
         if (attempt == null) {
             synchronized(lock) {
                 if (connected == null && operation?.isActive != true) {
-                    mutableState.value = AccountState.Failed("Sign-in expired. Choose your server and try again.", false)
+                    reset(AccountState.Failed("Sign-in expired. Choose your server and try again.", false))
                 }
             }
             return
@@ -188,7 +188,9 @@ class MatrixAccount(
         }
     }
 
-    fun cancel() {
+    fun cancel() = reset(AccountState.SignedOut)
+
+    private fun reset(nextState: AccountState) {
         val (oldJob, oldAttempt) = synchronized(lock) {
             generation++
             val job = operation
@@ -198,7 +200,7 @@ class MatrixAccount(
             pending = null
             connected = null
             options = null
-            mutableState.value = AccountState.SignedOut
+            mutableState.value = nextState
             job to attempt
         }
         oldJob?.cancel()
