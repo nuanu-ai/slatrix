@@ -129,16 +129,19 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         replace(selection.min, selection.max, emoji)
     }) { picking = false }
     var formatting by remember { mutableStateOf(false) }
-    // The selection a link goes on, while its sheet asks for the address.
+    // The selection a link goes on, while its sheet asks for the address; at the caret, the link there.
     var linking by remember { mutableStateOf<TextRange?>(null) }
     val focus = LocalFocusManager.current
     val onFormat = actions.onFormat
-    val linked = linking
-    if (linked != null && onFormat != null) {
-        LinkSheet(linked.collapsed, { label, href ->
+    val range = linking
+    if (range != null && onFormat != null) {
+        val link = composer.styles.firstOrNull { it.kind == ComposerStyle.Kind.Link && it.start <= range.max && range.min <= it.end &&
+            (!range.collapsed || it.start < range.min && range.min < it.end) }
+        val target = if (range.collapsed && link != null) TextRange(link.start, link.end) else range
+        LinkSheet(target.collapsed, link?.href, { label, href ->
             linking = null
-            if (label != null) replace(linked.min, linked.max, label)
-            onFormat(linked.min, if (label != null) linked.min + label.length else linked.max, ComposerStyle.Kind.Link, href)
+            if (label != null) replace(target.min, target.max, label)
+            onFormat(target.min, if (label != null) target.min + label.length else target.max, ComposerStyle.Kind.Link, href)
         }) { linking = null }
     }
     var height by remember { mutableIntStateOf(0) }
@@ -161,6 +164,12 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         }
         composer.target?.let { TargetBar(it, actions.onCancelTarget) }
         BasicTextField(shown, { next ->
+            val left = ComposerStyles.blockLeft(composer.styles, composer.typing, shown.text, next.text, shown.selection.min)
+                .takeIf { shown.selection.collapsed && onFormat != null }
+            if (left != null) {
+                onFormat?.invoke(shown.selection.min, shown.selection.min, left, null)
+                return@BasicTextField
+            }
             field = next
             pending = null
             val changed = next.text != lastText
@@ -170,7 +179,9 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
             modifier = Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium)
                 .semantics { contentDescription = placeholder },
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
-            visualTransformation = remember(composer.styles, composer.mentions, colors) { ComposerVisual(composer.styles, composer.mentions, colors) },
+            visualTransformation = remember(composer.styles, composer.mentions, composer.typing, colors) {
+                ComposerVisual(composer.styles, composer.mentions, composer.typing?.takeIf { it.position == 0 }?.kinds?.firstOrNull { it.block }, colors)
+            },
             cursorBrush = SolidColor(colors.accent), maxLines = 5,
             decorationBox = { inner ->
                 Box(Modifier.padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.CenterStart) {
@@ -185,8 +196,8 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
             if (formatting && onFormat != null) {
                 val selection = shown.selection
                 val caret = selection.max
-                val active = composer.typing?.takeIf { it.position == caret && selection.collapsed }?.kinds
-                    ?: ComposerStyles.typingAt(composer.styles, composer.text, caret.coerceAtMost(composer.text.length))
+                val active = ComposerStyles.typing(composer.styles, composer.typing.takeIf { selection.collapsed }, composer.text,
+                    caret.coerceAtMost(composer.text.length))
                 FormattingBar(active, !composer.loading, { onFormat(selection.min, selection.max, it, null) }) {
                     // The sheet's field takes the keyboard.
                     focus.clearFocus()

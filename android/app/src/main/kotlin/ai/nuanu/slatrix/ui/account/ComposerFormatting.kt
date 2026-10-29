@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.ComposerFormat
 import ai.nuanu.slatrix.core.ComposerMention
 import ai.nuanu.slatrix.core.ComposerStyle
 import ai.nuanu.slatrix.core.ComposerStyle.Kind
@@ -89,21 +90,28 @@ fun RowScope.FormattingBar(active: Set<Kind>, enabled: Boolean, onFormat: (Kind)
     }
 }
 
-/** Slack's link sheet; with nothing selected it asks for the text too. [onSave] gets the text, if asked, and the address. */
+/**
+ * Slack's link sheet; with nothing selected it asks for the text too. It opens on [current], a link being changed, which
+ * an empty address removes. [onSave] gets the text, if asked, and the address.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LinkSheet(askText: Boolean, onSave: (text: String?, href: String) -> Unit, onDismiss: () -> Unit) {
+fun LinkSheet(askText: Boolean, current: String?, onSave: (text: String?, href: String) -> Unit, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
     var text by rememberSaveable { mutableStateOf("") }
-    var link by rememberSaveable { mutableStateOf("") }
-    val href = link.trim().let { if (it.isEmpty() || it.contains(':')) it else "https://$it" }
+    var link by rememberSaveable { mutableStateOf(current.orEmpty()) }
+    val typed = link.trim()
+    // A scheme stays as typed; anything else, a host and port too, is a web address.
+    val href = if (typed.isEmpty() || Regex("^[A-Za-z][A-Za-z0-9+.-]*:(?!\\d)").containsMatchIn(typed)) typed else "https://$typed"
+    // The address must be one a message may link to, as the Mac asks.
+    val valid = if (href.isEmpty()) current != null else ComposerFormat.safeLink(href) != null
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         shape = SlatrixTheme.topPanelShape, containerColor = colors.canvas) {
         Column(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge).padding(bottom = UiMetrics.GapLarge),
             verticalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Add link", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                TextButton(onClick = { onSave(text.takeIf { askText }?.ifBlank { href }, href) }, enabled = href.isNotEmpty()) { Text("Save") }
+                TextButton(onClick = { onSave(text.takeIf { askText }?.ifBlank { href }, href) }, enabled = valid) { Text("Save") }
             }
             if (askText) OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), label = { Text("Text") }, singleLine = true)
             OutlinedTextField(link, { link = it }, Modifier.fillMaxWidth(), label = { Text("Link") }, singleLine = true,
@@ -117,7 +125,7 @@ fun LinkSheet(askText: Boolean, onSave: (text: String?, href: String) -> Unit, o
  * marker sits before its line and maps to the line's start.
  */
 class ComposerVisual(private val styles: List<ComposerStyle>, private val mentions: List<ComposerMention>,
-    private val colors: AppColors) : VisualTransformation {
+    private val armed: Kind?, private val colors: AppColors) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val raw = text.text
         val starts = generateSequence(0) { start -> raw.indexOf('\n', start).takeIf { it >= 0 }?.plus(1) }.toList()
@@ -125,8 +133,9 @@ class ComposerVisual(private val styles: List<ComposerStyle>, private val mentio
         var number = 0
         val shown = buildAnnotatedString {
             for (start in starts) {
-                val end = raw.indexOf('\n', start).let { if (it < 0) raw.length else it }
-                val block = ComposerStyles.blockOf(styles, raw, start)
+                val end = ComposerStyles.lineEnd(raw, start)
+                // An empty first line can't hold a block yet; the one chosen at the caret shows there.
+                val block = ComposerStyles.blockOf(styles, raw, start) ?: armed.takeIf { start == 0 && end == 0 }
                 number = if (block == Kind.Numbered) number + 1 else 0
                 val marker = when (block) {
                     Kind.Bullet -> "•  "
@@ -174,11 +183,13 @@ class ComposerVisual(private val styles: List<ComposerStyle>, private val mentio
         Kind.Bold -> SpanStyle(fontWeight = FontWeight.Bold)
         Kind.Italic -> SpanStyle(fontStyle = FontStyle.Italic)
         Kind.Strike -> SpanStyle(textDecoration = TextDecoration.LineThrough)
+        Kind.Underline -> SpanStyle(textDecoration = TextDecoration.Underline)
         Kind.Code -> SpanStyle(fontFamily = FontFamily.Monospace, background = colors.inlineCode)
         Kind.Link -> SpanStyle(color = colors.accent, textDecoration = TextDecoration.Underline)
         else -> SpanStyle()
     }
 
-    override fun equals(other: Any?) = other is ComposerVisual && other.styles == styles && other.mentions == mentions && other.colors == colors
+    override fun equals(other: Any?) = other is ComposerVisual && other.styles == styles && other.mentions == mentions &&
+        other.armed == armed && other.colors == colors
     override fun hashCode() = styles.hashCode() * 31 + mentions.hashCode()
 }

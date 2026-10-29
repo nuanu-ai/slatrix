@@ -59,21 +59,36 @@ object ComposerFormat {
         val pills = mentions.filter { it.start >= start && it.end <= end }
         val cuts = (listOf(start, end) + (inline.flatMap { listOf(it.start, it.end) } + pills.flatMap { listOf(it.start, it.end) })
             .filter { it in start..end }).distinct().sorted()
-        val html = StringBuilder()
+        // Each piece with the link it is in, so a link over several formats stays one link.
+        val pieces = mutableListOf<Pair<String, String?>>()
         for ((from, to) in cuts.zipWithNext()) {
             val pill = pills.firstOrNull { it.start == from }
             if (pills.any { it.start < from && from < it.end }) continue
             val on = inline.filter { it.start <= from && to <= it.end }
             var piece = if (pill != null) "<a href=\"${escape(permalink(pill.userId))}\">${escape(text.substring(pill.start + 1, pill.end))}</a>"
             else buildString {
-                for (at in from until to) append(if (text[at] == ' ' && (at == start || text[at - 1] == ' ')) "&nbsp;" else escape(text[at].toString()))
+                for (at in from until to) when {
+                    text[at] == '\r' -> Unit
+                    text[at] == ' ' && (at == start || text[at - 1] == ' ') -> append("&nbsp;")
+                    else -> append(escape(text[at].toString()))
+                }
             }
             val kinds = on.map { it.kind }
             if (pill == null && ComposerStyle.Kind.Code in kinds) piece = "<code>$piece</code>"
-            for ((kind, tag) in listOf(ComposerStyle.Kind.Strike to "del", ComposerStyle.Kind.Italic to "em", ComposerStyle.Kind.Bold to "strong"))
+            for ((kind, tag) in listOf(ComposerStyle.Kind.Strike to "del", ComposerStyle.Kind.Underline to "u",
+                ComposerStyle.Kind.Italic to "em", ComposerStyle.Kind.Bold to "strong"))
                 if (kind in kinds) piece = "<$tag>$piece</$tag>"
-            on.firstOrNull { it.kind == ComposerStyle.Kind.Link }?.href?.takeIf { pill == null }?.let { piece = "<a href=\"${escape(it)}\">$piece</a>" }
-            html.append(piece)
+            pieces += piece to on.firstOrNull { it.kind == ComposerStyle.Kind.Link }?.href?.takeIf { pill == null }
+        }
+        val html = StringBuilder()
+        var index = 0
+        while (index < pieces.size) {
+            val href = pieces[index].second
+            var next = index + 1
+            while (href != null && next < pieces.size && pieces[next].second == href) next++
+            val joined = pieces.subList(index, next).joinToString("") { it.first }
+            html.append(if (href == null) joined else "<a href=\"${escape(href)}\">$joined</a>")
+            index = next
         }
         return html.toString()
     }
@@ -97,6 +112,7 @@ object ComposerFormat {
         }
         /** A new line inside [block] keeps it, so an empty line there still has it. */
         fun lineBreak(block: ComposerStyle.Kind?) {
+            if (breakPending) text.append('\n')
             breakPending = false
             text.append('\n')
             if (block != null) styles += ComposerStyle(text.length - 1, text.length, block)
@@ -105,7 +121,9 @@ object ComposerFormat {
         fun walk(element: Element, kinds: Set<ComposerStyle.Kind>, href: String?) {
             val block = kinds.firstOrNull { it.block }
             for (node in element.childNodes()) when {
-                node is TextNode -> append(node.wholeText.replace(' ', ' '), kinds, href)
+                // Whitespace between another app's tags is layout, not text.
+                node is TextNode && node.isBlank && node.wholeText.contains('\n') -> Unit
+                node is TextNode -> append(node.wholeText.replace('\u00a0', ' '), kinds, href)
                 node !is Element -> Unit
                 node.normalName() == "br" -> lineBreak(block)
                 node.normalName() == "a" && mentionedUser(node.attr("href")) != null -> {
@@ -139,6 +157,7 @@ object ComposerFormat {
                         "b", "strong" -> ComposerStyle.Kind.Bold
                         "i", "em" -> ComposerStyle.Kind.Italic
                         "s", "strike", "del" -> ComposerStyle.Kind.Strike
+                        "u" -> ComposerStyle.Kind.Underline
                         "code", "tt" -> ComposerStyle.Kind.Code
                         else -> null
                     }
@@ -159,7 +178,8 @@ object ComposerFormat {
         val result = renderer.children(root)
         return ComposerMessage(
             result.body.trim(' ', '\n', '\r').replace('\u00a0', ' '),
-            result.html.trim().takeIf { renderer.formatted },
+            // Blank lines before and after the message go, as the Mac drops blank first and last paragraphs.
+            result.html.replace(blankEdges, "").takeIf { renderer.formatted },
             renderer.mentions.sorted(),
             renderer.mentionsRoom,
         )
@@ -284,7 +304,9 @@ object ComposerFormat {
         return id?.takeIf { userID.matches(it) }
     }
 
-    private fun safeLink(link: String): String? = runCatching { URI(link) }.getOrNull()
+    private val blankEdges = Regex("^(?:\\s|<br>)+|(?:\\s|<br>)+$")
+
+    internal fun safeLink(link: String): String? = runCatching { URI(link) }.getOrNull()
         ?.takeIf { it.scheme?.lowercase() in setOf("https", "http", "mailto", "matrix") }?.toString()
 
     internal fun localpart(id: String) = id.drop(1).substringBefore(':')

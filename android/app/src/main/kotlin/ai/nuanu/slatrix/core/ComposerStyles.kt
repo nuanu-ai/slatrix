@@ -6,7 +6,7 @@ package ai.nuanu.slatrix.core
  */
 data class ComposerStyle(val start: Int, val end: Int, val kind: Kind, val href: String? = null) {
     enum class Kind(val block: Boolean = false) {
-        Bold, Italic, Strike, Code, Link, Bullet(true), Numbered(true), Quote(true), CodeBlock(true)
+        Bold, Italic, Strike, Underline, Code, Link, Bullet(true), Numbered(true), Quote(true), CodeBlock(true)
     }
 }
 
@@ -28,6 +28,23 @@ internal object ComposerStyles {
         styles.filter { !it.kind.block && it.kind != ComposerStyle.Kind.Link && it.start < position && position <= it.end }
             .mapTo(mutableSetOf()) { it.kind } + listOfNotNull(blockOf(styles, text, lineStart(text, position)))
 
+    /** What typing at [position] takes, with the formats chosen there at the caret first. */
+    fun typing(styles: List<ComposerStyle>, typing: ComposerTyping?, text: String, position: Int): Set<ComposerStyle.Kind> =
+        typing?.takeIf { it.position == position }?.kinds ?: typingAt(styles, text, position)
+
+    /**
+     * The block that Return on its empty line, or Backspace at its line's start, leaves instead of changing the text,
+     * as on the Mac; [caret] is where the change was made.
+     */
+    fun blockLeft(styles: List<ComposerStyle>, typing: ComposerTyping?, old: String, new: String, caret: Int): ComposerStyle.Kind? {
+        if (caret !in 0..old.length) return null
+        val returned = new == old.substring(0, caret) + "\n" + old.substring(caret)
+        val emptyLine = lineStart(old, caret) == caret && lineEnd(old, caret) == caret
+        if (returned && emptyLine) return typing(styles, typing, old, caret).firstOrNull { it.block }
+        val backspaced = caret > 0 && old[caret - 1] == '\n' && new == old.removeRange(caret - 1, caret)
+        return if (backspaced) blockOf(styles, old, caret) else null
+    }
+
     /** The formats once the text went from [old] to [new]; what was typed takes [typing], or the formats before it. */
     fun after(styles: List<ComposerStyle>, old: String, new: String, typing: ComposerTyping?): List<ComposerStyle> {
         val prefix = old.commonPrefixWith(new).length
@@ -39,7 +56,7 @@ internal object ComposerStyles {
         fun end(x: Int) = when { x <= prefix -> x; x >= changedEnd -> x + shift; else -> prefix }
         var moved = styles.map { it.copy(start = start(it.start), end = end(it.end)) }
         if (insertedEnd > prefix) {
-            val kinds = typing?.takeIf { it.position == prefix }?.kinds ?: typingAt(styles, old, prefix)
+            val kinds = typing(styles, typing, old, prefix)
             moved = cut(moved, prefix, insertedEnd) { it != ComposerStyle.Kind.Link } +
                 kinds.map { ComposerStyle(prefix, insertedEnd, it) }
         }

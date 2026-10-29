@@ -71,14 +71,6 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     fun edit(text: String) {
         val current = mutableState.value
         if (!loaded || !worker.isActive || text == current.text) return
-        // Return on an empty list item, quote or code line ends the block instead of adding a line, as on the Mac.
-        val at = current.text.commonPrefixWith(text).length
-        val block = ComposerStyles.blockOf(current.styles, current.text, at)
-        if (block != null && text == current.text.substring(0, at) + "\n" + current.text.substring(at) &&
-            ComposerStyles.lineStart(current.text, at) == at && ComposerStyles.lineEnd(current.text, at) == at) {
-            change(current.copy(styles = ComposerStyles.toggled(current.styles, current.text, at, at, block, null), typing = null))
-            return
-        }
         change(current.copy(text = text, mentions = current.mentions.after(current.text, text),
             styles = ComposerStyles.after(current.styles, current.text, text, current.typing), typing = null))
     }
@@ -92,7 +84,7 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
         if (!loaded || !worker.isActive || start < 0 || end > current.text.length || start > end) return
         val emptyFirstLine = kind.block && start == 0 && ComposerStyles.lineEnd(current.text, 0) == 0
         if (start == end && (!kind.block || emptyFirstLine) && kind != ComposerStyle.Kind.Link) {
-            val kinds = current.typing?.takeIf { it.position == start }?.kinds ?: ComposerStyles.typingAt(current.styles, current.text, start)
+            val kinds = ComposerStyles.typing(current.styles, current.typing, current.text, start)
             val toggled = if (kind in kinds) kinds - kind else kinds.filterNot { kind.block && it.block }.toSet() + kind
             mutableState.value = current.copy(typing = ComposerTyping(start, toggled))
             return
