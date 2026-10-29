@@ -21,10 +21,13 @@ data class OpenChannel(
     val conversation: MatrixConversation? = null,
     val composer: MatrixComposer? = null,
     val error: String? = null,
+    /** The thread this shows instead of the channel's main timeline. */
+    val threadRoot: String? = null,
 )
 
 class MatrixWorkspace(scope: CoroutineScope, client: Client) {
-    val emojiHistory = EmojiHistory(scope, client)
+    /** Read once a conversation needs it; the thread workspace shares the main one's. */
+    val emojiHistory by lazy { EmojiHistory(scope, client) }
     private val mutableSelected = MutableStateFlow<OpenChannel?>(null)
     val selected: StateFlow<OpenChannel?> = mutableSelected.asStateFlow()
     private val requests = Channel<Pair<Long, OpenChannel?>>(Channel.CONFLATED)
@@ -51,9 +54,9 @@ class MatrixWorkspace(scope: CoroutineScope, client: Client) {
                     conversationRoom = checkNotNull(client.getRoom(requested.room.id))
                     composerRoom = checkNotNull(client.getRoom(requested.room.id))
                     currentCoroutineContext().ensureActive()
-                    val timeline = MatrixConversation(scope, checkNotNull(conversationRoom))
+                    val timeline = MatrixConversation(scope, checkNotNull(conversationRoom), requested.threadRoot)
                     conversation = timeline
-                    composer = MatrixComposer(scope, checkNotNull(composerRoom), timeline::send)
+                    composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
                     if (generation.get() == token) {
                         current = requested.copy(conversation = timeline, composer = composer)
                         mutableSelected.value = current
@@ -74,14 +77,13 @@ class MatrixWorkspace(scope: CoroutineScope, client: Client) {
         }
     }
 
-    fun open(room: RoomSummary) = select(room)
+    fun open(room: RoomSummary, threadRoot: String? = null) = select(OpenChannel(room, threadRoot = threadRoot))
 
     fun back() = select(null)
 
-    private fun select(room: RoomSummary?) {
+    private fun select(requested: OpenChannel?) {
         if (!worker.isActive) return
         val token = generation.incrementAndGet()
-        val requested = room?.let(::OpenChannel)
         if (current == null) mutableSelected.value = requested
         requests.trySend(token to requested)
     }

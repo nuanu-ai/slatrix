@@ -33,8 +33,9 @@ data class ComposerState(
 
 private const val SAVE_DELAY_MILLIS = 500L
 
-/** Borrows [room]; the caller closes it after [close] flushes the draft. */
-class MatrixComposer(scope: CoroutineScope, private val room: Room, private val sendMessage: suspend (ComposerMessage) -> Boolean) {
+/** Borrows [room]; the caller closes it after [close] flushes the draft. A thread's draft is kept apart under its [threadRoot]. */
+class MatrixComposer(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null,
+    private val sendMessage: suspend (ComposerMessage) -> Boolean) {
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
     private val mutableState = MutableStateFlow(ComposerState())
@@ -194,7 +195,7 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
 
     private suspend fun restore() = draftLock.withLock {
         try {
-            val draft = room.loadComposerDraft(null)
+            val draft = room.loadComposerDraft(threadRoot)
             currentCoroutineContext().ensureActive()
             loaded = true
             failure = null
@@ -216,9 +217,9 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
         val draft = setAside ?: mutableState.value
         val text = draft.text
         try {
-            if (text.isEmpty()) room.clearComposerDraft(null)
+            if (text.isEmpty()) room.clearComposerDraft(threadRoot)
             else room.saveComposerDraft(ComposerDraft(text, draft.mentions.takeIf { it.isNotEmpty() }
-                ?.let { ComposerFormat.plainTextDraft(text, it) }, ComposerDraftType.NewMessage, emptyList()), null)
+                ?.let { ComposerFormat.plainTextDraft(text, it) }, ComposerDraftType.NewMessage, emptyList()), threadRoot)
             savedRevision = savingRevision
             if (failure == Failure.Save) {
                 failure = null

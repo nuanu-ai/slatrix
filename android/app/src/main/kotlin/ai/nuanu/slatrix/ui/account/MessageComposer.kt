@@ -6,7 +6,6 @@ import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.MentionCandidate
 import ai.nuanu.slatrix.core.MentionPeople
 import ai.nuanu.slatrix.core.MentionSearch
-import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.background
@@ -73,10 +72,9 @@ data class ComposerActions(
  * thread screen uses it too; [recentSenders], latest first, rank who an @ suggests.
  */
 @Composable
-fun MessageComposer(room: RoomSummary, composer: ComposerState, onDraft: (String) -> Unit, onSend: () -> Unit,
+fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (String) -> Unit, onSend: () -> Unit,
     actions: ComposerActions, recentSenders: List<String> = emptyList()) {
     val colors = SlatrixTheme.colors
-    val description = if (room.direct) "Message ${room.name}" else "Message #${room.name}"
     val editing = composer.target is ComposerTarget.Edit
     // As BasicTextField(String) does: the text always comes from the composer, the caret from here.
     var field by remember { mutableStateOf(TextFieldValue(composer.text)) }
@@ -138,12 +136,12 @@ fun MessageComposer(room: RoomSummary, composer: ComposerState, onDraft: (String
             if (changed) onDraft(next.text)
         }, enabled = !composer.loading,
             modifier = Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium)
-                .semantics { contentDescription = description },
+                .semantics { contentDescription = placeholder },
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
             cursorBrush = SolidColor(colors.accent), maxLines = 5,
             decorationBox = { inner ->
                 Box(Modifier.padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.CenterStart) {
-                    if (composer.text.isEmpty()) Text(description, style = MaterialTheme.typography.bodyLarge,
+                    if (composer.text.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge,
                         color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     inner()
                 }

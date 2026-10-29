@@ -50,7 +50,7 @@ class MessageActionScreenshots(private val dark: Boolean) {
         compose.setContent {
             SlatrixTheme(dark = dark) {
                 LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), ComposerState(loading = false),
-                    {}, {}, {}, {}, {}, {}, {}, {}, actions, onOpenThread = {})
+                    {}, {}, {}, {}, {}, {}, {}, {}, actions = actions)
             }
         }
         val theme = if (dark) "dark" else "light"
