@@ -25,6 +25,7 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 - **Session storage**: reopen encrypted sessions through the real Android Keystore and app files. Catches lost session fields, plaintext credentials, tampering and missing keys; misses hardware-specific key behavior and abrupt power loss.
 - **Appearance storage**: reopen Android preferences after changing theme and palette. Catches lost appearance choices; misses rendered application and abrupt process death.
 - **Window configuration**: inspect the real Activity's keyboard adjustment mode and system bar icon appearance. Catches a missing resize request or icons that ignore theme changes; actual IME geometry and icon contrast still need emulator inspection.
+- **Native composer input**: inject keyboard events into the real Compose screen with an SDK draft fake. Catches lost input across draft state updates; misses real server behavior and keyboard-specific autocorrection.
 - **Device startup**: launch the real application and call the native SDK through its generated bindings. Catches missing entry points, startup failures and JNI packaging; misses authenticated server behavior.
 - **Android lint**: run the real detector on Kotlin fixtures. Catches off-system Compose colors and sizes; misses rendered layout and contrast.
 
