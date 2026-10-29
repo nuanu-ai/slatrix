@@ -172,19 +172,13 @@ class MatrixRoomsTest {
     }
 
     // capability: conversation.mark-read
-    @Test fun markingEverythingReadReadsOnlyTheUnreadConversations() = runTest {
-        val unread = TestRoom(roomInfo("!a:example.org", "Alpha", messages = 3u))
-        val read = TestRoom(roomInfo("!b:example.org", "Beta"))
-        val marked = TestRoom(roomInfo("!c:example.org", "Gamma").copy(isMarkedUnread = true))
-        val client = RoomsClient(listOf(unread, read, marked))
-        client.services.trySend(RoomsSync())
-        val rooms = MatrixRooms(backgroundScope, client)
-        rooms.state.first { it.rooms.size == 3 }
+    @Test fun markingEverythingReadReadsEachAndSaysWhichFailed() = runTest {
+        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha", messages = 3u))
+        val beta = TestRoom(roomInfo("!b:example.org", "Beta", messages = 1u)).apply { failWrites = true }
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(alpha, beta)))
 
-        assertTrue(rooms.markAllRead())
-        assertEquals("unread false", unread.writes.last())
-        assertEquals("unread false", marked.writes.last())
-        assertEquals(emptyList<String>(), read.writes)
+        assertEquals(listOf("!b:example.org"), rooms.markAllRead(listOf("!a:example.org", "!b:example.org")))
+        assertEquals("unread false", alpha.writes.last())
         rooms.close()
     }
 
