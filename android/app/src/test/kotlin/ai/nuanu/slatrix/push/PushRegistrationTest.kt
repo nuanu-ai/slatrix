@@ -103,6 +103,18 @@ class PushRegistrationTest {
         assertEquals(context.packageName, pusher.first.appId)
         assertEquals(PusherKind.Http(HttpPusherData("https://push.example.org/_matrix/push/v1/notify", PushFormat.EVENT_ID_ONLY, null)), pusher.second)
     }
+
+    @Test fun everyConnectionRestoresAPusherTheServerDropped() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val server = PusherClient()
+        val registration = PushRegistration(context)
+        registration.updateToken("registered-token")
+        registration.register(server, "@alex:example.org", "https://push.example.org/_matrix/push/v1/notify")
+        server.pushers.clear()
+
+        registration.register(server, "@alex:example.org", "https://push.example.org/_matrix/push/v1/notify")
+        assertEquals(setOf("registered-token"), server.pushers.keys)
+    }
 }
 
 private class PusherClient : Client(NoHandle) {
