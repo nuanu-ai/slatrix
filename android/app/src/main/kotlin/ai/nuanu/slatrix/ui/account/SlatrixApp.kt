@@ -251,7 +251,9 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
         onMarkUnread = { id, unread ->
             (rooms?.setUnread(id, unread) ?: false).also { if (it && !unread) PushNotifications(context).clear(id) }
         },
-        onMarkAllRead = { rooms?.markAllRead() ?: false },
+        onMarkAllRead = { ids ->
+            (rooms?.markAllRead(ids) ?: ids).also { failed -> (ids - failed.toSet()).forEach(PushNotifications(context)::clear) }
+        },
         search = {
             val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()
             val inScope = remember(state.rooms, selectedSpaceId) {

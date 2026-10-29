@@ -32,6 +32,12 @@ object SlackIcons {
     val ChevronDown = outline("chevron-down", "M6.5 9.25 L12 14.75 L17.5 9.25", width = 2f)
     val Close = outline("close", "M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5")
     val Check = outline("check", "M5 12.5 L10 17.5 L19 7", width = 2f)
+    /** A bubble with a dot at its corner, as Slack's Mark unread. */
+    val MarkUnread = outline("mark-unread", "M13.5 5 H7 A2 2 0 0 0 5 7 V17 A2 2 0 0 0 7 19 H17 A2 2 0 0 0 19 17 V10.5 " +
+        "M15.5 6.5 A2 2 0 1 0 19.5 6.5 A2 2 0 1 0 15.5 6.5 Z")
+    val MarkRead = outline("mark-read", "M7 5 H17 A2 2 0 0 1 19 7 V17 A2 2 0 0 1 17 19 H7 A2 2 0 0 1 5 17 V7 A2 2 0 0 1 7 5 Z " +
+        "M9 12.25 L11.25 14.5 L15.5 9.75")
+    val MarkAllRead = outline("mark-all-read", "M3.5 12.5 L7.5 16.5 L15 8 M11.5 15.5 L12.5 16.5 L20 8")
     val Tray = outline("tray", "M4 13 H8.5 L9.5 15.5 H14.5 L15.5 13 H20 M4 13 V18.5 A1.5 1.5 0 0 0 5.5 20 H18.5 " +
         "A1.5 1.5 0 0 0 20 18.5 V13 L17.5 5.5 H6.5 Z")
 

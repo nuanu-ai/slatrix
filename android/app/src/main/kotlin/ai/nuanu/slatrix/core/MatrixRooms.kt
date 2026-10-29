@@ -162,9 +162,9 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         }
     }
 
-    /** Marks every conversation that shows as unread read, at once. */
-    suspend fun markAllRead(): Boolean = coroutineScope {
-        state.value.rooms.filter { it.unread != UnreadBadge.None }.map { async { setUnread(it.id, false) } }.awaitAll().all { it }
+    /** Marks these conversations read at once, and returns the ones that failed. */
+    suspend fun markAllRead(roomIds: List<String>): List<String> = coroutineScope {
+        roomIds.map { id -> async { id.takeUnless { setUnread(id, false) } } }.awaitAll().filterNotNull()
     }
 
     suspend fun notification(roomId: String, eventId: String): NotificationStatus? = withTimeoutOrNull(15_000) {
