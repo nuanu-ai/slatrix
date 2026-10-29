@@ -106,7 +106,8 @@ private fun groups(runs: List<MessageRun>): List<Pair<MessageBlock, List<Piece>>
         groups
     }.map { (it.first().block ?: MessageBlock()) to pieces(it) }
 
-private fun AnnotatedString.Builder.append(lines: List<Line>, colors: AppColors, codeSize: TextUnit, me: String?) {
+private fun AnnotatedString.Builder.append(lines: List<Line>, colors: AppColors, codeSize: TextUnit, me: String?,
+    onMention: ((String) -> Unit)?) {
     lines.forEachIndexed { index, line ->
         if (index > 0) append('\n')
         for (run in line.runs) {
@@ -135,7 +136,9 @@ private fun AnnotatedString.Builder.append(lines: List<Line>, colors: AppColors,
                 },
             )
             val link = run.link
+            val person = run.mention?.takeIf { it != "@room" }
             if (link != null && run.mention == null) withLink(LinkAnnotation.Url(link, TextLinkStyles(style))) { append(run.text) }
+            else if (person != null && onMention != null) withLink(LinkAnnotation.Clickable(person, TextLinkStyles(style)) { onMention(person) }) { append(run.text) }
             else withStyle(style) { append(run.text) }
         }
     }
@@ -143,7 +146,7 @@ private fun AnnotatedString.Builder.append(lines: List<Line>, colors: AppColors,
 
 /** A message's text as Slack shows it: formatting, links, mention pills, quotes, lists and code blocks. */
 @Composable
-fun MessageBody(message: ConversationMessage, color: Color, me: String?) {
+fun MessageBody(message: ConversationMessage, color: Color, me: String?, onMention: ((String) -> Unit)? = null) {
     val colors = SlatrixTheme.colors
     val textStyle = MaterialTheme.typography.bodyLarge
     when (message.kind) {
@@ -168,7 +171,7 @@ fun MessageBody(message: ConversationMessage, color: Color, me: String?) {
         groups.forEachIndexed { index, (block, pieces) ->
             val content = @Composable {
                 MessagePieces(pieces, colors, color, textStyle, indent, me, message.kind == MessageKind.Emote,
-                    message.edited && !editedBelow && index == groups.lastIndex)
+                    message.edited && !editedBelow && index == groups.lastIndex, onMention)
             }
             val text = @Composable {
                 if (block.code) Surface(Modifier.padding(start = indent * block.list).fillMaxWidth(), shape = MaterialTheme.shapes.small,
@@ -187,11 +190,11 @@ fun MessageBody(message: ConversationMessage, color: Color, me: String?) {
 
 @Composable
 private fun MessagePieces(pieces: List<Piece>, colors: AppColors, color: Color, style: TextStyle, indent: Dp, me: String?,
-    emote: Boolean, edited: Boolean) {
+    emote: Boolean, edited: Boolean, onMention: ((String) -> Unit)?) {
     val caption = MaterialTheme.typography.bodySmall
     fun text(lines: List<Line>, last: Boolean) = buildAnnotatedString {
         val codeSize = style.fontSize * UiMetrics.CodeTextScale
-        if (emote) withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(lines, colors, codeSize, me) } else append(lines, colors, codeSize, me)
+        if (emote) withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(lines, colors, codeSize, me, onMention) } else append(lines, colors, codeSize, me, onMention)
         if (edited && last) withStyle(SpanStyle(color = colors.textSecondary, fontSize = caption.fontSize)) { append(" (edited)") }
     }
     Column {
