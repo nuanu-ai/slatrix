@@ -4,6 +4,21 @@ import { onRequest } from 'firebase-functions/v2/https';
 
 initializeApp();
 
+const allowedApps = new Set(['ai.nuanu.slatrix.dev', 'ai.nuanu.slatrix']);
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const boundedText = (value, bytes) => typeof value === 'string' && value.length > 0
+  && Buffer.byteLength(value) <= bytes && !/[\s\x00-\x1f\x7f]/u.test(value);
+
+function validNotification(value) {
+  return isObject(value)
+    && boundedText(value.event_id, 255) && value.event_id.startsWith('$')
+    && boundedText(value.room_id, 255) && value.room_id.startsWith('!')
+    && (value.prio === undefined || value.prio === 'high' || value.prio === 'low')
+    && Array.isArray(value.devices) && value.devices.length <= 100
+    && value.devices.every((device) => isObject(device) && allowedApps.has(device.app_id)
+      && boundedText(device.pushkey, 4096));
+}
+
 export const matrixPush = onRequest({
   region: 'europe-west1',
   serviceAccount: 'slatrix-push@slatrix-18cdc.iam.gserviceaccount.com',
@@ -15,6 +30,10 @@ export const matrixPush = onRequest({
   memory: '256MiB',
   timeoutSeconds: 30,
 }, async (request, response) => {
+  if (!isObject(request.body) || !validNotification(request.body.notification)) {
+    response.status(400).json({ errcode: 'M_BAD_JSON', error: 'Invalid notification' });
+    return;
+  }
   const notification = request.body.notification;
   await Promise.all(notification.devices.map((device) => getMessaging().send({
     token: device.pushkey,
