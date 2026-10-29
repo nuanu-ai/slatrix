@@ -237,7 +237,7 @@ class MatrixComposerTest {
     }
 }
 
-private class ComposerRoom(var draft: ComposerDraft? = null) : Room(NoHandle) {
+internal class ComposerRoom(var draft: ComposerDraft? = null) : Room(NoHandle) {
     var loadFailure: Exception? = null
     var saveFailure: Exception? = null
     override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? {
