@@ -8,51 +8,35 @@ private func room(_ name: String, direct: Bool = false, membership: String = "jo
         membership: membership, isSpace: space)
 }
 
+/// Finding a conversation by name, from the shared cases in `spec/conversation-search.json`.
 struct ConversationSwitcherTests {
-    // capability: search.rooms
-    @Test("A name that starts with the query ranks above one that only contains it, however recent")
-    func prefixBeatsSubstring() {
-        let rooms = [room("Product design"), room("Design")]
-        #expect(
-            ConversationSwitcher.results(rooms, query: "des", visited: []).map(\.name) == ["Design", "Product design"])
+    struct Room: Decodable {
+        var name: String
+        var direct: Bool?
+        var membership: String?
+        var space: Bool?
     }
 
-    @Test("A word that starts with the query ranks above a match inside a word")
-    func wordStartBeatsInsideWord() {
-        let rooms = [room("Undesigned"), room("Product design")]
-        #expect(
-            ConversationSwitcher.results(rooms, query: "des", visited: []).map(\.name)
-                == ["Product design", "Undesigned"])
+    struct Case: Decodable, CustomTestStringConvertible {
+        var name: String
+        var rooms: [Room]
+        var query: String
+        var visited: [String]?
+        var expected: [String]
+        var testDescription: String { name }
     }
 
-    @Test("Among equal matches, the conversation visited last comes first, then the room list's recency order")
-    func recentBeatsStale() {
-        let rooms = [room("Design crit"), room("Design ops"), room("Design system")]
-        let ids = rooms.map(\.id)
-        #expect(
-            ConversationSwitcher.results(rooms, query: "design", visited: [ids[0], ids[2]]).map(\.name)
-                == ["Design system", "Design crit", "Design ops"])
-    }
+    struct Spec: Decodable { var cases: [Case] }
 
-    @Test("A direct message matches the person's first or last name, ignoring case and accents")
-    func directMessagesByPersonName() {
-        let rooms = [room("Planning"), room("Zoë Liddell", direct: true)]
-        #expect(ConversationSwitcher.results(rooms, query: "lid", visited: []).map(\.name) == ["Zoë Liddell"])
-        #expect(ConversationSwitcher.results(rooms, query: "@ZOE", visited: []).map(\.name) == ["Zoë Liddell"])
-    }
-
-    @Test("A leading # is ignored, and left rooms and workspaces never show")
-    func skipsLeftRoomsAndSpaces() {
-        let rooms = [room("Design", membership: "leave"), room("Design team", space: true), room("Design")]
-        #expect(ConversationSwitcher.results(rooms, query: "#design", visited: []).map(\.membership) == ["join"])
-    }
-
-    @Test("With no query, recent conversations come first")
-    func emptyQueryListsRecent() {
-        let rooms = [room("Alpha"), room("Beta"), room("Gamma")]
-        #expect(
-            ConversationSwitcher.results(rooms, query: " ", visited: [rooms[2].id]).map(\.name)
-                == ["Gamma", "Alpha", "Beta"])
+    @Test(
+        "Conversation ranking matches the shared cases",
+        arguments: try SharedSpec.decode("spec/conversation-search.json", as: Spec.self).cases)
+    func results(spec: Case) {
+        let rooms = spec.rooms.map {
+            room($0.name, direct: $0.direct ?? false, membership: $0.membership ?? "join", space: $0.space ?? false)
+        }
+        let visited = (spec.visited ?? []).map { name in rooms.first { $0.name == name }!.id }
+        #expect(ConversationSwitcher.results(rooms, query: spec.query, visited: visited).map(\.name) == spec.expected)
     }
 }
 
