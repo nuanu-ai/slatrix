@@ -47,6 +47,10 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     let focuses = Recorder<TimelineFocus>()
     /// Holds reading the event cache, as a slow disk would.
     let buildGate = Gate()
+    /// Holds a timeline opened at an older message, as the server's context request would.
+    let eventGate = Gate()
+    /// Thread replies the room can load, by event ID, with their thread's root.
+    var threadRoots: [String: String] = [:]
     let membersGate = Gate()
     var memberList: [RoomMember] = []
     /// Whether your power level lets you notify the whole room.
@@ -62,9 +66,14 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
         focuses.append(configuration.focus)
         await buildGate.wait()
+        if case .event = configuration.focus { await eventGate.wait() }
         let timeline = FakeLiveTimeline(cached)
         timelines.append(timeline)
         return timeline
+    }
+    override func loadOrFetchEvent(eventId: String) async throws -> TimelineEvent {
+        guard let root = threadRoots[eventId] else { throw URLError(.resourceUnavailable) }
+        return FakeThreadReply(root: root)
     }
     override func members() async throws -> RoomMembersIterator {
         await membersGate.wait()
@@ -74,6 +83,16 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     override func subscribeToTypingNotifications(listener: TypingNotificationsListener) -> TaskHandle {
         FakeCancellableHandle(noHandle: .init())
     }
+}
+
+private final class FakeThreadReply: TimelineEvent, @unchecked Sendable {
+    let root: String
+    init(root: String) {
+        self.root = root
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func threadRootEventId() -> String? { root }
 }
 
 private final class FakePowerLevels: RoomPowerLevels, @unchecked Sendable {
