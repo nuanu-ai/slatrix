@@ -76,7 +76,7 @@ class IdentityVerificationDeviceTest {
             verification.close()
         }
     }
-    @Test fun recoveryFailureKeepsTheSessionLockedAndCanRetryWithAnOwnerKey() = runBlocking {
+    @Test fun recoveryFailureKeepsTheSessionLockedAndCanRetryWithAnOwnerKey() = runBlocking<Unit> {
         val encryption = IdentityEncryption(VerificationState.UNVERIFIED)
         val verification = IdentityVerification(scope, IdentityClient(encryption))
         try {

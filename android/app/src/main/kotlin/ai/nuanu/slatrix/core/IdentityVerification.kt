@@ -60,15 +60,18 @@ class IdentityVerification(private val scope: CoroutineScope, private val client
     private var verificationHandle: TaskHandle? = null
     private var recoveryHandle: TaskHandle? = null
 
-    init {
+    init { prepare() }
+
+    private fun prepare() {
+        mutableState.update { it.copy(phase = IdentityPhase.Preparing, error = null) }
         serviceScope.launch {
             try {
-                verificationHandle = encryption.verificationStateListener(object : VerificationStateListener {
+                if (verificationHandle == null) verificationHandle = encryption.verificationStateListener(object : VerificationStateListener {
                     override fun onUpdate(status: VerificationState) {
                         serviceScope.launch { if (!closed) updateStatus(status) }
                     }
                 })
-                recoveryHandle = encryption.recoveryStateListener(object : RecoveryStateListener {
+                if (recoveryHandle == null) recoveryHandle = encryption.recoveryStateListener(object : RecoveryStateListener {
                     override fun onUpdate(status: RecoveryState) {
                         serviceScope.launch { if (!closed) updateRecovery(status) }
                     }
@@ -92,6 +95,31 @@ class IdentityVerification(private val scope: CoroutineScope, private val client
                 mutableState.update { it.copy(phase = IdentityPhase.Failed, error = "Couldn’t check this device. Try again.") }
             }
         }
+    }
+
+    fun recover(recoveryKey: String) {
+        if (!canChoose()) return
+        if (state.value.recoveryAvailable != true) {
+            mutableState.update { it.copy(error = "Recovery isn’t available. Use another verified device.") }
+            return
+        }
+        if (recoveryKey.isBlank()) {
+            mutableState.update { it.copy(error = "Enter your recovery key to continue.") }
+            return
+        }
+        beginFlow(IdentityPhase.Recovering)
+        perform("Couldn’t use that recovery key. Check the key and your connection, then try again.") {
+            encryption.recover(recoveryKey)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            updateStatus(encryption.verificationState())
+            updateRecovery(encryption.recoveryState())
+            mutableState.update { it.copy(phase = IdentityPhase.ChooseMethod) }
+        }
+    }
+
+    fun retry() {
+        if (closed || state.value.phase != IdentityPhase.Failed) return
+        if (needsCancellation) stopFlow() else prepare()
     }
 
     fun requestVerification() {
@@ -188,7 +216,10 @@ class IdentityVerification(private val scope: CoroutineScope, private val client
         return result
     }
 
-    private fun perform(action: suspend () -> Unit) {
+    private fun perform(
+        failureMessage: String = "Couldn’t verify this device. Check your connection and try again.",
+        action: suspend () -> Unit,
+    ) {
         val token = flow
         flowScope.launch {
             try {
@@ -198,7 +229,7 @@ class IdentityVerification(private val scope: CoroutineScope, private val client
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                if (!closed && flow == token) stopFlow("Couldn’t verify this device. Check your connection and try again.")
+                if (!closed && flow == token) stopFlow(failureMessage)
             }
         }
     }
