@@ -108,7 +108,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 LiveChannelScreen(selected.room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
                                     { workspace?.back() }, { conversation?.loadOlder() },
                                     { event -> scope.launch { conversation?.markRead(event) } },
-                                    { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) workspace?.open(selected.room) })
+                                    { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) workspace?.open(selected.room) },
+                                    { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) })
                             } } }
                             else -> null
                         }) {

@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
+import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
@@ -13,6 +14,8 @@ import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import android.content.ClipData
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,15 +25,22 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +51,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -52,7 +63,7 @@ import java.util.Locale
 @Composable
 fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: ComposerState,
     onDraft: (String) -> Unit, onSend: () -> Unit, onBack: () -> Unit, onLoadOlder: () -> Unit, onRead: (String) -> Unit,
-    onRetry: () -> Unit) {
+    onRetry: () -> Unit, onRetrySend: (ConversationMessage) -> Unit = {}, onDeleteUnsent: (ConversationMessage) -> Unit = {}) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -97,7 +108,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     BackHandler(onBack = onBack)
     var menu by remember { mutableStateOf<ConversationMessage?>(null) }
-    menu?.let { MessageMenu(it) { menu = null } }
+    menu?.let { MessageMenu(it, onRetrySend, onDeleteUnsent) { menu = null } }
     Column(Modifier.fillMaxSize().background(colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(end = UiMetrics.GapLarge,
             top = UiMetrics.GapSmall, bottom = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
@@ -254,8 +265,11 @@ private fun MessageAvatar(initials: String, colorIndex: Int) {
 /** Slack's long-press sheet: who sent the message and when, then what can be done with it. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MessageMenu(message: ConversationMessage, onDismiss: () -> Unit) {
+private fun MessageMenu(message: ConversationMessage, onRetrySend: (ConversationMessage) -> Unit,
+    onDeleteUnsent: (ConversationMessage) -> Unit, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
     ModalBottomSheet(onDismissRequest = onDismiss, shape = SlatrixTheme.topPanelShape, containerColor = colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             Row(Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
@@ -265,6 +279,27 @@ private fun MessageMenu(message: ConversationMessage, onDismiss: () -> Unit) {
                 Text("${dayLabel(message.timestamp)} at ${timeLabel(message.timestamp)}",
                     style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1)
             }
+            if (message.sendState == MessageSendState.Failed) {
+                if (message.canRetry) MenuAction(Icons.Outlined.Refresh, "Retry", colors.textPrimary) { onRetrySend(message); onDismiss() }
+                MenuAction(Icons.Outlined.Delete, "Delete message", colors.destructive) { onDeleteUnsent(message); onDismiss() }
+            }
+            if (message.kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)) {
+                MenuAction(Icons.Outlined.ContentCopy, "Copy message", colors.textPrimary) {
+                    scope.launch {
+                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(message.senderName, message.body)))
+                        onDismiss()
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun MenuAction(icon: ImageVector, label: String, color: Color, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(onClick = onClick).padding(horizontal = UiMetrics.GapLarge),
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(UiMetrics.Icon), tint = color)
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = color)
     }
 }
