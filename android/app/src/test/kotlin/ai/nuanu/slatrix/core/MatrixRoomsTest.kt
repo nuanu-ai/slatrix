@@ -372,6 +372,22 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: app.offline-banner
+    @Test fun aDroppedConnectionSaysOfflineUntilSyncRunsAgainWithoutAnError() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        sync.started.await()
+
+        sync.emitState(SyncServiceState.OFFLINE)
+        rooms.offline.first { it }
+        assertNull("The banner says it, so Home's notice doesn't", rooms.state.value.error)
+        sync.emitState(SyncServiceState.RUNNING)
+        rooms.offline.first { !it }
+        rooms.close()
+    }
+
     @Test fun syncRunsOnlyInTheForegroundWhileAPushStillResolvesItsEvent() = runTest {
         val client = RoomsClient(emptyList())
         val sync = RoomsSync()
