@@ -89,19 +89,21 @@ fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetails
     LaunchedEffect(room.id, loads) { notifications = attempt { actions.notifications() } }
     // Outlives the pages, so going back doesn't cancel a change on its way.
     val scope = rememberCoroutineScope()
-    val open = { next: DetailsPage -> opener = page; page = next }
-    val details = { page = DetailsPage.Details }
-    when (page) {
+    // Whether the page showing came back from one over it, so it shows at once rather than easing in.
+    var returning by remember { mutableStateOf(false) }
+    val open = { next: DetailsPage -> opener = page; page = next; returning = false }
+    val details = { page = DetailsPage.Details; returning = true }
+    CompositionLocalProvider(LocalReturning provides returning) { when (page) {
         DetailsPage.Details -> DetailsPage(room, notifications?.getOrNull(), actions, scope, onLeft, onBack, open, spaces.isNotEmpty())
         DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, details)
         DetailsPage.Edit -> EditPage(room, actions, scope, details)
         DetailsPage.Notifications -> NotificationsPage(notifications, actions, scope, { notifications = Result.success(it) },
             { loads++ }, details)
-        DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener }
+        DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener; returning = true }
         DetailsPage.Pins -> PinsPage(room, me, actions.pins(), onOpenMessage, details)
         DetailsPage.Files -> FilesPage(actions.files(), onOpenMessage, details)
         DetailsPage.Workspaces -> WorkspacesPage(room, spaces, actions, scope, details)
-    }
+    } }
 }
 
 private fun noun(room: RoomSummary) = if (room.direct) "conversation" else "channel"

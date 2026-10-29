@@ -91,6 +91,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
     var preferences by rememberSaveable { mutableStateOf(false) }
+    var returning by remember { mutableStateOf(false) }
     // Browse channels or Create a channel, pushed over Home; null while neither is open.
     var channels by rememberSaveable { mutableStateOf<ChannelPage?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -175,7 +176,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         LiveWorkspace(when {
                             preferences -> { val client = (state as AccountState.Connected).client; { LivePreferencesScreen(dark, darkOverride, palette,
                                 { darkOverride = it; appearance.darkMode = it },
-                                { palette = it; appearance.paletteName = it.name }, { preferences = false }) {
+                                { palette = it; appearance.paletteName = it.name }, { preferences = false; returning = true }) {
                                     LiveNotificationSettings(userId) { client.getNotificationSettings() }
                                 } } }
                             channels != null -> { {
@@ -184,8 +185,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
                                     openChannel, { notice = it }) { channels = null }
                             } }
-                            you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut,
-                                onBack = { you = false }, avatarUrl = userAvatarUrl) } }
+                            // Back from Preferences shows You at once.
+                            you -> { { CompositionLocalProvider(LocalReturning provides returning) {
+                                LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() },
+                                    { preferences = true; returning = false }, account::signOut, onBack = { you = false }, avatarUrl = userAvatarUrl)
+                            } } }
                             thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms, media) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {

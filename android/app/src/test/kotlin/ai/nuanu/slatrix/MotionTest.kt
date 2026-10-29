@@ -81,6 +81,7 @@ class MotionTest {
         compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeByFrame()
         val early = bounds(text)
+        // From its first frame on screen: a sheet's window lays out a frame later than a page.
         compose.mainClock.advanceTimeBy(150)
         val settled = bounds(text)
         compose.mainClock.advanceTimeBy(2_000)

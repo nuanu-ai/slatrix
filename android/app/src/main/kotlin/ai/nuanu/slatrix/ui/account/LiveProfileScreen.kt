@@ -5,6 +5,7 @@ import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.Motion
 import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.graphicsLayer
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
@@ -84,15 +85,23 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
     }
 }
 
+/** True where a page shows again because the one over it went back, which is instant. */
+internal val LocalReturning = compositionLocalOf { false }
+
 /**
  * A pushed page: a plain bar with Back, its title and maybe an action such as Save, then its rows. It eases in from the
- * side, as Slack's pages do; going back is instant.
+ * side, as Slack's pages do, once; going back to it, or turning the phone, shows it at once.
  */
 @Composable
 internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable () -> Unit = {}, content: LazyListScope.() -> Unit) {
     BackHandler(onBack = onBack)
-    val shown = remember { Animatable(0f) }
-    LaunchedEffect(shown) { shown.animateTo(1f, Motion.pane()) }
+    val returning = LocalReturning.current
+    var entered by rememberSaveable { mutableStateOf(returning) }
+    val shown = remember { Animatable(if (entered) 1f else 0f) }
+    LaunchedEffect(shown) {
+        shown.animateTo(1f, Motion.pane())
+        entered = true
+    }
     Column(Modifier.fillMaxSize().graphicsLayer {
         alpha = shown.value
         translationX = (1 - shown.value) * Motion.PushDistance * size.width
