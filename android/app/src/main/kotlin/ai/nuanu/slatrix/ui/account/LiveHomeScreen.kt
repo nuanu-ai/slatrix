@@ -14,19 +14,28 @@ import android.text.format.DateFormat
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Chat
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -44,14 +53,16 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-private enum class HomeTab(val label: String, val icon: ImageVector) {
-    Home("Home", Icons.Outlined.Home),
-    Dms("DMs", Icons.AutoMirrored.Outlined.Chat),
-    Activity("Activity", Icons.Outlined.Notifications),
+private enum class HomeTab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
+    Home("Home", Icons.Outlined.Home, Icons.Filled.Home),
+    Dms("DMs", Icons.Outlined.Forum, Icons.Filled.Forum),
+    Activity("Activity", Icons.Outlined.Notifications, Icons.Filled.Notifications),
 }
 
 /** Shows [cover], such as a conversation, in Home's place, and gives Home back its tab, search and scroll position after. */
@@ -66,7 +77,9 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}, onStar: suspend (String, Boolean) -> Boolean = { _, _ -> true },
     activity: @Composable () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
-    var query by rememberSaveable { mutableStateOf("") }
+    var actions by remember { mutableStateOf<RoomSummary?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val homeList = rememberLazyListState()
     val directList = rememberLazyListState()
     val colors = SlatrixTheme.colors
@@ -84,7 +97,8 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                     )
                     HomeTab.entries.forEach { destination ->
                         NavigationRailItem(selected = tab == destination, onClick = { tab = destination },
-                            icon = { Icon(destination.icon, null) }, label = { Text(destination.label) }, colors = navigationColors)
+                            icon = { Icon(if (tab == destination) destination.selectedIcon else destination.icon, null) },
+                            label = { Text(destination.label) }, colors = navigationColors)
                     }
                 }
             }
@@ -93,28 +107,46 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                 Surface(Modifier.weight(1f).fillMaxWidth(), shape = SlatrixTheme.topPanelShape, color = colors.canvas) {
                     Box(Modifier.fillMaxSize()) {
                         when (tab) {
-                            HomeTab.Home -> HomeList(homeList, state, query, { query = it }, selectedSpaceId, onRoom)
-                            HomeTab.Dms -> DirectList(directList, state, query, { query = it }, onRoom)
+                            HomeTab.Home -> HomeList(homeList, state, selectedSpaceId, onRoom) { actions = it }
+                            HomeTab.Dms -> DirectList(directList, state, onRoom) { actions = it }
                             HomeTab.Activity -> activity()
                         }
-                        state.error?.let { message ->
+                        val failure = notice
+                        if (failure != null) {
+                            Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(failure) }
+                        } else state.error?.let { message ->
                             Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
                                 action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
                         }
                     }
                 }
                 if (!expanded) {
-                    NavigationBar(containerColor = colors.canvas) {
-                        val navigationColors = NavigationBarItemDefaults.colors(selectedTextColor = colors.textPrimary)
+                    HorizontalDivider(color = colors.border)
+                    NavigationBar(containerColor = colors.raised) {
+                        val navigationColors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = colors.textPrimary, selectedTextColor = colors.textPrimary, indicatorColor = colors.pressed,
+                            unselectedIconColor = colors.textSecondary, unselectedTextColor = colors.textSecondary,
+                        )
                         HomeTab.entries.forEach { destination ->
-                            NavigationBarItem(selected = tab == destination, onClick = { tab = destination },
-                                icon = { Icon(destination.icon, null) }, label = { Text(destination.label) }, colors = navigationColors)
+                            val selected = tab == destination
+                            NavigationBarItem(selected = selected, onClick = { tab = destination },
+                                icon = { Icon(if (selected) destination.selectedIcon else destination.icon, null) },
+                                label = { Text(destination.label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+                                colors = navigationColors)
                         }
                     }
                 }
             }
         }
     }
+    actions?.let { room ->
+        ConversationActions(room, { starred ->
+            scope.launch {
+                if (!onStar(room.id, starred)) notice = if (starred) "Couldn’t star ${room.name}." else "Couldn’t unstar ${room.name}."
+            }
+        }) { actions = null }
+    }
+    notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
 }
 
 @Composable
@@ -163,50 +195,71 @@ private fun HeaderTitle(text: String, modifier: Modifier = Modifier) {
         maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
-@Composable
-private fun SearchField(query: String, onQuery: (String) -> Unit, placeholder: String) {
-    OutlinedTextField(query, onQuery, Modifier.fillMaxWidth().padding(UiMetrics.GapLarge),
-        placeholder = { Text(placeholder) }, leadingIcon = { Icon(Icons.Outlined.Search, null) },
-        singleLine = true, shape = MaterialTheme.shapes.large)
+private enum class HomeSection(val label: String, val icon: ImageVector) {
+    Starred("Starred", Icons.Outlined.StarOutline),
+    Channels("Channels", Icons.Outlined.Tag),
+    Direct("Direct messages", Icons.Outlined.Forum),
 }
 
 @Composable
-private fun HomeList(list: LazyListState, state: RoomListState, query: String, onQuery: (String) -> Unit,
-    selectedSpaceId: String?, onRoom: (String) -> Unit) {
+private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId: String?, onRoom: (String) -> Unit,
+    onActions: (RoomSummary) -> Unit) {
     // A saved workspace's channels are known only with its spaces, so its list waits for them rather than filling in.
     val waiting = state.loading || (selectedSpaceId != null && !state.spacesKnown)
-    val visible = remember(state.rooms, selectedSpaceId, query) {
-        state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) && it.name.contains(query, ignoreCase = true) }
+    val sections = remember(state.rooms, selectedSpaceId) {
+        val visible = state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
+        // Slack drops Starred while nothing is starred, but always shows where channels and messages go.
+        listOfNotNull(
+            visible.filter { it.starred }.takeIf { it.isNotEmpty() }?.let { HomeSection.Starred to it },
+            HomeSection.Channels to visible.filter { !it.starred && !it.direct },
+            HomeSection.Direct to visible.filter { !it.starred && it.direct },
+        )
     }
-    val channels = remember(visible) { visible.filterNot { it.direct } }
-    val direct = remember(visible) { visible.filter { it.direct } }
-    LazyColumn(Modifier.fillMaxSize(), list) {
-        item { SearchField(query, onQuery, "Find a channel or conversation") }
+    var collapsed by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
         if (waiting) {
             item { ConnectionIndicator(true, null) }
         } else {
-            item { RoomSection("Channels") }
-            items(channels, key = { it.id }) { LiveRoomRow(it, onRoom) }
-            item { HorizontalDivider(Modifier.padding(top = UiMetrics.GapSmall), color = SlatrixTheme.colors.border) }
-            item { RoomSection("Direct messages") }
-            items(direct, key = { it.id }) { LiveRoomRow(it, onRoom) }
-            if (visible.isEmpty()) item {
-                EmptyList(if (query.isNotEmpty()) "No results" else "Your conversations will appear here.")
+            sections.forEachIndexed { index, (section, rooms) ->
+                if (index > 0) item(key = "divider-${section.name}") { SectionDivider() }
+                val open = section.name !in collapsed
+                item(key = section.name) {
+                    SectionHeader(section, open) { collapsed = if (open) collapsed + section.name else collapsed - section.name }
+                }
+                // A collapsed section keeps its unread conversations in view, as Slack's does.
+                items(if (open) rooms else rooms.filter { it.unread != UnreadBadge.None }, key = { it.id }) {
+                    LiveRoomRow(it, onRoom, onActions)
+                }
             }
         }
-        item { Spacer(Modifier.height(UiMetrics.GapSection)) }
     }
 }
 
 @Composable
-private fun DirectList(list: LazyListState, state: RoomListState, query: String, onQuery: (String) -> Unit, onRoom: (String) -> Unit) {
-    val direct = remember(state.rooms, query) { state.rooms.filter { it.direct && it.name.contains(query, ignoreCase = true) } }
-    LazyColumn(Modifier.fillMaxSize(), list) {
-        item { SearchField(query, onQuery, "Find a conversation") }
+private fun SectionHeader(section: HomeSection, open: Boolean, onToggle: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button, onClick = onToggle)
+        .semantics(mergeDescendants = true) { stateDescription = if (open) "Expanded" else "Collapsed" }
+        .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+        Icon(section.icon, null, Modifier.size(UiMetrics.Icon))
+        Text(section.label, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Icon(if (open) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown, null, Modifier.size(UiMetrics.LargeIcon))
+    }
+}
+
+@Composable
+private fun SectionDivider() {
+    HorizontalDivider(Modifier.padding(vertical = UiMetrics.GapSmall), color = SlatrixTheme.colors.border)
+}
+
+@Composable
+private fun DirectList(list: LazyListState, state: RoomListState, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) {
+    val direct = remember(state.rooms) { state.rooms.filter { it.direct } }
+    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
         if (state.loading) item { ConnectionIndicator(true, null) }
-        items(direct, key = { it.id }) { LiveDirectRow(it, onRoom) }
-        if (!state.loading && direct.isEmpty()) item { EmptyList(if (query.isNotEmpty()) "No results" else "No direct messages") }
-        item { Spacer(Modifier.height(UiMetrics.GapSection)) }
+        items(direct, key = { it.id }) { LiveDirectRow(it, onRoom, onActions) }
+        if (!state.loading && direct.isEmpty()) item { EmptyList("No direct messages") }
     }
 }
 
@@ -215,40 +268,47 @@ private fun EmptyList(text: String) {
     Text(text, Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textSecondary)
 }
 
-@Composable
-private fun RoomSection(label: String) {
-    Text(label, Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
-        style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-}
+/** Opens a conversation on tap and its actions on a long press, as Slack's rows do. */
+@OptIn(ExperimentalFoundationApi::class)
+private fun Modifier.conversation(room: RoomSummary, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) =
+    combinedClickable(role = Role.Button, onLongClickLabel = "More actions", onLongClick = { onActions(room) }) { onRoom(room.id) }
 
 @Composable
-private fun LiveRoomRow(room: RoomSummary, onRoom: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) { onRoom(room.id) }
-        .unreadState(room).padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        if (room.direct) LiveAvatar(room.initials, room.colorIndex, UiMetrics.CompactAvatar)
-        else Icon(Icons.Outlined.Tag, null, Modifier.size(UiMetrics.CompactAvatar), tint = SlatrixTheme.colors.textSecondary)
-        Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (room.unread == UnreadBadge.None) FontWeight.Normal else FontWeight.Bold,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
+private fun LiveRoomRow(room: RoomSummary, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) {
+    val colors = SlatrixTheme.colors
+    val unread = room.unread != UnreadBadge.None
+    val color = if (unread) colors.textPrimary else colors.textBody
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).conversation(room, onRoom, onActions)
+        .unreadState(room).padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapTiny),
+        verticalAlignment = Alignment.CenterVertically) {
+        if (room.direct) {
+            LiveAvatar(room.initials, room.colorIndex, UiMetrics.CompactAvatar)
+            Spacer(Modifier.width(UiMetrics.GapMedium))
+        } else {
+            Icon(if (room.isPrivate) Icons.Outlined.Lock else Icons.Outlined.Tag, if (room.isPrivate) "Private channel" else null,
+                Modifier.size(UiMetrics.Icon), tint = color)
+            Spacer(Modifier.width(UiMetrics.GapLarge))
+        }
+        Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = color,
+            fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
         UnreadCount(room.unread)
     }
 }
 
 /** A row of the DMs tab: the newest message under the name, and when it came, as Slack lists them. */
 @Composable
-private fun LiveDirectRow(room: RoomSummary, onRoom: (String) -> Unit) {
+private fun LiveDirectRow(room: RoomSummary, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) {
     val colors = SlatrixTheme.colors
     val unread = room.unread != UnreadBadge.None
-    Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { onRoom(room.id) }.unreadState(room)
-        .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
+    Row(Modifier.fillMaxWidth().conversation(room, onRoom, onActions).unreadState(room)
+        .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         LiveAvatar(room.initials, room.colorIndex, UiMetrics.ListAvatar)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
                     fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                room.latest?.let { Text(latestTime(it.timestamp), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary) }
+                room.latest?.let { Text(latestTime(it.timestamp), style = MaterialTheme.typography.bodySmall, color = colors.textBody) }
                 UnreadCount(room.unread)
             }
             val latest = room.latest
@@ -256,8 +316,27 @@ private fun LiveDirectRow(room: RoomSummary, onRoom: (String) -> Unit) {
                 latest?.body == null -> ""
                 latest.own -> "You: ${latest.body}"
                 else -> latest.body
-            }, style = MaterialTheme.typography.bodyMedium, color = if (unread) colors.textPrimary else colors.textSecondary,
+            }, style = MaterialTheme.typography.bodyLarge, color = if (unread) colors.textPrimary else colors.textBody,
                 minLines = 1, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** Slack's long-press sheet for a conversation: its name, then what can be done with it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConversationActions(room: RoomSummary, onStar: (Boolean) -> Unit, onDismiss: () -> Unit) {
+    val noun = if (room.direct) "conversation" else "channel"
+    ModalBottomSheet(onDismissRequest = onDismiss, shape = SlatrixTheme.topPanelShape, containerColor = SlatrixTheme.colors.overlay) {
+        Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
+            Text(room.name, Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
+                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable { onStar(!room.starred); onDismiss() }
+                .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (room.starred) Icons.Filled.Star else Icons.Outlined.StarOutline, null, Modifier.size(UiMetrics.Icon))
+                Text(if (room.starred) "Unstar $noun" else "Star $noun", style = MaterialTheme.typography.bodyLarge)
+            }
         }
     }
 }

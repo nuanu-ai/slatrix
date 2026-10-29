@@ -124,7 +124,16 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
 
     suspend fun close() { worker.cancelAndJoin() }
 
-    suspend fun setStarred(roomId: String, starred: Boolean): Boolean = false
+    /** Stars or unstars a conversation with Matrix's favourite tag, which the account's other clients show as starred too. */
+    suspend fun setStarred(roomId: String, starred: Boolean): Boolean = withContext(Dispatchers.Default) {
+        try {
+            client.getRoom(roomId)?.use { it.setIsFavourite(starred, null) } != null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     suspend fun notification(roomId: String, eventId: String): NotificationStatus? = withTimeoutOrNull(15_000) {
         val service = activeSync.filterNotNull().first()
@@ -236,6 +245,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             initials = AvatarPlaceholder.initials(name), colorIndex = AvatarPlaceholder.colorIndex(name),
             spaceIds = ancestors(info.id),
             latest = if (info.isDirect) followed[info.id]?.let { latest(it.room) } else null,
+            starred = info.isFavourite,
+            isPrivate = info.isPublic == false,
         )
         // An unchanged room keeps its instance, so its row skips recomposition.
         if (summaries[info.id] != summary) summaries[info.id] = summary

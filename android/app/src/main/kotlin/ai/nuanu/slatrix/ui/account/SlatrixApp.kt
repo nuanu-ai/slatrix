@@ -195,7 +195,8 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
     val open: (String) -> Unit = remember(rooms, workspace) {
         { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
     }
-    LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace, activity)
+    LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
+        onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false }, activity = activity)
 }
 
 /** Collects Activity here, so a new item recomposes only its tab. A thread reply opens its thread over Activity. */
