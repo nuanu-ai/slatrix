@@ -5,6 +5,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -27,6 +29,7 @@ import org.matrix.rustcomponents.sdk.LatestEventValue
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.NotificationProcessSetup
 import org.matrix.rustcomponents.sdk.NotificationStatus
+import org.matrix.rustcomponents.sdk.ReceiptType
 import org.matrix.rustcomponents.sdk.Membership
 import org.matrix.rustcomponents.sdk.Room
 import org.matrix.rustcomponents.sdk.RoomInfo
@@ -160,6 +163,31 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         } catch (_: Exception) {
             false
         }
+    }
+
+    /**
+     * Marks a conversation read, with receipts and the fully-read marker at its newest message, or unread, with Matrix's
+     * flag, which the account's other clients show too, as on the Mac.
+     */
+    suspend fun setUnread(roomId: String, unread: Boolean): Boolean = withContext(Dispatchers.Default) {
+        try {
+            client.getRoom(roomId)?.use { room ->
+                if (!unread) {
+                    room.markAsRead(ReceiptType.READ)
+                    room.markAsRead(ReceiptType.FULLY_READ)
+                }
+                room.setUnreadFlag(unread)
+            } != null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Marks these conversations read at once, and returns the ones that failed. */
+    suspend fun markAllRead(roomIds: List<String>): List<String> = coroutineScope {
+        roomIds.map { id -> async { id.takeUnless { setUnread(id, false) } } }.awaitAll().filterNotNull()
     }
 
     suspend fun notification(roomId: String, eventId: String): NotificationStatus? = withTimeoutOrNull(15_000) {
