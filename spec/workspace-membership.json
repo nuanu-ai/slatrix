@@ -1,0 +1,71 @@
+{
+  "cases": [
+    {
+      "name": "All conversations includes a channel from any workspace",
+      "direct": false,
+      "spaceIds": [
+        "!nuanu"
+      ],
+      "spaceId": null,
+      "included": true
+    },
+    {
+      "name": "All conversations includes a channel outside any workspace",
+      "direct": false,
+      "spaceIds": [],
+      "spaceId": null,
+      "included": true
+    },
+    {
+      "name": "A workspace includes its channel",
+      "direct": false,
+      "spaceIds": [
+        "!studio"
+      ],
+      "spaceId": "!studio",
+      "included": true
+    },
+    {
+      "name": "A workspace includes a channel in its nested space",
+      "direct": false,
+      "spaceIds": [
+        "!design",
+        "!studio"
+      ],
+      "spaceId": "!studio",
+      "included": true
+    },
+    {
+      "name": "A workspace excludes another workspace's channel",
+      "direct": false,
+      "spaceIds": [
+        "!nuanu"
+      ],
+      "spaceId": "!studio",
+      "included": false
+    },
+    {
+      "name": "A workspace excludes channels outside any workspace",
+      "direct": false,
+      "spaceIds": [],
+      "spaceId": "!studio",
+      "included": false
+    },
+    {
+      "name": "Direct messages appear in every workspace",
+      "direct": true,
+      "spaceIds": [
+        "!nuanu"
+      ],
+      "spaceId": "!studio",
+      "included": true
+    },
+    {
+      "name": "Direct messages without a workspace appear in every workspace",
+      "direct": true,
+      "spaceIds": [],
+      "spaceId": "!studio",
+      "included": true
+    }
+  ]
+}
