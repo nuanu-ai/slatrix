@@ -80,6 +80,18 @@ class LiveChannelScreenTest {
         compose.waitUntil("A page that showed nothing asks again while the top is near") { requests == 2 }
     }
 
+    @Test fun aFailedPageWaitsForRetryInsteadOfAskingAgain() {
+        var requests = 0
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message("Hello", minutes = 0)), loading = false,
+                    error = "Couldn’t load older messages."), ComposerState(loading = false), {}, {}, {}, { requests++ }, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("Couldn’t load older messages.").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, requests) }
+    }
+
     @Test fun theHistoryIndicatorSitsAboveTheOldestMessageAndCoversNone() {
         val many = (1..40).map { message("Message $it", minutes = it) }
         compose.setContent {
