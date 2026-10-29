@@ -5,6 +5,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
@@ -18,12 +19,14 @@ import kotlinx.coroutines.sync.Mutex
 import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.EventSendState
 import org.matrix.rustcomponents.sdk.FormattedBody
+import org.matrix.rustcomponents.sdk.Mentions
 import org.matrix.rustcomponents.sdk.MessageFormat
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.ProfileDetails
 import org.matrix.rustcomponents.sdk.Room
 import org.matrix.rustcomponents.sdk.TaskHandle
+import org.matrix.rustcomponents.sdk.TextMessageContent
 import org.matrix.rustcomponents.sdk.Timeline
 import org.matrix.rustcomponents.sdk.TimelineDiff
 import org.matrix.rustcomponents.sdk.TimelineItem
@@ -66,6 +69,7 @@ class MatrixConversation(scope: CoroutineScope, room: Room) {
     private val ready = CompletableDeferred<Timeline>()
     private val updates = Channel<List<TimelineDiff>>(Channel.UNLIMITED)
     private val pageLock = Mutex()
+    private val sendLock = Mutex()
     private val items = mutableListOf<ConversationMessage?>()
 
     init {
@@ -96,6 +100,7 @@ class MatrixConversation(scope: CoroutineScope, room: Room) {
                 ready.completeExceptionally(CancellationException())
                 listener?.let { runCatching { it.cancel() }; it.close() }
                 timeline?.close()
+                room.close()
                 updates.close()
             }
         }
@@ -123,7 +128,35 @@ class MatrixConversation(scope: CoroutineScope, room: Room) {
         }
     }
 
-    suspend fun send(message: ComposerMessage): Boolean = false
+    suspend fun send(message: ComposerMessage): Boolean {
+        if (!lifetime.isActive || message.body.isBlank()) return false
+        val task = operations.async {
+            if (!sendLock.tryLock()) return@async false
+            try {
+                mutableState.update { it.copy(sending = true, sendError = null) }
+                val timeline = ready.await()
+                val formatted = message.html?.let { FormattedBody(MessageFormat.Html, it) }
+                val content = checkNotNull(timeline.createMessageContent(MessageType.Text(TextMessageContent(message.body, formatted))))
+                content.use { raw ->
+                    raw.withMentions(Mentions(message.mentions, message.mentionsRoom)).use { outgoing ->
+                        timeline.send(outgoing).close()
+                    }
+                }
+                currentCoroutineContext().ensureActive()
+                true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                currentCoroutineContext().ensureActive()
+                mutableState.update { it.copy(sendError = "Couldn’t send your message. Try again.") }
+                false
+            } finally {
+                if (lifetime.isActive) mutableState.update { it.copy(sending = false) }
+                sendLock.unlock()
+            }
+        }
+        return try { task.await() } finally { task.cancel() }
+    }
 
     suspend fun markRead(eventId: String): Boolean = false
 
