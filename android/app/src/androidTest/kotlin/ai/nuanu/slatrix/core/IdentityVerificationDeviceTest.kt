@@ -150,6 +150,23 @@ class IdentityVerificationDeviceTest {
         }
     }
 
+    @Test fun retryRefreshesUnavailableVerificationMethods() = runBlocking<Unit> {
+        val encryption = IdentityEncryption(VerificationState.UNVERIFIED)
+        encryption.devicesAvailable = false
+        encryption.sdkRecovery = RecoveryState.DISABLED
+        val verification = IdentityVerification(scope, IdentityClient(encryption))
+        try {
+            val ready = withTimeout(5_000) { verification.state.first { it.phase == IdentityPhase.ChooseMethod } }
+            assertEquals(false, ready.hasOtherDevice)
+            assertEquals(false, ready.recoveryAvailable)
+            encryption.devicesAvailable = true
+            verification.retry()
+            withTimeout(5_000) { verification.state.first { it.hasOtherDevice == true } }
+        } finally {
+            verification.close()
+        }
+    }
+
 }
 
 private class IdentityClient(
@@ -164,6 +181,8 @@ private class IdentityClient(
 private class IdentityEncryption(var sdkState: VerificationState = VerificationState.UNKNOWN) : Encryption(NoHandle) {
     var observer: VerificationStateListener? = null
     var recoverAction: suspend (String) -> Unit = {}
+    var devicesAvailable = true
+    var sdkRecovery = RecoveryState.ENABLED
     var identityAction: suspend () -> UserIdentity? = { UserIdentity(NoHandle) }
     override suspend fun userIdentity(userId: String, fallbackToServer: Boolean): UserIdentity? = identityAction()
     override suspend fun waitForE2eeInitializationTasks() = Unit
@@ -172,9 +191,9 @@ private class IdentityEncryption(var sdkState: VerificationState = VerificationS
         observer = listener
         return IdentityTask()
     }
-    override fun recoveryState(): RecoveryState = RecoveryState.ENABLED
+    override fun recoveryState(): RecoveryState = sdkRecovery
     override fun recoveryStateListener(listener: RecoveryStateListener): TaskHandle = IdentityTask()
-    override suspend fun hasDevicesToVerifyAgainst(): Boolean = true
+    override suspend fun hasDevicesToVerifyAgainst(): Boolean = devicesAvailable
     override suspend fun recover(recoveryKey: String) { recoverAction(recoveryKey) }
 }
 
