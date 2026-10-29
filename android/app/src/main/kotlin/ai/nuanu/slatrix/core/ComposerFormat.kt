@@ -11,7 +11,7 @@ data class ComposerMessage(val body: String, val html: String?, val mentions: Li
 
 object ComposerFormat {
     private const val userPattern = "@[A-Za-z0-9._=/+\\-]+:(?:\\[[0-9A-Fa-f:]+\\]|[A-Za-z0-9](?:[A-Za-z0-9.\\-]*[A-Za-z0-9])?)(?::[0-9]{1,5})?"
-    private val userID = Regex("^$userPattern$")
+    internal val userID = Regex("^$userPattern$")
     internal val mentioned = Regex("(?<![A-Za-z0-9_])(?:$userPattern|@room(?![A-Za-z0-9_:]))")
 
     /** The composer's text as a draft, with each pill in [mentions] a link to its person. */

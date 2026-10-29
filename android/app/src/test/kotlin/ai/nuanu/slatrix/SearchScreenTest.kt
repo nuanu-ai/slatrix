@@ -13,6 +13,7 @@ import android.app.Application
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasSetTextAction
@@ -48,7 +49,7 @@ class SearchScreenTest {
         compose.setContent {
             SlatrixTheme {
                 LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
-                    search = { SearchScreen(rooms, "@alex:example.org", MessageSearchState(), {}, {}, {}, {}) })
+                    search = { SearchScreen(rooms, "@alex:example.org", MessageSearchState(), {}, {}, {}, onRoom = {}) })
             }
         }
         compose.onNode(hasText("Search") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
@@ -98,7 +99,7 @@ class SearchScreenTest {
         compose.setContent {
             SlatrixTheme {
                 SearchScreen(rooms, "@alex:example.org", MessageSearchState(MessageSearchQuery("budget"), listOf(elsewhere), endReached = false),
-                    {}, { more++ }, {}, {})
+                    {}, { more++ }, {}, onRoom = {})
             }
         }
         compose.onNode(hasSetTextAction()).performTextInput("budget")
@@ -109,11 +110,45 @@ class SearchScreenTest {
 
     @Test fun aSearchWithNoHitsSaysSo() {
         compose.setContent {
-            SlatrixTheme { SearchScreen(rooms, "@alex:example.org", MessageSearchState(MessageSearchQuery("zebra")), {}, {}, {}, {}) }
+            SlatrixTheme { SearchScreen(rooms, "@alex:example.org", MessageSearchState(MessageSearchQuery("zebra")), {}, {}, {}, onRoom = {}) }
         }
         compose.onNode(hasSetTextAction()).performTextInput("zebra")
         compose.onNode(hasSetTextAction()).performImeAction()
         compose.onNodeWithText("No results for “zebra”").assertIsDisplayed()
+    }
+
+    // capability: search.recent
+    @Test fun anEmptyFieldOffersRecentSearchesAndOneSearchesAgain() {
+        val asked = mutableListOf<MessageSearchQuery?>()
+        val searched = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                SearchScreen(rooms, "@alex:example.org", MessageSearchState(), { asked += it }, {}, {},
+                    listOf("budget in:#design", "launch"), { searched += it }) {}
+            }
+        }
+        compose.onNodeWithText("Recent searches").assertIsDisplayed()
+        compose.onNodeWithText("budget in:#design").performClick()
+
+        compose.runOnIdle {
+            assertEquals(MessageSearchQuery("budget", roomId = "!design:example.org"), asked.last())
+            assertEquals(listOf("budget in:#design"), searched)
+        }
+        compose.onNode(hasSetTextAction()).assert(hasText("budget in:#design"))
+    }
+
+    // capability: search.recent
+    @Test fun aSearchIsRememberedAndTypingOffersTheRecentOnesThatMatch() {
+        val searched = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme { SearchScreen(rooms, "@alex:example.org", MessageSearchState(), {}, {}, {}, listOf("launch plan", "budget"), { searched += it }) {} }
+        }
+        compose.onNode(hasSetTextAction()).performTextInput("lau")
+        compose.onNodeWithText("launch plan").assertIsDisplayed()
+        compose.onNodeWithText("budget").assertDoesNotExist()
+
+        compose.onNode(hasSetTextAction()).performImeAction()
+        compose.runOnIdle { assertEquals(listOf("lau"), searched) }
     }
 
     private fun top(text: String) = compose.onNodeWithText(text).fetchSemanticsNode().boundsInRoot.top

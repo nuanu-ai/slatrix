@@ -74,7 +74,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Asked, with the oldest message on screen, once the reader reaches the newest of a conversation opened at an older one. */
     onLoadNewer: (anchor: String?) -> Unit = {},
     /** Opens a message where it is, highlighted, as a tap on a reply's quote does. */
-    onOpenMessage: (eventId: String) -> Unit = {}) {
+    onOpenMessage: (eventId: String) -> Unit = {},
+    /** Opens the conversation's details, as a tap on Slack's header pill does. */
+    onOpenDetails: () -> Unit = {}) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -166,7 +168,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 Text("Thread", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = colors.textPrimary)
                 Text(if (room.direct) room.name else "#${room.name}", style = MaterialTheme.typography.bodyMedium,
                     color = colors.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            } else Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.extraLarge, color = colors.raised, contentColor = colors.textPrimary) {
+            } else Surface(onOpenDetails, Modifier.weight(1f), shape = MaterialTheme.shapes.extraLarge, color = colors.raised, contentColor = colors.textPrimary) {
                 Row(Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapTiny),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                     if (!room.direct) Icon(Icons.Outlined.Tag, null, Modifier.size(UiMetrics.Icon))
