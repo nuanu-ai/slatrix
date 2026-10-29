@@ -57,6 +57,7 @@ fun ConnectedAccountScreen(
         when {
             recovery && identity.phase in listOf(IdentityPhase.ChooseMethod, IdentityPhase.Failed, IdentityPhase.Recovering) -> {
                 OutlinedTextField(key, { key = it }, label = { Text("Recovery key") },
+                    singleLine = true,
                     visualTransformation = PasswordVisualTransformation(), enabled = identity.phase != IdentityPhase.Recovering,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { if (key.isNotBlank()) onRecover(key) }), modifier = Modifier.fillMaxWidth())

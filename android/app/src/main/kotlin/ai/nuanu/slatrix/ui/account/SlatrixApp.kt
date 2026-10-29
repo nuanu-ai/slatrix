@@ -43,8 +43,9 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     val state by account.state.collectAsState()
     val context = LocalContext.current
     val appearance = remember(context) { AppearancePreferences(context) }
-    val dark = appearance.darkMode ?: isSystemInDarkTheme()
-    val palette = SidebarPalette.entries.firstOrNull { it.name == appearance.paletteName } ?: SidebarPalette.Aubergine
+    var darkOverride by rememberSaveable { mutableStateOf(appearance.darkMode) }
+    val dark = darkOverride ?: isSystemInDarkTheme()
+    var palette by rememberSaveable { mutableStateOf(SidebarPalette.entries.firstOrNull { it.name == appearance.paletteName } ?: SidebarPalette.Aubergine) }
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
     BackHandler(enabled = state is AccountState.Connecting || state is AccountState.ChooseMethod || state is AccountState.BrowserSignIn) { account.cancel() }
@@ -68,13 +69,9 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {
                         when {
-                            you -> {
-                                BackHandler { you = false }
-                                AccountLayout("You", null) {
-                                    Text((state as AccountState.Connected).userId)
-                                    TextButton(onClick = { you = false }) { Text("Back") }
-                                }
-                            }
+                            you -> LiveProfileScreen((state as AccountState.Connected).userId, dark, darkOverride, palette,
+                                { darkOverride = it; appearance.darkMode = it },
+                                { palette = it; appearance.paletteName = it.name }, { you = false })
                             selected != null -> key(selected.room.id) {
                                 val conversation = selected.conversation
                                 val composer = selected.composer
@@ -83,7 +80,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 val scope = androidx.compose.runtime.rememberCoroutineScope()
                                 LiveChannelScreen(selected.room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
                                     { workspace?.back() }, { conversation?.loadOlder() },
-                                    { event -> scope.launch { conversation?.markRead(event) } })
+                                    { event -> scope.launch { conversation?.markRead(event) } },
+                                    { if (draft.error != null) composer?.retry() else workspace?.open(selected.room) })
                             }
                             else -> LiveHomeScreen((state as AccountState.Connected).userId, roomState,
                                 { id -> roomState.rooms.firstOrNull { it.id == id }?.let { workspace?.open(it) } },

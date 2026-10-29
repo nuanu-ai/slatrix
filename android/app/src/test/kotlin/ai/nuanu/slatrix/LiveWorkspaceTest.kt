@@ -16,10 +16,15 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.runtime.CompositionLocalProvider
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -51,7 +56,7 @@ class LiveWorkspaceTest {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(loading = false), draft.value,
                     { draft.value = draft.value.copy(text = it) },
-                    { submitted = draft.value.text; draft.value = draft.value.copy(sending = true) }, {}, {}, {})
+                    { submitted = draft.value.text; draft.value = draft.value.copy(sending = true) }, {}, {}, {}, {})
             }
         }
         compose.onNodeWithContentDescription("Send message").performClick()
@@ -65,19 +70,24 @@ class LiveWorkspaceTest {
         fun message(id: String) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", id, null,
             0, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
         val timeline = mutableStateOf(ConversationState(listOf(message("First")), loading = false, hasMore = false))
+        val owner = object : LifecycleOwner { override val lifecycle = LifecycleRegistry(this) }
+        compose.runOnUiThread { owner.lifecycle.currentState = Lifecycle.State.RESUMED }
         var read: String? = null
         compose.setContent {
-            SlatrixTheme {
-                LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, {}, {}, { read = it })
-            }
+            SlatrixTheme { CompositionLocalProvider(LocalLifecycleOwner provides owner) {
+                LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, {}, {}, { read = it }, {})
+            } }
         }
         compose.onNodeWithText("First").assertExists()
         compose.waitUntil { read == "\$First" }
-        compose.activityRule.scenario.moveToState(Lifecycle.State.STARTED)
-        compose.runOnIdle { timeline.value = timeline.value.copy(messages = timeline.value.messages + message("Next")) }
-        compose.onNodeWithText("Next").assertExists()
+        compose.runOnIdle {
+            owner.lifecycle.currentState = Lifecycle.State.STARTED
+            timeline.value = timeline.value.copy(messages = timeline.value.messages + message("Next"))
+        }
+        compose.onNodeWithText("Next").assertIsDisplayed()
         compose.runOnIdle { assertEquals("\$First", read) }
-        compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+        compose.runOnIdle { owner.lifecycle.currentState = Lifecycle.State.RESUMED }
+        compose.waitForIdle()
         compose.waitUntil { read == "\$Next" }
     }
 }

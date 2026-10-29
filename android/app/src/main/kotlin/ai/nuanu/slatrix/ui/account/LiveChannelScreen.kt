@@ -29,14 +29,48 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.flow.distinctUntilChanged
 import java.text.DateFormat
 import java.util.Date
 
 @Composable
 fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: ComposerState,
-    onDraft: (String) -> Unit, onSend: () -> Unit, onBack: () -> Unit, onLoadOlder: () -> Unit, onRead: (String) -> Unit) {
+    onDraft: (String) -> Unit, onSend: () -> Unit, onBack: () -> Unit, onLoadOlder: () -> Unit, onRead: (String) -> Unit,
+    onRetry: () -> Unit) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var resumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, _ -> resumed = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    val latest = state.messages.lastOrNull { it.eventId != null }
+    val read by rememberUpdatedState(onRead)
+    LaunchedEffect(latest?.id, latest?.eventId, resumed) {
+        val event = latest?.eventId ?: return@LaunchedEffect
+        if (!resumed) return@LaunchedEffect
+        snapshotFlow {
+            list.layoutInfo.visibleItemsInfo.any { item ->
+                item.key == latest.id && item.offset + item.size <= list.layoutInfo.viewportEndOffset &&
+                    item.offset + item.size > list.layoutInfo.viewportStartOffset
+            }
+        }.distinctUntilChanged().collect { visible -> if (visible) read(event) }
+    }
+    val newest = state.messages.lastOrNull()
+    var following by remember { mutableStateOf(true) }
+    LaunchedEffect(list) {
+        snapshotFlow { list.isScrollInProgress }.collect { scrolling ->
+            following = !scrolling && list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset == 0
+        }
+    }
+    LaunchedEffect(newest?.id) {
+        if (following || newest?.own == true && newest.sendState == MessageSendState.Sending) list.scrollToItem(0)
+    }
     BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize().background(colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(end = UiMetrics.GapLarge,
@@ -68,7 +102,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             }
             if (state.loading || state.loadingHistory) Box(Modifier.align(Alignment.TopCenter)) { ConnectionIndicator(true, null) }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
-                Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(message) }
+                Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
+                    action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
             }
         }
         val description = if (room.direct) "Message ${room.name}" else "Message #${room.name}"
