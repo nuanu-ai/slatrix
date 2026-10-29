@@ -1,0 +1,85 @@
+{
+  "about": "Which workspaces the switcher offers and which one opens. Workspaces are joined spaces; a top-level one is a child of no joined space. entries lists the top-level workspaces in name order, then All (null) only while some joined channel belongs to no workspace; direct messages and invitations never count. choose opens the remembered workspace while it is still known (any joined space, nested ones too), or All while the switcher offers it; else the workspace of the conversation on screen; else the top-level workspace with the most joined channels, the first by name on a tie, so a first launch lands where the person works. \"__all__\" is how a remembered choice of All is stored.",
+  "workspaces": [
+    { "id": "!alpha", "name": "Alpha" },
+    { "id": "!lab", "name": "Harbor" },
+    { "id": "!test", "name": "Test space" },
+    { "id": "!nested", "name": "Design", "topLevel": false }
+  ],
+  "entries": [
+    {
+      "name": "Top-level workspaces in name order, without All when every channel has a workspace",
+      "workspaces": ["!nested", "!lab", "!test"],
+      "rooms": [
+        { "id": "a", "spaces": ["!lab"] },
+        { "id": "dm", "direct": true },
+        { "id": "invited", "membership": "invite" }
+      ],
+      "expected": ["!lab", "!test"]
+    },
+    {
+      "name": "All comes last while a channel belongs to no workspace",
+      "workspaces": ["!nested", "!lab", "!test"],
+      "rooms": [
+        { "id": "a", "spaces": ["!lab"] },
+        { "id": "dm", "direct": true },
+        { "id": "invited", "membership": "invite" },
+        { "id": "orphan" }
+      ],
+      "expected": ["!lab", "!test", null]
+    }
+  ],
+  "choose": [
+    {
+      "name": "A first launch opens the workspace with the most channels, not the first by name",
+      "remembered": null, "workspaces": ["!alpha", "!lab", "!test"], "busy": true, "expected": "!lab"
+    },
+    { "name": "The remembered workspace opens", "remembered": "!test", "workspaces": ["!alpha", "!lab", "!test"], "busy": true, "expected": "!test" },
+    {
+      "name": "A remembered nested space opens, as one opened from a link",
+      "remembered": "!nested", "workspaces": ["!alpha", "!lab", "!nested"], "busy": true, "expected": "!nested"
+    },
+    { "name": "A workspace left since falls back to the busiest", "remembered": "!gone", "workspaces": ["!alpha", "!lab", "!test"], "busy": true, "expected": "!lab" },
+    {
+      "name": "Remembered All opens while a channel belongs to no workspace",
+      "remembered": "__all__", "workspaces": ["!alpha", "!lab", "!test"], "busy": true, "extraRooms": [{ "id": "orphan" }], "expected": null
+    },
+    { "name": "Remembered All falls back once it leaves the switcher", "remembered": "__all__", "workspaces": ["!alpha", "!lab", "!test"], "busy": true, "expected": "!lab" },
+    {
+      "name": "A tie goes to the first by name",
+      "remembered": null, "workspaces": ["!alpha", "!test"],
+      "rooms": [{ "id": "a", "spaces": ["!test"] }, { "id": "b", "spaces": ["!alpha"] }], "expected": "!alpha"
+    },
+    {
+      "name": "Channels in a nested space don't make it the choice",
+      "remembered": null, "workspaces": ["!alpha", "!nested"],
+      "rooms": [{ "id": "a", "spaces": ["!nested"] }, { "id": "b", "spaces": ["!nested"] }], "expected": "!alpha"
+    },
+    { "name": "With no workspaces, All", "remembered": null, "workspaces": [], "rooms": [{ "id": "orphan" }], "expected": null },
+    {
+      "name": "When remembered All is gone, the workspace of the conversation on screen wins over the busiest",
+      "remembered": "__all__", "workspaces": ["!alpha", "!lab", "!test"], "busy": true, "extraRooms": [{ "id": "joined", "spaces": ["!test"] }],
+      "showing": "joined", "expected": "!test"
+    },
+    {
+      "name": "When the remembered workspace is gone, the conversation on screen wins over the busiest",
+      "remembered": "!gone", "workspaces": ["!alpha", "!lab", "!test"], "busy": true, "extraRooms": [{ "id": "joined", "spaces": ["!test"] }],
+      "showing": "joined", "expected": "!test"
+    },
+    {
+      "name": "The remembered workspace wins over the conversation on screen",
+      "remembered": "!lab", "workspaces": ["!alpha", "!lab", "!test"], "busy": true, "extraRooms": [{ "id": "joined", "spaces": ["!test"] }],
+      "showing": "joined", "expected": "!lab"
+    }
+  ],
+  "busyRooms": [
+    { "id": "a", "spaces": ["!lab"] },
+    { "id": "b", "spaces": ["!lab"] },
+    { "id": "c", "spaces": ["!test"] },
+    { "id": "d", "spaces": ["!alpha"] },
+    { "id": "dm1", "spaces": ["!alpha"], "direct": true },
+    { "id": "dm2", "spaces": ["!alpha"], "direct": true },
+    { "id": "i1", "spaces": ["!alpha"], "membership": "invite" },
+    { "id": "i2", "spaces": ["!alpha"], "membership": "invite" }
+  ]
+}
