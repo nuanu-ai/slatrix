@@ -9,11 +9,26 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.matrix.rustcomponents.sdk.*
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Robolectric
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35])
 class PushRegistrationTest {
+    @Test fun firebaseTokenRotationReplacesTheRegisteredPusher() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val server = PusherClient()
+        val registration = PushRegistration(context)
+        registration.updateToken("previous-token")
+        registration.register(server, "@alex:example.org", "https://push.example.org/_matrix/push/v1/notify")
+        val service = Robolectric.buildService(PushMessagingService::class.java).create().get()
+
+        service.onNewToken("firebase-refreshed-token")
+        PushRegistration(context).register(server, "@alex:example.org", "https://push.example.org/_matrix/push/v1/notify")
+
+        assertEquals(setOf("firebase-refreshed-token"), server.pushers.keys)
+    }
+
     @Test fun rotatingTheTokenPreservesDeliveryUntilReplacementAndResumesCleanupAfterReopening() = runTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val registration = PushRegistration(context)
