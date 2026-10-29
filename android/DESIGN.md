@@ -89,9 +89,9 @@ Canvas holds conversations. Raised surfaces distinguish headers, overlay surface
 
 ## Typography
 
-Use the native Material 3 type ramp supplied by `SlatrixTheme`. Account headings use `headlineMedium`; workspace headings use `headlineSmall`; profile names use `titleLarge`; conversation headers and section labels use `titleSmall`, which the theme maps to `titleMedium`. These titles are bold where the screen requests it. Message bodies and list labels use `bodyLarge`, supporting details use `bodyMedium`, and timestamps use `bodySmall`. Avatar initials use the bold `labelLarge` role.
+Use the Material 3 type ramp supplied by `SlatrixTheme`, set in Lato (Slack's typeface, bundled under the SIL Open Font License) with no added tracking. Account headings use `headlineMedium`; workspace headings use `headlineSmall`; profile names use `titleLarge`; conversation headers and section labels use `titleSmall`, which the theme maps to `titleMedium`. These titles are bold where the screen requests it. Message bodies and list labels use `bodyLarge`, supporting details use `bodyMedium`, and timestamps use `bodySmall`. Avatar initials use the bold `labelLarge` role.
 
-**The Scaled Type Rule.** Use theme type roles and allow Android system font scaling. Do not replace them with fixed text sizes. The app inherits Material's font metrics; it has no separate display face.
+**The Scaled Type Rule.** Use theme type roles and allow Android system font scaling. Do not replace them with fixed text sizes. Lato ships in regular, italic, bold, bold italic and black.
 
 ## Layout
 
