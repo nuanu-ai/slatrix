@@ -163,11 +163,11 @@ internal fun box(width: Int?, height: Int?, maxWidth: Dp, maxHeight: Dp): Pair<D
 
 /** An attachment under its message: an image or video inline, anything else as Slack's file row. A long press opens the message's sheet. */
 @Composable
-internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, loadFile: FileLoader, opening: Boolean,
+internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, videos: VideoPlayback, opening: Boolean,
     onOpenFile: () -> Unit, onLongPress: () -> Unit, onView: (ImageBitmap?) -> Unit) {
     when (attachment.kind) {
         MessageAttachment.Kind.Image -> InlineImage(attachment, load, onLongPress, onView)
-        MessageAttachment.Kind.Video -> InlineVideo(attachment, load, loadFile, onLongPress)
+        MessageAttachment.Kind.Video -> InlineVideo(attachment, load, videos, onLongPress)
         else -> FileRow(attachment, opening, onLongPress, onOpenFile)
     }
 }
@@ -182,7 +182,7 @@ private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onLo
         val shown = picture(attachment, pixels.first, pixels.second, false, load)
         Box(Modifier.size(width, height).clip(shape).background(colors.sunken).border(UiMetrics.Divider, colors.border, shape)
             .semantics { contentDescription = attachment.name }
-            .combinedClickable(onClickLabel = "View image", onLongClick = onLongPress) { onView(shown) }) {
+            .combinedClickable(onClickLabel = "View image", onLongClickLabel = "Message actions", onLongClick = onLongPress) { onView(shown) }) {
             shown?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
         }
     }
@@ -199,7 +199,8 @@ private fun FileRow(attachment: MessageAttachment, opening: Boolean, onLongPress
     }
     val shape = MaterialTheme.shapes.large
     Row(Modifier.padding(top = UiMetrics.GapTiny).fillMaxWidth().clip(shape).border(UiMetrics.Divider, colors.border, shape)
-        .combinedClickable(enabled = !opening, onClickLabel = "Open file", onLongClick = onLongPress, onClick = onOpen).padding(UiMetrics.GapMedium),
+        .combinedClickable(onClickLabel = "Open file", onLongClickLabel = "Message actions", onLongClick = onLongPress) { if (!opening) onOpen() }
+        .padding(UiMetrics.GapMedium),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
         FileTile(kind)
         Column(Modifier.weight(1f)) {

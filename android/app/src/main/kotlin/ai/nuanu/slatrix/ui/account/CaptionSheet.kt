@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.ConversationMessage
+import ai.nuanu.slatrix.core.caption
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.layout.Arrangement
@@ -24,9 +25,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-
-/** The caption of a file or picture, without its name, which a captionless one carries as its text. */
-internal val ConversationMessage.caption: String? get() = body.takeIf { attachment != null && it != attachment.name }
 
 /** Edits your media's caption, as the Mac's caption editor does; saving it empty removes it. */
 @OptIn(ExperimentalMaterial3Api::class)

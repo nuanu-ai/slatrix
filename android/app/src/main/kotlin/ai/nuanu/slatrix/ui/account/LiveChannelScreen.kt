@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
+import ai.nuanu.slatrix.core.caption
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageAttachment
@@ -87,6 +88,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     typing: List<String> = emptyList()) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
+    val videos = rememberVideoPlayback(loadFile)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var resumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     DisposableEffect(lifecycle) {
@@ -252,14 +254,14 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val first = line != null && row.eventId == line
                             if (first) NewLine()
                             if (threadRoot != null && row.eventId == threadRoot) Column {
-                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, loadFile, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
+                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
                                 // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                                 RepliesBar(replies)
                             // The first reply starts under the replies bar, and the first unread under the New line, so
                             // each shows its sender again.
                             } else LiveMessageRow(if (row.id == firstReply || first) row.copy(grouped = false) else row, state.ownUserId,
                                 actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
-                                loadPicture, loadFile, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
+                                loadPicture, videos, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
                         }
                     }
                 }
@@ -385,7 +387,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
 @Composable
 private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
-    loadPicture: PictureLoader, loadFile: FileLoader, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (MessageAttachment, ImageBitmap?) -> Unit,
+    loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (MessageAttachment, ImageBitmap?) -> Unit,
     onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
@@ -417,10 +419,10 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
                 Column {
                     val attachment = message.attachment
                     // An attachment's text is its caption; without one it is the file's name, which the attachment shows.
-                    if (attachment == null || message.body != attachment.name) {
+                    if (attachment == null || message.caption != null) {
                         MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me)
                     }
-                    attachment?.let { Attachment(it, loadPicture, loadFile, opening, { onOpenFile(message) }, { onMenu(message) }) { shown -> onView(it, shown) } }
+                    attachment?.let { Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, { onMenu(message) }) { shown -> onView(it, shown) } }
                 }
                 // In the row's bottom padding, so the bar comes and goes without moving anything.
                 message.uploadProgress?.let {

@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.core.MatrixComposer
 import ai.nuanu.slatrix.core.EmojiRecents
 import ai.nuanu.slatrix.core.MatrixConversation
 import ai.nuanu.slatrix.core.MatrixWorkspace
+import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
@@ -180,7 +181,9 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
                     colors.textPrimary) { pin(message, !pinned); onDismiss() }
             }
             val edit = actions.onEdit?.takeIf { message.editable }
-            val caption = eventId != null && message.own && message.attachment != null && actions.onEditCaption != null
+            // As on the Mac, an image's or a file's.
+            val caption = eventId != null && message.own && actions.onEditCaption != null &&
+                message.attachment?.kind in setOf(MessageAttachment.Kind.Image, MessageAttachment.Kind.File)
             val delete = eventId != null && message.own && actions.onDelete != null
             if (eventId != null && (edit != null || caption || delete)) {
                 HorizontalDivider(Modifier.padding(vertical = UiMetrics.GapSmall), color = colors.border)
