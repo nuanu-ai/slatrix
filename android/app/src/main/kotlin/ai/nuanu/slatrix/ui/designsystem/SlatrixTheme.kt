@@ -5,6 +5,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
@@ -133,7 +134,7 @@ fun SlatrixTheme(
             extraLarge = RoundedCornerShape(DesignTokens.radii.getValue("panel").dp),
         )
     }
-    CompositionLocalProvider(LocalColors provides colors) {
+    CompositionLocalProvider(LocalColors provides colors, LocalContentColor provides colors.textPrimary) {
         MaterialTheme(colorScheme = scheme, typography = Typography().let { it.copy(titleSmall = it.titleMedium) }, shapes = shapes, content = content)
     }
 }

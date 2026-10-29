@@ -115,9 +115,10 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                 }
                 if (!expanded) {
                     NavigationBar(containerColor = colors.canvas) {
-                        NavigationBarItem(selected = !directOnly, onClick = { directOnly = false }, icon = { Icon(Icons.Outlined.Home, null) }, label = { Text("Home") })
-                        NavigationBarItem(selected = directOnly, onClick = { directOnly = true }, icon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) }, label = { Text("DMs") })
-                        NavigationBarItem(selected = false, onClick = onYou, icon = { Icon(Icons.Outlined.PersonOutline, null) }, label = { Text("You") })
+                        val navigationColors = NavigationBarItemDefaults.colors(selectedTextColor = colors.textPrimary)
+                        NavigationBarItem(selected = !directOnly, onClick = { directOnly = false }, icon = { Icon(Icons.Outlined.Home, null) }, label = { Text("Home") }, colors = navigationColors)
+                        NavigationBarItem(selected = directOnly, onClick = { directOnly = true }, icon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) }, label = { Text("DMs") }, colors = navigationColors)
+                        NavigationBarItem(selected = false, onClick = onYou, icon = { Icon(Icons.Outlined.PersonOutline, null) }, label = { Text("You") }, colors = navigationColors)
                     }
                 }
             }
