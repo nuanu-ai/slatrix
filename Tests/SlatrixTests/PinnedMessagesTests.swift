@@ -180,7 +180,7 @@ struct PinnedMessagesTests {
     }
 
     // capability: conversation.pins
-    @Test("Pins show the latest pin first with edits and deletions applied, skipping other events and duplicates")
+    @Test("Pins show with edits and deletions applied, skipping other events and duplicates")
     func opensPins() async throws {
         await open()
         #expect(service.messages.map(\.id) == ["$later", "$earlier"])

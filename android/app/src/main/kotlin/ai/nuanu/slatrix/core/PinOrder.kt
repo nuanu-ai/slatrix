@@ -12,7 +12,8 @@ object PinOrder {
     fun <T> arrange(pinned: List<String>, items: List<T>, id: (T) -> String?): List<T> {
         val place = HashMap<String, Int>()
         pinned.forEachIndexed { index, event -> place[event] = index }
-        return items.filter { id(it) in place }.distinctBy(id).sortedByDescending { place.getValue(id(it)!!) }
+        return items.mapNotNull { item -> id(item)?.let { event -> place[event]?.let { Triple(event, it, item) } } }
+            .distinctBy { it.first }.sortedByDescending { it.second }.map { it.third }
     }
 
     /** What a room past the SDK's limit says under its pins. */

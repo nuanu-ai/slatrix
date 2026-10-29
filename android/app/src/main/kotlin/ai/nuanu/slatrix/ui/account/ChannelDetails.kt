@@ -230,9 +230,9 @@ private fun NotificationsPage(loaded: Result<NotificationSetting>?, actions: Cha
                     }
                 }
             }
-            error?.let { ErrorLine(it) }
+            error?.let { NoteLine(it) }
             loaded?.exceptionOrNull()?.let { failure ->
-                ErrorLine(failure.message.orEmpty())
+                NoteLine(failure.message.orEmpty())
                 TextButton(onClick = onRetry, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
             }
         }
@@ -279,7 +279,7 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
                         if (member.id == me) Text("(you)", style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
                     }
                 }
-                if (shown.isEmpty()) item { ErrorLine("No matches", colors.textSecondary) }
+                if (shown.isEmpty()) item { NoteLine("No matches", colors.textSecondary) }
             }
             members?.isFailure == true -> item {
                 Column(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -326,10 +326,10 @@ private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpe
             messages.isNotEmpty() -> Unit
             pins.state.loading && room.pinned.isNotEmpty() -> item { DelayedProgress() }
             else -> item {
-                ErrorLine(pins.state.error ?: if (room.pinned.isEmpty()) "No pinned messages" else "Couldn’t load pins", colors.textSecondary)
+                NoteLine(pins.state.error ?: if (room.pinned.isEmpty()) "No pinned messages" else "Couldn’t load pins", colors.textSecondary)
             }
         }
-        PinOrder.note(room.pinned.size)?.let { item { ErrorLine(it, colors.textSecondary) } }
+        PinOrder.note(room.pinned.distinct().size)?.let { item { NoteLine(it, colors.textSecondary) } }
     }
 }
 
@@ -374,11 +374,11 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
         when {
             state.loading -> item { DelayedProgress() }
             state.error != null -> item {
-                ErrorLine(state.error, colors.textSecondary)
+                NoteLine(state.error, colors.textSecondary)
                 TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
             }
             else -> {
-                if (shared.isEmpty() && !state.loadingHistory) item { ErrorLine("Nothing shared yet", colors.textSecondary) }
+                if (shared.isEmpty() && !state.loadingHistory) item { NoteLine("Nothing shared yet", colors.textSecondary) }
                 // Older history is asked for, as on the Mac, rather than paged through on its own in a long conversation. The
                 // button stays while a page loads, so the end of the list doesn't move.
                 if (state.hasMore) item {
@@ -430,7 +430,7 @@ private fun WorkspacesPage(room: RoomSummary, spaces: List<SpaceSummary>, action
                 }) { Text(if (direct) "Remove" else "Add") }
             }
         }
-        error?.let { item { ErrorLine(it) } }
+        error?.let { item { NoteLine(it) } }
     }
 }
 
@@ -493,7 +493,7 @@ private fun AddPeoplePage(actions: ChannelDetailsActions, scope: CoroutineScope,
 }
 
 @Composable
-private fun ErrorLine(message: String, color: Color = SlatrixTheme.colors.destructive) {
+private fun NoteLine(message: String, color: Color = SlatrixTheme.colors.destructive) {
     Text(message, Modifier.fillMaxWidth().padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyMedium, color = color)
 }
 

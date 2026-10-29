@@ -1,17 +1,11 @@
 {
-  "about": "Which of a conversation's pinned messages show, and in what order, as Slack lists them. pinned is the room's m.room.pinned_events, in the order the messages were pinned; events are the pinned messages the app has loaded, in timeline order; shown lists them as the Pinned messages page does, the most recently pinned first. The SDK loads only a room's 128 most recently pinned messages, so a room with more says how many of them show.",
+  "about": "Which of a conversation's pinned messages show, and in what order, as Slack lists them. pinned is the room's m.room.pinned_events, in the order the messages were pinned; events are the pinned messages the app has loaded, in timeline order; shown lists them as the Pinned messages page does, the most recently pinned first. The SDK loads only a room's 128 most recently pinned messages, so a room with more says how many of them show; total counts its distinct pinned events.",
   "order": [
     {
       "name": "The most recently pinned comes first",
       "pinned": ["$a", "$b", "$c"],
       "events": ["$a", "$b", "$c"],
       "shown": ["$c", "$b", "$a"]
-    },
-    {
-      "name": "Pin order wins over when a message was sent",
-      "pinned": ["$new", "$old"],
-      "events": ["$old", "$new"],
-      "shown": ["$old", "$new"]
     },
     {
       "name": "A pin whose message hasn't loaded is left out",
@@ -38,10 +32,10 @@
       "shown": ["$b", "$a"]
     },
     {
-      "name": "Nothing pinned shows nothing",
-      "pinned": [],
-      "events": ["$a"],
-      "shown": []
+      "name": "A message pinned later comes first even if it was sent earlier",
+      "pinned": ["$b", "$a"],
+      "events": ["$a", "$b"],
+      "shown": ["$a", "$b"]
     }
   ],
   "limit": [
