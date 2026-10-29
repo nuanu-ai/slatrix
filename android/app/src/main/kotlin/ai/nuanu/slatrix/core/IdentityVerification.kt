@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.ClientException
 import org.matrix.rustcomponents.sdk.RecoveryState
 import org.matrix.rustcomponents.sdk.RecoveryStateListener
 import org.matrix.rustcomponents.sdk.SessionVerificationController
@@ -186,6 +187,7 @@ class IdentityVerification(private val scope: CoroutineScope, private val client
         flow++
         val pending = flowScope.coroutineContext[Job]!!
         val activeController = controller.takeIf { acceptedByUser || incoming != null || needsCancellation }
+        val request = incoming
         controller?.setDelegate(null)
         verificationHandle?.cancel()
         recoveryHandle?.cancel()
@@ -193,7 +195,7 @@ class IdentityVerification(private val scope: CoroutineScope, private val client
         if (activeController != null) {
             scope.launch(NonCancellable) {
                 pending.join()
-                sdk.withLock { try { activeController.cancelVerification() } catch (_: Exception) { } }
+                sdk.withLock { try { cancelController(activeController, request) } catch (_: Exception) { } }
             }
         }
     }
@@ -245,6 +247,7 @@ class IdentityVerification(private val scope: CoroutineScope, private val client
         val pending = flowScope.coroutineContext[Job]!!
         pending.cancel()
         val oldController = controller
+        val request = incoming
         oldController?.setDelegate(null)
         needsCancellation = acceptedByUser || incoming != null || needsCancellation
         acceptedByUser = false
@@ -256,7 +259,7 @@ class IdentityVerification(private val scope: CoroutineScope, private val client
         serviceScope.launch {
             pending.join()
             try {
-                if (needsCancellation) sdk.withLock { oldController?.cancelVerification() }
+                if (needsCancellation && oldController != null) sdk.withLock { cancelController(oldController, request) }
                 if (closed || flow != token) return@launch
                 needsCancellation = false
                 flowScope = CoroutineScope(serviceScope.coroutineContext + SupervisorJob(serviceScope.coroutineContext[Job]))
@@ -269,6 +272,23 @@ class IdentityVerification(private val scope: CoroutineScope, private val client
                     mutableState.update { it.copy(phase = IdentityPhase.Failed, error = "Couldn’t stop verification. Try again.") }
                 }
             }
+        }
+    }
+
+    private suspend fun cancelController(controller: SessionVerificationController, request: SessionVerificationRequestDetails?) {
+        if (request != null) {
+            try {
+                controller.acknowledgeVerificationRequest(request.senderProfile.userId, request.flowId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // The incoming request may have expired or already been acknowledged.
+            }
+        }
+        try {
+            controller.cancelVerification()
+        } catch (error: ClientException.Generic) {
+            if (!error.msg.contains("verification request missing", ignoreCase = true)) throw error
         }
     }
 
