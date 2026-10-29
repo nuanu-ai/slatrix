@@ -755,7 +755,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val latest = summary.latestEvent() as? EmbeddedEventDetails.Ready
                 MessageThread(summary.numReplies().coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
                     latest?.let { name(it.senderProfile, it.sender) },
-                    latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong())
+                    latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong(),
+                    (latest?.senderProfile as? ProfileDetails.Ready)?.avatarUrl)
             }?.takeIf { it.replies > 0 },
             replyTo = content.inReplyTo?.let(::replyPreview),
             avatarUrl = (event.senderProfile as? ProfileDetails.Ready)?.avatarUrl,
