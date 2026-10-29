@@ -8,6 +8,8 @@ import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.MatrixChannel
+import ai.nuanu.slatrix.core.MatrixForward
+import org.matrix.rustcomponents.sdk.MessageType
 import ai.nuanu.slatrix.core.MatrixConversation
 import org.matrix.rustcomponents.sdk.Client
 import ai.nuanu.slatrix.core.ConversationView
@@ -69,6 +71,7 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -164,9 +167,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {
                         LiveWorkspace(when {
-                            preferences -> { { LivePreferencesScreen(dark, darkOverride, palette,
+                            preferences -> { val client = (state as AccountState.Connected).client; { LivePreferencesScreen(dark, darkOverride, palette,
                                 { darkOverride = it; appearance.darkMode = it },
-                                { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
+                                { palette = it; appearance.paletteName = it.name }, { preferences = false }) {
+                                    LiveNotificationSettings(userId) { client.getNotificationSettings() }
+                                } } }
                             person != null -> { { person?.let { (id, name) ->
                                 LivePersonProfile(id, name, userId, people, rooms?.state, { room ->
                                     person = null
@@ -256,6 +261,10 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         if (open.room.direct) value = people?.counterpart(open.room.id)
     }
     val profile = { id: String -> onPerson(id, timeline.rows.firstNotNullOfOrNull { (it as? ConversationMessage)?.takeIf { row -> row.senderId == id }?.senderName }) }
+    // The message and the copy read when Forward was tapped, so the copy is the message the page shows.
+    var forwarding by remember { mutableStateOf<Pair<ConversationMessage, MessageType>?>(null) }
+    var forwarded by remember { mutableStateOf<String?>(null) }
+    forwarded?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); forwarded = null } }
     Box(Modifier.fillMaxSize()) {
         LiveChannelScreen(room, timeline, draft, { composer?.edit(it); if (draft.target !is ComposerTarget.Edit) open.typing?.changed(it) }, { composer?.send(); open.typing?.stopped() },
             { owner?.back() }, { conversation?.loadOlder() },
@@ -267,10 +276,13 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
             { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
-            open.threadRoot, rememberMessageActions(conversation, composer, main, room),
+            open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { remember(it) { it.copy(onForward = { m ->
+                scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { forwarded = "This message can’t be forwarded." } }
+            }) } },
             ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
                 onNeedPeople = { composer?.loadPeople() },
                 onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
+                onFormat = { start, end, kind, href -> composer?.format(start, end, kind, href) },
                 onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
             // A quote doesn't know its parent's thread, so it asks before jumping.
             { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } },
@@ -280,7 +292,10 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             rooms?.client?.let { client ->
                 val channel = MatrixChannel(client, open.room.id)
                 ChannelDetailsActions(channel::members, channel::save, channel::leave, channel::invite, channel::notifications,
-                    channel::setNotifications, pins = {
+                    channel::setNotifications, setInWorkspace = { id, adding ->
+                        channel.setInWorkspace(id, adding)
+                        rooms.reloadSpaces()
+                    }, pins = {
                     val pins = rememberConversation(client, open.room.id, ConversationView.Pins)
                     // Unpins through the conversation, which outlives the page, so going back doesn't cancel it.
                     PinnedMessages(pins?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load pins")) {
@@ -296,12 +311,22 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         }
         // Over the conversation, so Back finds it where it was.
         if (details && actions != null) {
+            val spaces by remember(roomList) { derivedStateOf { roomList?.value?.spaces.orEmpty() } }
             ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }, onOpenMessage = { id ->
                 details = false
                 // A pin doesn't know its thread, so it asks before jumping.
                 scope.launch { jump(open.room, id, main?.threadRootOf(open.room.id, id)) }
-            }, onPerson = profile) { details = false }
+            }, spaces, onPerson = profile) { details = false }
         }
+        forwarding?.let { (message, content) ->
+            ForwardScreen(message, room, roomList?.value?.rooms.orEmpty().filter { it.canPost }, { destination ->
+                rooms?.client?.let { MatrixForward(it).forward(content, open.room.id, destination.id) } ?: "Couldn’t forward this message."
+            }, { destination ->
+                forwarding = null
+                forwarded = if (destination.direct) "Forwarded to ${destination.name}." else "Forwarded to #${destination.name}."
+            }) { forwarding = null }
+        }
+        forwarded?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
     }
 }
 

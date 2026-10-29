@@ -10,6 +10,7 @@ import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.NotificationChoice
 import ai.nuanu.slatrix.core.NotificationSetting
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.ChannelDetailsActions
 import ai.nuanu.slatrix.ui.account.ChannelDetailsScreen
@@ -27,6 +28,9 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.hasAnySibling
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -286,11 +290,32 @@ class ChannelDetailsScreenTest {
         compose.runOnIdle { assertTrue(asked) }
     }
 
+    // capability: channel.link-workspace
+    @Test fun workspacesAddOrTakeTheChannelOutWhereYouMayManageThem() {
+        val changes = mutableListOf<Pair<String, Boolean>>()
+        val spaces = listOf(SpaceSummary("!design:example.org", "Design"), SpaceSummary("!studio:example.org", "Studio"),
+            SpaceSummary("!ops:example.org", "Operations", canManageRooms = false))
+        details(room.copy(spaceIds = setOf("!design:example.org", "!studio:example.org"), parentIds = setOf("!design:example.org")),
+            ChannelDetailsActions(setInWorkspace = { id, add -> changes += id to add }), spaces = spaces)
+        compose.onNodeWithText("Workspaces").performClick()
+        compose.onNodeWithText("Through another workspace").assertIsDisplayed()
+        workspaceButton("Operations", "Add").assertIsNotEnabled()
+        workspaceButton("Design", "Remove").performClick()
+        // Shows the change at once, before the workspaces are read again, so a second tap doesn't send it twice.
+        workspaceButton("Design", "Add").assertIsDisplayed()
+        workspaceButton("Studio", "Add").performClick()
+        workspaceButton("Studio", "Remove").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(listOf("!design:example.org" to false, "!studio:example.org" to true), changes) }
+    }
+
+    private fun workspaceButton(workspace: String, label: String) =
+        compose.onNode(hasText(label) and hasClickAction() and hasAnySibling(hasText(workspace)))
+
     private fun pinned(body: String) = ConversationMessage(body, "\$$body", "@mira:example.org", "Mira", body, null,
         1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "M", 0)
 
     private fun details(room: RoomSummary, actions: ChannelDetailsActions = ChannelDetailsActions(), me: String? = null,
-        onLeft: () -> Unit = {}, onOpenMessage: (String) -> Unit = {}) {
-        compose.setContent { SlatrixTheme { ChannelDetailsScreen(room, me, actions, onLeft, onOpenMessage) {} } }
+        onLeft: () -> Unit = {}, onOpenMessage: (String) -> Unit = {}, spaces: List<SpaceSummary> = emptyList()) {
+        compose.setContent { SlatrixTheme { ChannelDetailsScreen(room, me, actions, onLeft, onOpenMessage, spaces) {} } }
     }
 }
