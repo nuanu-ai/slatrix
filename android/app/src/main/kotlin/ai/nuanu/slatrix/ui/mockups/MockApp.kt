@@ -25,7 +25,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -46,8 +45,8 @@ fun SlatrixMockups(
     var palette by rememberSaveable { mutableStateOf(SidebarPalette.Aubergine) }
     var darkOverride by rememberSaveable { mutableStateOf<Int?>(null) }
     var drafts by rememberSaveable { mutableStateOf(mapOf<String, String>()) }
-    var sentByRoom by remember { mutableStateOf(mapOf<String, List<MockMessage>>()) }
-    var sentReplies by remember { mutableStateOf(emptyList<MockMessage>()) }
+    var sentByRoom by rememberSaveable { mutableStateOf(mapOf<String, List<MockMessage>>()) }
+    var sentReplies by rememberSaveable { mutableStateOf(emptyList<MockMessage>()) }
     val effectiveDark = darkOverride?.let { it == 1 } ?: dark
     val room = MockData.channels.firstOrNull { it.id == roomId } ?: MockData.conversations.first { it.id == roomId }.let {
         MockChannel(it.id, it.name, "Direct message", direct = true)

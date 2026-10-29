@@ -28,7 +28,7 @@ data class MockMessage(
     val colorIndex: Int = 0,
     val replyCount: Int = 0,
     val reaction: String? = null,
-)
+) : java.io.Serializable
 
 data class MockActivity(
     val id: String,
