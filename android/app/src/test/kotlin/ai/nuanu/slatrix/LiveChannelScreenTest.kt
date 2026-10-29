@@ -69,7 +69,9 @@ class LiveChannelScreenTest {
         repeat(20) { compose.onRoot().performTouchInput { swipeDown() } }
         compose.waitUntil { requests == 1 }
         compose.runOnIdle { state.value = state.value.copy(loadingHistory = true) }
+        compose.waitForIdle()
         compose.runOnIdle { state.value = state.value.copy(loadingHistory = false) }
+        compose.waitForIdle()
         compose.waitUntil("A page that showed nothing asks again while the top is near") { requests == 2 }
     }
 
