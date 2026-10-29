@@ -77,10 +77,10 @@
 
     {"id": "message.react.quick", "what": "React with one of your recent emoji straight from a message.", "mac": "done", "android": "done"},
     {"id": "message.react.picker", "what": "Pick any emoji to react with, searching by name or shortcode.", "mac": "done", "android": "done"},
-    {"id": "message.reply", "what": "Reply to a message with a quote of it.", "mac": "done", "android": "missing"},
+    {"id": "message.reply", "what": "Reply to a message with a quote of it.", "mac": "done", "android": "done"},
     {"id": "message.copy-text", "what": "Copy a message's text.", "mac": "done", "android": "done"},
     {"id": "message.copy-link", "what": "Copy a link to a message.", "mac": "done", "android": "done"},
-    {"id": "message.edit", "what": "Edit your own message.", "mac": "done", "android": "missing"},
+    {"id": "message.edit", "what": "Edit your own message.", "mac": "done", "android": "done"},
     {"id": "message.delete", "what": "Delete your own message.", "mac": "done", "android": "done"},
     {"id": "message.forward", "what": "Forward a message to another conversation.", "mac": "done", "android": "missing"},
     {"id": "message.pin", "what": "Pin or unpin a message.", "mac": "done", "android": "missing"},
