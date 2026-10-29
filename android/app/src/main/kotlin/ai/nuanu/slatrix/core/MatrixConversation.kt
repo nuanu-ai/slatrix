@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.core
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.DateDividerMode
 import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.EventSendState
@@ -89,7 +91,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                 timeline = room.timelineWithConfiguration(TimelineConfiguration(
                     focus = TimelineFocus.Live(hideThreadedEvents = true), filter = TimelineFilter.All,
                     internalIdPrefix = null, dateDividerMode = DateDividerMode.DAILY,
-                    trackReadReceipts = TimelineReadReceiptTracking.ALL_EVENTS, reportUtds = false,
+                    trackReadReceipts = TimelineReadReceiptTracking.MESSAGE_LIKE_EVENTS, reportUtds = false,
                 ))
                 currentCoroutineContext().ensureActive()
                 listener = timeline.addListener(object : TimelineListener {
@@ -99,11 +101,14 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                 ready.complete(timeline)
                 mutableState.update { it.copy(loading = false) }
                 loadOlder()
-                for (batch in updates) {
-                    batch.forEach(::apply)
-                    // A cleared or reset timeline starts over from the live end.
-                    val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
-                    mutableState.update { it.copy(messages = items.filterNotNull(), loading = false, hasMore = it.hasMore || reset) }
+                // asEvent blocks on the SDK, so updates are mapped off the main thread.
+                withContext(Dispatchers.Default) {
+                    for (batch in updates) {
+                        batch.forEach(::apply)
+                        // A cleared or reset timeline starts over from the live end.
+                        val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
+                        mutableState.update { it.copy(messages = items.filterNotNull(), loading = false, hasMore = it.hasMore || reset) }
+                    }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled

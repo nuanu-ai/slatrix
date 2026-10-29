@@ -19,9 +19,7 @@ class MatrixConversationTest {
     @Test fun cachedMessagesAppearWhileOlderHistoryIsStillLoading() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        runCurrent()
-
-        val message = conversation.state.value.messages.single()
+        val message = conversation.state.first { it.messages.isNotEmpty() }.messages.single()
         assertEquals("stable-1", message.id)
         assertEquals("\$one", message.eventId)
         assertEquals("Hello", message.body)
@@ -137,11 +135,10 @@ class MatrixConversationTest {
         val room = ConversationRoom(timeline)
         val conversation = MatrixConversation(backgroundScope, room)
         timeline.pageStarted.await()
-        runCurrent()
-        assertEquals(MessageSendState.Sending, conversation.state.value.messages.last().sendState)
+        assertEquals(MessageSendState.Sending, conversation.state.first { it.messages.size == 2 }.messages.last().sendState)
 
         timeline.emit(listOf(TimelineDiff.Set(2u, conversationItem("stable-new", "\$new", "Delivered"))))
-        runCurrent()
+        conversation.state.first { it.messages.last().body == "Delivered" }
         assertEquals("stable-new", conversation.state.value.messages.last().id)
         assertEquals("\$new", conversation.state.value.messages.last().eventId)
         assertEquals(MessageSendState.Sent, conversation.state.value.messages.last().sendState)
@@ -149,7 +146,7 @@ class MatrixConversationTest {
             MsgLikeKind.UnableToDecrypt(EncryptedMessage.Unknown), null, null, null,
         ))
         timeline.emit(listOf(TimelineDiff.Set(2u, conversationItem("stable-new", "\$new", "", content = encrypted))))
-        runCurrent()
+        conversation.state.first { it.messages.last().kind == MessageKind.Encrypted }
         assertEquals(MessageKind.Encrypted, conversation.state.value.messages.last().kind)
         assertEquals("Waiting for this message", conversation.state.value.messages.last().body)
 
@@ -169,7 +166,6 @@ class MatrixConversationTest {
         timeline.pageCancelled.await()
         val closed = conversation.state.value
         timeline.emit(listOf(TimelineDiff.PushBack(conversationItem("late", "\$late", "Too late"))))
-        runCurrent()
         assertEquals(closed, conversation.state.value)
     }
 }
