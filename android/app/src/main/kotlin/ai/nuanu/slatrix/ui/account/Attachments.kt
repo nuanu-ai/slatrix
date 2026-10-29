@@ -110,7 +110,7 @@ private val pictures = object : LruCache<String, ImageBitmap>((Runtime.getRuntim
  * full screen. Null while it loads or when there's none.
  */
 @Composable
-private fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): ImageBitmap? {
+internal fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): ImageBitmap? {
     val key = "${attachment.source.url()}@${width}x$height${if (full) " full" else ""}"
     val picture by produceState(pictures[key], key) {
         if (value != null) return@produceState
@@ -149,7 +149,7 @@ internal fun decode(bytes: ByteArray, width: Int, height: Int, fit: Boolean): Im
 }
 
 /** The box an inline image takes, decided before it loads: its shape within the bounds, never enlarged, as on the Mac. */
-private fun box(width: Int?, height: Int?, maxWidth: Dp, maxHeight: Dp): Pair<Dp, Dp> {
+internal fun box(width: Int?, height: Int?, maxWidth: Dp, maxHeight: Dp): Pair<Dp, Dp> {
     if (width == null || height == null || width <= 0 || height <= 0) {
         val boxHeight = maxHeight * 3 / 4
         return min(maxWidth, boxHeight * 4 / 3) to boxHeight
@@ -161,12 +161,15 @@ private fun box(width: Int?, height: Int?, maxWidth: Dp, maxHeight: Dp): Pair<Dp
     else maxHeight * width / height to maxHeight
 }
 
-/** An attachment under its message: an image inline, anything else as Slack's file row. A long press opens the message's sheet. */
+/** An attachment under its message: an image or video inline, anything else as Slack's file row. A long press opens the message's sheet. */
 @Composable
-internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, opening: Boolean, onOpenFile: () -> Unit,
-    onLongPress: () -> Unit, onView: (ImageBitmap?) -> Unit) {
-    if (attachment.kind == MessageAttachment.Kind.Image) InlineImage(attachment, load, onLongPress, onView)
-    else FileRow(attachment, opening, onLongPress, onOpenFile)
+internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, loadFile: FileLoader, opening: Boolean,
+    onOpenFile: () -> Unit, onLongPress: () -> Unit, onView: (ImageBitmap?) -> Unit) {
+    when (attachment.kind) {
+        MessageAttachment.Kind.Image -> InlineImage(attachment, load, onLongPress, onView)
+        MessageAttachment.Kind.Video -> InlineVideo(attachment, load, loadFile, onLongPress)
+        else -> FileRow(attachment, opening, onLongPress, onOpenFile)
+    }
 }
 
 @Composable

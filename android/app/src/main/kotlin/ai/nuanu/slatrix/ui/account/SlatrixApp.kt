@@ -275,7 +275,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             // A quote doesn't know its parent's thread, so it asks before jumping.
             { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } },
             { attachment, width, height, full -> media.picture(attachment, width, height, full) },
-            { openAttachment(context, media, it) }, { details = true },
+            { openAttachment(context, media, it) }, { media.file(it) }, { details = true },
             typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty())
         val actions = remember(rooms, open.room.id, conversation) {
             rooms?.client?.let { client ->

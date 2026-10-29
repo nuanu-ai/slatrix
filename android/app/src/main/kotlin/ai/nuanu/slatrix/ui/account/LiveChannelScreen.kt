@@ -80,6 +80,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     onOpenMessage: (eventId: String) -> Unit = {},
     loadPicture: PictureLoader = { _, _, _, _ -> null },
     onOpenFile: suspend (MessageAttachment) -> String? = { null },
+    loadFile: FileLoader = { null },
     /** Opens the conversation's details, as a tap on Slack's header pill does. */
     onOpenDetails: () -> Unit = {},
     /** Who else is typing, by name. */
@@ -251,14 +252,14 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val first = line != null && row.eventId == line
                             if (first) NewLine()
                             if (threadRoot != null && row.eventId == threadRoot) Column {
-                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
+                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, loadFile, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
                                 // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                                 RepliesBar(replies)
                             // The first reply starts under the replies bar, and the first unread under the New line, so
                             // each shows its sender again.
                             } else LiveMessageRow(if (row.id == firstReply || first) row.copy(grouped = false) else row, state.ownUserId,
                                 actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
-                                loadPicture, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
+                                loadPicture, loadFile, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
                         }
                     }
                 }
@@ -384,7 +385,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
 @Composable
 private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
-    loadPicture: PictureLoader, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (MessageAttachment, ImageBitmap?) -> Unit,
+    loadPicture: PictureLoader, loadFile: FileLoader, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (MessageAttachment, ImageBitmap?) -> Unit,
     onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
@@ -419,7 +420,7 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
                     if (attachment == null || message.body != attachment.name) {
                         MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me)
                     }
-                    attachment?.let { Attachment(it, loadPicture, opening, { onOpenFile(message) }, { onMenu(message) }) { shown -> onView(it, shown) } }
+                    attachment?.let { Attachment(it, loadPicture, loadFile, opening, { onOpenFile(message) }, { onMenu(message) }) { shown -> onView(it, shown) } }
                 }
                 // In the row's bottom padding, so the bar comes and goes without moving anything.
                 message.uploadProgress?.let {

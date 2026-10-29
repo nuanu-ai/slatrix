@@ -685,7 +685,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long)) }
                 is MessageType.Video -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
                     MessageAttachment.Kind.Video, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
-                    source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long)) }
+                    source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long, info?.duration?.toMillis())) }
                 is MessageType.Audio -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
                     MessageAttachment.Kind.Audio, filename, info?.mimetype, info?.size?.long, null, null, source)) }
                 is MessageType.File -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(

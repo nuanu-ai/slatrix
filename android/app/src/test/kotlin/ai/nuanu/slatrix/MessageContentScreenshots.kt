@@ -68,6 +68,9 @@ class MessageContentScreenshots(private val dark: Boolean) {
                 MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, source)),
             message("f", "Mira", "Q3 report.pdf", null, 21).copy(kind = MessageKind.Attachment, grouped = true,
                 attachment = MessageAttachment(MessageAttachment.Kind.File, "Q3 report.pdf", "application/pdf", 250_000, null, null, source)),
+            message("g", "Jordan", "Walkthrough of the new onboarding", null, 30).copy(kind = MessageKind.Attachment,
+                attachment = MessageAttachment(MessageAttachment.Kind.Video, "walkthrough.mp4", "video/mp4", 8_000_000, 1280, 720, source,
+                    source, 40_000, durationMillis = 83_000)),
         )
         compose.setContent {
             SlatrixTheme(dark = dark) {

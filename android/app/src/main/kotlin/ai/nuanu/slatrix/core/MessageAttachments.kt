@@ -16,6 +16,8 @@ data class MessageAttachment(
     /** The sender's own small picture of it, when they attached one. */
     val thumbnail: MediaSource? = null,
     val thumbnailSize: Long? = null,
+    /** A video's or recording's length. */
+    val durationMillis: Long? = null,
 ) {
     enum class Kind { Image, Video, Audio, File }
 }
