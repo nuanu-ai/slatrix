@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix
 
 import ai.nuanu.slatrix.core.ComposerState
+import ai.nuanu.slatrix.core.ComposerStyle
 import ai.nuanu.slatrix.core.ComposerStyle.Kind
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.RoomSummary
@@ -15,7 +16,9 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
@@ -35,6 +38,7 @@ class ComposerFormattingScreenTest {
     @get:Rule val compose = createComposeRule()
     private val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
     private val text = mutableStateOf("Hi there")
+    private val styles = mutableStateOf(emptyList<ComposerStyle>())
     private val formats = mutableListOf<Format>()
 
     private data class Format(val start: Int, val end: Int, val kind: Kind, val href: String?)
@@ -43,7 +47,7 @@ class ComposerFormattingScreenTest {
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(emptyList(), loading = false, hasMore = false),
-                    ComposerState(text.value, loading = false), { text.value = it }, {}, {}, {}, {}, {}, {}, {},
+                    ComposerState(text.value, loading = false, styles = styles.value), { text.value = it }, {}, {}, {}, {}, {}, {}, {},
                     composerActions = ComposerActions(onFormat = { start, end, kind, href -> formats += Format(start, end, kind, href) }))
             }
         }
@@ -83,6 +87,40 @@ class ComposerFormattingScreenTest {
         compose.runOnIdle {
             assertEquals("See docs", text.value)
             assertEquals(listOf(Format(4, 8, Kind.Link, "https://example.org")), formats)
+        }
+    }
+
+    @Test fun anAddressThatCannotBeALinkCannotBeSaved() {
+        show()
+        compose.onNodeWithContentDescription("Message #design").performTextInputSelection(TextRange(3, 8))
+        compose.onNodeWithContentDescription("Formatting").performClick()
+        compose.onNodeWithContentDescription("Link").performClick()
+        compose.onNode(hasSetTextAction() and hasText("Link")).performTextInput("javascript:alert(1)")
+        compose.onNodeWithText("Save").assertIsNotEnabled()
+    }
+
+    @Test fun aLinkOpensWithItsAddressAndAnEmptyAddressRemovesIt() {
+        text.value = "See docs"
+        styles.value = listOf(ComposerStyle(4, 8, Kind.Link, "https://example.org"))
+        show()
+        compose.onNodeWithContentDescription("Message #design").performTextInputSelection(TextRange(6))
+        compose.onNodeWithContentDescription("Formatting").performClick()
+        compose.onNodeWithContentDescription("Link").performClick()
+        compose.onNode(hasSetTextAction() and hasText("https://example.org")).performTextClearance()
+        compose.onNodeWithText("Save").performClick()
+        compose.runOnIdle { assertEquals(listOf(Format(4, 8, Kind.Link, "")), formats) }
+    }
+
+    // capability: composer.formatting
+    @Test fun returnOnAnEmptyListItemEndsTheListInsteadOfAddingALine() {
+        text.value = "one\n"
+        styles.value = listOf(ComposerStyle(0, 4, Kind.Bullet))
+        show()
+        compose.onNodeWithContentDescription("Message #design").performTextInputSelection(TextRange(4))
+        compose.onNodeWithContentDescription("Message #design").performTextInput("\n")
+        compose.runOnIdle {
+            assertEquals(listOf(Format(4, 4, Kind.Bullet, null)), formats)
+            assertEquals("one\n", text.value)
         }
     }
 }

@@ -34,63 +34,72 @@ class ComposerFormattingTest {
 
     // capability: composer.formatting
     @Test fun eachFormatSendsTheSharedCasesHtml() = runTest {
-        val s = Sending(this)
-        s.composer.state.first { !it.loading }
-        for ((name, text, kind, href) in listOf(
-            Quad("Bold", "Hi there", Kind.Bold, null),
-            Quad("Italic", "soft", Kind.Italic, null),
-            Quad("Strikethrough", "gone", Kind.Strike, null),
-            Quad("A link, with its address after the text in the body", "docs", Kind.Link, "https://example.org/a?b=1&c"),
-            Quad("A bulleted list", "one\ntwo", Kind.Bullet, null),
-            Quad("A numbered list", "one\ntwo", Kind.Numbered, null),
-            Quad("A quote, line by line", "said\nthis", Kind.Quote, null),
-            Quad("A code block, fenced in the body", "if a < b {\n  go()", Kind.CodeBlock, null),
+        val sending = Sending(this)
+        sending.composer.state.first { !it.loading }
+        for (case in listOf(
+            Case("Bold", "Hi there", 3, Kind.Bold),
+            Case("Italic", "soft", 0, Kind.Italic),
+            Case("Strikethrough", "gone", 0, Kind.Strike),
+            Case("Inline code, with its body in backticks", "a < b", 0, Kind.Code),
+            Case("A link, with its address after the text in the body", "docs", 0, Kind.Link, "https://example.org/a?b=1&c"),
+            Case("A bulleted list", "one\ntwo", 0, Kind.Bullet),
+            Case("A numbered list", "one\ntwo", 0, Kind.Numbered),
+            Case("A quote, line by line", "said\nthis", 0, Kind.Quote),
+            Case("A code block, fenced in the body", "if a < b {\n  go()", 0, Kind.CodeBlock),
         )) {
-            s.composer.edit(text)
-            val start = if (name == "Bold") 3 else 0
-            s.composer.format(start, text.length, kind, href)
-            assertEquals(name, expected(name), s.send())
+            sending.composer.edit(case.text)
+            sending.composer.format(case.start, case.text.length, case.kind, case.href)
+            assertEquals(case.name, expected(case.name), sending.send())
         }
-        s.composer.edit("a < b")
-        s.composer.format(0, 5, Kind.Code)
-        assertEquals(expected("Inline code, with its body in backticks"), s.send())
     }
 
     // capability: composer.formatting
     @Test fun boldGoesOnASelectionAndOffAgainAndAtTheCaretAppliesToWhatIsTypedNext() = runTest {
-        val s = Sending(this)
-        s.composer.state.first { !it.loading }
-        s.composer.edit("Hi there")
-        s.composer.format(3, 8, Kind.Bold)
-        s.composer.format(3, 8, Kind.Bold)
-        assertEquals(null, s.send().html)
+        val sending = Sending(this)
+        sending.composer.state.first { !it.loading }
+        sending.composer.edit("Hi there")
+        sending.composer.format(3, 8, Kind.Bold)
+        sending.composer.format(3, 8, Kind.Bold)
+        assertEquals(null, sending.send().html)
 
-        s.composer.edit("Hi ")
-        s.composer.format(3, 3, Kind.Bold)
-        s.composer.edit("Hi you")
-        s.composer.format(6, 6, Kind.Bold)
-        s.composer.edit("Hi you!")
-        assertEquals("Hi <strong>you</strong>!", s.send().html)
+        sending.composer.edit("Hi ")
+        sending.composer.format(3, 3, Kind.Bold)
+        sending.composer.edit("Hi you")
+        sending.composer.format(6, 6, Kind.Bold)
+        sending.composer.edit("Hi you!")
+        assertEquals("Hi <strong>you</strong>!", sending.send().html)
 
-        s.composer.edit("Hi")
-        s.composer.format(0, 2, Kind.Bold)
-        s.composer.edit("Hi you")
-        assertEquals("Typing at the end of bold stays bold", "<strong>Hi you</strong>", s.send().html)
+        sending.composer.edit("Hi")
+        sending.composer.format(0, 2, Kind.Bold)
+        sending.composer.edit("Hi you")
+        assertEquals("Typing at the end of bold stays bold", "<strong>Hi you</strong>", sending.send().html)
     }
 
     // capability: composer.formatting
-    @Test fun returnInAListStartsTheNextItemAndOnAnEmptyItemEndsTheList() = runTest {
-        val s = Sending(this)
-        s.composer.state.first { !it.loading }
-        s.composer.edit("one")
-        s.composer.format(3, 3, Kind.Bullet)
-        s.composer.edit("one\n")
-        s.composer.edit("one\ntwo")
-        s.composer.edit("one\ntwo\n")
-        s.composer.edit("one\ntwo\n\n")
-        assertEquals("one\ntwo\n", s.composer.state.value.text)
-        s.composer.edit("one\ntwo\nafter")
-        assertEquals("<ul><li>one</li><li>two</li></ul>after", s.send().html)
+    @Test fun returnInAListStartsTheNextItemAndEndingItLeavesTheRestPlain() = runTest {
+        val sending = Sending(this)
+        sending.composer.state.first { !it.loading }
+        sending.composer.edit("one")
+        sending.composer.format(3, 3, Kind.Bullet)
+        sending.composer.edit("one\n")
+        sending.composer.edit("one\ntwo")
+        sending.composer.edit("one\ntwo\n")
+        sending.composer.format(8, 8, Kind.Bullet)
+        sending.composer.edit("one\ntwo\nafter")
+        assertEquals("<ul><li>one</li><li>two</li></ul>after", sending.send().html)
+    }
+
+    @Test fun returnOnAnEmptyItemOrBackspaceAtAnItemsStartLeavesTheBlock() {
+        val list = listOf(ComposerStyle(0, 9, Kind.Bullet))
+        fun left(old: String, new: String, caret: Int, styles: List<ComposerStyle> = list, typing: ComposerTyping? = null) =
+            ComposerStyles.blockLeft(styles, typing, old, new, caret)
+        assertEquals("An empty middle item", Kind.Bullet, left("one\n\ntwo", "one\n\n\ntwo", 4))
+        assertEquals("An empty last item", Kind.Bullet, left("one\ntwo\n", "one\ntwo\n\n", 8))
+        assertEquals("Return after an item's text starts the next", null, left("one\ntwo\n", "one\ntwo\n\n", 7))
+        assertEquals("An empty first item chosen at the caret", Kind.Bullet,
+            left("", "\n", 0, emptyList(), ComposerTyping(0, setOf(Kind.Bullet))))
+        assertEquals("Backspace at an item's start", Kind.Bullet, left("one\ntwo", "onetwo", 4))
+        assertEquals("Backspace in plain text", null, left("one\ntwo", "onetwo", 4, emptyList()))
     }
 
     // capability: composer.formatting
@@ -113,5 +122,31 @@ class ComposerFormattingTest {
         assertEquals(html, reopened.send().html)
     }
 
-    private data class Quad(val name: String, val text: String, val kind: Kind, val href: String?)
+    // capability: composer.formatting
+    @Test fun aBlankLineAfterAListAndALinkOverMixedFormatsSurviveTheDraft() = runTest {
+        val room = ComposerRoom()
+        val first = Sending(this, room)
+        first.composer.state.first { !it.loading }
+        first.composer.edit("a\n\nsee docs here")
+        first.composer.format(0, 1, Kind.Bullet)
+        first.composer.format(7, 16, Kind.Link, "https://example.org")
+        first.composer.format(7, 11, Kind.Bold)
+        first.composer.close()
+
+        val reopened = Sending(this, room)
+        assertEquals("a\n\nsee docs here", reopened.composer.state.first { !it.loading }.text)
+        val message = reopened.send()
+        assertEquals("<ul><li>a</li></ul><br>see <a href=\"https://example.org\"><strong>docs</strong> here</a>", message.html)
+        assertEquals("- a\n\nsee docs here (https://example.org)", message.body)
+    }
+
+    @Test fun editingAMessageFromAnotherAppKeepsUnderlineAndIgnoresItsHtmlLayout() = runTest {
+        val sending = Sending(this)
+        sending.composer.state.first { !it.loading }
+        sending.composer.editMessage(ComposerTarget.Edit("\$one", "under\nline", "<p><u>under</u></p>\n<p>line</p>\n"))
+        assertEquals("under\nline", sending.composer.state.value.text)
+        assertEquals("<u>under</u><br>line", sending.send().html)
+    }
+
+    private data class Case(val name: String, val text: String, val start: Int, val kind: Kind, val href: String? = null)
 }
