@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Photos the system camera takes for the composer, which it writes through a content URI. -->
+<paths>
+    <cache-path name="camera" path="camera/" />
+</paths>
