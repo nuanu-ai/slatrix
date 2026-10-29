@@ -299,6 +299,14 @@ class LiveHomeScreenTest {
         compose.onNode(isDialog()).assertDoesNotExist()
     }
 
+    @Test fun aSavedWorkspaceStillLoadingNeverFlashesAllConversations() {
+        compose.setContent {
+            SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(loading = false), {}, {}, {}, "!harbor:example.org") }
+        }
+        compose.onNodeWithContentDescription("Switch workspace").assertExists()
+        compose.onNodeWithText("All conversations").assertDoesNotExist()
+    }
+
     @Test fun allConversationsJoinsTheSwitcherWhileAChannelHasNoWorkspace() {
         val chosen = mutableListOf<String?>()
         val rooms = listOf(channel("!work:example.org", "work").copy(spaceIds = setOf("!harbor:example.org")), channel("!loose:example.org", "loose"))

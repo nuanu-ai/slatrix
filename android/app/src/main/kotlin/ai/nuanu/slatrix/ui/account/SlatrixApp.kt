@@ -8,6 +8,8 @@ import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityVerification
 import ai.nuanu.slatrix.core.MatrixRooms
+import ai.nuanu.slatrix.core.MatrixSearch
+import ai.nuanu.slatrix.core.MessageSearchState
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.ConversationState
@@ -35,6 +37,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,7 +63,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: MatrixRooms?, workspace: MatrixWorkspace?,
     notification: NotificationTarget? = null, threads: MatrixWorkspace? = null, activity: MatrixActivity? = null,
-    onNotificationHandled: (NotificationTarget) -> Unit = {}) {
+    search: MatrixSearch? = null, onNotificationHandled: (NotificationTarget) -> Unit = {}) {
     val state by account.state.collectAsState()
     RequestNotificationPermission(signedIn = state is AccountState.Connected, configured = BuildConfig.PUSH_GATEWAY.isNotEmpty())
     val context = LocalContext.current
@@ -92,23 +95,22 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 val userId = (state as AccountState.Connected).userId
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
                 var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
+                val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
+                val selected = workspace?.selected?.collectAsState()?.value
                 // Read inside derivedStateOf, so room list updates recompose the app only when the workspace changes.
+                // Only a pick is saved: a fallback while spaces still load must not replace what the person chose.
                 val roomList = rooms?.state?.collectAsState()
-                val choice by remember(roomList) {
+                val showing = rememberUpdatedState(selected?.room)
+                val selectedSpaceId by remember(roomList, userId) {
                     derivedStateOf {
                         val list = roomList?.value
-                        if (list?.spacesKnown == true) WorkspaceRail.choose(remembered, null, list.spaces, list.rooms) to true
-                        else remembered?.takeUnless { it == WorkspaceRail.AllToken } to false
+                        if (list?.spacesKnown == true) WorkspaceRail.choose(remembered, showing.value, list.spaces, list.rooms)
+                        else remembered?.takeUnless { it == WorkspaceRail.AllToken }
                     }
                 }
-                val selectedSpaceId = choice.first
                 val chooseSpace: (String?) -> Unit = { id ->
                     (id ?: WorkspaceRail.AllToken).let { remembered = it; workspacePreferences.selectedSpaceId = it }
                 }
-                // Keeps what opened, so a first launch's pick holds as channel counts change.
-                LaunchedEffect(choice) { if (choice.second && (choice.first ?: WorkspaceRail.AllToken) != remembered) chooseSpace(choice.first) }
-                val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
-                val selected = workspace?.selected?.collectAsState()?.value
                 val thread = threads?.selected?.collectAsState()?.value
                 val covered = rememberSaveableStateHolder()
                 // Opens a message highlighted in its conversation and a thread reply in its thread too: for notifications
@@ -155,7 +157,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, rooms, workspace, { you = true }, selectedSpaceId, chooseSpace) {
+                            LiveHome(userId, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
@@ -217,14 +219,29 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
 @Composable
-private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, onYou: () -> Unit,
+private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
+    jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
     selectedSpaceId: String?, onSpace: (String?) -> Unit, activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
+    val scope = rememberCoroutineScope()
     val open: (String) -> Unit = remember(rooms, workspace) {
         { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
     }
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
-        onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false }, activity = activity)
+        onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
+        search = {
+            val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()
+            val inScope = remember(state.rooms, selectedSpaceId) {
+                state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
+            }
+            SearchScreen(inScope, userId, messages, { query -> if (query == null) search?.clear() else search?.search(query) },
+                { search?.loadMore() }, { hit ->
+                    // A hit doesn't know its thread, so it is looked up first: a reply opens in its thread.
+                    state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
+                        scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
+                    }
+                }, open)
+        }, activity = activity)
 }
 
 /** Collects Activity here, so a new item recomposes only its tab. An item opens at its message. */
