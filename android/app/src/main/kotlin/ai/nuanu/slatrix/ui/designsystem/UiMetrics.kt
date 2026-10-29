@@ -19,6 +19,9 @@ object UiMetrics {
     val Icon = 20.dp
     val LargeIcon = 24.dp
     val Divider = 1.dp
+    /** The grab handle atop a bottom sheet. */
+    val SheetHandleWidth = 32.dp
+    val SheetHandleHeight = 4.dp
     val CompactAvatar = 24.dp
     val ListAvatar = 36.dp
     val HeaderAvatar = 32.dp

@@ -10,6 +10,7 @@ import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.content.ClipData
@@ -36,11 +37,9 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -113,7 +112,6 @@ internal fun MessageActionsHost(message: ConversationMessage, actions: MessageAc
 
 private enum class Step { Sheet, Picker, ConfirmDelete }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MessageActionSheet(message: ConversationMessage, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
     onRetrySend: (ConversationMessage) -> Unit,
@@ -126,7 +124,7 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
         clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(message.senderName, text)))
         onDismiss()
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, shape = SlatrixTheme.topPanelShape, containerColor = colors.canvas) {
+    BottomSheet(onDismissRequest = onDismiss, containerColor = colors.canvas) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             Row(Modifier.padding(horizontal = UiMetrics.GapLarge).padding(bottom = UiMetrics.GapSmall),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {

@@ -8,6 +8,7 @@ import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.MentionCandidate
 import ai.nuanu.slatrix.core.MentionPeople
 import ai.nuanu.slatrix.core.MentionSearch
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.net.Uri
@@ -40,9 +41,7 @@ import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PhotoLibrary
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
@@ -230,7 +229,6 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
 }
 
 /** Slack's "+": a circle that offers photos and videos, or any file, from the system pickers. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AttachButton(onAttach: (List<Uri>) -> Unit) {
     val colors = SlatrixTheme.colors
@@ -241,8 +239,7 @@ private fun AttachButton(onAttach: (List<Uri>) -> Unit) {
     IconButton(onClick = { choosing = true }, colors = IconButtonDefaults.iconButtonColors(containerColor = colors.raised)) {
         Icon(Icons.Outlined.Add, "Attachments", tint = colors.textPrimary)
     }
-    if (choosing) ModalBottomSheet(onDismissRequest = { choosing = false }, shape = SlatrixTheme.topPanelShape,
-        containerColor = colors.canvas) {
+    if (choosing) BottomSheet(onDismissRequest = { choosing = false }, containerColor = colors.canvas) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             AttachChoice(Icons.Outlined.PhotoLibrary, "Photos & videos") {
                 choosing = false

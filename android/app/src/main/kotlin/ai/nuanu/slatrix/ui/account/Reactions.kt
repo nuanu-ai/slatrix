@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationRow
 import ai.nuanu.slatrix.core.MessageReaction
 import ai.nuanu.slatrix.core.MessageThread
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.text.format.DateUtils
@@ -25,9 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -83,12 +82,11 @@ private fun lastReply(at: Long, now: Long): String =
     else "Last reply " + DateUtils.getRelativeTimeSpanString(at, now, DateUtils.MINUTE_IN_MILLIS)
 
 /** Who reacted with each emoji, named as they appear in the conversation, with you as "You". */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ReactionsSheet(reactions: List<MessageReaction>, rows: List<ConversationRow>, me: String?, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
     val names = remember(rows) { rows.filterIsInstance<ConversationMessage>().associate { it.senderId to it.senderName } }
-    ModalBottomSheet(onDismissRequest = onDismiss, shape = SlatrixTheme.topPanelShape, containerColor = colors.overlay) {
+    BottomSheet(onDismissRequest = onDismiss, containerColor = colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             for (reaction in reactions) {
                 val who = reaction.senders.map { if (it == me) "You" else names[it] ?: ComposerFormat.localpart(it) }

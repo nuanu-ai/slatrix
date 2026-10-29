@@ -2,6 +2,11 @@ package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
+import ai.nuanu.slatrix.ui.designsystem.Motion
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.graphicsLayer
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -79,11 +84,19 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
     }
 }
 
-/** A pushed page: a plain bar with Back, its title and maybe an action such as Save, then its rows. */
+/**
+ * A pushed page: a plain bar with Back, its title and maybe an action such as Save, then its rows. It eases in from the
+ * side, as Slack's pages do; going back is instant.
+ */
 @Composable
 internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable () -> Unit = {}, content: LazyListScope.() -> Unit) {
     BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas).navigationBarsPadding().imePadding()) {
+    val shown = remember { Animatable(0f) }
+    LaunchedEffect(shown) { shown.animateTo(1f, Motion.pane()) }
+    Column(Modifier.fillMaxSize().graphicsLayer {
+        alpha = shown.value
+        translationX = (1 - shown.value) * Motion.PushDistance * size.width
+    }.background(SlatrixTheme.colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack, modifier = Modifier.size(UiMetrics.Touch)) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
