@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Bump when a change here alters the built package, so it gets a new key.
 SDK_PACKAGE_FORMAT=1
-ANDROID_PACKAGE_FORMAT=1
+ANDROID_PACKAGE_FORMAT=2
 RUSTUP_VERSION=1.29.2
 RUSTUP_SHA256_MACOS=f7c7e11eb2e07f006e532a8aaac77b32f4527d305ac386c0c633ca6133d35ca9
 RUSTUP_SHA256_LINUX=5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4
@@ -160,6 +160,10 @@ if [[ -n $android ]]; then
         build -p matrix-sdk-ffi --profile small-release --features "$FFI_FEATURES")
     (cd "$src" && "${isolated[@]}" cargo "+$RUST_TOOLCHAIN" run -p uniffi-bindgen -- generate --language kotlin \
         --no-format --library target/aarch64-linux-android/small-release/libmatrix_sdk_ffi.so --out-dir "$staging/kotlin")
+    # The symbol table is half the library and nothing reads it at run time: JNA and JNI look up the dynamic symbols.
+    # Without an NDK, Gradle would package it unstripped.
+    strip=("$ndk"/toolchains/llvm/prebuilt/*/bin/llvm-strip)
+    "${strip[0]}" --strip-unneeded "$staging"/jniLibs/*/libmatrix_sdk_ffi.so
     # The JNI entry point android_platform.rs exports; TLS checks certificates through it.
     mkdir -p "$staging/kotlin/org/matrix/rustsdk"
     cat > "$staging/kotlin/org/matrix/rustsdk/Android.kt" <<'EOF'
