@@ -36,7 +36,7 @@ enum class MockScreen { Home, Dms, Activity, Channel, Thread, You }
 
 @Composable
 fun SlatrixMockups(
-    dark: Boolean = false,
+    dark: Boolean = true,
 ) {
     var screen by rememberSaveable { mutableStateOf(MockScreen.Home) }
     var tab by rememberSaveable { mutableStateOf(MockScreen.Home) }
