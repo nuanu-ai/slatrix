@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import java.text.DateFormat
@@ -107,9 +108,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
                 items(state.rows.asReversed(), key = { it.id }) { row -> if (row is ConversationMessage) LiveMessageRow(row) }
                 // The top of the conversation, which also lets an empty one ask for history.
-                item(key = "top") { Spacer(Modifier.fillMaxWidth()) }
+                item(key = "top") { if (state.loadingHistory && state.rows.isNotEmpty()) HistoryProgress() }
             }
-            if (state.loading || state.loadingHistory) Box(Modifier.align(Alignment.TopCenter)) { ConnectionIndicator(true, null) }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
                 Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
                     action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
@@ -136,6 +136,15 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun HistoryProgress() {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(UiMetrics.ProgressDelayMillis); visible = true }
+    Box(Modifier.fillMaxWidth().height(UiMetrics.Touch), contentAlignment = Alignment.Center) {
+        if (visible) CircularProgressIndicator(Modifier.size(UiMetrics.Icon))
     }
 }
 
