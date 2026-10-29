@@ -54,12 +54,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var palette by rememberSaveable { mutableStateOf(SidebarPalette.entries.firstOrNull { it.name == appearance.paletteName } ?: SidebarPalette.Aubergine) }
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
-    // A restore keeps its session, so Back leaves the app instead of signing out.
+    // Back during a restore leaves the app; cancelling would show sign-in with the session still saved.
     BackHandler(enabled = (state as? AccountState.Connecting)?.restoring == false || state is AccountState.ChooseMethod ||
         state is AccountState.BrowserSignIn || (state as? AccountState.Failed)?.let { it.options != null && !it.canRetryRestore } == true) {
         account.cancel()
     }
-    var restoreFailed by rememberSaveable { mutableStateOf(false) }
+    var restoreFailed by remember { mutableStateOf(false) }
     LaunchedEffect(state) { if ((state as? AccountState.Failed)?.canRetryRestore == true) restoreFailed = true }
     SlatrixTheme(dark = dark, palette = palette) {
         val failure = state as? AccountState.Failed

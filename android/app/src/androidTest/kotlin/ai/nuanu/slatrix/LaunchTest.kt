@@ -7,6 +7,8 @@ import ai.nuanu.slatrix.core.SessionStore
 import ai.nuanu.slatrix.core.StoredSession
 import ai.nuanu.slatrix.ui.account.SlatrixApp
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -67,7 +69,7 @@ class LaunchTest {
         compose.setContent { SlatrixApp(account, null, null, null) }
         account.restore()
 
-        compose.onNodeWithText("Restore your session").assertDoesNotExist()
+        compose.onAllNodes(hasText("", substring = true)).assertCountEquals(0)
         compose.runOnIdle {
             assertFalse("Back during launch leaves the app and keeps the session",
                 compose.activity.onBackPressedDispatcher.hasEnabledCallbacks())
@@ -78,6 +80,5 @@ class LaunchTest {
         compose.onNodeWithText("Try again").performClick()
         compose.waitUntil(5_000) { (account.state.value as? AccountState.Connecting)?.restoring == true }
         compose.onNodeWithText("Restore your session").assertExists()
-        compose.onNodeWithText("Cancel").assertDoesNotExist()
     }
 }

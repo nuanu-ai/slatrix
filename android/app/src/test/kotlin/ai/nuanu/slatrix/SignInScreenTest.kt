@@ -79,11 +79,14 @@ class SignInScreenTest {
         compose.waitUntil(5_000) { account.state.value is AccountState.Failed }
 
         compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
-        compose.runOnIdle {
-            assertFalse(compose.activity.isFinishing)
-            assertEquals(AccountState.SignedOut, account.state.value)
+        try {
+            compose.runOnIdle {
+                assertFalse(compose.activity.isFinishing)
+                assertEquals(AccountState.SignedOut, account.state.value)
+            }
+        } finally {
+            scope.cancel()
         }
-        scope.cancel()
     }
 
     @Test fun signingInAgainAfterAFailedRestoreForgetsTheSavedSession() {
