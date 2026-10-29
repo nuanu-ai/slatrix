@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -283,7 +284,7 @@ private fun ScreenHeader(title: String, onYou: (() -> Unit)? = null, onBack: (()
             Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = SlatrixTheme.colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         }
-        if (onYou != null) IconButton(onClick = onYou, modifier = Modifier.size(UiMetrics.Touch).semantics { contentDescription = "You" }) { Avatar("JL", 0) }
+        if (onYou != null) IconButton(onClick = onYou, modifier = Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch).semantics { contentDescription = "You" }) { Avatar("JL", 0) }
     }
 }
 
@@ -303,7 +304,7 @@ private fun SectionLabel(text: String) {
 
 @Composable
 private fun Avatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.Avatar) {
-    Box(Modifier.size(size).clip(MaterialTheme.shapes.large).background(DesignTokens.avatarColors[colorIndex]), contentAlignment = Alignment.Center) {
+    Box(Modifier.sizeIn(minWidth = size, minHeight = size).clip(MaterialTheme.shapes.large).background(DesignTokens.avatarColors[colorIndex]).padding(UiMetrics.GapTiny), contentAlignment = Alignment.Center) {
         Text(initials, style = if (size == UiMetrics.ProfileAvatar) MaterialTheme.typography.headlineMedium else AvatarStyle.label, fontWeight = FontWeight.Bold, color = SlatrixTheme.colors.onAccent)
     }
 }
