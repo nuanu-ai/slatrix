@@ -196,10 +196,7 @@ private fun FileRow(attachment: MessageAttachment, opening: Boolean, onOpen: () 
     Row(Modifier.padding(top = UiMetrics.GapTiny).fillMaxWidth().clip(shape).border(UiMetrics.Divider, colors.border, shape)
         .clickable(enabled = !opening, onClickLabel = "Open file", onClick = onOpen).padding(UiMetrics.GapMedium),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(UiMetrics.FileTile).background(DesignTokens.fileColors.getValue(kind.token), MaterialTheme.shapes.medium),
-            contentAlignment = Alignment.Center) {
-            Icon(Icons.Outlined.Description, null, Modifier.size(UiMetrics.Icon), tint = colors.onAccent)
-        }
+        FileTile(kind)
         Column(Modifier.weight(1f)) {
             Text(attachment.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary,
                 maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
@@ -211,6 +208,15 @@ private fun FileRow(attachment: MessageAttachment, opening: Boolean, onOpen: () 
             LaunchedEffect(opening) { late = false; if (opening) { delay(UiMetrics.ProgressDelayMillis); late = true } }
             if (opening && late) CircularProgressIndicator(Modifier.fillMaxSize())
         }
+    }
+}
+
+/** A file's tile, in its kind's color, as file rows and the Files list show it. */
+@Composable
+internal fun FileTile(kind: FileKind) {
+    Box(Modifier.size(UiMetrics.FileTile).background(DesignTokens.fileColors.getValue(kind.token), MaterialTheme.shapes.medium),
+        contentAlignment = Alignment.Center) {
+        Icon(Icons.Outlined.Description, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.onAccent)
     }
 }
 

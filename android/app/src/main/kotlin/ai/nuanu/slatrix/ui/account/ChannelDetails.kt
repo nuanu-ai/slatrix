@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.FileKind
 import ai.nuanu.slatrix.core.ChannelMember
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
@@ -351,14 +352,19 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
             Row(Modifier.fillMaxWidth().clickable { if (link != null) uris.openUri(link) else message.eventId?.let(onOpenMessage) }
                 .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-                Box(Modifier.size(UiMetrics.Avatar).background(colors.raised, MaterialTheme.shapes.small), contentAlignment = Alignment.Center) {
+                // A file shows by its name and type, as its row in the conversation does, not by its caption.
+                val file = message.attachment.takeIf { link == null }
+                val kind = file?.let { FileKind.of(it.name, it.mimeType) }
+                if (kind != null) FileTile(kind)
+                else Box(Modifier.size(UiMetrics.Avatar).background(colors.raised, MaterialTheme.shapes.small), contentAlignment = Alignment.Center) {
                     Icon(if (link != null) Icons.Outlined.Link else Icons.Outlined.Description, null, Modifier.size(UiMetrics.Icon),
                         tint = colors.textSecondary)
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(link ?: message.body, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold,
+                    Text(link ?: file?.name ?: message.body, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold,
                         color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("Shared by ${message.senderName} · ${dayLabel(message.timestamp)}", style = MaterialTheme.typography.bodyMedium,
+                    Text(listOfNotNull(file?.let { kind?.label(it.name) }, "Shared by ${message.senderName}", dayLabel(message.timestamp))
+                        .joinToString(" · "), style = MaterialTheme.typography.bodyMedium,
                         color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
