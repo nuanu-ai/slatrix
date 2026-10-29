@@ -1,0 +1,25 @@
+{
+  "about": "Your recent searches, newest first. adding: the list after searching for query; the query is kept trimmed, moves to the front once whatever its case, a blank one isn't kept, and only the newest ten stay. offered: which recent searches the search field offers while query is typed; an empty field offers the newest five, and typing offers up to three that contain it, leaving out the one it already says.",
+  "adding": [
+    { "name": "A search moves to the front once, whatever its case or spacing", "recents": ["launch", "budget"], "query": "  Budget ", "expected": ["Budget", "launch"] },
+    { "name": "A blank search isn't kept", "recents": ["launch"], "query": " \n", "expected": ["launch"] },
+    { "name": "The first search starts the list", "recents": [], "query": "roadmap", "expected": ["roadmap"] },
+    {
+      "name": "Only the newest ten are kept",
+      "recents": ["query 0", "query 1", "query 2", "query 3", "query 4", "query 5", "query 6", "query 7", "query 8", "query 9"],
+      "query": "newest",
+      "expected": ["newest", "query 0", "query 1", "query 2", "query 3", "query 4", "query 5", "query 6", "query 7", "query 8"]
+    }
+  ],
+  "offered": [
+    { "name": "An empty field offers recent searches", "recents": ["budget", "launch"], "query": "", "expected": ["budget", "launch"] },
+    { "name": "An empty field offers the newest five", "recents": ["a", "b", "c", "d", "e", "f", "g"], "query": "  ", "expected": ["a", "b", "c", "d", "e"] },
+    { "name": "Typing offers the ones that contain it, ignoring case, but not the same search again", "recents": ["design review", "launch", "DES"], "query": "des", "expected": ["design review"] },
+    {
+      "name": "Typing offers at most three",
+      "recents": ["design 0", "design 1", "design 2", "design 3", "design 4"],
+      "query": "design",
+      "expected": ["design 0", "design 1", "design 2"]
+    }
+  ]
+}

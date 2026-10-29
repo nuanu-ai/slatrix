@@ -222,6 +222,82 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.reactions.show
+    @Test fun reactionsCountTheirSendersAndMarkYours() = runTest {
+        fun sent(id: String) = ReactionSenderData(id, 1_700_000_000_000u, null)
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Ship it", reactions = listOf(
+            Reaction("👍", listOf(sent("@mira:example.org"), sent("@me:example.org"))),
+            Reaction("🎉", listOf(sent("@sam:example.org"))),
+        ))))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val state = conversation.state.first { it.rows.isNotEmpty() }
+        assertEquals(listOf(
+            MessageReaction("👍", 2, true, listOf("@mira:example.org", "@me:example.org")),
+            MessageReaction("🎉", 1, false, listOf("@sam:example.org")),
+        ), state.rows.messages.single().reactions)
+        assertEquals("@me:example.org", state.ownUserId)
+        conversation.close()
+    }
+
+    // capability: message.thread-summary
+    @Test fun aThreadRootCountsItsRepliesAndKnowsTheLastOne() = runTest {
+        val reply = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Done", null)), "Done", false, null)), null, null, null))
+        val summary = object : ThreadSummary(NoHandle) {
+            override fun numReplies(): ULong = 3u
+            override fun latestEvent(): EmbeddedEventDetails = EmbeddedEventDetails.Ready(reply, "@sam:example.org",
+                ProfileDetails.Ready("Sam Okafor", false, null, null, null), 1_700_000_600_000u, EventOrTransactionId.EventId("\$r"))
+        }
+        val root = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Plan?", null)), "Plan?", false, null)), null, null, summary))
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Plan?", content = root), conversationItem("b", "\$b", "Solo")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val messages = conversation.state.first { it.rows.isNotEmpty() }.rows.messages
+        assertEquals(listOf(MessageThread(3, "Sam Okafor", 1_700_000_600_000L), null), messages.map { it.thread })
+        conversation.close()
+    }
+
+    // capability: message.reply-preview
+    @Test fun aReplyQuotesItsParentAndAsksForOneTheTimelineHasNotLoaded() = runTest {
+        fun text(body: String) = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)), null, null, null))
+        fun reply(parent: String, details: EmbeddedEventDetails) = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Yes", null)), "Yes", false, null)),
+            object : InReplyToDetails(NoHandle) {
+                override fun eventId(): String = parent
+                override fun event(): EmbeddedEventDetails = details
+            }, null, null))
+        val ready = EmbeddedEventDetails.Ready(text("Ship it?"), "@sam:example.org",
+            ProfileDetails.Ready("Sam Okafor", false, null, null, null), 1_700_000_000_000u, EventOrTransactionId.EventId("\$p"))
+        val timeline = ConversationTimeline(listOf(
+            conversationItem("a", "\$a", "Yes", content = reply("\$p", ready)),
+            conversationItem("b", "\$b", "Yes", content = reply("\$old", EmbeddedEventDetails.Unavailable)),
+            conversationItem("c", "\$c", "Yes", content = reply("\$old", EmbeddedEventDetails.Unavailable)),
+        ))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val messages = conversation.state.first { it.rows.isNotEmpty() }.rows.messages
+        assertEquals(listOf(
+            ReplyPreview("\$p", ReplyPreview.State.Ready, "Sam Okafor", "Ship it?"),
+            ReplyPreview("\$old", ReplyPreview.State.Loading),
+            ReplyPreview("\$old", ReplyPreview.State.Loading),
+        ), messages.map { it.replyTo })
+        assertEquals("\$old", timeline.fetched.receive())
+        conversation.close()
+        assertTrue("Asked once for a parent two replies quote", timeline.fetched.tryReceive().isFailure)
+    }
+
+    // capability: message.edited
+    @Test fun anEditedMessageSaysSo() = runTest {
+        val edited = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Fixed", null)), "Fixed", true, null)),
+            null, null, null,
+        ))
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Fixed", content = edited), conversationItem("b", "\$b", "Plain")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        assertEquals(listOf(true, false), conversation.state.first { it.rows.isNotEmpty() }.rows.messages.map { it.edited })
+        conversation.close()
+    }
+
     // capability: message.react.quick
     @Test fun reactingTogglesTheReactionOnTheMessageAndSaysWhenItAddedOne() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
@@ -266,6 +342,81 @@ class MatrixConversationTest {
         assertEquals(EventOrTransactionId.EventId("\$one"), id)
         assertEquals("Hello again", (((edited as EditedContent.RoomMessage).content as ConversationContent).type as MessageType.Text).content.body)
         conversation.close()
+    }
+
+    // capability: composer.attachments
+    @Test fun attachmentsGoOutInOrderAsImagesAndVideosWithTheirSizeOrAsFilesAndShowTheirUpload() = runTest {
+        val uploading = EventSendState.NotSentYet(MediaUploadProgress(0u, AbstractProgress(25u, 100u)))
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "txn-a", "photo.png", local = true, sendState = uploading)))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        assertEquals(0.25f, conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single().uploadProgress)
+
+        conversation.sendAttachments(listOf(
+            { OutgoingAttachment("/cache/photo.png", "photo.png", "image/png", 2_048, 1200, 800) },
+            { OutgoingAttachment("/cache/notes.pdf", "notes.pdf", "application/pdf", 4_096, null, null) },
+            { OutgoingAttachment("/cache/clip.mp4", "clip.mp4", "video/mp4", 8_192, 640, 360, durationMillis = 3_000) },
+        ))
+        val (photo, image) = timeline.attachments.receive()
+        assertEquals(UploadSource.File("/cache/photo.png"), photo.source)
+        assertEquals(ImageInfo(800u, 1200u, "image/png", 2_048u, null, null, null, null), (image as AttachmentKind.Image).imageInfo)
+        val (notes, file) = timeline.attachments.receive()
+        assertEquals(UploadSource.File("/cache/notes.pdf"), notes.source)
+        assertEquals(FileInfo("application/pdf", 4_096u, null, null), (file as AttachmentKind.File).fileInfo)
+        val (_, video) = timeline.attachments.receive()
+        assertEquals(VideoInfo(java.time.Duration.ofMillis(3_000), 360u, 640u, "video/mp4", 8_192u, null, null, null),
+            (video as AttachmentKind.Video).videoInfo)
+        conversation.close()
+    }
+
+    @Test fun anAttachmentInAThreadGoesToTheThread() = runTest {
+        val timeline = ConversationTimeline(emptyList())
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root")
+        conversation.sendAttachments(listOf({ OutgoingAttachment("/cache/a.txt", "a.txt", "text/plain", 1, null, null) }))
+        val relation = com.google.gson.JsonParser.parseString(timeline.attachments.receive().first.extraContentJson).asJsonObject["m.relates_to"].asJsonObject
+        assertEquals("m.thread", relation["rel_type"].asString)
+        assertEquals("\$root", relation["event_id"].asString)
+        conversation.close()
+    }
+
+    @Test fun anAttachmentThatCantBeReadSaysSo() = runTest {
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(ConversationTimeline(emptyList())))
+        conversation.sendAttachments(listOf({ throw java.io.FileNotFoundException("gone") }))
+        assertEquals("Couldn’t send this file.", conversation.state.first { it.notice != null }.notice)
+        conversation.close()
+    }
+
+    // capability: message.pin
+    @Test fun pinningPinsOrUnpinsTheMessageAndAFailureSaysSo() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val message = conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single()
+        conversation.pin(message, true)
+        assertEquals("\$one" to true, timeline.pins.receive())
+        conversation.pin(message, false)
+        assertEquals("\$one" to false, timeline.pins.receive())
+
+        timeline.pinFailure = IllegalStateException("Forbidden")
+        conversation.pin(message, true)
+        assertEquals("Couldn’t pin this message.", conversation.state.first { it.notice != null }.notice)
+        conversation.close()
+    }
+
+    // capability: conversation.pins
+    @Test fun pinnedMessagesComeFromTheRoomsPinnedTimeline() = runTest {
+        val room = ConversationRoom(ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Ship it"))))
+        val pinned = MatrixConversation(backgroundScope, room, view = ConversationView.Pins)
+        assertEquals(listOf("Ship it"), pinned.state.first { it.rows.isNotEmpty() }.rows.messages.map { it.body })
+        assertTrue(room.configuration?.focus is TimelineFocus.PinnedEvents)
+        pinned.close()
+    }
+
+    // capability: conversation.files
+    @Test fun sharedFilesReadTheWholeConversationThreadsIncluded() = runTest {
+        val room = ConversationRoom(ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "spec.pdf"))))
+        val files = MatrixConversation(backgroundScope, room, view = ConversationView.Files)
+        files.state.first { it.rows.isNotEmpty() }
+        assertEquals(TimelineFocus.Live(hideThreadedEvents = false), room.configuration?.focus)
+        files.close()
     }
 
     @Test fun aFailedDeleteSaysSoForAMoment() = runTest {
@@ -429,6 +580,7 @@ private class JumpRoom(private val live: Timeline, private val around: Timeline)
     val focuses = mutableListOf<TimelineFocus>()
     var aroundFailure: Exception? = null
     override suspend fun setUnreadFlag(newValue: Boolean) = Unit
+    override fun ownUserId(): String = "@me:example.org"
     override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline {
         focuses += configuration.focus
         if (configuration.focus is TimelineFocus.Event) aroundFailure?.let { throw it }
@@ -441,6 +593,7 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
     var markedUnread = true
     val sendQueueEnabled = CompletableDeferred<Boolean>()
     override fun enableSendQueue(enable: Boolean) { sendQueueEnabled.complete(enable) }
+    override fun ownUserId(): String = "@me:example.org"
     override suspend fun setUnreadFlag(newValue: Boolean) { markedUnread = newValue }
     override suspend fun timeline(): Timeline = value
     override suspend fun matrixToEventPermalink(eventId: String): String = "https://matrix.to/#/!design:example.org/$eventId"
@@ -474,6 +627,20 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         redactFailure?.let { throw it }
         redacted.send(eventOrTransactionId)
     }
+    val pins = Channel<Pair<String, Boolean>>(Channel.UNLIMITED)
+    var pinFailure: Exception? = null
+    override suspend fun pinEvent(eventId: String): Boolean {
+        pinFailure?.let { throw it }
+        pins.send(eventId to true)
+        return true
+    }
+    override suspend fun unpinEvent(eventId: String): Boolean {
+        pinFailure?.let { throw it }
+        pins.send(eventId to false)
+        return true
+    }
+    val fetched = Channel<String>(Channel.UNLIMITED)
+    override suspend fun fetchDetailsForEvent(eventId: String) { fetched.send(eventId) }
     override suspend fun addListener(listener: TimelineListener): TaskHandle {
         this.listener = listener
         listener.onUpdate(listOf(TimelineDiff.Reset(cached)))
@@ -504,6 +671,14 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         replies.send(eventId)
         return send(msg)
     }
+    val attachments = Channel<Pair<UploadParameters, AttachmentKind>>(Channel.UNLIMITED)
+    override fun sendAttachment(params: UploadParameters, attachment: AttachmentKind): SendAttachmentJoinHandle {
+        attachments.trySend(params to attachment)
+        return object : SendAttachmentJoinHandle(NoHandle) {
+            override suspend fun join() = Unit
+            override fun cancel() = Unit
+        }
+    }
     val edits = Channel<Pair<EventOrTransactionId, EditedContent>>(Channel.UNLIMITED)
     override suspend fun edit(eventOrTransactionId: EventOrTransactionId, newContent: EditedContent) {
         edits.send(eventOrTransactionId to newContent)
@@ -525,6 +700,7 @@ private fun conversationItem(
     local: Boolean = false,
     sendState: EventSendState? = if (local) EventSendState.NotSentYet(null) else null,
     content: TimelineItemContent? = null,
+    reactions: List<Reaction> = emptyList(),
     sender: String = "@mira:example.org",
     timestamp: ULong = 1_700_000_000_000u,
     editable: Boolean = false,
@@ -540,7 +716,7 @@ private fun conversationItem(
             MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)),
             null, null, null,
         )),
-        reactions = emptyList(), eventTypeRaw = "m.room.message", timestamp = timestamp,
+        reactions = reactions, eventTypeRaw = "m.room.message", timestamp = timestamp,
         localSendState = sendState, editSendState = null, redactionSendState = null, localCreatedAt = null,
         readReceipts = emptyMap(), origin = null, canBeRepliedTo = true,
         lazyProvider = object : LazyTimelineItemProvider(NoHandle) {},

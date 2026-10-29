@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_base.EncryptionState
+import uniffi.ruma_events.MessageLikeEventType
+import uniffi.ruma_events.StateEventType
 
 class MatrixRoomsTest {
     @Test fun retryKeepsTheLiveSyncUntilNotificationLookupCompletes() = runTest {
@@ -124,6 +126,47 @@ class MatrixRoomsTest {
         // Another client unstars it.
         alpha.emit(alpha.info.copy(isFavourite = false))
         rooms.state.first { state -> state.rooms.none { it.starred } }
+        rooms.close()
+    }
+
+    // capability: channel.read-only
+    @Test fun whetherYouMayPostFollowsTheRoomsPowerLevels() = runTest {
+        val news = TestRoom(roomInfo("!news:example.org", "News"))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(news)))
+        assertTrue("Unknown power levels keep the composer", rooms.state.first { !it.loading }.rooms.single().canPost)
+
+        news.emit(news.info.copy(powerLevels = TestPowers(post = false)))
+        rooms.state.first { state -> !state.rooms.single().canPost }
+        news.emit(news.info.copy(powerLevels = TestPowers(post = true)))
+        rooms.state.first { state -> state.rooms.single().canPost }
+        rooms.close()
+    }
+
+    // capability: channel.details
+    @Test fun aSummaryCarriesItsMemberCountAndWhatYouMayChange() = runTest {
+        val design = TestRoom(roomInfo("!design:example.org", "design").copy(joinedMembersCount = 12u))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(design)))
+        val unknown = rooms.state.first { !it.loading }.rooms.single()
+        assertEquals(12, unknown.memberCount)
+        assertFalse("Unknown power levels offer no edit", unknown.canEditName || unknown.canEditTopic)
+
+        design.emit(design.info.copy(powerLevels = TestPowers(name = false, invite = false)))
+        val known = rooms.state.first { state -> state.rooms.single().canEditTopic }.rooms.single()
+        assertFalse(known.canEditName)
+        assertFalse(known.canInvite)
+        rooms.close()
+    }
+
+    // capability: conversation.pins
+    @Test fun aSummaryCarriesItsPinsInTheOrderPinnedAndWhetherYouMayPin() = runTest {
+        val design = TestRoom(roomInfo("!design:example.org", "design").copy(pinnedEventIds = listOf("\$old", "\$new")))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(design)))
+        val unknown = rooms.state.first { !it.loading }.rooms.single()
+        assertEquals(listOf("\$old", "\$new"), unknown.pinned)
+        assertFalse("Unknown power levels offer no pinning", unknown.canPin)
+
+        design.emit(design.info.copy(powerLevels = TestPowers()))
+        rooms.state.first { state -> state.rooms.single().canPin }
         rooms.close()
     }
 
@@ -470,11 +513,24 @@ private class RoomsSync : SyncService(NoHandle) {
     }
 }
 
+/** What you may do in a room; the event type objects compare through the SDK, so they're told apart by type. */
+internal class TestPowers(private val post: Boolean = true, private val name: Boolean = true, private val topic: Boolean = true,
+    private val invite: Boolean = true, private val pin: Boolean = true) : RoomPowerLevels(NoHandle) {
+    override fun canOwnUserSendMessage(message: MessageLikeEventType): Boolean = post || message !is MessageLikeEventType.RoomMessage
+    override fun canOwnUserSendState(stateEvent: StateEventType): Boolean = when (stateEvent) {
+        is StateEventType.RoomName -> name
+        is StateEventType.RoomTopic -> topic
+        else -> true
+    }
+    override fun canOwnUserInvite(): Boolean = invite
+    override fun canOwnUserPinUnpin(): Boolean = pin
+}
+
 private class RoomsHandle : TaskHandle(NoHandle) {
     override fun cancel() = Unit
 }
 
-private fun roomInfo(
+internal fun roomInfo(
     id: String,
     name: String,
     direct: Boolean = false,

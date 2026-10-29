@@ -25,8 +25,10 @@ Choose a homeserver, sign in with the method it offers, and verify the device wi
 another device or a recovery key. Home lists starred conversations, channels and direct
 messages. Long-press a conversation to star or unstar it. The Search tab
 finds channels and people as you type, and messages when you search, with Slack's
-`in:` and `from:`. Tap the workspace
+`in:` and `from:`. An empty search field lists your recent searches. Tap the workspace
 icon or name to switch workspaces; direct messages remain available in every workspace.
+Tap Channels to browse the open workspace's channels, or the server's public ones,
+and join one; Add channel offers that or creating a private channel in the workspace.
 Open You, then Preferences, to change the color mode and sidebar palette.
 Color mode follows the system until you choose Light or Dark.
 

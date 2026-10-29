@@ -4,10 +4,13 @@ import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.MentionPeople
+import ai.nuanu.slatrix.core.MentionPerson
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
+import ai.nuanu.slatrix.ui.account.ComposerActions
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -19,6 +22,7 @@ import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import org.junit.Rule
@@ -43,10 +47,10 @@ class MessageActionScreenshots(private val dark: Boolean) {
             MessageKind.Text, MessageSendState.Sent, sender == "Jordan", sender.take(1), if (sender == "Mira") 2 else 5)
         val rows = listOf(
             message("a", "Mira", "The new onboarding flow is up on staging. Would love eyes on the empty states.", 0),
-            message("b", "Jordan", "Looking now. The illustrations read well in dark mode too.", 10),
+            message("b", "Jordan", "Looking now. The illustrations read well in dark mode too.", 10).copy(editable = true),
         )
         val actions = MessageActions(quick = listOf("🙂", "❤️", "👍", "💯", "🐛"), recent = listOf("🙂", "❤️", "👍"),
-            onReact = { _, _ -> }, link = { "" }, onDelete = {})
+            onReact = { _, _ -> }, link = { "" }, onDelete = {}, onQuote = {}, onEdit = {}, onPin = { _, _ -> })
         compose.setContent {
             SlatrixTheme(dark = dark) {
                 LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), ComposerState(loading = false),
@@ -77,6 +81,29 @@ class MessageActionScreenshots(private val dark: Boolean) {
         compose.runOnIdle { composer.value = ComposerState("Looking now.", loading = false, target = ComposerTarget.Edit("\$b", "Looking now.")) }
         compose.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/Editing-$theme.png")
+    }
+
+    @Test fun composerMentionsAndAttachments() {
+        val room = RoomSummary("!design:example.org", "design", false, "Launch reviews and critique", UnreadBadge.None, "D", 0)
+        val text = mutableStateOf("")
+        val people = MentionPeople(listOf(MentionPerson("@mira:example.org", "Mira Chen"), MentionPerson("@miles:example.org", "Miles Park"),
+            MentionPerson("@jordan:example.org", "Jordan Lee")), offersRoom = true)
+        compose.setContent {
+            SlatrixTheme(dark = dark) {
+                LiveChannelScreen(room, ConversationState(emptyList(), loading = false, hasMore = false),
+                    ComposerState(text.value, loading = false), { text.value = it }, {}, {}, {}, {}, {}, {}, {},
+                    composerActions = ComposerActions(people = people, onAttach = {}))
+            }
+        }
+        val theme = if (dark) "dark" else "light"
+        captureScreenRoboImage("build/outputs/roborazzi/Composer-$theme.png")
+        compose.onNodeWithContentDescription("Message #design").performTextInput("Can you check this @mi")
+        compose.onNodeWithText("Miles Park").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/Mentions-$theme.png")
+        compose.runOnIdle { text.value = "" }
+        compose.onNodeWithContentDescription("Attachments").performClick()
+        compose.onNodeWithText("Files").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/Attachments-$theme.png")
     }
 
     companion object {

@@ -202,6 +202,17 @@ class MatrixWorkspaceTest {
         assertEquals("\$root", workspace.selected.value?.at)
         workspace.close()
     }
+
+    // capability: composer.typing
+    @Test fun aChannelSaysWhoIsTypingButAThreadDoesNotSinceTypingIsRoomWide() = runTest {
+        val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+        workspace.open(alpha)
+        assertNotNull(workspace.selected.first { it?.conversation != null }?.typing)
+        workspace.open(alpha, threadRoot = "\$root")
+        assertNull(workspace.selected.first { it?.threadRoot != null && it.conversation != null }?.typing)
+        workspace.close()
+    }
 }
 
 private class WorkspaceClient(private val threadRoots: Map<String, String> = emptyMap(),
@@ -213,6 +224,7 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
     override suspend fun getRecentEmojis(): List<RecentEmoji> = emptyList()
     override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
         override fun id(): String = roomId
+        override fun ownUserId(): String = "@me:example.org"
         override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
             focuses.add(configuration.focus).let { object : Timeline(NoHandle) {
                 override suspend fun addListener(listener: TimelineListener): TaskHandle = object : TaskHandle(NoHandle) {

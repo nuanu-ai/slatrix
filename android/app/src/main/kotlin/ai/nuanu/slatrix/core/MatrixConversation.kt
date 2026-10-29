@@ -22,11 +22,19 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.matrix.rustcomponents.sdk.AttachmentKind
 import org.matrix.rustcomponents.sdk.DateDividerMode
+import org.matrix.rustcomponents.sdk.FileInfo
+import org.matrix.rustcomponents.sdk.ImageInfo
+import org.matrix.rustcomponents.sdk.UploadParameters
+import org.matrix.rustcomponents.sdk.UploadSource
+import org.matrix.rustcomponents.sdk.VideoInfo
 import org.matrix.rustcomponents.sdk.EditedContent
+import org.matrix.rustcomponents.sdk.EmbeddedEventDetails
 import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.EventSendState
 import org.matrix.rustcomponents.sdk.FormattedBody
+import org.matrix.rustcomponents.sdk.InReplyToDetails
 import org.matrix.rustcomponents.sdk.Mentions
 import org.matrix.rustcomponents.sdk.MessageFormat
 import org.matrix.rustcomponents.sdk.MessageType
@@ -49,6 +57,12 @@ import org.matrix.rustcomponents.sdk.TimelineListener
 import org.matrix.rustcomponents.sdk.VirtualTimelineItem
 import uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode
 import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
+
+/**
+ * What a conversation shows: its timeline, its pinned messages, which the SDK fetches itself, or every message threads
+ * included, for the files and links shared in it.
+ */
+enum class ConversationView { Timeline, Pins, Files }
 
 enum class MessageKind { Text, Notice, Emote, Attachment, Encrypted, Deleted, Unsupported }
 enum class MessageSendState { Sent, Sending, Failed }
@@ -80,10 +94,34 @@ data class ConversationMessage(
     val queuePaused: Boolean = false,
     /** Your own text message, which you can edit. */
     val editable: Boolean = false,
-) : ConversationRow
+    val edited: Boolean = false,
+    val reactions: List<MessageReaction> = emptyList(),
+    /** Set on a thread's root: the summary under it. */
+    val thread: MessageThread? = null,
+    /** The message this one replies to, quoted above it. */
+    val replyTo: ReplyPreview? = null,
+    /** How much of an attachment you're sending has gone up, from 0 to 1. */
+    val uploadProgress: Float? = null,
+) : ConversationRow {
+    /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
+    val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
+}
+
+/** One emoji's reactions: how many, whether one is yours, and who, as user IDs in the order they reacted. */
+data class MessageReaction(val key: String, val count: Int, val mine: Boolean, val senders: List<String>)
+
+/** The quoted parent above a reply; until it loads, or when it can't, only its event ID is known. */
+data class ReplyPreview(val eventId: String, val state: State, val senderName: String = "", val body: String = "") {
+    enum class State { Loading, Ready, Unavailable }
+}
+
+/** Slack's "N replies" line under a thread's root. */
+data class MessageThread(val replies: Int, val lastReplier: String?, val lastReplyAt: Long?)
 
 data class ConversationState(
     val rows: List<ConversationRow> = emptyList(),
+    /** Whose reactions are "yours" and whose mentions stand out. */
+    val ownUserId: String? = null,
     val loading: Boolean = true,
     val loadingHistory: Boolean = false,
     val hasMore: Boolean = true,
@@ -106,6 +144,12 @@ private const val MAX_BLANK_PAGES = 5
 private const val ROOT_KEY = "thread-root"
 private const val NOTICE_MILLIS = 4_000L
 
+/** The relation that puts an attachment in a thread, as the Mac sends it. */
+private fun threadRelation(root: String): String {
+    val id = "\"" + root.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    return """{"m.relates_to":{"rel_type":"m.thread","event_id":$id,"is_falling_back":true,"m.in_reply_to":{"event_id":$id}}}"""
+}
+
 /** The value, or null when [block] failed; cancellation still cancels. */
 internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } catch (cancelled: CancellationException) {
     throw cancelled
@@ -119,12 +163,15 @@ internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } c
 class MatrixConversation(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null,
     private val at: String? = null,
     /** The thread's root as its channel shows it, on screen at once while the thread loads, as on the Mac. */
-    root: ConversationMessage? = null) {
+    root: ConversationMessage? = null,
+    private val view: ConversationView = ConversationView.Timeline) {
     // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
     private val root = root?.copy(id = ROOT_KEY, grouped = false)
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
-    private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null))
+    private val ownUserId = room.ownUserId()
+    private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null,
+        ownUserId = ownUserId))
     val state: StateFlow<ConversationState> = mutableState.asStateFlow()
     private val ready = CompletableDeferred<Unit>()
     private val updates = Channel<Update>(Channel.UNLIMITED)
@@ -164,7 +211,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     private val updating = operations.launch {
         try {
-            open(threadRoot?.let(TimelineFocus::Thread) ?: TimelineFocus.Live(hideThreadedEvents = true)) { shown = it }
+            open(when {
+                view == ConversationView.Pins -> TimelineFocus.PinnedEvents
+                threadRoot != null -> TimelineFocus.Thread(threadRoot)
+                else -> TimelineFocus.Live(hideThreadedEvents = view != ConversationView.Files)
+            }) { shown = it }
             currentCoroutineContext().ensureActive()
             ready.complete(Unit)
             // A thread shows its reply wherever it is; a channel first checks whether its live timeline holds it.
@@ -420,11 +471,49 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
+    /** Pins the message to the room, or with [pin] false unpins it. */
+    fun pin(message: ConversationMessage, pin: Boolean) {
+        val id = message.eventId ?: return
+        operations.launch {
+            val timeline = quietly { timeline() } ?: return@launch
+            if (quietly { if (pin) timeline.pinEvent(id) else timeline.unpinEvent(id) } == null) {
+                announce(if (pin) "Couldn’t pin this message." else "Couldn’t unpin this message.")
+            }
+        }
+    }
+
     fun delete(message: ConversationMessage) {
         val id = EventOrTransactionId.EventId(message.eventId ?: return)
         operations.launch {
             // A failed redaction leaves the message, so its sheet offers Delete again.
             if (quietly { timeline().redactEvent(id, null) } == null) announce("Couldn’t delete this message.")
+        }
+    }
+
+    /** Prepares and sends each in turn, so they arrive in the order picked; the copies go once uploaded. */
+    fun sendAttachments(attachments: List<suspend () -> OutgoingAttachment>) {
+        operations.launch {
+            for (prepare in attachments) {
+                val sent = quietly {
+                    val attachment = prepare()
+                    try {
+                        val params = UploadParameters(UploadSource.File(attachment.path), null, null, null, null,
+                            threadRoot?.let(::threadRelation))
+                        val size = attachment.size.toULong()
+                        val kind = if (attachment.mimeType.startsWith("video/")) AttachmentKind.Video(VideoInfo(
+                            attachment.durationMillis?.let(java.time.Duration::ofMillis), attachment.height?.toULong(),
+                            attachment.width?.toULong(), attachment.mimeType, size, null, null, null), null)
+                        else if (attachment.width != null && attachment.height != null) AttachmentKind.Image(
+                            ImageInfo(attachment.height.toULong(), attachment.width.toULong(), attachment.mimeType, size, null, null, null, null),
+                            null)
+                        else AttachmentKind.File(FileInfo(attachment.mimeType, size, null, null))
+                        timeline().sendAttachment(params, kind).use { it.join() }
+                    } finally {
+                        java.io.File(attachment.path).parentFile?.deleteRecursively()
+                    }
+                }
+                if (sent == null) announce("Couldn’t send this file.")
+            }
         }
     }
 
@@ -527,40 +616,73 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return rows
     }
 
+    private data class Shown(val kind: MessageKind, val body: String, val html: String? = null)
+
+    private fun shown(kind: MsgLikeKind): Shown = when (kind) {
+        is MsgLikeKind.Message -> {
+            fun html(formatted: FormattedBody?) = formatted?.takeIf { it.format is MessageFormat.Html }?.body
+            when (val type = kind.content.msgType) {
+                is MessageType.Text -> Shown(MessageKind.Text, kind.content.body, html(type.content.formatted))
+                is MessageType.Notice -> Shown(MessageKind.Notice, kind.content.body, html(type.content.formatted))
+                is MessageType.Emote -> Shown(MessageKind.Emote, kind.content.body, html(type.content.formatted))
+                is MessageType.Image, is MessageType.Audio, is MessageType.Video,
+                is MessageType.File, is MessageType.Gallery -> Shown(MessageKind.Attachment, kind.content.body)
+                else -> Shown(MessageKind.Unsupported, kind.content.body)
+            }
+        }
+        is MsgLikeKind.UnableToDecrypt -> Shown(MessageKind.Encrypted, "Waiting for this message")
+        is MsgLikeKind.Redacted -> Shown(MessageKind.Deleted, "This message was deleted")
+        is MsgLikeKind.Sticker -> Shown(MessageKind.Attachment, kind.body)
+        is MsgLikeKind.Poll -> Shown(MessageKind.Unsupported, kind.question)
+        else -> Shown(MessageKind.Unsupported, "Unsupported message")
+    }
+
+    private fun name(profile: ProfileDetails, sender: String) =
+        (profile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: sender
+
+    /** Parents asked for once each, since the SDK updates every reply that quotes one when it arrives. */
+    private val askedFor = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    private fun replyPreview(reply: InReplyToDetails): ReplyPreview {
+        val id = reply.eventId()
+        return when (val parent = reply.event()) {
+            is EmbeddedEventDetails.Ready -> {
+                val shown = (parent.content as? TimelineItemContent.MsgLike)?.content?.kind?.let(::shown)
+                    ?: Shown(MessageKind.Unsupported, "Unsupported message")
+                val text = if (shown.kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)) {
+                    MessageBodyRenderer.render(shown.body, shown.html).joinToString("") { it.text }
+                } else shown.body
+                ReplyPreview(id, ReplyPreview.State.Ready, name(parent.senderProfile, parent.sender), text.replace('\n', ' '))
+            }
+            is EmbeddedEventDetails.Error -> ReplyPreview(id, ReplyPreview.State.Unavailable)
+            is EmbeddedEventDetails.Pending -> ReplyPreview(id, ReplyPreview.State.Loading)
+            is EmbeddedEventDetails.Unavailable -> {
+                // The SDK answers with the parent or an error in a later update of the reply. A request that failed, say
+                // offline, is made again the next time the reply updates.
+                if (askedFor.add(id)) operations.launch {
+                    runCatching { timeline().fetchDetailsForEvent(id) }.onFailure {
+                        if (it is CancellationException) throw it
+                        askedFor.remove(id)
+                    }
+                }
+                ReplyPreview(id, ReplyPreview.State.Loading)
+            }
+        }
+    }
+
     private fun row(item: TimelineItem): ConversationRow? {
         val event = item.asEvent() ?: return (item.asVirtual() as? VirtualTimelineItem.DateDivider)?.let {
             DayDivider(item.uniqueId().id, it.ts.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
         }
         val content = (event.content as? TimelineItemContent.MsgLike)?.content ?: return null
-        val senderName = (event.senderProfile as? ProfileDetails.Ready)?.displayName
-            ?.takeIf { it.isNotBlank() } ?: event.sender
-        var formatted: FormattedBody? = null
-        val kind: MessageKind
-        val body: String
-        when (val value = content.kind) {
-            is MsgLikeKind.Message -> {
-                body = value.content.body
-                kind = when (val type = value.content.msgType) {
-                    is MessageType.Text -> { formatted = type.content.formatted; MessageKind.Text }
-                    is MessageType.Notice -> { formatted = type.content.formatted; MessageKind.Notice }
-                    is MessageType.Emote -> { formatted = type.content.formatted; MessageKind.Emote }
-                    is MessageType.Image, is MessageType.Audio, is MessageType.Video,
-                    is MessageType.File, is MessageType.Gallery -> MessageKind.Attachment
-                    else -> MessageKind.Unsupported
-                }
-            }
-            is MsgLikeKind.UnableToDecrypt -> { body = "Waiting for this message"; kind = MessageKind.Encrypted }
-            is MsgLikeKind.Redacted -> { body = "This message was deleted"; kind = MessageKind.Deleted }
-            is MsgLikeKind.Sticker -> { body = value.body; kind = MessageKind.Attachment }
-            is MsgLikeKind.Poll -> { body = value.question; kind = MessageKind.Unsupported }
-            else -> { body = "Unsupported message"; kind = MessageKind.Unsupported }
-        }
+        val senderName = name(event.senderProfile, event.sender)
+        val (kind, body, html) = shown(content.kind)
         val failure = event.localSendState as? EventSendState.SendingFailed
         return ConversationMessage(
             id = item.uniqueId().id,
             eventId = if (event.isRemote) (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId else null,
             senderId = event.sender, senderName = senderName, body = body,
-            formattedBody = formatted?.takeIf { it.format is MessageFormat.Html }?.body,
+            formattedBody = html,
             timestamp = event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong(), kind = kind,
             sendState = when (event.localSendState) {
                 is EventSendState.NotSentYet -> MessageSendState.Sending
@@ -573,8 +695,22 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             canRetry = failure != null && failure.error !is QueueWedgeError.ExpiredAccessToken &&
                 failure.error !is QueueWedgeError.MissingMediaContent && failure.error !is QueueWedgeError.InvalidMimeType,
             queuePaused = failure?.isRecoverable == true,
+            uploadProgress = (event.localSendState as? EventSendState.NotSentYet)?.progress?.progress
+                ?.takeIf { it.total > 0u }?.let { it.current.toFloat() / it.total.toFloat() },
             // An edit goes out as text, so only a text message keeps its kind.
             editable = event.isEditable && kind == MessageKind.Text,
-        )
+            edited = (content.kind as? MsgLikeKind.Message)?.content?.isEdited == true,
+            reactions = event.reactions.map { reaction ->
+                MessageReaction(reaction.key, reaction.senders.size, reaction.senders.any { it.senderId == ownUserId },
+                    reaction.senders.map { it.senderId })
+            },
+            thread = content.threadSummary?.let { summary ->
+                val latest = summary.latestEvent() as? EmbeddedEventDetails.Ready
+                MessageThread(summary.numReplies().coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
+                    latest?.let { name(it.senderProfile, it.sender) },
+                    latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong())
+            }?.takeIf { it.replies > 0 },
+            replyTo = content.inReplyTo?.let(::replyPreview),
+        ).also { it.runs }
     }
 }

@@ -69,6 +69,21 @@ class LiveChannelScreenshots(private val dark: Boolean, private val fontScale: F
         captureScreenRoboImage("build/outputs/roborazzi/LiveChannel-sheet-$theme-$fontScale.png")
     }
 
+    @Test fun renderReadOnly() {
+        val room = RoomSummary("!news:example.org", "announcements", false, "Company news", UnreadBadge.None, "A", 0, canPost = false)
+        val message = ConversationMessage("a", "\$a", "@mira:example.org", "Mira", "The office is closed on Friday.", null,
+            Calendar.getInstance().timeInMillis, MessageKind.Text, MessageSendState.Sent, false, "M", 2)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
+                SlatrixTheme(dark = dark) {
+                    LiveChannelScreen(room, ConversationState(listOf(message), loading = false, hasMore = false),
+                        ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+                }
+            }
+        }
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/LiveChannel-read-only-${if (dark) "dark" else "light"}-$fontScale.png")
+    }
+
     companion object {
         @JvmStatic @Parameters(name = "dark={0}-font{1}")
         fun cases(): List<Array<Any>> = listOf(arrayOf(false, 1f), arrayOf(true, 1f), arrayOf(false, 1.3f))

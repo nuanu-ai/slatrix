@@ -79,17 +79,18 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
     }
 }
 
-/** A page pushed over Home: a plain bar with Back and its title, then its rows. */
+/** A pushed page: a plain bar with Back, its title and maybe an action such as Save, then its rows. */
 @Composable
-private fun PushedPage(title: String, onBack: () -> Unit, content: LazyListScope.() -> Unit) {
+internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable () -> Unit = {}, content: LazyListScope.() -> Unit) {
     BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas).navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack, modifier = Modifier.size(UiMetrics.Touch)) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
             }
-            Text(title, Modifier.padding(start = UiMetrics.GapSmall),
-                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(title, Modifier.weight(1f).padding(start = UiMetrics.GapSmall),
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            action()
         }
         HorizontalDivider(color = SlatrixTheme.colors.border)
         LazyColumn(Modifier.fillMaxSize(), content = content)
