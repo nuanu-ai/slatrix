@@ -6,7 +6,8 @@ sealed interface ComposerTarget {
 
     data class Reply(override val eventId: String, val senderName: String, val body: String) : ComposerTarget
 
-    data class Edit(override val eventId: String, val body: String) : ComposerTarget
+    /** [html] is the message's formatted body, which keeps its mention pills. */
+    data class Edit(override val eventId: String, val body: String, val html: String? = null) : ComposerTarget
 
     companion object {
         /** Null for a message that hasn't reached the server or was deleted. */
