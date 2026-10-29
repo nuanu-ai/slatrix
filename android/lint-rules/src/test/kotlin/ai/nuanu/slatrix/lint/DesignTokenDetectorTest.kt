@@ -131,6 +131,55 @@ class DesignTokenDetectorTest : LintDetectorTest() {
         ).run().expectErrorCount(4)
     }
 
+    @Test
+    fun testRejectsResolvedComposeFactoriesIncludingAliases() {
+        lint().files(
+            kotlin(
+                """
+                package androidx.compose.ui.graphics
+                @JvmInline value class Color(val value: ULong) {
+                    companion object {
+                        fun hsv(hue: Float, saturation: Float, value: Float, alpha: Float = 1f): Color = TODO()
+                        fun hsl(hue: Float, saturation: Float, lightness: Float, alpha: Float = 1f): Color = TODO()
+                    }
+                }
+                """,
+            ),
+            kotlin(
+                """
+                package androidx.compose.ui.unit
+                @JvmInline value class TextUnit internal constructor(val packedValue: ULong)
+                @JvmInline value class TextUnitType internal constructor(val value: Long) {
+                    companion object { val Sp: TextUnitType get() = TODO() }
+                }
+                fun TextUnit(value: Float, type: TextUnitType): TextUnit = TODO()
+                """,
+            ),
+            kotlin(
+                """
+                package ai.nuanu.slatrix.ui.chat
+                import androidx.compose.ui.graphics.Color as Ink
+                import androidx.compose.ui.graphics.Color.Companion.hsv as hueColor
+                import androidx.compose.ui.unit.TextUnit as Size
+                import androidx.compose.ui.unit.TextUnitType
+                val hsvColor = Ink.hsv(120f, 1f, 1f)
+                val hslColor = Ink.hsl(120f, 1f, .5f)
+                val aliasedColor = hueColor(120f, 1f, 1f)
+                val textSize = Size(14f, TextUnitType.Sp)
+                object OtherColor { fun hsv(): Int = 42 }
+                val unrelated = OtherColor.hsv()
+                """,
+            ),
+            kotlin(
+                """
+                package ai.nuanu.slatrix.ui.designsystem
+                import androidx.compose.ui.graphics.Color
+                val selectedColor = Color.hsv(120f, 1f, 1f)
+                """,
+            ),
+        ).run().expectErrorCount(4)
+    }
+
     private val colorStub = kotlin(
         """
         package androidx.compose.ui.graphics
