@@ -246,4 +246,18 @@ extension RoomListRefresherTests {
                     == LatestMessage(body: "Shipped it", timestamp: Date(timeIntervalSince1970: 2), isOwn: true)
             })
     }
+
+    @Test("A direct message without a picture of its own shows the other person's")
+    func directMessagePicture() async {
+        var info = roomInfo(id: "!avery:example.org", isDirect: true)
+        info.heroes = [
+            RoomHero(
+                userId: "@avery:example.org", displayName: "Avery", avatarUrl: "mxc://example.org/avery", status: nil,
+                call: nil)
+        ]
+        let refresher = RoomListRefresher()
+        refresher.attach(FakeClient(rooms: [FakeRoom(info)]))
+        refresher.request()
+        #expect(await eventually { refresher.rooms.first?.avatarURL == "mxc://example.org/avery" })
+    }
 }
