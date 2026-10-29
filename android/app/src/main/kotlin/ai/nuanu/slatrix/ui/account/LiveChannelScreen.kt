@@ -74,7 +74,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Asked, with the oldest message on screen, once the reader reaches the newest of a conversation opened at an older one. */
     onLoadNewer: (anchor: String?) -> Unit = {},
     /** Opens a message where it is, highlighted, as a tap on a reply's quote does. */
-    onOpenMessage: (eventId: String) -> Unit = {}) {
+    onOpenMessage: (eventId: String) -> Unit = {},
+    onOpenDetails: () -> Unit = {}) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle

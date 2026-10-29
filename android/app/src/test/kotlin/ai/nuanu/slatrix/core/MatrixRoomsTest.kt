@@ -20,6 +20,7 @@ import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_base.EncryptionState
 import uniffi.ruma_events.MessageLikeEventType
+import uniffi.ruma_events.StateEventType
 
 class MatrixRoomsTest {
     @Test fun retryKeepsTheLiveSyncUntilNotificationLookupCompletes() = runTest {
@@ -134,10 +135,25 @@ class MatrixRoomsTest {
         val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(news)))
         assertTrue("Unknown power levels keep the composer", rooms.state.first { !it.loading }.rooms.single().canPost)
 
-        news.emit(news.info.copy(powerLevels = PostingPowers(canPost = false)))
+        news.emit(news.info.copy(powerLevels = TestPowers(post = false)))
         rooms.state.first { state -> !state.rooms.single().canPost }
-        news.emit(news.info.copy(powerLevels = PostingPowers(canPost = true)))
+        news.emit(news.info.copy(powerLevels = TestPowers(post = true)))
         rooms.state.first { state -> state.rooms.single().canPost }
+        rooms.close()
+    }
+
+    // capability: channel.details
+    @Test fun aSummaryCarriesItsMemberCountAndWhatYouMayChange() = runTest {
+        val design = TestRoom(roomInfo("!design:example.org", "design").copy(joinedMembersCount = 12u))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(design)))
+        val unknown = rooms.state.first { !it.loading }.rooms.single()
+        assertEquals(12, unknown.memberCount)
+        assertFalse("Unknown power levels offer no edit", unknown.canEditName || unknown.canEditTopic)
+
+        design.emit(design.info.copy(powerLevels = TestPowers(name = false, invite = false)))
+        val known = rooms.state.first { state -> state.rooms.single().canEditTopic }.rooms.single()
+        assertFalse(known.canEditName)
+        assertFalse(known.canInvite)
         rooms.close()
     }
 
@@ -467,15 +483,23 @@ private class RoomsSync : SyncService(NoHandle) {
     }
 }
 
-private class PostingPowers(private val canPost: Boolean) : RoomPowerLevels(NoHandle) {
-    override fun canOwnUserSendMessage(message: MessageLikeEventType): Boolean = canPost || message !is MessageLikeEventType.RoomMessage
+/** What you may do in a room; the event type objects compare through the SDK, so they're told apart by type. */
+internal class TestPowers(private val post: Boolean = true, private val name: Boolean = true, private val topic: Boolean = true,
+    private val invite: Boolean = true) : RoomPowerLevels(NoHandle) {
+    override fun canOwnUserSendMessage(message: MessageLikeEventType): Boolean = post || message !is MessageLikeEventType.RoomMessage
+    override fun canOwnUserSendState(stateEvent: StateEventType): Boolean = when (stateEvent) {
+        is StateEventType.RoomName -> name
+        is StateEventType.RoomTopic -> topic
+        else -> true
+    }
+    override fun canOwnUserInvite(): Boolean = invite
 }
 
 private class RoomsHandle : TaskHandle(NoHandle) {
     override fun cancel() = Unit
 }
 
-private fun roomInfo(
+internal fun roomInfo(
     id: String,
     name: String,
     direct: Boolean = false,
