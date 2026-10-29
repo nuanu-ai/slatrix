@@ -96,8 +96,9 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
             coroutineScope {
                 launch { sync() }
                 launch { refreshSpaces() }
-                spaceRequests.trySend(SpaceRequest.Rebuild)
                 add(client.rooms())
+                // After add's lookup, so the first space result covers the cached rooms, and before publish, so an empty account gets one.
+                spaceRequests.trySend(SpaceRequest.Rebuild)
                 publish()
                 for (first in events) {
                     var event: Event? = first
@@ -175,14 +176,14 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
     private suspend fun add(listed: List<Room>) {
         val ids = mutableListOf<String>()
         for (room in listed) {
+            var entry: Followed? = null
             try {
                 val id = room.id()
                 if (id in followed) {
                     room.close()
                     continue
                 }
-                ids += id
-                val entry = Followed(room)
+                entry = Followed(room)
                 followed[id] = entry
                 entry.handle = room.subscribeToRoomInfoUpdates(object : RoomInfoListener {
                     override fun call(roomInfo: RoomInfo) { events.trySend(Event.Info(roomInfo, entry)) }
@@ -190,9 +191,12 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
                 val info = room.roomInfo()
                 currentCoroutineContext().ensureActive()
                 accept(info)
+                ids += id
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
+                // Unfollowed, so the list's next reset reads it again.
+                entry?.let { followed.values.remove(it); it.release() } ?: room.close()
                 error = "Couldn’t load some conversations."
             }
         }
