@@ -3,6 +3,7 @@ package ai.nuanu.slatrix
 import android.app.Application
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationState
@@ -46,6 +47,23 @@ class LiveWorkspaceTest {
         compose.onNodeWithText("3").assertExists()
         compose.onNodeWithText("Team").performClick()
         compose.runOnIdle { assertEquals("!team:example.org", opened) }
+    }
+
+    @Test fun choosingATestWorkspaceHidesOtherWorkspacesChannels() {
+        val nuanu = RoomSummary("!work:example.org", "Work channel", false, "", UnreadBadge.None, "W", 0, setOf("!nuanu:example.org"))
+        val test = RoomSummary("!test:example.org", "Test channel", false, "", UnreadBadge.None, "T", 1, setOf("!studio:example.org"))
+        val direct = RoomSummary("!sam:example.org", "Sam", true, "", UnreadBadge.None, "S", 2)
+        val rooms = RoomListState(listOf(nuanu, test, direct), loading = false, spaces = listOf(
+            SpaceSummary("!nuanu:example.org", "Nuanu", true, "N", 0),
+            SpaceSummary("!studio:example.org", "Test Studio", true, "TS", 1),
+        ))
+        val selected = mutableStateOf<String?>(null)
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", rooms, {}, {}, {}, selected.value, { selected.value = it }) } }
+        compose.onNodeWithContentDescription("Switch workspace").performClick()
+        compose.onNodeWithText("Test Studio").performClick()
+        compose.onNodeWithText("Test channel").assertExists()
+        compose.onNodeWithText("Sam").assertExists()
+        compose.onNodeWithText("Work channel").assertDoesNotExist()
     }
 
     @Test fun theComposerStaysEditableWhileThePreviousMessageIsSending() {
