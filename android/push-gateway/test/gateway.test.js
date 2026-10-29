@@ -58,3 +58,36 @@ test('homeserver notification forwards only event IDs to the intended Android pa
     android: { priority: 'high', restrictedPackageName: 'ai.nuanu.slatrix.dev' },
   }]);
 });
+
+test('untrusted notification fields are rejected before any push is emitted', async (t) => {
+  const delivered = [];
+  t.mock.method(getMessaging(), 'send', async (message) => {
+    delivered.push(message);
+    return 'projects/test/messages/unexpected';
+  });
+  const valid = notification();
+  const malformed = [
+    null, [], {}, { notification: [] },
+    ...[
+      { devices: null }, { devices: {} },
+      { devices: [null] },
+      { devices: [valid.devices[0], { app_id: 'other.application', pushkey: 'foreign-token' }] },
+      { devices: [{ app_id: 'ai.nuanu.slatrix.dev' }] },
+      { devices: [{ app_id: 'ai.nuanu.slatrix.dev', pushkey: '' }] },
+      { devices: [{ app_id: 'ai.nuanu.slatrix.dev', pushkey: 42 }] },
+      { devices: [{ app_id: 'ai.nuanu.slatrix.dev', pushkey: 'contains\nnewline' }] },
+      { devices: [{ app_id: 'ai.nuanu.slatrix.dev', pushkey: 'x'.repeat(4097) }] },
+      { devices: Array.from({ length: 101 }, () => valid.devices[0]) },
+      { event_id: null }, { event_id: '' }, { event_id: [] }, { event_id: 'missing-sigil' },
+      { event_id: '$' + 'é'.repeat(128) }, { event_id: '$line\nbreak' },
+      { room_id: null }, { room_id: '' }, { room_id: 'missing-sigil' },
+      { room_id: '!' + 'r'.repeat(255) },
+      { prio: 'urgent' },
+    ].map((overrides) => ({ notification: notification(overrides) })),
+  ];
+  for (const [index, value] of malformed.entries()) {
+    const response = await post(value);
+    assert.equal(response.status, 400, `malformed request ${index}`);
+  }
+  assert.deepEqual(delivered, []);
+});
