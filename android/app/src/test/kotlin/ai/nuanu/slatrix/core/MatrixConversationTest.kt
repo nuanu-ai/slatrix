@@ -487,27 +487,30 @@ class MatrixConversationTest {
     }
 
     // capability: message.forward
-    @Test fun aMessageForwardsAsItsTextOrItsFileButNotAVideoOrWhileAnEditOrDeleteIsPending() = runTest {
+    @Test fun aMessageForwardsAsItsTextOrItsMediaButNotWhileAnEditOrDeleteIsPending() = runTest {
         fun media(type: MessageType) = TimelineItemContent.MsgLike(MsgLikeContent(
             MsgLikeKind.Message(MessageContent(type, "clip", false, null)), null, null, null))
         val source = object : MediaSource(NoHandle) {}
         val file = MessageType.File(FileMessageContent("plan.pdf", null, null, source, null))
         val video = MessageType.Video(VideoMessageContent("clip.mp4", null, null, source, null))
+        val audio = MessageType.Audio(AudioMessageContent("memo.m4a", null, null, source, null, null, null))
         val timeline = ConversationTimeline(listOf(
             conversationItem("a", "\$text", "Ship it"),
             conversationItem("b", "\$file", "plan.pdf", content = media(file)),
             conversationItem("c", "\$video", "clip.mp4", content = media(video)),
             conversationItem("d", "\$editing", "Being edited", editState = EventSendState.NotSentYet(null)),
             conversationItem("e", "\$deleting", "Being deleted", deleting = true),
+            conversationItem("f", "\$audio", "memo.m4a", content = media(audio)),
         ))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        val rows = conversation.state.first { it.rows.messages.size == 5 }.rows.messages
+        val rows = conversation.state.first { it.rows.messages.size == 6 }.rows.messages
 
         assertEquals(MessageType.Text(TextMessageContent("Ship it", null)), conversation.forwardable(rows[0]))
         assertEquals(file, conversation.forwardable(rows[1]))
-        assertNull(conversation.forwardable(rows[2]))
+        assertEquals(video, conversation.forwardable(rows[2]))
         assertNull("A pending edit could change what goes", conversation.forwardable(rows[3]))
         assertNull(conversation.forwardable(rows[4]))
+        assertEquals(audio, conversation.forwardable(rows[5]))
         conversation.close()
     }
 
