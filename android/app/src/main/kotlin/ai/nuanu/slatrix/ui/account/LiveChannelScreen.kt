@@ -75,8 +75,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     onLoadNewer: (anchor: String?) -> Unit = {},
     /** Opens a message where it is, highlighted, as a tap on a reply's quote does. */
     onOpenMessage: (eventId: String) -> Unit = {},
-    loadPicture: PictureLoader = { _, _, _ -> null },
-    onOpenFile: suspend (MessageAttachment) -> Unit = {}) {
+    loadPicture: PictureLoader = { _, _, _, _ -> null },
+    onOpenFile: suspend (MessageAttachment) -> String? = { null }) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -311,7 +311,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
 @Composable
 private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
-    loadPicture: PictureLoader, onOpenFile: suspend (MessageAttachment) -> Unit, onView: (MessageAttachment, ImageBitmap?) -> Unit,
+    loadPicture: PictureLoader, onOpenFile: suspend (MessageAttachment) -> String?, onView: (MessageAttachment, ImageBitmap?) -> Unit,
     onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed

@@ -12,7 +12,7 @@ class MatrixMedia(private val client: Client, private val folder: File) {
      * A picture of an image or video no bigger than [width]×[height] pixels: the sender's thumbnail, or else an image
      * small enough to fetch whole, since the SDK downloads all of an encrypted original even for a thumbnail.
      */
-    suspend fun picture(attachment: MessageAttachment, width: Int, height: Int): ByteArray? {
+    suspend fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean = false): ByteArray? {
         val source = attachment.thumbnail ?: attachment.source.takeIf {
             attachment.kind == MessageAttachment.Kind.Image && (attachment.size ?: Long.MAX_VALUE) <= MAX_PREVIEW_BYTES
         } ?: return null

@@ -221,7 +221,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         ComposerActions(onCancelTarget = { composer?.cancelTarget() }), { conversation?.loadNewer(it) },
         // A quote doesn't know its parent's thread, so it asks before jumping.
         { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } },
-        media::picture, { openAttachment(context, media, it) })
+        { attachment, width, height, full -> media.picture(attachment, width, height, full) },
+        { openAttachment(context, media, it) })
 }
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */

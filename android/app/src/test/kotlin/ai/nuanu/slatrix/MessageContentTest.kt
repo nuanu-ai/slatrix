@@ -34,6 +34,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
@@ -60,6 +63,7 @@ class MessageContentTest {
     private var jumped: String? = null
     private var opened: MessageAttachment? = null
     private val picture = CompletableDeferred<ByteArray?>()
+    private val opening = CompletableDeferred<String?>()
 
     private fun show(vararg messages: ConversationMessage) {
         compose.setContent {
@@ -67,7 +71,8 @@ class MessageContentTest {
                 LiveChannelScreen(room, ConversationState(messages.toList(), loading = false, hasMore = false, ownUserId = "@me:example.org"),
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
                     onOpenThread = { thread = it }, actions = MessageActions(onReact = { message, key -> toggled = message to key }),
-                    onOpenMessage = { jumped = it }, loadPicture = { _, _, _ -> picture.await() }, onOpenFile = { opened = it })
+                    onOpenMessage = { jumped = it }, loadPicture = { _, _, _, _ -> picture.await() },
+                    onOpenFile = { opened = it; opening.await() })
             }
         }
     }
@@ -194,6 +199,18 @@ class MessageContentTest {
         compose.onNodeWithText("PDF", substring = true, useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("Q3 report.pdf", useUnmergedTree = true).performClick()
         compose.runOnIdle { assertEquals(report, opened) }
+    }
+
+    // capability: message.file
+    @Test fun aFileKeepsOpeningAfterItsRowScrollsAwayAndSaysWhenItCannot() {
+        val report = MessageAttachment(MessageAttachment.Kind.File, "Q3 report.pdf", "application/pdf", 250_000, null, null, source)
+        show(message("Q3 report.pdf").copy(kind = MessageKind.Attachment, attachment = report), *(1..40).map { message("Message $it") }.toTypedArray())
+        repeat(10) { compose.onRoot().performTouchInput { swipeDown() } }
+        compose.onNodeWithText("Q3 report.pdf", useUnmergedTree = true).performClick()
+        repeat(10) { compose.onRoot().performTouchInput { swipeUp() } }
+        compose.onNodeWithText("Q3 report.pdf", useUnmergedTree = true).assertDoesNotExist()
+        opening.complete("Couldn’t download Q3 report.pdf.")
+        compose.onNodeWithText("Couldn’t download Q3 report.pdf.").assertIsDisplayed()
     }
 
     // capability: message.deleted

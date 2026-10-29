@@ -72,7 +72,7 @@ class MessageContentScreenshots(private val dark: Boolean) {
         compose.setContent {
             SlatrixTheme(dark = dark) {
                 LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false, ownUserId = "@jordan:example.org"),
-                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, loadPicture = { _, _, _ -> png })
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, loadPicture = { _, _, _, _ -> png })
             }
         }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/MessageContent-${if (dark) "dark" else "light"}.png")

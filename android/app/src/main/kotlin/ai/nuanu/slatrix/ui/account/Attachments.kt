@@ -73,13 +73,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Downloads the file and hands it to the app the phone opens its kind with, as Slack does. */
-internal suspend fun openAttachment(context: Context, media: MatrixMedia, attachment: MessageAttachment) {
+internal suspend fun openAttachment(context: Context, media: MatrixMedia, attachment: MessageAttachment): String? {
     val file = try {
         media.file(attachment)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {
-        return Toast.makeText(context, "Couldn’t download ${attachment.name}.", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Couldn’t download ${attachment.name}.", Toast.LENGTH_SHORT).show()
+        return null
     }
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
     val type = attachment.mimeType ?: context.contentResolver.getType(uri) ?: "*/*"
@@ -88,10 +89,11 @@ internal suspend fun openAttachment(context: Context, media: MatrixMedia, attach
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(context, "No app on this phone opens ${attachment.name}.", Toast.LENGTH_SHORT).show()
     }
+    return null
 }
 
 /** Fetches a picture of an attachment no bigger than the pixels asked for. */
-typealias PictureLoader = suspend (MessageAttachment, width: Int, height: Int) -> ByteArray?
+typealias PictureLoader = suspend (MessageAttachment, width: Int, height: Int, full: Boolean) -> ByteArray?
 
 /** Decoded pictures, shared by every conversation, so scrolling back or reopening a room shows them at once. */
 private val pictures = object : LruCache<String, ImageBitmap>((Runtime.getRuntime().maxMemory() / 8).toInt()) {
@@ -105,7 +107,7 @@ private fun picture(attachment: MessageAttachment, width: Int, height: Int, load
     val picture by produceState(pictures[key], key) {
         if (value != null) return@produceState
         value = try {
-            load(attachment, width, height)?.let { bytes -> withContext(Dispatchers.Default) { decode(bytes, width, height) } }
+            load(attachment, width, height, false)?.let { bytes -> withContext(Dispatchers.Default) { decode(bytes, width, height) } }
                 ?.also { pictures.put(key, it) }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -142,7 +144,7 @@ private fun box(width: Int?, height: Int?, maxWidth: Dp, maxHeight: Dp): Pair<Dp
 
 /** An attachment under its message: an image inline, anything else as Slack's file row. */
 @Composable
-internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, onOpenFile: suspend (MessageAttachment) -> Unit,
+internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, onOpenFile: suspend (MessageAttachment) -> String?,
     onView: (ImageBitmap?) -> Unit) {
     if (attachment.kind == MessageAttachment.Kind.Image) InlineImage(attachment, load, onView) else FileRow(attachment, onOpenFile)
 }
@@ -164,7 +166,7 @@ private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onVi
 
 /** Slack's file row: a tile colored by the file's kind, its name and its type and size. A tap downloads and opens it. */
 @Composable
-private fun FileRow(attachment: MessageAttachment, onOpen: suspend (MessageAttachment) -> Unit) {
+private fun FileRow(attachment: MessageAttachment, onOpen: suspend (MessageAttachment) -> String?) {
     val colors = SlatrixTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()

@@ -27,17 +27,27 @@ class MatrixMediaTest {
     }
 
     private val original = Source("mxc://example.org/original")
-    private fun image(size: Long?, thumbnail: MediaSource? = null) =
-        MessageAttachment(MessageAttachment.Kind.Image, "photo.jpg", "image/jpeg", size, 1600, 900, original, thumbnail)
+    private val thumbnail = Source("mxc://example.org/thumbnail")
+    private fun image(size: Long?, thumbnailSize: Long? = null) = MessageAttachment(MessageAttachment.Kind.Image, "photo.jpg",
+        "image/jpeg", size, 1600, 900, original, thumbnail.takeIf { thumbnailSize != null }, thumbnailSize)
 
     // capability: message.image
     @Test fun aPictureComesFromTheSendersThumbnailOrASmallOriginalAndNeverFromAHugeOne() = runTest {
         val media = MatrixMedia(MediaClient(File("unused")), Files.createTempDirectory("media").toFile())
-        val thumbnail = Source("mxc://example.org/thumbnail")
-        assertEquals("mxc://example.org/thumbnail", media.picture(image(50_000_000, thumbnail), 400, 300)?.decodeToString())
-        assertEquals("mxc://example.org/original", media.picture(image(2_000_000), 400, 300)?.decodeToString())
-        assertNull("A huge original isn't fetched just to show a preview", media.picture(image(50_000_000), 400, 300))
-        assertNull("Nor is one of unknown size", media.picture(image(null), 400, 300))
+        suspend fun inline(attachment: MessageAttachment) = media.picture(attachment, 400, 300)?.decodeToString()
+        assertEquals("mxc://example.org/thumbnail", inline(image(50_000_000, thumbnailSize = 40_000)))
+        assertEquals("mxc://example.org/original", inline(image(2_000_000)))
+        assertNull("A huge original isn't fetched just to show a preview", inline(image(50_000_000)))
+        assertNull("Nor is one of unknown size", inline(image(null)))
+        assertNull("Nor a huge thumbnail", inline(image(50_000_000, thumbnailSize = 50_000_000)))
+    }
+
+    // capability: message.media-viewer
+    @Test fun theViewerShowsTheOriginalWhenItIsSmallEnoughAndTheThumbnailOtherwise() = runTest {
+        val media = MatrixMedia(MediaClient(File("unused")), Files.createTempDirectory("media").toFile())
+        suspend fun full(attachment: MessageAttachment) = media.picture(attachment, 2048, 2048, full = true)?.decodeToString()
+        assertEquals("mxc://example.org/original", full(image(2_000_000, thumbnailSize = 40_000)))
+        assertEquals("mxc://example.org/thumbnail", full(image(50_000_000, thumbnailSize = 40_000)))
     }
 
     // capability: message.file
@@ -45,10 +55,13 @@ class MatrixMediaTest {
         val download = Files.createTempFile("download", ".tmp").toFile().apply { writeText("quarterly numbers") }
         val folder = Files.createTempDirectory("media").toFile()
         val media = MatrixMedia(MediaClient(download), folder)
-        val attachment = MessageAttachment(MessageAttachment.Kind.File, "../../Q3 report.pdf", "application/pdf", 17, null, null, original)
-        val file = media.file(attachment)
-        assertEquals("quarterly numbers", file.readText())
-        assertEquals("Q3 report.pdf", file.name)
-        assertTrue("Saved inside the app's media folder", file.canonicalPath.startsWith(folder.canonicalPath + File.separator))
+        fun file(name: String) = MessageAttachment(MessageAttachment.Kind.File, name, "application/pdf", 17, null, null, Source("mxc://example.org/$name"))
+        val report = media.file(file("../../Q3 report.pdf"))
+        assertEquals("quarterly numbers", report.readText())
+        assertEquals("Q3 report.pdf", report.name)
+        assertTrue("Saved inside the app's media folder", report.canonicalPath.startsWith(folder.canonicalPath + File.separator))
+        val long = media.file(file("x".repeat(300) + ".pdf"))
+        assertEquals("A name too long for the file system is cut but keeps its type", "pdf", long.extension)
+        assertEquals("quarterly numbers", long.readText())
     }
 }

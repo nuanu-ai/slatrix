@@ -15,6 +15,7 @@ data class MessageAttachment(
     val source: MediaSource,
     /** The sender's own small picture of it, when they attached one. */
     val thumbnail: MediaSource? = null,
+    val thumbnailSize: Long? = null,
 ) {
     enum class Kind { Image, Video, Audio, File }
 }
