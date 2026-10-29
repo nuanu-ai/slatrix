@@ -66,7 +66,7 @@ data class RoomListState(
     val spaces: List<SpaceSummary> = emptyList(),
 )
 
-class MatrixRooms(scope: CoroutineScope, private val client: Client) {
+class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
     private val syncLock = Mutex()
     private val activeSync = MutableStateFlow<SyncService?>(null)
     private val mutableState = MutableStateFlow(RoomListState())
