@@ -30,7 +30,7 @@ struct ProtectedLocalState: Codable, Equatable {
 
     func validate() throws {
         guard drafts.count <= 4_096, threadDrafts.count <= 4_096, saved.count <= 10_000,
-            (savedRemovals ?? []).count <= 10_000,
+            (savedRemovals ?? []).count <= 1_000,
             (recentSearches ?? []).count <= RecentSearches.limit,
             (recentSearches ?? []).allSatisfy({ $0.utf8.count <= 1_024 })
         else { throw ProtectedLocalStateError.invalidData }

@@ -133,20 +133,22 @@ private final class AccountDataObserver: RawAccountDataListener {
 }
 
 /// Keeps an account's Later in step with its account data: merges what other devices write as each sync brings it,
-/// and writes back whatever this device holds that the account lacks. A failed write stays here and goes again with
-/// the next change, sync or reconnection.
+/// and writes back whatever this device holds that the account lacks. It writes only over a list read from the server
+/// or heard from a sync, never the store's, which lags until the first sync. A failed write stays here and goes again
+/// with the next change or sync, or once the connection is back and the account has been read again.
 @MainActor
 @Observable final class SavedMessagesService {
     private(set) var list = SavedMessages()
     @ObservationIgnored private var accountID: String?
+    @ObservationIgnored private var client: Client?
     @ObservationIgnored private var session = UUID()
     @ObservationIgnored private var handle: TaskHandle?
     @ObservationIgnored private var writer: Task<Void, Never>?
     @ObservationIgnored private var changes: AsyncStream<Void>.Continuation?
-    /// The account's list as last read or written; nil until read, so nothing is written over a list not yet seen.
+    /// The account's list as last read, heard or written; nil until read, so nothing is written over a list unseen.
     @ObservationIgnored private var published: SavedMessages?
     /// Lists heard from the account, so a write knows whether one landed while it was out.
-    @ObservationIgnored private var heard = 0
+    @ObservationIgnored private var heardCount = 0
 
     /// The signed-in account's client, or nil on sign-out. The list stays with its account until another account, or
     /// the preview, takes over, so the last save to the device's vault still has it.
@@ -158,71 +160,94 @@ private final class AccountDataObserver: RawAccountDataListener {
         changes = nil
         published = nil
         session = UUID()
-        if let accountID { own(accountID) }
+        self.client = client
+        if let accountID { switchAccount(to: accountID) }
         guard let client else { return }
         let session = session
         handle = client.observeRawAccountDataEvent(
             eventType: SavedMessages.eventType,
             listener: AccountDataObserver { content in
+                // Read here, off the main thread, so a long list costs the window nothing.
+                let remote = SavedMessages(json: content)
                 Task { @MainActor [weak self] in
                     guard let self, self.session == session else { return }
-                    self.receive(content)
+                    self.receive(remote)
                 }
             })
-        Task { [weak self] in
-            let stored: String?
-            do { stored = try await client.accountData(eventType: SavedMessages.eventType) } catch { return }
-            // A sync that already answered is at least as new as the store.
-            guard let self, self.session == session, self.published == nil else { return }
-            self.receive(stored)
-        }
         // One write at a time; a change while one is out waits for it, and a failed one waits for the next change.
         let (stream, changes) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         self.changes = changes
         writer = Task { [weak self] in
             for await _ in stream {
-                guard let self, let published = self.published, let content = self.list.content(over: published) else {
-                    continue
-                }
+                guard let self, let published = self.published else { continue }
                 let next = self.list
-                let heard = self.heard
+                guard let content = await Self.content(next, over: published) else { continue }
+                let heardCount = self.heardCount
                 guard (try? await client.setAccountData(eventType: SavedMessages.eventType, content: content)) != nil,
                     self.session == session
                 else { continue }
                 // A list heard meanwhile may have landed after this write, so it stands for the account's.
-                if self.heard == heard { self.published = next }
+                if self.heardCount == heardCount { self.published = next }
             }
         }
+        read()
     }
 
     /// What the device's vault held for the account when it opened.
     func merge(_ local: SavedMessages, accountID: String) {
-        own(accountID)
+        switchAccount(to: accountID)
         update(list.merged(with: local))
     }
 
     func set(roomID: String, eventID: String, saved: Bool) {
         update(list.setting(roomID: roomID, eventID: eventID, saved: saved, at: Date()))
+        // Until the account is read nothing is written, so a read that failed must not hold this back.
+        if published == nil { read() }
     }
 
-    /// Writes what an earlier attempt couldn't, now the connection is back.
-    func resume() { changes?.yield() }
+    /// The connection is back: what the account held before may have changed, so read it again before writing.
+    func resume() {
+        published = nil
+        read()
+    }
 
-    private func own(_ accountID: String) {
+    private func read() {
+        guard let client else { return }
+        let session = session
+        Task { [weak self] in
+            guard let remote = await Self.fetch(client) else { return }
+            // A sync that answered meanwhile is at least as new.
+            guard let self, self.session == session, self.published == nil else { return }
+            self.receive(remote)
+        }
+    }
+
+    private func switchAccount(to accountID: String) {
         guard accountID != self.accountID else { return }
         self.accountID = accountID
         list = SavedMessages()
     }
 
-    private func receive(_ content: String?) {
-        let remote = SavedMessages(json: content)
+    private func receive(_ remote: SavedMessages) {
         published = remote
-        heard += 1
+        heardCount += 1
         update(list.merged(with: remote))
     }
 
     private func update(_ next: SavedMessages) {
         if next != list { list = next }
         changes?.yield()
+    }
+
+    /// The account's list from the server, read off the main thread; nil when the server can't be reached.
+    private nonisolated static func fetch(_ client: Client) async -> SavedMessages? {
+        do { return SavedMessages(json: try await client.fetchAccountData(eventType: SavedMessages.eventType)) } catch {
+            return nil
+        }
+    }
+
+    /// Off the main thread, as `fetch`.
+    private nonisolated static func content(_ list: SavedMessages, over account: SavedMessages) async -> String? {
+        list.content(over: account)
     }
 }
