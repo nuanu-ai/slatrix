@@ -137,6 +137,30 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    @Test fun failedMessagesResumeTheQueueResendOrDelete() = runTest {
+        val offline = EventSendState.SendingFailed(QueueWedgeError.GenericApiError("Offline"), true)
+        val rejected = EventSendState.SendingFailed(QueueWedgeError.GenericApiError("Rejected"), false)
+        val expired = EventSendState.SendingFailed(QueueWedgeError.ExpiredAccessToken, false)
+        val timeline = ConversationTimeline(listOf(
+            conversationItem("a", "txn-a", "Offline", local = true, sendState = offline),
+            conversationItem("b", "txn-b", "Rejected", local = true, sendState = rejected),
+            conversationItem("c", "txn-c", "Expired", local = true, sendState = expired),
+        ))
+        val room = ConversationRoom(timeline)
+        val conversation = MatrixConversation(backgroundScope, room)
+        val (a, b, c) = conversation.state.first { it.rows.size == 3 }.rows.messages
+        assertEquals(listOf(MessageSendState.Failed, MessageSendState.Failed, MessageSendState.Failed), listOf(a, b, c).map { it.sendState })
+        assertEquals(listOf(true, true, false), listOf(a, b, c).map { it.canRetry })
+
+        conversation.retrySend(a)
+        assertTrue(room.sendQueueEnabled.await())
+        conversation.retrySend(b)
+        assertEquals(EventOrTransactionId.TransactionId("txn-b"), timeline.retried.receive())
+        conversation.deleteUnsent(c)
+        assertEquals(EventOrTransactionId.TransactionId("txn-c"), timeline.aborted.receive())
+        conversation.close()
+    }
+
     @Test fun sendPreservesComposerFieldsAndAcceptsOnlyTheSdkQueueResult() = runTest {
         val timeline = ConversationTimeline(emptyList())
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
@@ -219,6 +243,8 @@ class MatrixConversationTest {
 private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
     var configuration: TimelineConfiguration? = null
     var markedUnread = true
+    val sendQueueEnabled = CompletableDeferred<Boolean>()
+    override fun enableSendQueue(enable: Boolean) { sendQueueEnabled.complete(enable) }
     override suspend fun setUnreadFlag(newValue: Boolean) { markedUnread = newValue }
     override suspend fun timeline(): Timeline = value
     var openFailure: Exception? = null
@@ -238,6 +264,10 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     val receipts = Channel<Pair<ReceiptType, String>>(Channel.UNLIMITED)
     val submissions = Channel<ConversationContent>(Channel.UNLIMITED)
     val sendResults = Channel<Result<SendHandle>>(Channel.UNLIMITED)
+    val retried = Channel<EventOrTransactionId>(Channel.UNLIMITED)
+    val aborted = Channel<EventOrTransactionId>(Channel.UNLIMITED)
+    override suspend fun retrySend(itemId: EventOrTransactionId, target: SendTarget): Boolean { retried.send(itemId); return true }
+    override suspend fun abortSend(itemId: EventOrTransactionId, target: SendTarget): Boolean { aborted.send(itemId); return true }
     override suspend fun addListener(listener: TimelineListener): TaskHandle {
         this.listener = listener
         listener.onUpdate(listOf(TimelineDiff.Reset(cached)))
@@ -277,6 +307,7 @@ private fun conversationItem(
     eventId: String,
     body: String,
     local: Boolean = false,
+    sendState: EventSendState? = if (local) EventSendState.NotSentYet(null) else null,
     content: TimelineItemContent? = null,
     sender: String = "@mira:example.org",
     timestamp: ULong = 1_700_000_000_000u,
@@ -293,7 +324,7 @@ private fun conversationItem(
             null, null, null,
         )),
         reactions = emptyList(), eventTypeRaw = "m.room.message", timestamp = timestamp,
-        localSendState = if (local) EventSendState.NotSentYet(null) else null, editSendState = null, redactionSendState = null, localCreatedAt = null,
+        localSendState = sendState, editSendState = null, redactionSendState = null, localCreatedAt = null,
         readReceipts = emptyMap(), origin = null, canBeRepliedTo = true,
         lazyProvider = object : LazyTimelineItemProvider(NoHandle) {},
     )
