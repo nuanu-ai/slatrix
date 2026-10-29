@@ -289,9 +289,15 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at.takeUnless { open.resume }) },
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
             { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
-            open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { remember(it) { it.copy(onForward = { m ->
-                scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { forwarded = "This message can’t be forwarded." } }
-            }) } },
+            open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { actions ->
+                remember(actions, open.threadRoot) {
+                    // Marking a channel unread leaves it, as in Slack, so it shows unread in the list; a thread has its own read state.
+                    val markUnread = fun() { scope.launch { if (conversation?.markUnread() == true) owner?.back() } }
+                    actions.copy(onForward = { m ->
+                        scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { forwarded = "This message can’t be forwarded." } }
+                    }, onMarkUnread = markUnread.takeIf { open.threadRoot == null })
+                }
+            },
             ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
                 onNeedPeople = { composer?.loadPeople() },
                 onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
@@ -359,12 +365,19 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
     activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val open: (String) -> Unit = remember(rooms, workspace) {
         { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
     }
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
         onBrowseChannels = { onChannels(ChannelPage.Browse) }, onCreateChannel = { onChannels(ChannelPage.Create) },
+        onMarkUnread = { id, unread ->
+            (rooms?.setUnread(id, unread) ?: false).also { if (it && !unread) PushNotifications(context).clear(id) }
+        },
+        onMarkAllRead = { ids ->
+            (rooms?.markAllRead(ids) ?: ids).also { failed -> (ids - failed.toSet()).forEach(PushNotifications(context)::clear) }
+        },
         search = {
             val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()
             val inScope = remember(state.rooms, selectedSpaceId) {

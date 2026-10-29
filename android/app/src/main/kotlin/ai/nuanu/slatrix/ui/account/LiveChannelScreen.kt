@@ -284,7 +284,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
         val placeholder = when {
             threadRoot != null -> "Add a reply"
-            room.direct -> "Message ${room.name}"
+            room.direct || room.isPrivate -> "Message ${room.name}"
             else -> "Message #${room.name}"
         }
         val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
@@ -407,7 +407,7 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
             if (failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.size(UiMetrics.Icon), tint = colors.destructive)
         } else Box(Modifier.clip(MaterialTheme.shapes.small).clickable(role = Role.Button) { onPerson(message.senderId) }
             .semantics(mergeDescendants = true) { contentDescription = "${message.senderName}’s profile" }) {
-            LiveAvatar(message.initials, message.colorIndex)
+            LiveAvatar(message.initials, message.colorIndex, url = message.avatarUrl)
         }
         Column(Modifier.weight(1f)) {
             if (!message.grouped) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {

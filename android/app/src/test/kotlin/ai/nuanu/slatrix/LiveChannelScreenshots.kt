@@ -15,6 +15,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
@@ -59,7 +60,8 @@ class LiveChannelScreenshots(private val dark: Boolean, private val fontScale: F
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
                 SlatrixTheme(dark = dark) {
                     LiveChannelScreen(room, ConversationState(messages, loading = false, hasMore = false),
-                        ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+                        ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                        composerActions = ai.nuanu.slatrix.ui.account.ComposerActions(onAttach = {}, onFormat = { _, _, _, _ -> }))
                 }
             }
         }
@@ -68,6 +70,10 @@ class LiveChannelScreenshots(private val dark: Boolean, private val fontScale: F
         compose.onNodeWithText("One more pass after lunch.").performTouchInput { longClick() }
         compose.onNodeWithText("Delete message").assertIsDisplayed()
         captureScreenRoboImage("build/outputs/roborazzi/LiveChannel-sheet-$theme-$fontScale.png")
+        androidx.test.espresso.Espresso.pressBack()
+        // Slack's composer once you tap into it: the field over its toolbar.
+        compose.onNode(androidx.compose.ui.test.hasContentDescription("Message design") and androidx.compose.ui.test.hasSetTextAction()).performClick()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/LiveChannel-focused-$theme-$fontScale.png")
     }
 
     @Test fun renderReadOnly() {
