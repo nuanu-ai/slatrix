@@ -95,17 +95,21 @@ class LiveChannelScreenTest {
         }
     }
 
-    @Test fun theHistoryIndicatorWaitsBeforeShowing() {
+    @Test fun theHistoryIndicatorWaitsBeforeShowingAndStaysAcrossBackToBackPages() {
+        val state = mutableStateOf(ConversationState(listOf(message("Hello", minutes = 0)), loading = false, loadingHistory = true))
         compose.mainClock.autoAdvance = false
         compose.setContent {
-            SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(listOf(message("Hello", minutes = 0)), loading = false, loadingHistory = true),
-                    ComposerState(loading = false), {}, {}, {}, {}, {}, {})
-            }
+            SlatrixTheme { LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}) }
         }
         compose.mainClock.advanceTimeBy(200)
         compose.onNode(progress).assertDoesNotExist()
         compose.mainClock.advanceTimeBy(400)
+        compose.onNode(progress).assertExists()
+
+        compose.runOnIdle { state.value = state.value.copy(loadingHistory = false) }
+        compose.mainClock.advanceTimeBy(100)
+        compose.runOnIdle { state.value = state.value.copy(loadingHistory = true) }
+        compose.mainClock.advanceTimeBy(100)
         compose.onNode(progress).assertExists()
     }
 
