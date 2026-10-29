@@ -30,8 +30,6 @@ You shows the signed-in identity and Preferences. Color mode follows the system 
 default, with Light and Dark overrides. Aubergine and Lagoon are separate palette
 choices. Appearance and workspace choices persist across launches.
 
-Home, DMs, Activity, channel, thread and You fixtures support tests and visual review.
-Activity and thread fixture interactions are not connected-account features.
 Notifications require a configured Firebase project and a Firebase Cloud Function
 that implements the Matrix push gateway API.
 Live acceptance uses an owner-provided test account and room.

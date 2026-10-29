@@ -45,13 +45,13 @@ The Firebase file must include `ai.nuanu.slatrix.dev` for debug builds or
 Firebase project using its runtime identity, without a service-account key.
 Builds without these properties leave push disabled.
 
-## Screen mockups
+## Screenshots
 
-Render the six fictional screen fixtures without signing in:
+Render Home, DMs, You and a conversation with fictional data, without signing in:
 
 ```sh
 ./gradlew :app:recordRoborazziDebug
 ```
 
-The PNGs in `app/build/outputs/roborazzi/` cover all six screens, both themes and palettes,
-plus larger text. Android CI attaches them with its test reports and APKs.
+The PNGs land in `app/build/outputs/roborazzi/`, in both themes, with the Lagoon palette
+and larger text for some. Android CI attaches them with its test reports and APKs.
