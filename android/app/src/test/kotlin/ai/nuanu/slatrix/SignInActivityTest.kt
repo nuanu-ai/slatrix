@@ -16,9 +16,10 @@ import org.robolectric.annotation.GraphicsMode
 class SignInActivityTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    @Test fun aNewInstallationOpensSignIn() {
+    @Test fun aNewInstallationAsksForTheServerBeforeCredentials() {
         compose.onNodeWithText("Homeserver").assertExists()
-        compose.onNodeWithText("Username").assertExists()
-        compose.onNodeWithText("Password").assertExists()
+        compose.onNodeWithText("Continue").assertExists()
+        compose.onNodeWithText("Username").assertDoesNotExist()
+        compose.onNodeWithText("Password").assertDoesNotExist()
     }
 }
