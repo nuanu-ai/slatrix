@@ -5,6 +5,7 @@ import android.app.Application
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -53,6 +54,20 @@ class MockNavigationTest {
         compose.onNodeWithContentDescription("Send message").performClick()
         compose.onNodeWithText("Channel draft").assertIsDisplayed()
         compose.onNodeWithText("Message #design").assertIsDisplayed()
+    }
+    @Test fun sentMessagesAndRepliesSurviveActivityRecreation() {
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent { SlatrixMockups() }
+        compose.onNodeWithText("design").performClick()
+        compose.onNodeWithText("Message #design").performTextInput("Keep this message")
+        compose.onNodeWithContentDescription("Send message").performClick()
+        compose.onNodeWithText("3 replies").performScrollTo().performClick()
+        compose.onNodeWithText("Reply…").performTextInput("Keep this reply")
+        compose.onNodeWithContentDescription("Send reply").performClick()
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithText("Keep this reply").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Keep this message").performScrollTo().assertIsDisplayed()
     }
     @Test fun activityFiltersAndReturnsFromItsThread() {
         compose.setContent { SlatrixMockups() }
