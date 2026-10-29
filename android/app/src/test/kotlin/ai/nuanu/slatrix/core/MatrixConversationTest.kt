@@ -19,7 +19,7 @@ class MatrixConversationTest {
     @Test fun cachedMessagesAppearWhileOlderHistoryIsStillLoading() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        val message = conversation.state.first { it.rows.messages.isNotEmpty() }.rows.messages.single()
+        val message = conversation.state.first { !it.loading }.rows.messages.single()
         assertEquals("stable-1", message.id)
         assertEquals("\$one", message.eventId)
         assertEquals("Hello", message.body)

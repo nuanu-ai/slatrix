@@ -55,13 +55,16 @@ class LiveChannelScreenTest {
 
     @Test fun olderHistoryLoadsAsTheReaderNearsTheTop() {
         val many = (1..200).map { message("Message $it", minutes = it) }
-        val state = mutableStateOf(ConversationState(many, loading = false))
+        val state = mutableStateOf(ConversationState())
         var requests = 0
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, { requests++ }, {}, {})
             }
         }
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals("Nothing pages before the cached messages land", 0, requests) }
+        compose.runOnIdle { state.value = ConversationState(many, loading = false) }
         compose.onNodeWithText("Message 200").assertExists()
         compose.runOnIdle { assertEquals("The newest page is far from the top", 0, requests) }
         compose.onNodeWithText("Earlier messages").assertDoesNotExist()
