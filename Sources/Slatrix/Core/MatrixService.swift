@@ -1231,33 +1231,45 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         await open(id, at: anchor, resuming: true)
     }
 
-    /// Opens a conversation scrolled to a message, which it highlights.
-    func jumpToMessage(roomID: String, eventID: String) async {
+    /// Opens a conversation scrolled to a message, which it highlights. A thread reply opens the conversation at its
+    /// thread's root, which it returns for the thread to open at the reply.
+    @discardableResult
+    func jumpToMessage(roomID: String, eventID: String) async -> String? {
         jump = MessageJump(roomID: roomID, eventID: eventID)
-        await open(roomID, at: eventID)
+        return await open(roomID, at: eventID)
     }
 
-    /// Live, as Slack does, when the live timeline open or in the cache holds `eventID`; else loaded around it.
-    private func open(_ id: String, at eventID: String, resuming: Bool = false) async {
+    /// Live, as Slack does, when the live timeline open or in the cache holds `eventID`; else loaded around it. The
+    /// live timeline never holds a thread reply, and around one the SDK shows only its thread, so a reply opens at its
+    /// root, which it returns; a read marker on one opens the conversation live.
+    @discardableResult
+    private func open(_ id: String, at eventID: String, resuming: Bool = false) async -> String? {
         guard eventID.hasPrefix("$") else {
             errorMessage = "This message hasn’t been sent yet."
-            return
+            return nil
         }
-        if showRecentRoom(id, containing: eventID) { return }
-        if await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil, containing: eventID) { return }
-        // Opened at a thread reply, the SDK shows only that thread; a read marker on one opens the conversation live.
-        if resuming {
-            let token = selection
-            let reply = (try? await requireRoom(id).loadOrFetchEvent(eventId: eventID))?.threadRootEventId() != nil
-            guard selection == token else { return }
-            if reply {
-                await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil)
-                return
-            }
+        if await openLive(id, holding: eventID) { return nil }
+        let token = selection
+        let root = (try? await requireRoom(id).loadOrFetchEvent(eventId: eventID))?.threadRootEventId()
+        guard selection == token else { return nil }
+        if root != nil, resuming {
+            await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil)
+            return nil
         }
+        if let root {
+            jump = MessageJump(roomID: id, eventID: eventID, threadRootID: root)
+            if await openLive(id, holding: root) { return root }
+        }
+        let target = root ?? eventID
         let focus = TimelineFocus.event(
-            eventId: eventID, numContextEvents: 30, threadMode: .automatic(hideThreadedEvents: true))
-        await setupRoom(id, focus: focus, eventID: eventID)
+            eventId: target, numContextEvents: 30, threadMode: .automatic(hideThreadedEvents: true))
+        await setupRoom(id, focus: focus, eventID: target)
+        return root
+    }
+
+    private func openLive(_ id: String, holding eventID: String) async -> Bool {
+        if showRecentRoom(id, containing: eventID) { return true }
+        return await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil, containing: eventID)
     }
 
     /// Shows a conversation whose live timeline is still open, rows and all, in the frame of the click. False when

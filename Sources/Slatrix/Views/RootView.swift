@@ -1700,10 +1700,11 @@ struct RootView: View {
                         return
                     }
                 }
+                var replyRootID: String?
                 if let resumeAnchor, eventID == nil {
                     await matrix.resumeRoom(id, at: resumeAnchor)
                 } else if let destinationEventID {
-                    await matrix.jumpToMessage(roomID: id, eventID: destinationEventID)
+                    replyRootID = await matrix.jumpToMessage(roomID: id, eventID: destinationEventID)
                 } else if thread == nil || requiresRoomSelection {
                     await matrix.selectRoom(id)
                 }
@@ -1721,7 +1722,9 @@ struct RootView: View {
                         return
                     }
                 }
-                if let thread {
+                // A jump to a thread reply opens its thread beside the conversation, as Slack does.
+                let replyRoot = replyRootID.flatMap { root in matrix.messages.first { $0.eventID == root } }
+                if let thread = thread ?? replyRoot {
                     threadRoot = thread
                     openingThreadID = thread.eventID
                     do {

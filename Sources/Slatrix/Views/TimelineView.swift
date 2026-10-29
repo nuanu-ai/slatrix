@@ -47,13 +47,17 @@ struct TimelineView: View {
     }
     /// The intro tops a conversation loaded back to its start, or one with nothing else to show.
     private var reachedStart: Bool { matrix.isPreview || !matrix.hasMoreHistory }
+    /// The message jumped to, when this pane shows it.
+    private var jumpTarget: String? {
+        thread ? threadRootID.flatMap { matrix.jump?.eventID(inThread: $0) } : matrix.jump?.eventID(inThread: nil)
+    }
     private var hasNewer: Bool { !thread && matrix.focusedEventID != nil && matrix.hasMoreForwardHistory }
 
     var body: some View {
         TimelineTable(
             entries: entries, context: updatedContext, live: live, bottomAligned: !thread,
-            focusedEventID: thread ? nil : matrix.jump?.eventID ?? matrix.focusedEventID,
-            jumpID: thread ? nil : matrix.jump?.id, startsAtUnread: startsAtUnread,
+            focusedEventID: thread ? jumpTarget : jumpTarget ?? matrix.focusedEventID,
+            jumpID: jumpTarget == nil ? nil : matrix.jump?.id, startsAtUnread: startsAtUnread,
             memoryKey: "\(matrix.notificationSessionID)|\(room.id)|\(thread ? threadRootID ?? "" : "")",
             canLoadOlder: hasOlder && !loadingHistory,
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
@@ -84,8 +88,8 @@ struct TimelineView: View {
             }
         }
         .animation(Motion.overlay, value: jumpVisible)
-        .task(id: thread ? nil : matrix.jump?.id) {
-            highlighted = thread ? nil : matrix.jump?.eventID
+        .task(id: jumpTarget == nil ? nil : matrix.jump?.id) {
+            highlighted = jumpTarget
             // Held long enough to find, then faded by the row.
             guard highlighted != nil, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
             highlighted = nil
