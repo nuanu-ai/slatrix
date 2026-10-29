@@ -5,6 +5,9 @@ import androidx.compose.ui.graphics.Color
 enum class SidebarPalette {
     Aubergine, Clementine, Banana, Jade, Lagoon, Barbra, Gray, MoodIndigo;
 
+    /** The name Slack and the Mac show. */
+    val label: String get() = if (this == MoodIndigo) "Mood Indigo" else name
+
     val tokenName: String get() = name.replaceFirstChar { it.lowercase() }
 }
 
