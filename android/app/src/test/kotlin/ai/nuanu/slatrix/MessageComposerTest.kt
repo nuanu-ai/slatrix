@@ -99,17 +99,18 @@ class MessageComposerTest {
         compose.runOnIdle { assertEquals(picked, attached) }
     }
 
-    @Test fun anUploadShowsItsProgressOnTheMessage() {
+    @Test fun anUploadShowsItsProgressOnTheMessageWithoutChangingItsHeight() {
         val photo = ConversationMessage("p", null, "@me:example.org", "Me", "photo.png", null, 1_700_000_000_000L,
             MessageKind.Attachment, MessageSendState.Sending, true, "M", 0, uploadProgress = 0.25f)
+        val state = mutableStateOf(ConversationState(listOf(photo), loading = false, hasMore = false))
         compose.setContent {
-            SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(listOf(photo), loading = false, hasMore = false),
-                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
-            }
+            SlatrixTheme { LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
         }
         compose.onNode(androidx.compose.ui.test.hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(0.25f, 0f..1f)))
             .assertExists()
+        val uploading = compose.onNodeWithText("photo.png").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { state.value = state.value.copy(rows = listOf(photo.copy(uploadProgress = null, sendState = MessageSendState.Sent))) }
+        assertEquals("The bar lands without moving the row", uploading, compose.onNodeWithText("photo.png").fetchSemanticsNode().boundsInRoot)
     }
 
     @Test fun theEmojiButtonInsertsAnEmojiWhereYouType() {

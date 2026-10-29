@@ -268,7 +268,7 @@ class MatrixConversationTest {
     }
 
     // capability: composer.attachments
-    @Test fun attachmentsGoOutInOrderAsImagesWithTheirSizeOrAsFilesAndShowTheirUpload() = runTest {
+    @Test fun attachmentsGoOutInOrderAsImagesAndVideosWithTheirSizeOrAsFilesAndShowTheirUpload() = runTest {
         val uploading = EventSendState.NotSentYet(MediaUploadProgress(0u, AbstractProgress(25u, 100u)))
         val timeline = ConversationTimeline(listOf(conversationItem("a", "txn-a", "photo.png", local = true, sendState = uploading)))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
@@ -277,6 +277,7 @@ class MatrixConversationTest {
         conversation.sendAttachments(listOf(
             { OutgoingAttachment("/cache/photo.png", "photo.png", "image/png", 2_048, 1200, 800) },
             { OutgoingAttachment("/cache/notes.pdf", "notes.pdf", "application/pdf", 4_096, null, null) },
+            { OutgoingAttachment("/cache/clip.mp4", "clip.mp4", "video/mp4", 8_192, 640, 360, durationMillis = 3_000) },
         ))
         val (photo, image) = timeline.attachments.receive()
         assertEquals(UploadSource.File("/cache/photo.png"), photo.source)
@@ -284,6 +285,9 @@ class MatrixConversationTest {
         val (notes, file) = timeline.attachments.receive()
         assertEquals(UploadSource.File("/cache/notes.pdf"), notes.source)
         assertEquals(FileInfo("application/pdf", 4_096u, null, null), (file as AttachmentKind.File).fileInfo)
+        val (_, video) = timeline.attachments.receive()
+        assertEquals(VideoInfo(java.time.Duration.ofMillis(3_000), 360u, 640u, "video/mp4", 8_192u, null, null, null),
+            (video as AttachmentKind.Video).videoInfo)
         conversation.close()
     }
 
