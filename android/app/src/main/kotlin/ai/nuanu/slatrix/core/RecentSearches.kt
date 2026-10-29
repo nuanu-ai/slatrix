@@ -32,9 +32,13 @@ class RecentSearchStore(context: Context, private val userId: String) {
     val recents: List<String>
         get() = values.getString(userId, null)?.let { stored ->
             runCatching { JSONArray(stored).let { array -> List(array.length()) { array.getString(it) } } }.getOrNull()
-        }?.takeIf { list -> list.size <= RecentSearches.Limit && list.all { it.toByteArray().size <= 1_024 } }.orEmpty()
+        }?.takeIf { list -> list.size <= RecentSearches.Limit && list.all(::fits) }.orEmpty()
 
-    /** Puts [query] first and returns the list it makes. */
-    fun add(query: String): List<String> =
-        RecentSearches.adding(query, recents).also { values.edit { putString(userId, JSONArray(it).toString()) } }
+    /** Puts [query] first and returns the list it makes; a search too long to keep leaves the list as it was. */
+    fun add(query: String): List<String> {
+        if (!fits(query.trim())) return recents
+        return RecentSearches.adding(query, recents).also { values.edit { putString(userId, JSONArray(it).toString()) } }
+    }
+
+    private fun fits(query: String) = query.toByteArray().size <= 1_024
 }

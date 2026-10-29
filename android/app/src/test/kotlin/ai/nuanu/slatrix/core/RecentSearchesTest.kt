@@ -21,6 +21,12 @@ class RecentSearchesTest {
         assertEquals(emptyList<String>(), RecentSearchStore(context, "@sam:example.org").recents)
     }
 
+    @Test fun aSearchTooLongToKeepLeavesTheOthers() {
+        RecentSearchStore(context, "@alex:example.org").add("budget")
+        RecentSearchStore(context, "@alex:example.org").add("x".repeat(1_025))
+        assertEquals(listOf("budget"), RecentSearchStore(context, "@alex:example.org").recents)
+    }
+
     @Test fun storedSearchesThatBreakTheRulesAreDropped() {
         val values = context.getSharedPreferences("recent-searches", 0)
         values.edit().putString("@alex:example.org", """["budget", "${"x".repeat(1_025)}"]""").commit()
