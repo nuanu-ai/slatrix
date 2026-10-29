@@ -124,7 +124,7 @@ class IdentityVerification(private val scope: CoroutineScope, private val client
     }
 
     fun retry() {
-        if (closed || state.value.phase != IdentityPhase.Failed) return
+        if (closed || state.value.phase !in listOf(IdentityPhase.Failed, IdentityPhase.ChooseMethod)) return
         if (needsCancellation) stopFlow() else prepare()
     }
 
