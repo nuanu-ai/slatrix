@@ -16,6 +16,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  push-gateway:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: android/push-gateway/package-lock.json
+      - name: Test push gateway
+        working-directory: android/push-gateway
+        run: |
+          npm ci
+          npm test
+
   android:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
