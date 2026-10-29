@@ -75,6 +75,12 @@ enum TimelineScrollPolicy {
         !live || scrolledByReader && viewport.distanceFromBottom > viewport.height * 2
     }
 
+    /// A timeline opened at an older message turns live once the reader is at its newest message with nothing newer to
+    /// load, as Slack's does. An open edit holds it back: only a timeline that holds a message can edit it.
+    static func turnsLive(atBottom: Bool, live: Bool, hasNewer: Bool, editing: Bool) -> Bool {
+        atBottom && !live && !hasNewer && !editing
+    }
+
     /// History starts loading this many screens before the reader reaches an end, so a page lands before they do.
     static let historyLead: CGFloat = 3
 

@@ -64,15 +64,24 @@ struct TimelineHostedTests {
         let hosting: NSHostingView<Fixture>
         var bottomReports: [Bool] = []
 
-        init(messages: [ChatMessage], room: ChatRoom = TimelineHostedTests.room, height: CGFloat = 400) {
-            client = FakeClient(rooms: [FakeRoom(roomInfo(id: room.id))])
-            service.user = ChatUser(id: TimelineHostedTests.user, name: "Reader")
+        /// With `opening`, the conversation opens the way the app opens it, its timelines built by that room.
+        init(
+            messages: [ChatMessage] = [], room: ChatRoom = TimelineHostedTests.room, height: CGFloat = 400,
+            opening: FakeOpenRoom? = nil
+        ) {
+            client = FakeClient(rooms: [opening ?? FakeRoom(roomInfo(id: room.id))])
+            let user = ChatUser(id: TimelineHostedTests.user, name: "Reader")
+            service.user = user
             service.rooms = [room]
-            service.selectedRoomID = room.id
-            service.configureMessageActionsForChecks(
-                client: client, main: timeline, thread: nil,
-                rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
-            service.messages = messages
+            if opening != nil {
+                service.configureRoomOpenForChecks(client: client, roomList: FakeRoomListService(), user: user)
+            } else {
+                service.selectedRoomID = room.id
+                service.configureMessageActionsForChecks(
+                    client: client, main: timeline, thread: nil,
+                    rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
+                service.messages = messages
+            }
             window = offscreenWindow(NSSize(width: 620, height: height))
             hosting = NSHostingView(
                 rootView: Fixture(
@@ -421,6 +430,58 @@ struct TimelineHostedTests {
         harness.hosting.rootView = fixture
         await settle(harness) { harness.top(of: "Message 39") != nil }
         #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+    }
+
+    @Test(
+        "Scrolled to its newest, a conversation opened at an older message turns live if the live one fills the screen",
+        arguments: zip([10, 35], [true, false]))
+    func turnsLiveAtNewest(cachedFrom: Int, turnsLive: Bool) async throws {
+        // Like the SDK's, each timeline numbers its own items in the order it loads them, so one ID names different
+        // messages in each.
+        // Older messages run over several lines, so a row given another message's height shows.
+        func body(_ index: Int) -> String {
+            "Message \(index)" + String(repeating: " and more", count: index < 20 ? 40 : 0)
+        }
+        func items(_ range: Range<Int>, id: (Int) -> Int = { $0 }) -> [TimelineItem] {
+            range.enumerated().map { offset, index in
+                FakeTimelineItem(
+                    textEvent(
+                        "$m\(index)", body: body(index), sender: index % 3 == 0 ? Self.user : "@other:example.org"),
+                    uniqueID: "\(id(offset))")
+            }
+        }
+        let room = FakeOpenRoom(Self.room.id, cached: items(cachedFrom..<40))
+        // Loaded around the message, then a page before it.
+        room.focusedItems = items(0..<40) { ($0 + 21) % 40 }
+        let harness = Harness(opening: room)
+        defer { harness.close() }
+        await harness.service.jumpToMessage(roomID: Self.room.id, eventID: "$m5")
+        await settle(harness) { harness.top(of: body(5)) != nil }
+        // The live timeline waits here, so the screen can be read before it takes over.
+        room.buildGate.arm()
+        harness.scroll(toTop: harness.clip.bounds.minY + 10_000)
+        await settle(harness) { room.buildGate.isWaiting }
+        #expect(harness.service.focusedEventID == "$m5" && !harness.service.hasMoreForwardHistory)
+        let screen = harness.clip.convert(harness.clip.bounds, to: nil)
+        let shown = (0..<40).map(body).filter { body in
+            harness.top(of: body).map { $0 > screen.minY && $0 <= screen.maxY } ?? false
+        }
+        let before = shown.map { harness.top(of: $0) ?? -1 }
+        #expect(shown.contains(body(39)))
+        room.buildGate.release()
+        // The first layout with the live timeline's rows already shows every row where it was. A live timeline that
+        // doesn't reach the screen is closed, the conversation left as it was.
+        var after: [CGFloat] = []
+        _ = await eventually {
+            harness.layout()
+            let closed = room.timelines.all.last?.allListenersCancelled == true
+            guard turnsLive ? harness.service.focusedEventID == nil : closed else { return false }
+            after = shown.map { harness.top(of: $0) ?? -1 }
+            return true
+        }
+        #expect(harness.service.focusedEventID == (turnsLive ? nil : "$m5"))
+        #expect(harness.service.messages.first?.body == body(turnsLive ? cachedFrom : 0))
+        #expect(zip(after, before).allSatisfy { abs($0 - $1) < 0.5 } && after.count == before.count)
     }
 
     @Test("Jumping to a loaded message scrolls it into view in the same table and highlights it at its own height")

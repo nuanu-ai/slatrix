@@ -113,6 +113,18 @@ struct TimelineScrollPolicyTests {
         }
     }
 
+    @Test(
+        "A timeline opened at an older message turns live at its newest, unless more is to load or an edit is open",
+        arguments: [
+            (true, false, false, false, true),
+            // Scrolled up, already live, newer history still to load, or editing a message only it may hold.
+            (false, false, false, false, false), (true, true, false, false, false), (true, false, true, false, false),
+            (true, false, false, true, false),
+        ])
+    func turnsLive(atBottom: Bool, live: Bool, hasNewer: Bool, editing: Bool, turns: Bool) {
+        #expect(Policy.turnsLive(atBottom: atBottom, live: live, hasNewer: hasNewer, editing: editing) == turns)
+    }
+
     @Test("History loads within three screens of either end")
     func loadsAhead() {
         #expect(Policy.needsOlder(Viewport(top: 1_799, height: 600, contentHeight: 9_000)))
