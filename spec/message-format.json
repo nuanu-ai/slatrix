@@ -146,6 +146,29 @@
       "runs": [{ "text": "Plan:\n" }, { "text": "• ", "list": 1, "marker": true }, { "text": "ship", "list": 1 }]
     },
     {
+      "name": "Paragraphs inside list items stay on the bullet's line",
+      "body": "a b",
+      "html": "<ul><li><p>a</p></li><li><p>b</p></li></ul>",
+      "runs": [
+        { "text": "• ", "list": 1, "marker": true },
+        { "text": "a\n", "list": 1 },
+        { "text": "• ", "list": 1, "marker": true },
+        { "text": "b", "list": 1 }
+      ]
+    },
+    {
+      "name": "A link to a room stays a link",
+      "body": "#room:example.org",
+      "html": "<a href=\"https://matrix.to/#/#room:example.org\">#room:example.org</a>",
+      "runs": [{ "text": "#room:example.org", "link": "https://matrix.to/#/%23room:example.org" }]
+    },
+    {
+      "name": "A link with characters a web address can't hold has them escaped",
+      "body": "notes",
+      "html": "<a href=\"https://my_host.example.org/a b\">notes</a>",
+      "runs": [{ "text": "notes", "link": "https://my_host.example.org/a%20b" }]
+    },
+    {
       "name": "A link keeps its text and goes to its target",
       "body": "See the docs",
       "html": "See <a href=\"https://example.org/docs\">the docs</a>",
@@ -238,6 +261,30 @@
       "body": "Docs at www.example.org.",
       "html": null,
       "runs": [{ "text": "Docs at " }, { "text": "www.example.org", "link": "http://www.example.org" }, { "text": "." }]
+    },
+    {
+      "name": "A typed domain becomes a link, while file names and version numbers stay text",
+      "body": "See example.com and github.com/nuanu-ai today, or notes.txt and v1.2",
+      "html": null,
+      "runs": [
+        { "text": "See " },
+        { "text": "example.com", "link": "http://example.com" },
+        { "text": " and " },
+        { "text": "github.com/nuanu-ai", "link": "http://github.com/nuanu-ai" },
+        { "text": " today, or notes.txt and v1.2" }
+      ]
+    },
+    {
+      "name": "A typed address keeps its own closing parenthesis and leaves the sentence's",
+      "body": "Read https://en.wikipedia.org/wiki/Foo_(bar) (or https://example.org/x).",
+      "html": null,
+      "runs": [
+        { "text": "Read " },
+        { "text": "https://en.wikipedia.org/wiki/Foo_(bar)", "link": "https://en.wikipedia.org/wiki/Foo_(bar)" },
+        { "text": " (or " },
+        { "text": "https://example.org/x", "link": "https://example.org/x" },
+        { "text": ")." }
+      ]
     },
     {
       "name": "A typed mail address becomes a mail link",
