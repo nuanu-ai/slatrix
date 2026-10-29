@@ -191,7 +191,7 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Today at 9:41", substring = true).assertIsDisplayed()
     }
 
-    // capability: conversation.grouping
+    // capability: people.avatars
     @Test fun aMessageGroupShowsItsSendersPictureOnceLoadedWithoutMovingTheRow() {
         val picture = CompletableDeferred<ImageBitmap>()
         val rows = listOf(message("First", minutes = 0).copy(avatarUrl = "mxc://example.org/mira"))
@@ -214,15 +214,13 @@ class LiveChannelScreenTest {
         compose.waitForIdle()
 
         assertEquals("The row keeps its place and height", before, compose.onNodeWithText("First").fetchSemanticsNode().boundsInRoot)
-        val name = compose.onNodeWithText("Mira", useUnmergedTree = true).fetchSemanticsNode()
-        val density = name.layoutInfo.density.density
-        // The avatar sits before the name, its top level with the name's.
-        val at = name.boundsInWindow
+        // The picture covers the initials, in the same tile.
+        val at = compose.onNodeWithText("M", useUnmergedTree = true).fetchSemanticsNode().boundsInWindow.center
         val pixel = compose.runOnIdle {
             val root = checkNotNull(view).rootView
             val bitmap = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
             root.draw(android.graphics.Canvas(bitmap))
-            bitmap.getPixel((at.left - 20 * density).toInt(), (at.top + 10 * density).toInt())
+            bitmap.getPixel(at.x.toInt(), at.y.toInt())
         }
         assertEquals(android.graphics.Color.RED, pixel)
     }
