@@ -69,6 +69,7 @@ data class RoomSummary(
     val canPin: Boolean = false,
     /** The pinned messages' event IDs, in the order they were pinned. */
     val pinned: List<String> = emptyList(),
+    val avatarUrl: String? = null,
     /** The workspaces holding it directly; [spaceIds] adds the ones holding those. */
     val parentIds: Set<String> = emptySet(),
 )
@@ -82,6 +83,7 @@ data class SpaceSummary(
     val isTopLevel: Boolean = true,
     val initials: String = AvatarPlaceholder.initials(name),
     val colorIndex: Int = AvatarPlaceholder.colorIndex(name),
+    val avatarUrl: String? = null,
     /** Whether your power level lets you add channels or take them out; unknown ones leave it to the action to check. */
     val canManageRooms: Boolean = true,
 )
@@ -254,7 +256,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         val name = info.displayName?.takeIf { it.isNotBlank() } ?: info.id
         if (info.isSpace) {
             summaries.remove(info.id)
-            val space = SpaceSummary(id = info.id, name = name, isTopLevel = topLevel(info.id),
+            val space = SpaceSummary(id = info.id, name = name, isTopLevel = topLevel(info.id), avatarUrl = info.avatarUrl,
                 canManageRooms = info.powerLevels?.canOwnUserSendState(StateEventType.SpaceChild) ?: true)
             if (spaces[info.id] != space) spaces[info.id] = space
             return
@@ -272,6 +274,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             parentIds = parentIds(info.id),
             latest = if (info.isDirect) followed[info.id]?.let { latest(it.room) } else null,
             starred = info.isFavourite,
+            // A direct message without a picture of its own shows the other person's.
+            avatarUrl = info.avatarUrl ?: info.heroes.singleOrNull()?.avatarUrl?.takeIf { info.isDirect },
             // Slack's private channel: only an invitation lets someone in. A restricted room is open to its space, a public channel.
             isPrivate = info.joinRule.let { it is JoinRule.Invite || it is JoinRule.Knock || it is JoinRule.Private },
             canPost = info.powerLevels?.canOwnUserSendMessage(MessageLikeEventType.RoomMessage) ?: true,
