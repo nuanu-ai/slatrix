@@ -40,7 +40,9 @@ class MatrixActivity(private val userId: String) {
     val items: StateFlow<List<ActivityItem>> = mutableItems.asStateFlow()
 
     val listener = object : SyncNotificationListener {
-        override fun onNotification(notification: NotificationItem, roomId: String) { receive(notification, roomId) }
+        override fun onNotification(notification: NotificationItem, roomId: String) {
+            try { receive(notification, roomId) } finally { notification.destroy() }
+        }
     }
 
     fun receive(notification: NotificationItem, roomId: String) {

@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.push.PushRegistration
 import ai.nuanu.slatrix.push.PushRegistrationWorker
 import android.app.NotificationManager
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,7 +62,15 @@ class AccountRuntime private constructor(application: Application) {
                     mutableIdentity.value = next?.let { IdentityVerification(scope, it) }
                     mutableActivity.value = next?.let { client ->
                         MatrixActivity((state as AccountState.Connected).userId).also {
-                            scope.launch { runCatching { client.registerNotificationHandler(it.listener) } }
+                            scope.launch {
+                                try {
+                                    client.registerNotificationHandler(it.listener)
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    // Activity then lists only what pushes deliver.
+                                }
+                            }
                         }
                     }
                 }

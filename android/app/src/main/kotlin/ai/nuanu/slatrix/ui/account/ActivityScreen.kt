@@ -64,7 +64,7 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenRoom: (String) -> Unit, onOp
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                 .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapLarge),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                ActivityFilter.entries.forEach { FilterChip(it.label, it == filter) { filter = it } }
+                ActivityFilter.entries.forEach { ActivityChip(it.label, it == filter) { filter = it } }
             }
         }
         if (shown.isEmpty()) item(key = "empty") {
@@ -79,7 +79,7 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenRoom: (String) -> Unit, onOp
 }
 
 @Composable
-private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun ActivityChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val colors = SlatrixTheme.colors
     Surface(onClick = onClick, Modifier.semantics { this.selected = selected }, shape = MaterialTheme.shapes.medium,
         color = if (selected) colors.textPrimary else colors.canvas, contentColor = if (selected) colors.canvas else colors.textPrimary,
