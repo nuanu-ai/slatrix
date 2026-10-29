@@ -135,7 +135,7 @@ class MatrixRoomsTest {
         assertTrue("Unknown power levels keep the composer", rooms.state.first { !it.loading }.rooms.single().canPost)
 
         news.emit(news.info.copy(powerLevels = PostingPowers(canPost = false)))
-        rooms.state.first { state -> state.rooms.single().canPost.not() }
+        rooms.state.first { state -> !state.rooms.single().canPost }
         news.emit(news.info.copy(powerLevels = PostingPowers(canPost = true)))
         rooms.state.first { state -> state.rooms.single().canPost }
         rooms.close()

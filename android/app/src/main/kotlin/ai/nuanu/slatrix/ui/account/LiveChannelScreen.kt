@@ -231,13 +231,18 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             else -> "Message #${room.name}"
         }
         val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
-        if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders)
-        // In the composer's panel, so the conversation ends where it would.
-        else Text("You don’t have permission to post in this channel.", Modifier.fillMaxWidth()
-            .border(UiMetrics.Divider, colors.border, SlatrixTheme.topPanelShape).heightIn(min = UiMetrics.ComposerMinHeight)
-            .wrapContentHeight().padding(horizontal = UiMetrics.GapLarge), style = MaterialTheme.typography.bodyMedium,
-            color = colors.textSecondary, textAlign = TextAlign.Center)
+        if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders) else CannotPost()
     }
+}
+
+/** The Mac's line in place of the composer, in a panel like the composer's. */
+@Composable
+private fun CannotPost() {
+    val colors = SlatrixTheme.colors
+    Text("You don’t have permission to post in this channel.", Modifier.fillMaxWidth()
+        .border(UiMetrics.Divider, colors.border, SlatrixTheme.topPanelShape).background(colors.canvas, SlatrixTheme.topPanelShape)
+        .heightIn(min = UiMetrics.ComposerMinHeight).wrapContentHeight().padding(horizontal = UiMetrics.GapLarge),
+        style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, textAlign = TextAlign.Center)
 }
 
 /** Slack's bar between a thread's root and its replies. */

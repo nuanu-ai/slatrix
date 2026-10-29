@@ -231,16 +231,22 @@ class LiveChannelScreenTest {
     }
 
     // capability: channel.read-only
-    @Test fun aChannelYouCantPostInSaysSoInPlaceOfTheComposer() {
+    @Test fun aChannelYouCantPostInSaysSoInPlaceOfTheComposerAndItsThreadsDoToo() {
+        val threadRoot = mutableStateOf<String?>(null)
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room.copy(canPost = false), ConversationState(listOf(message("Welcome", minutes = 1)),
-                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    threadRoot = threadRoot.value)
             }
         }
         compose.onNodeWithText("Welcome").assertIsDisplayed()
         compose.onNodeWithText("You don’t have permission to post in this channel.").assertIsDisplayed()
         compose.onNodeWithContentDescription("Message #design").assertDoesNotExist()
+
+        compose.runOnIdle { threadRoot.value = "\$Welcome" }
+        compose.onNodeWithText("You don’t have permission to post in this channel.").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Add a reply").assertDoesNotExist()
     }
 
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
