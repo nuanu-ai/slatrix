@@ -38,6 +38,41 @@ struct ChatRoom: Identifiable, Hashable {
     var canInvite: Bool? = nil
     /// nil until the room's power levels are known; the composer shows until then.
     var canPostMessages: Bool? = nil
+    /// Read for direct messages only, which the DMs page lists with it.
+    var latest: LatestMessage? = nil
+
+    /// The DMs page: the newest conversation first, then those with nothing to show yet by name.
+    static func directMessages(_ rooms: [ChatRoom]) -> [ChatRoom] {
+        rooms.filter(\.isDirect).sorted {
+            let (first, second) = ($0.latest?.timestamp ?? .distantPast, $1.latest?.timestamp ?? .distantPast)
+            return first != second ? first > second : $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+}
+
+/// A conversation's newest event; `body` is nil when there is nothing to preview, such as a membership change.
+struct LatestMessage: Hashable {
+    var body: String?
+    var timestamp: Date
+    var isOwn: Bool
+
+    /// Slack marks your own message.
+    var preview: String? { body.map { isOwn ? "You: \($0)" : $0 } }
+
+    /// The time today, "Yesterday" the day before, and the date before that.
+    func time(now: Date = Date(), calendar: Calendar = .current) -> String {
+        var style = Date.FormatStyle(
+            locale: calendar.locale ?? .current, calendar: calendar, timeZone: calendar.timeZone)
+        if calendar.isDate(timestamp, inSameDayAs: now) { return timestamp.formatted(style.hour().minute()) }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+            calendar.isDate(timestamp, inSameDayAs: yesterday)
+        {
+            return "Yesterday"
+        }
+        style = style.month(.abbreviated).day()
+        let sameYear = calendar.isDate(timestamp, equalTo: now, toGranularity: .year)
+        return timestamp.formatted(sameYear ? style : style.year())
+    }
 }
 
 struct ChatUser: Identifiable, Hashable {

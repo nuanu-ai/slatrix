@@ -155,6 +155,35 @@ enum MatrixMapping {
         return MessageBodyRenderer.shared.render(body: body, formattedBody: html).plainText
     }
 
+    /// A conversation's newest event, for the DMs page; nil when it has none.
+    static func latestMessage(_ value: LatestEventValue) -> LatestMessage? {
+        let (timestamp, isOwn, content): (Timestamp, Bool, TimelineItemContent)
+        switch value {
+        case .remote(let time, _, let own, _, let item): (timestamp, isOwn, content) = (time, own, item)
+        case .local(let time, _, _, let item, _): (timestamp, isOwn, content) = (time, true, item)
+        case .none, .remoteInvite: return nil
+        }
+        var body: String?
+        if case .msgLike(let like) = content {
+            switch like.kind {
+            case .message(let message):
+                switch message.msgType {
+                case .text(let text): body = previewText(message.body, formatted: text.formatted)
+                case .notice(let text): body = previewText(message.body, formatted: text.formatted)
+                case .emote(let text): body = previewText(message.body, formatted: text.formatted)
+                default: body = message.body
+                }
+            case .sticker(let text, _, _): body = text
+            case .poll(let question, _, _, _, _, _, _): body = question
+            case .redacted: body = "This message was deleted"
+            case .unableToDecrypt: body = "Waiting for this message"
+            case .liveLocation, .other: body = nil
+            }
+        }
+        return LatestMessage(
+            body: body, timestamp: Date(timeIntervalSince1970: Double(timestamp) / 1000), isOwn: isOwn)
+    }
+
     static func replyPreview(eventID: String, details: EmbeddedEventDetails) -> ChatReplyPreview {
         switch details {
         case .unavailable: return ChatReplyPreview(state: .unavailable, eventID: eventID)

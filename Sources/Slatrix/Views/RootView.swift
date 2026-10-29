@@ -1284,7 +1284,7 @@ struct RootView: View {
                 Divider().overlay(colors.border)
             }
             switch route {
-            case .directMessages: RoomDirectory(matrix: matrix, onSelect: selectRoom)
+            case .directMessages: DirectMessagesView(matrix: matrix, onSelect: selectRoom)
             case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
             case .threads:
                 ThreadsFeedView(
@@ -2880,49 +2880,6 @@ private struct RoomName: View {
     let matrix: MatrixService
     let roomID: String
     var body: some View { Text(matrix.rooms.first { $0.id == roomID }?.name ?? "Conversation") }
-}
-
-/// Every direct message, for the DMs page.
-private struct RoomDirectory: View {
-    let matrix: MatrixService
-    let onSelect: (String) -> Void
-    @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
-    private var colors: AppColors { appearance.colors }
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(matrix.rooms.filter(\.isDirect)) { room in
-                    Button {
-                        onSelect(room.id)
-                    } label: {
-                        HStack(spacing: m.sp12) {
-                            AvatarView(name: room.name, size: m.avatar, matrix: matrix, source: room.avatarURL)
-                            VStack(alignment: .leading, spacing: m.sp4) {
-                                Text(room.name).font(m.font(.body, .semibold))
-                                Text(
-                                    room.topic.isEmpty
-                                        ? room.isDirect ? "Direct message" : "\(room.memberCount) members" : room.topic
-                                ).font(m.font(.meta)).foregroundStyle(colors.textSecondary).lineLimit(1)
-                            }
-                            Spacer()
-                            if room.hasUnread {
-                                Text(
-                                    room.unreadMessages > 0 || room.unread > 0
-                                        ? "\(max(room.unreadMessages, room.unread))" : "•"
-                                ).font(m.font(.caption, .semibold)).padding(m.sp4).background(
-                                    colors.selection, in: Circle()
-                                ).accessibilityLabel("Unread conversation")
-                            }
-                            Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(
-                                colors.textSecondary)
-                        }.padding(m.sp20).contentShape(Rectangle())
-                    }.buttonStyle(.row)
-                    Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)
-                }
-            }
-        }
-    }
 }
 
 /// Makes a binding inside its own body: SwiftUI reads a binding when it compares a view's inputs, and what the
