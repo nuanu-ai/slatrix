@@ -459,6 +459,21 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.video
+    @Test fun aVideoCarriesItsLengthAndSizeForItsPoster() = runTest {
+        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/clip" }
+        val poster = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/poster" }
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "clip.mp4", content = TimelineItemContent.MsgLike(
+            MsgLikeContent(MsgLikeKind.Message(MessageContent(MessageType.Video(VideoMessageContent("clip.mp4", null, null, source,
+                VideoInfo(java.time.Duration.ofSeconds(83), 720u, 1280u, "video/mp4", 5_000_000u, ThumbnailInfo(720u, 1280u, "image/jpeg", 40_000u),
+                    poster, null))), "clip.mp4", false, null)), null, null, null)))))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val video = conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single()
+        assertEquals(MessageAttachment(MessageAttachment.Kind.Video, "clip.mp4", "video/mp4", 5_000_000, 1280, 720, source, poster, 40_000,
+            durationMillis = 83_000), video.attachment)
+        conversation.close()
+    }
+
     @Test fun aFailedDeleteSaysSoForAMoment() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.redactFailure = IllegalStateException("Offline")
