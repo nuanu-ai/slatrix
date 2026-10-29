@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.core.AccountState
 import ai.nuanu.slatrix.core.AttachmentImport
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
+import ai.nuanu.slatrix.core.MatrixChannel
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityVerification
 import ai.nuanu.slatrix.core.MatrixRooms
@@ -33,7 +34,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -152,10 +152,10 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 { darkOverride = it; appearance.darkMode = it },
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
-                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, roomList) } } }
+                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace, jump, roomList) { root, row -> threads?.open(selected.room, root, root = row) }
+                                LiveConversation(selected, workspace, workspace, jump, rooms) { root, row -> threads?.open(selected.room, root, root = row) }
                             } } } }
                             else -> null
                         }) {
@@ -198,10 +198,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
 private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
-    jump: (RoomSummary, String, String?) -> Unit, roomList: State<RoomListState>?,
+    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?,
     onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
-    // The room as the list follows it, so a change of name, topic or permissions shows while it's open.
+    // The room as the list follows it, so a change of name, topic or permissions shows while it's open; read only
+    // below, so other rooms' updates don't recompose the conversation.
+    val roomList = rooms?.state?.collectAsState()
     val room by remember(open.room, roomList) {
         derivedStateOf { roomList?.value?.rooms?.firstOrNull { it.id == open.room.id } ?: open.room }
     }
@@ -210,23 +212,35 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     val timeline = conversation?.state?.collectAsState()?.value ?: ConversationState(error = open.error)
     val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
     val scope = rememberCoroutineScope()
-    LiveChannelScreen(room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
-        { owner?.back() }, { conversation?.loadOlder() },
-        { event ->
-            scope.launch {
-                if (conversation?.markRead(event) == true && open.threadRoot == null) PushNotifications(context).clear(open.room.id)
+    var details by rememberSaveable(open.room.id) { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize()) {
+        LiveChannelScreen(room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
+            { owner?.back() }, { conversation?.loadOlder() },
+            { event ->
+                scope.launch {
+                    if (conversation?.markRead(event) == true && open.threadRoot == null) PushNotifications(context).clear(open.room.id)
+                }
+            },
+            { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
+            { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
+            { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
+            open.threadRoot, rememberMessageActions(conversation, composer, main),
+            ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
+                onNeedPeople = { composer?.loadPeople() },
+                onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
+                onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
+            // A quote doesn't know its parent's thread, so it asks before jumping.
+            { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } }, { details = true })
+        val actions = remember(rooms, open.room.id) {
+            rooms?.client?.let { MatrixChannel(it, open.room.id) }?.let {
+                ChannelDetailsActions(it::members, it::save, it::leave, it::invite, it::notifications, it::setNotifications)
             }
-        },
-        { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
-        { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
-        { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
-        open.threadRoot, rememberMessageActions(conversation, composer, main),
-        ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
-            onNeedPeople = { composer?.loadPeople() },
-            onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
-            onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
-        // A quote doesn't know its parent's thread, so it asks before jumping.
-        { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } })
+        }
+        // Over the conversation, so Back finds it where it was.
+        if (details && actions != null) {
+            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }) { details = false }
+        }
+    }
 }
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
