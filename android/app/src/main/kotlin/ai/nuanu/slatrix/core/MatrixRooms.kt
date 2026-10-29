@@ -233,7 +233,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         val name = info.displayName?.takeIf { it.isNotBlank() } ?: info.id
         if (info.isSpace) {
             summaries.remove(info.id)
-            val space = SpaceSummary(id = info.id, name = name, isTopLevel = topLevel(info.id))
+            val space = SpaceSummary(id = info.id, name = name, isTopLevel = topLevel(info.id), avatarUrl = info.avatarUrl)
             if (spaces[info.id] != space) spaces[info.id] = space
             return
         }
@@ -249,6 +249,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             spaceIds = ancestors(info.id),
             latest = if (info.isDirect) followed[info.id]?.let { latest(it.room) } else null,
             starred = info.isFavourite,
+            // A direct message without a picture of its own shows the other person's.
+            avatarUrl = info.avatarUrl ?: info.heroes.singleOrNull()?.avatarUrl?.takeIf { info.isDirect },
             // Slack's private channel: only an invitation lets someone in. A restricted room is open to its space, a public channel.
             isPrivate = info.joinRule.let { it is JoinRule.Invite || it is JoinRule.Knock || it is JoinRule.Private },
         )

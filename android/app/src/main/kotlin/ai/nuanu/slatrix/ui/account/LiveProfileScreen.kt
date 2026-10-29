@@ -39,7 +39,7 @@ import kotlinx.coroutines.CancellationException
  */
 @Composable
 fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
-    onBack: () -> Unit) {
+    onBack: () -> Unit, avatarUrl: String? = null) {
     val colors = SlatrixTheme.colors
     val localpart = userId.removePrefix("@").substringBefore(':')
     val name by produceState<String?>(null, userId) {
@@ -59,7 +59,7 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
         item {
             Row(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                LiveAvatar(AvatarPlaceholder.initials(localpart), AvatarPlaceholder.colorIndex(userId), UiMetrics.ProfileAvatar)
+                LiveAvatar(AvatarPlaceholder.initials(localpart), AvatarPlaceholder.colorIndex(userId), UiMetrics.ProfileAvatar, avatarUrl)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
                     Text(name ?: localpart, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)

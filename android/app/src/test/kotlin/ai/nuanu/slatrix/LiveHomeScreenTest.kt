@@ -21,6 +21,7 @@ import android.graphics.Canvas
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.CompositionLocalProvider
+import ai.nuanu.slatrix.ui.account.AvatarLoader
 import ai.nuanu.slatrix.ui.account.LocalAvatarLoader
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -315,7 +316,9 @@ class LiveHomeScreenTest {
         val picture = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.RED) }.asImageBitmap()
         val space = SpaceSummary("!harbor:example.org", "Harbor", avatarUrl = "mxc://example.org/harbor")
         compose.setContent {
-            CompositionLocalProvider(LocalAvatarLoader provides { url, _ -> picture.takeIf { url == "mxc://example.org/harbor" } }) {
+            CompositionLocalProvider(LocalAvatarLoader provides object : AvatarLoader {
+                override suspend fun load(url: String, sizePx: Int) = picture.takeIf { url == "mxc://example.org/harbor" }
+            }) {
                 SlatrixTheme {
                     LiveHomeScreen("@alex:example.org", RoomListState(loading = false, spaces = listOf(space), spacesKnown = true), {}, {}, {},
                         "!harbor:example.org")
