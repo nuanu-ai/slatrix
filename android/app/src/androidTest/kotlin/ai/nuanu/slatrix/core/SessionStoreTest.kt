@@ -4,10 +4,12 @@ import android.content.ContextWrapper
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
+import java.io.IOException
 import java.util.UUID
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,6 +27,13 @@ class SessionStoreTest {
 
     @Before fun setUp() { check(directory.mkdirs()) }
     @After fun tearDown() { directory.deleteRecursively() }
+
+    @Test fun unavailableStorageIsNotAnEmptySession() {
+        check(directory.delete())
+        directory.writeText("unavailable storage")
+
+        assertThrows(IOException::class.java) { SessionStore(context).load() }
+    }
 
     @Test fun encryptedSessionSurvivesReopening() {
         val session = StoredSession(
