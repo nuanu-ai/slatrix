@@ -247,7 +247,9 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                     }
                 }, files = {
                     val files = rememberConversation(client, open.room.id, ConversationView.Files)
-                    SharedFiles(files?.state?.collectAsState()?.value ?: ConversationState(loading = false)) { files?.loadOlder() }
+                    val state = files?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load files")
+                    // Asks for the next page, which after a failed one is that page again.
+                    SharedFiles(state) { files?.loadOlder() }
                 })
             }
         }

@@ -357,13 +357,18 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
         }
         val state = files.state
         when {
-            state.loading || state.loadingHistory -> item { DelayedProgress() }
-            state.error != null -> item { ErrorLine(state.error, colors.textSecondary) }
+            state.loading -> item { DelayedProgress() }
+            state.error != null -> item {
+                ErrorLine(state.error, colors.textSecondary)
+                TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
+            }
             else -> {
-                if (shared.isEmpty()) item { ErrorLine("Nothing shared yet", colors.textSecondary) }
-                // Older history is asked for, as on the Mac, rather than paged through on its own in a long conversation.
+                if (shared.isEmpty() && !state.loadingHistory) item { ErrorLine("Nothing shared yet", colors.textSecondary) }
+                // Older history is asked for, as on the Mac, rather than paged through on its own in a long conversation. The
+                // button stays while a page loads, so the end of the list doesn't move.
                 if (state.hasMore) item {
-                    TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Load more") }
+                    TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall),
+                        enabled = !state.loadingHistory) { Text("Load more") }
                 }
             }
         }
