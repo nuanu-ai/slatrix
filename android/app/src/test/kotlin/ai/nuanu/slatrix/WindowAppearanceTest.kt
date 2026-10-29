@@ -30,14 +30,17 @@ class WindowAppearanceTest {
     private val lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
         WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
 
-    @Test fun aSavedDarkChoiceOverridesALightSystem() = checkSavedChoice(dark = true, bars = 0)
+    @Test fun aSavedDarkChoiceOverridesALightSystem() = checkAppearance(saved = true, bars = 0)
 
     @Test @Config(qualifiers = "w412dp-h892dp-night-420dpi")
-    fun aSavedLightChoiceOverridesADarkSystem() = checkSavedChoice(dark = false, bars = lightBars)
+    fun aSavedLightChoiceOverridesADarkSystem() = checkAppearance(saved = false, bars = lightBars)
 
-    private fun checkSavedChoice(dark: Boolean, bars: Int) {
+    @Test @Config(qualifiers = "w412dp-h892dp-night-420dpi")
+    fun withoutAChoiceTheAppFollowsADarkSystem() = checkAppearance(saved = null, bars = 0)
+
+    private fun checkAppearance(saved: Boolean?, bars: Int) {
         val context = ApplicationProvider.getApplicationContext<Application>()
-        AppearancePreferences(context).darkMode = dark
+        AppearancePreferences(context).darkMode = saved
         val scope = CoroutineScope(SupervisorJob())
         val account = MatrixAccount(scope, SessionStore(context), File(context.noBackupFilesDir, "matrix"),
             OAuthConfiguration("Slatrix", "com.github.nuanu-ai.slatrix.dev:/oauth/callback", "https://github.com/nuanu-ai/slatrix",
