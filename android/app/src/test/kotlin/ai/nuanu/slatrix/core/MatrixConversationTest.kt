@@ -404,10 +404,19 @@ class MatrixConversationTest {
     // capability: conversation.pins
     @Test fun pinnedMessagesComeFromTheRoomsPinnedTimeline() = runTest {
         val room = ConversationRoom(ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Ship it"))))
-        val pinned = MatrixConversation(backgroundScope, room, pinned = true)
+        val pinned = MatrixConversation(backgroundScope, room, view = ConversationView.Pins)
         assertEquals(listOf("Ship it"), pinned.state.first { it.rows.isNotEmpty() }.rows.messages.map { it.body })
         assertTrue(room.configuration?.focus is TimelineFocus.PinnedEvents)
         pinned.close()
+    }
+
+    // capability: conversation.files
+    @Test fun sharedFilesReadTheWholeConversationThreadsIncluded() = runTest {
+        val room = ConversationRoom(ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "spec.pdf"))))
+        val files = MatrixConversation(backgroundScope, room, view = ConversationView.Files)
+        files.state.first { it.rows.isNotEmpty() }
+        assertEquals(TimelineFocus.Live(hideThreadedEvents = false), room.configuration?.focus)
+        files.close()
     }
 
     @Test fun aFailedDeleteSaysSoForAMoment() = runTest {

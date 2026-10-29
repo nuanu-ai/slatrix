@@ -58,6 +58,8 @@ import org.matrix.rustcomponents.sdk.VirtualTimelineItem
 import uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode
 import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
 
+enum class ConversationView { Timeline, Pins, Files }
+
 enum class MessageKind { Text, Notice, Emote, Attachment, Encrypted, Deleted, Unsupported }
 enum class MessageSendState { Sent, Sending, Failed }
 
@@ -158,8 +160,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val at: String? = null,
     /** The thread's root as its channel shows it, on screen at once while the thread loads, as on the Mac. */
     root: ConversationMessage? = null,
-    /** Shows the room's pinned messages, which the SDK fetches itself, instead of its timeline. */
-    private val pinned: Boolean = false) {
+    private val view: ConversationView = ConversationView.Timeline) {
     // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
     private val root = root?.copy(id = ROOT_KEY, grouped = false)
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
@@ -206,7 +207,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     private val updating = operations.launch {
         try {
-            open(if (pinned) TimelineFocus.PinnedEvents
+            open(if (view == ConversationView.Pins) TimelineFocus.PinnedEvents
                 else threadRoot?.let(TimelineFocus::Thread) ?: TimelineFocus.Live(hideThreadedEvents = true)) { shown = it }
             currentCoroutineContext().ensureActive()
             ready.complete(Unit)

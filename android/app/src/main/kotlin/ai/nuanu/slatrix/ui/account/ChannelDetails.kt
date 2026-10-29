@@ -52,7 +52,10 @@ data class ChannelDetailsActions(
     val setNotifications: suspend (NotificationChoice) -> Unit = {},
     /** The room's pinned messages, read while the Pinned messages page shows. */
     val pins: @Composable () -> PinnedMessages = { PinnedMessages() },
+    val files: @Composable () -> SharedFiles = { SharedFiles() },
 )
+
+data class SharedFiles(val state: ConversationState = ConversationState(), val onLoadMore: () -> Unit = {})
 
 /** A conversation's pinned messages as they load, and unpinning one. */
 data class PinnedMessages(val state: ConversationState = ConversationState(), val onUnpin: (ConversationMessage) -> Unit = {})

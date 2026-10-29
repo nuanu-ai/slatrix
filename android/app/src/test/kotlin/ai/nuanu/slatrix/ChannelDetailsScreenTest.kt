@@ -15,6 +15,10 @@ import ai.nuanu.slatrix.ui.account.ChannelDetailsActions
 import ai.nuanu.slatrix.ui.account.ChannelDetailsScreen
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.account.PinnedMessages
+import ai.nuanu.slatrix.ui.account.SharedFiles
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.ui.test.assertIsDisplayed
@@ -226,6 +230,40 @@ class ChannelDetailsScreenTest {
         compose.onNodeWithText("Pinned messages").performClick()
         compose.onNodeWithText("Ship it").assertIsDisplayed()
         compose.onNodeWithContentDescription("Unpin").assertDoesNotExist()
+    }
+
+    // capability: conversation.files
+    @Test fun filesListWhatWasSharedNewestFirstAndOpenIt() {
+        val links = mutableListOf<String>()
+        var opened: String? = null
+        var older = false
+        val rows = listOf(pinned("spec.pdf").copy(kind = MessageKind.Attachment), pinned("Morning all"),
+            pinned("Notes at https://example.org/notes").copy(timestamp = 1_700_000_600_000L))
+        compose.setContent {
+            SlatrixTheme {
+                CompositionLocalProvider(LocalUriHandler provides object : UriHandler {
+                    override fun openUri(uri: String) { links += uri }
+                }) {
+                    ChannelDetailsScreen(room, null, ChannelDetailsActions(files = {
+                        SharedFiles(ConversationState(rows, loading = false)) { older = true }
+                    }), {}, { opened = it }) {}
+                }
+            }
+        }
+        compose.onNodeWithText("Files").performClick()
+        val link = compose.onNodeWithText("https://example.org/notes").fetchSemanticsNode().boundsInRoot
+        val file = compose.onNodeWithText("spec.pdf").fetchSemanticsNode().boundsInRoot
+        assertTrue("The newest comes first", link.bottom <= file.top)
+        compose.onNodeWithText("Morning all").assertDoesNotExist()
+
+        compose.onNodeWithText("spec.pdf").performClick()
+        compose.onNodeWithText("https://example.org/notes").performClick()
+        compose.onNodeWithText("Load more").performClick()
+        compose.runOnIdle {
+            assertEquals("\$spec.pdf", opened)
+            assertEquals(listOf("https://example.org/notes"), links)
+            assertTrue(older)
+        }
     }
 
     private fun pinned(body: String) = ConversationMessage(body, "\$$body", "@mira:example.org", "Mira", body, null,
