@@ -180,3 +180,14 @@ test('the Matrix endpoint enforces its path, HTTP method, JSON media type and bo
   assert.equal(oversized.status, 413);
   assert.deepEqual(delivered, []);
 });
+
+test('an empty JSON request returns a client error without sending a push', async (t) => {
+  const delivered = [];
+  t.mock.method(getMessaging(), 'send', async (message) => {
+    delivered.push(message);
+    return 'projects/test/messages/unexpected';
+  });
+  const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' } });
+  assert.equal(response.status, 400);
+  assert.deepEqual(delivered, []);
+});
