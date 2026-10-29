@@ -520,6 +520,38 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.unread-line
+    @Test fun theNewLineGoesAboveTheFirstMessageAfterTheReadMarkerAndNeverInAThread() = runTest {
+        val items = listOf(conversationItem("a", "\$a", "Read"), readMarker(), conversationItem("b", "\$b", "Unread"))
+        val timeline = ConversationTimeline(items)
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        assertEquals("\$b", conversation.state.first { !it.loading }.unread)
+        // Reading moves the marker after the newest message.
+        timeline.emit(listOf(TimelineDiff.Remove(1u), TimelineDiff.PushBack(readMarker())))
+        conversation.state.first { it.unread == null }
+        conversation.close()
+
+        val thread = MatrixConversation(backgroundScope, ConversationRoom(ConversationTimeline(items)), threadRoot = "\$a")
+        assertNull(thread.state.first { !it.loading }.unread)
+        thread.close()
+    }
+
+    // capability: conversation.unread-line
+    @Test fun anUnreadConversationOpensAroundWhereItsUnreadMessagesStartWithoutAHighlight() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
+        val around = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier"), readMarker(),
+            conversationItem("next", "\$next", "Unread")))
+        val room = JumpRoom(live, around)
+        val conversation = MatrixConversation(backgroundScope, room, at = "\$old", resume = true)
+
+        val opened = conversation.state.first { !it.loading }
+        assertEquals(listOf("Earlier", "Unread"), opened.rows.messages.map { it.body })
+        assertEquals("\$next", opened.unread)
+        assertNull(opened.highlight)
+        assertTrue(opened.focused)
+        conversation.close()
+    }
+
     // capability: thread.open
     @Test fun aThreadShowsTheRootTheChannelHadAtOnceAndKeepsItsRowWhenTheThreadLoadsIt() = runTest {
         val root = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", "Plan?", null,
@@ -679,6 +711,12 @@ private fun conversationItem(
         override fun uniqueId(): TimelineUniqueId = TimelineUniqueId(stableId)
         override fun asEvent(): EventTimelineItem = event.also { onMap() }
     }
+}
+
+private fun readMarker() = object : TimelineItem(NoHandle) {
+    override fun uniqueId(): TimelineUniqueId = TimelineUniqueId("read-marker")
+    override fun asEvent(): EventTimelineItem? = null
+    override fun asVirtual(): VirtualTimelineItem = VirtualTimelineItem.ReadMarker
 }
 
 private fun dateDivider(stableId: String, timestamp: ULong) = object : TimelineItem(NoHandle) {

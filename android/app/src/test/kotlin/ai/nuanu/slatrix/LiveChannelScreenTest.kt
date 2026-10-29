@@ -26,6 +26,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasProgressBarRangeInfo
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertCountEquals
@@ -252,6 +253,25 @@ class LiveChannelScreenTest {
         // On the conversation itself: a swipe that starts on the composer doesn't scroll it.
         repeat(30) { compose.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performTouchInput { swipeUp() } }
         compose.waitUntil { newer > 0 }
+    }
+
+    // capability: conversation.unread-line
+    @Test fun anUnreadConversationOpensWithItsNewLineAtTheTopAndKeepsItOnceRead() {
+        val many = (1..200).map { message("Message $it", minutes = it) }
+        val state = mutableStateOf(ConversationState(many, loading = false, unread = "\$Message 185"))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("New").assertIsDisplayed()
+        compose.onNodeWithText("Message 185").assertIsDisplayed()
+        compose.onNodeWithText("Message 184").assertIsNotDisplayed()
+        compose.onNodeWithText("Message 200").assertIsNotDisplayed()
+
+        // Reading moves the SDK's marker after the newest message; the line stays until the reader leaves.
+        compose.runOnIdle { state.value = state.value.copy(unread = null) }
+        compose.onNodeWithText("New").assertIsDisplayed()
     }
 
     private fun message(body: String, minutes: Int, sender: String = "Mira", state: MessageSendState = MessageSendState.Sent) =
