@@ -24,6 +24,20 @@ struct DirectMessagesTests {
         #expect(direct.map { $0.latest?.preview } == ["You: Shipped it", "See you at noon", nil])
     }
 
+    @Test("Find a DM narrows the list by name, and Unreads to unread conversations and the one open")
+    func filters() {
+        let rooms = [
+            ChatRoom(id: "!avery:example.org", name: "Avery Stone", isDirect: true, unreadMessages: 1),
+            ChatRoom(id: "!blake:example.org", name: "Blake", isDirect: true),
+            ChatRoom(id: "!casey:example.org", name: "Casey Stone", isDirect: true),
+        ]
+        #expect(ChatRoom.directMessages(rooms, matching: "stone").map(\.name) == ["Avery Stone", "Casey Stone"])
+        #expect(
+            ChatRoom.directMessages(rooms, unreadOnly: true, keeping: "!blake:example.org").map(\.name) == [
+                "Avery Stone", "Blake",
+            ])
+    }
+
     @Test(
         "A latest message shows its time today, Yesterday the day before, and its date before that",
         arguments: [
