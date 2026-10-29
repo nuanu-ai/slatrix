@@ -17,6 +17,18 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35])
 class PushNotificationsTest {
+    @Test fun identityConfirmationKeepsResolvedMessageContentPrivateByDefault() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+
+        PushNotifications(context).show("@alex:example.org", "!team:example.org", "\$unverified", notificationMessage())
+
+        val notification = manager.activeNotifications.single().notification
+        assertEquals("Slatrix", notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+        assertEquals("New message", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    }
+
     @Test fun sdkPrivacyDecisionsAndDismissedDuplicatesSurviveNotificationDelivery() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
@@ -29,7 +41,7 @@ class PushNotificationsTest {
         notifications.show(user, room, "\$redacted", NotificationStatus.EventRedacted)
         assertTrue(manager.activeNotifications.isEmpty())
 
-        notifications.show(user, room, "\$resolved", notificationMessage())
+        notifications.show(user, room, "\$resolved", notificationMessage(), previewAllowed = true)
         val notification = manager.activeNotifications.single().notification
         assertEquals("Team", notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
         assertEquals("Sam: Review budget?", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
@@ -41,7 +53,7 @@ class PushNotificationsTest {
         assertEquals(room, target.getStringExtra(PushNotifications.ROOM_ID))
 
         manager.cancelAll()
-        PushNotifications(context).show(user, room, "\$resolved", notificationMessage())
+        PushNotifications(context).show(user, room, "\$resolved", notificationMessage(), previewAllowed = true)
         assertTrue("A repeated gateway delivery must not resurrect a dismissed notification", manager.activeNotifications.isEmpty())
 
         notifications.show(user, room, "\$missing", NotificationStatus.EventNotFound)
