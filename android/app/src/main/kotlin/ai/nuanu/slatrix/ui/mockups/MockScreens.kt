@@ -8,6 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -212,7 +215,61 @@ fun ThreadScreen(parent: MockMessage, replies: List<MockMessage>, draft: String,
 }
 
 @Composable
-fun YouScreen(dark: Boolean, palette: SidebarPalette, onDarkToggle: () -> Unit, onPalette: (SidebarPalette) -> Unit, onBack: () -> Unit) {}
+fun YouScreen(dark: Boolean, palette: SidebarPalette, onDarkToggle: () -> Unit, onPalette: (SidebarPalette) -> Unit, onBack: () -> Unit) {
+    var status by rememberSaveable { mutableStateOf("") }
+    var editingStatus by rememberSaveable { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas)) {
+        ScreenHeader("You", onBack = onBack)
+        LazyColumn {
+            item {
+                Row(Modifier.padding(UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+                    Avatar(MockData.profile.initials, 0, UiMetrics.ProfileAvatar)
+                    Column(verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
+                        Text(MockData.profile.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
+                            Icon(Icons.Filled.Circle, null, Modifier.size(UiMetrics.GapSmall), tint = SlatrixTheme.colors.presenceActive)
+                            Text("Active", style = MaterialTheme.typography.bodyMedium, color = SlatrixTheme.colors.textSecondary)
+                        }
+                        Text(MockData.profile.title, style = MaterialTheme.typography.bodyMedium, color = SlatrixTheme.colors.textSecondary)
+                    }
+                }
+            }
+            item {
+                if (editingStatus) {
+                    OutlinedTextField(status, { status = it }, Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge), label = { Text("What's your status?") }, singleLine = true)
+                    TextButton(onClick = { editingStatus = false }, modifier = Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Save status") }
+                } else {
+                    TextButton(onClick = { editingStatus = true }, modifier = Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text(status.ifEmpty { "Set a status" }) }
+                }
+            }
+            item {
+                HorizontalDivider(Modifier.padding(top = UiMetrics.GapLarge), color = SlatrixTheme.colors.border)
+                SectionLabel("Appearance")
+                Row(
+                    Modifier.fillMaxWidth().toggleable(value = dark, role = Role.Switch, onValueChange = { onDarkToggle() })
+                        .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Dark mode", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Switch(checked = dark, onCheckedChange = null)
+                }
+                SectionLabel("Color theme")
+                listOf(SidebarPalette.Aubergine, SidebarPalette.Lagoon).forEach { choice ->
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
+                            .selectable(selected = palette == choice, role = Role.RadioButton, onClick = { onPalette(choice) })
+                            .padding(horizontal = UiMetrics.GapLarge),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(UiMetrics.GapSection).clip(MaterialTheme.shapes.small).background(DesignTokens.colors(dark, choice).getValue("selectionStrong")))
+                        Text(choice.name, Modifier.weight(1f).padding(horizontal = UiMetrics.GapMedium), style = MaterialTheme.typography.bodyLarge)
+                        RadioButton(selected = palette == choice, onClick = null)
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun ScreenHeader(title: String, onYou: (() -> Unit)? = null, onBack: (() -> Unit)? = null, subtitle: String? = null) {
