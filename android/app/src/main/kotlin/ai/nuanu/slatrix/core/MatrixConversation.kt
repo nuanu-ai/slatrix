@@ -103,6 +103,8 @@ data class ConversationMessage(
     val attachment: MessageAttachment? = null,
     /** How much of an attachment you're sending has gone up, from 0 to 1. */
     val uploadProgress: Float? = null,
+    /** The sender's picture, drawn over the initials once it loads. */
+    val avatarUrl: String? = null,
 ) : ConversationRow {
     /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
     val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
@@ -117,7 +119,7 @@ data class ReplyPreview(val eventId: String, val state: State, val senderName: S
 }
 
 /** Slack's "N replies" line under a thread's root. */
-data class MessageThread(val replies: Int, val lastReplier: String?, val lastReplyAt: Long?)
+data class MessageThread(val replies: Int, val lastReplier: String?, val lastReplyAt: Long?, val lastReplierAvatarUrl: String? = null)
 
 data class ConversationState(
     val rows: List<ConversationRow> = emptyList(),
@@ -797,10 +799,12 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val latest = summary.latestEvent() as? EmbeddedEventDetails.Ready
                 MessageThread(summary.numReplies().coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
                     latest?.let { name(it.senderProfile, it.sender) },
-                    latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong())
+                    latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong(),
+                    (latest?.senderProfile as? ProfileDetails.Ready)?.avatarUrl)
             }?.takeIf { it.replies > 0 },
             replyTo = content.inReplyTo?.let(::replyPreview),
             attachment = shown.attachment,
+            avatarUrl = (event.senderProfile as? ProfileDetails.Ready)?.avatarUrl,
         ).also { it.runs }
     }
 }

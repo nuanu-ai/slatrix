@@ -304,7 +304,7 @@ private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpe
             Row(Modifier.fillMaxWidth().clickable { message.eventId?.let(onOpenMessage) }
                 .padding(start = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapMedium),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-                LiveAvatar(message.initials, message.colorIndex)
+                LiveAvatar(message.initials, message.colorIndex, url = message.avatarUrl)
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                         Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
