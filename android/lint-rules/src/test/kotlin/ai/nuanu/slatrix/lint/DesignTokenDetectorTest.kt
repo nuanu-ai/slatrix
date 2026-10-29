@@ -113,6 +113,24 @@ class DesignTokenDetectorTest : LintDetectorTest() {
         ).run().expectErrorCount(2)
     }
 
+    @Test
+    fun testRejectsEquivalentConstantSizesAndDirectDpConstruction() {
+        lint().files(
+            unitStub,
+            kotlin(
+                """
+                package ai.nuanu.slatrix.ui.chat
+                import androidx.compose.ui.unit.Dp
+                import androidx.compose.ui.unit.dp
+                val parenthesized = (12).dp
+                val negative = (-4).dp
+                val calculated = (2 * 6).dp
+                val constructed = Dp(12f)
+                """,
+            ),
+        ).run().expectErrorCount(4)
+    }
+
     private val colorStub = kotlin(
         """
         package androidx.compose.ui.graphics
@@ -126,7 +144,7 @@ class DesignTokenDetectorTest : LintDetectorTest() {
     private val unitStub = kotlin(
         """
         package androidx.compose.ui.unit
-        class Dp(value: Float)
+        @JvmInline value class Dp(val value: Float)
         class TextUnit(value: Float)
         val Int.dp: Dp get() = Dp(toFloat())
         val Int.sp: TextUnit get() = TextUnit(toFloat())
