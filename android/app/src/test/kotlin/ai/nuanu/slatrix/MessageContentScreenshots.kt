@@ -78,6 +78,37 @@ class MessageContentScreenshots(private val dark: Boolean) {
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/MessageContent-${if (dark) "dark" else "light"}.png")
     }
 
+    /** The layout of Slack's channel reference screen, in fictional words: a quote, reactions, a day divider and pills. */
+    @Test fun renderSlackLayout() {
+        if (dark) return
+        val room = RoomSummary("!ops:example.org", "ops-review", false, "", UnreadBadge.None, "O", 0)
+        val day = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -3); set(Calendar.HOUR_OF_DAY, 14); set(Calendar.MINUTE, 9) }.timeInMillis
+        fun message(id: String, sender: String, html: String, at: Long) =
+            ConversationMessage(id, "\$$id", "@${sender.lowercase().replace(' ', '.')}:example.org", sender, "", html, at,
+                MessageKind.Text, MessageSendState.Sent, false, sender.split(' ').joinToString("") { it.take(1) }, 3)
+        fun pill(id: String, name: String) = "<a href=\"https://matrix.to/#/@$id:example.org\">$name</a>"
+        val rows = listOf(
+            message("a", "Nora Field", "We went through the vendor list and the audit forms, and we are coming back with a " +
+                "short note on what is ready and what is still missing.", day - 30 * 60_000L).copy(reactions = listOf(
+                MessageReaction("👍", 2, false, listOf("@sam:example.org", "@lee:example.org")))),
+            message("b", "Nora Field", pill("nora", "Nora Field") + " Hi! Sharing what we have so far.<ol><li>Cases over the " +
+                "threshold this quarter</li></ol>", day).copy(replyTo = ReplyPreview("\$x", ReplyPreview.State.Ready, "Sam Reyes",
+                "Could you send the numbers before the review?"), reactions = listOf(
+                MessageReaction("👀", 2, true, listOf("@sam:example.org", "@me:example.org")))),
+            DayDivider("next", day + 22 * 3_600_000L),
+            message("c", "Nora Field", pill("alex", "Alex Moreau") + " " + pill("lena", "Lena") + " I booked a short call today to " +
+                "set priorities for the open tasks at 14:00 CET / 15:00 local.", day + 22 * 3_600_000L).copy(reactions = listOf(
+                MessageReaction("👌", 1, false, listOf("@lena:example.org")))),
+        )
+        compose.setContent {
+            SlatrixTheme(dark = false) {
+                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = true, ownUserId = "@me:example.org"),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/MessageContent-slack-layout.png")
+    }
+
     companion object {
         @JvmStatic @Parameters(name = "dark={0}")
         fun cases(): List<Array<Any>> = listOf(arrayOf(false), arrayOf(true))
