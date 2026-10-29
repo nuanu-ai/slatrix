@@ -24,6 +24,8 @@ import org.matrix.rustcomponents.sdk.RecoveryStateListener
 import org.matrix.rustcomponents.sdk.SessionVerificationController
 import org.matrix.rustcomponents.sdk.SessionVerificationControllerDelegate
 import org.matrix.rustcomponents.sdk.SessionVerificationData
+import org.matrix.rustcomponents.sdk.SessionVerificationRequestDetails
+import org.matrix.rustcomponents.sdk.UserProfile
 import org.matrix.rustcomponents.sdk.TaskHandle
 import org.matrix.rustcomponents.sdk.VerificationState
 import org.matrix.rustcomponents.sdk.VerificationStateListener
@@ -118,6 +120,36 @@ class IdentityVerificationDeviceTest {
         }
     }
 
+    @Test fun cancellingAnIncomingRequestAllowsANewFlowAndIgnoresItsStaleDelegate() = runBlocking {
+        val encryption = IdentityEncryption(VerificationState.UNVERIFIED)
+        val controller = IdentityController(requireAcknowledgement = true)
+        val verification = IdentityVerification(scope, IdentityClient(encryption, controller))
+        try {
+            withTimeout(5_000) { verification.state.first { it.phase == IdentityPhase.ChooseMethod } }
+            val oldDelegate = controller.observer!!
+            oldDelegate.didReceiveVerificationRequest(SessionVerificationRequestDetails(
+                UserProfile("@alice:example.org", "Alice", null, null, null),
+                "incoming-flow", "OTHER", "Alice’s laptop", 1uL,
+            ))
+            withTimeout(5_000) { verification.state.first { it.phase == IdentityPhase.Incoming } }
+            verification.cancel()
+            withTimeout(5_000) { controller.cancelled.await() }
+            withTimeout(5_000) { verification.state.first { it.phase == IdentityPhase.ChooseMethod } }
+            verification.requestVerification()
+            withTimeout(5_000) { controller.requested.await() }
+            controller.observer!!.didAcceptVerificationRequest()
+            withTimeout(5_000) { verification.state.first { it.phase == IdentityPhase.Comparing } }
+            oldDelegate.didCancel()
+            assertEquals(IdentityPhase.Comparing, verification.state.value.phase)
+            verification.rejectMismatch()
+            withTimeout(5_000) { controller.declined.await() }
+            withTimeout(5_000) { verification.state.first { it.phase == IdentityPhase.Failed } }
+            assertFalse(controller.approved.isCompleted)
+        } finally {
+            verification.close()
+        }
+    }
+
 }
 
 private class IdentityClient(
@@ -146,17 +178,25 @@ private class IdentityEncryption(var sdkState: VerificationState = VerificationS
     override suspend fun recover(recoveryKey: String) { recoverAction(recoveryKey) }
 }
 
-private class IdentityController : SessionVerificationController(NoHandle) {
+private class IdentityController(private val requireAcknowledgement: Boolean = false) : SessionVerificationController(NoHandle) {
     var observer: SessionVerificationControllerDelegate? = null
     val requested = CompletableDeferred<Unit>()
     val approved = CompletableDeferred<Unit>()
+    val cancelled = CompletableDeferred<Unit>()
+    val declined = CompletableDeferred<Unit>()
+    private var acknowledged = false
+    override suspend fun acknowledgeVerificationRequest(senderId: String, flowId: String) { acknowledged = true }
     override fun setDelegate(delegate: SessionVerificationControllerDelegate?) { observer = delegate }
-    override suspend fun requestDeviceVerification() { requested.complete(Unit) }
+    override suspend fun requestDeviceVerification() { acknowledged = true; requested.complete(Unit) }
     override suspend fun startSasVerification() {
         observer!!.didReceiveVerificationData(SessionVerificationData.Decimals(listOf(1234u, 5678u, 9012u).map { it.toUShort() }))
     }
     override suspend fun approveVerification() { approved.complete(Unit) }
-    override suspend fun cancelVerification() = Unit
+    override suspend fun declineVerification() { declined.complete(Unit) }
+    override suspend fun cancelVerification() {
+        check(!requireAcknowledgement || acknowledged) { "verification request missing" }
+        cancelled.complete(Unit)
+    }
 }
 
 private class IdentityTask : TaskHandle(NoHandle) {
