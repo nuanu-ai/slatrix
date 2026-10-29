@@ -177,6 +177,7 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Today at 9:41", substring = true).assertIsDisplayed()
     }
 
+    // capability: message.copy-text
     @Test fun theMessageSheetCopiesTextAndRetriesOrDeletesAFailedMessage() {
         val failed = message("Lost on the way", minutes = 1, sender = "Jordan", state = MessageSendState.Failed)
             .copy(transactionId = "txn", canRetry = true)

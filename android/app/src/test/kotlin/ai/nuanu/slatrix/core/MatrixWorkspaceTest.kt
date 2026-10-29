@@ -161,6 +161,7 @@ private class WorkspaceClient(private val beforeSave: suspend () -> Unit = {}) :
     private val drafts = mutableMapOf<String, ComposerDraft>()
     val handles = mutableListOf<Room>()
     var failSaves = false
+    override suspend fun getRecentEmojis(): List<RecentEmoji> = emptyList()
     override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
         override fun id(): String = roomId
         override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
