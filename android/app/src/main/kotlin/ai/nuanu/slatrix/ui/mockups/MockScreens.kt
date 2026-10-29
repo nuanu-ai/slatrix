@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.mockups
 
+import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -303,7 +304,7 @@ private fun SectionLabel(text: String) {
 @Composable
 private fun Avatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.Avatar) {
     Box(Modifier.size(size).clip(MaterialTheme.shapes.large).background(DesignTokens.avatarColors[colorIndex]), contentAlignment = Alignment.Center) {
-        Text(initials, style = if (size == UiMetrics.ProfileAvatar) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = SlatrixTheme.colors.onAccent)
+        Text(initials, style = if (size == UiMetrics.ProfileAvatar) MaterialTheme.typography.headlineMedium else AvatarStyle.label, fontWeight = FontWeight.Bold, color = SlatrixTheme.colors.onAccent)
     }
 }
 
