@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButtonDefaults
@@ -143,24 +144,26 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
             }
         }
         composer.target?.let { TargetBar(it, actions.onCancelTarget) }
-        BasicTextField(shown, { next ->
-            field = next
-            pending = null
-            val changed = next.text != lastText
-            lastText = next.text
-            if (changed) onDraft(next.text)
-        }, enabled = !composer.loading,
-            modifier = Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium)
-                .semantics { contentDescription = placeholder },
-            textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
-            cursorBrush = SolidColor(colors.accent), maxLines = 5,
-            decorationBox = { inner ->
-                Box(Modifier.padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.CenterStart) {
-                    if (composer.text.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge,
-                        color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    inner()
-                }
-            })
+        ReceiveKeyboardMedia(actions.onAttach?.takeIf { !editing }) {
+            BasicTextField(shown, { next ->
+                field = next
+                pending = null
+                val changed = next.text != lastText
+                lastText = next.text
+                if (changed) onDraft(next.text)
+            }, enabled = !composer.loading,
+                modifier = Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium)
+                    .semantics { contentDescription = placeholder },
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
+                cursorBrush = SolidColor(colors.accent), maxLines = 5,
+                decorationBox = { inner ->
+                    Box(Modifier.padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.CenterStart) {
+                        if (composer.text.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge,
+                            color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        inner()
+                    }
+                })
+        }
         Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
             actions.onAttach?.takeIf { !editing }?.let { AttachButton(it) }
             IconButton(onClick = { picking = true }, enabled = !composer.loading) {
@@ -191,6 +194,7 @@ private fun AttachButton(onAttach: (List<Uri>) -> Unit) {
     var choosing by remember { mutableStateOf(false) }
     val media = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { if (it.isNotEmpty()) onAttach(it) }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) onAttach(it) }
+    val camera = rememberCamera { onAttach(listOf(it)) }
     IconButton(onClick = { choosing = true }, colors = IconButtonDefaults.iconButtonColors(containerColor = colors.raised)) {
         Icon(Icons.Outlined.Add, "Attachments", tint = colors.textPrimary)
     }
@@ -201,6 +205,7 @@ private fun AttachButton(onAttach: (List<Uri>) -> Unit) {
                 choosing = false
                 media.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             }
+            AttachChoice(Icons.Outlined.PhotoCamera, "Camera") { choosing = false; camera() }
             AttachChoice(Icons.Outlined.Description, "Files") { choosing = false; files.launch(arrayOf("*/*")) }
         }
     }
