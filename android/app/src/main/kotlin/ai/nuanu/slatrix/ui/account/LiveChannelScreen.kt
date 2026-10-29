@@ -35,6 +35,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -43,6 +44,7 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
@@ -206,12 +208,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Box(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
                             if (threadRoot != null && row.eventId == threadRoot) Column {
-                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage) { menu = it }
+                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, onPerson) { menu = it }
                                 // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                                 RepliesBar(replies)
                             // The first reply starts under the replies bar, so it shows its sender again.
                             } else LiveMessageRow(if (row.id == firstReply) row.copy(grouped = false) else row, state.ownUserId,
-                                actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage) { menu = it }
+                                actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage, onPerson) { menu = it }
                         }
                     }
                 }
@@ -324,6 +326,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
 @Composable
 private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
+    onPerson: (String) -> Unit,
     onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
@@ -339,10 +342,13 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
         if (message.grouped) Box(Modifier.width(UiMetrics.Avatar), contentAlignment = Alignment.Center) {
             if (failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.size(UiMetrics.Icon), tint = colors.destructive)
-        } else LiveAvatar(message.initials, message.colorIndex)
+        } else Box(Modifier.clip(MaterialTheme.shapes.small).clickable(role = Role.Button) { onPerson(message.senderId) }
+            .semantics(mergeDescendants = true) { contentDescription = "${message.senderName}’s profile" }) {
+            LiveAvatar(message.initials, message.colorIndex)
+        }
         Column(Modifier.weight(1f)) {
             if (!message.grouped) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
+                Text(message.senderName, Modifier.weight(1f, fill = false).clickable(role = Role.Button) { onPerson(message.senderId) }, style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(when (message.sendState) {
                     MessageSendState.Sent -> remember(message.timestamp) { timeLabel(message.timestamp) }
@@ -352,7 +358,7 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
             }
             message.replyTo?.let { reply -> ReplyQuote(reply) { onOpenReply(reply.eventId) } }
             Box {
-                MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me)
+                MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me, onPerson)
                 // In the row's bottom padding, so the bar comes and goes without moving anything.
                 message.uploadProgress?.let {
                     LinearProgressIndicator({ it }, Modifier.align(Alignment.BottomStart).fillMaxWidth().height(UiMetrics.GapTiny)

@@ -15,6 +15,8 @@ import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityVerification
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.MatrixSearch
+import ai.nuanu.slatrix.core.MatrixPeople
+import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.core.MessageSearchState
 import ai.nuanu.slatrix.core.RecentSearchStore
 import ai.nuanu.slatrix.core.RoomListState
@@ -43,6 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -71,7 +74,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: MatrixRooms?, workspace: MatrixWorkspace?,
     notification: NotificationTarget? = null, threads: MatrixWorkspace? = null, activity: MatrixActivity? = null,
-    search: MatrixSearch? = null, onNotificationHandled: (NotificationTarget) -> Unit = {}) {
+    search: MatrixSearch? = null, people: MatrixPeople? = null, onNotificationHandled: (NotificationTarget) -> Unit = {}) {
     val state by account.state.collectAsState()
     RequestNotificationPermission(signedIn = state is AccountState.Connected, configured = BuildConfig.PUSH_GATEWAY.isNotEmpty())
     val context = LocalContext.current
@@ -82,6 +85,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
     var preferences by rememberSaveable { mutableStateOf(false) }
+    // Someone's profile, pushed over whatever is open, and the name to show until theirs loads.
+    var person by rememberSaveable { mutableStateOf<Pair<String, String?>?>(null) }
     // Browse channels or Create a channel, pushed over Home; null while neither is open.
     var channels by rememberSaveable { mutableStateOf<ChannelPage?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -148,6 +153,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         you = false
                         preferences = false
                         channels = null
+                        person = null
                         jump(room, target.eventId, target.threadRoot)
                         onNotificationHandled(target)
                     }
@@ -161,6 +167,15 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             preferences -> { { LivePreferencesScreen(dark, darkOverride, palette,
                                 { darkOverride = it; appearance.darkMode = it },
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
+                            person != null -> { { person?.let { (id, name) ->
+                                LivePersonProfile(id, name, userId, people, rooms?.state, { room ->
+                                    person = null
+                                    you = false
+                                    threads?.back()
+                                    // Message from the conversation already open just goes back to it, where you were.
+                                    if (selected?.room?.id != room.id) workspace?.open(room)
+                                }) { person = null }
+                            } } }
                             channels != null -> { {
                                 val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
                                 if (channels == ChannelPage.Browse) LiveBrowseChannels(rooms, selectedSpaceId, openChannel) { channels = null }
@@ -168,10 +183,14 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     openChannel, { notice = it }) { channels = null }
                             } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
-                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms) } } }
-                            // Kept while a thread covers it, so Back returns to the same place in the channel.
+                            thread != null -> { { covered.SaveableStateProvider("${thread.room.id} ${thread.threadRoot}") { key(thread.room.id, thread.threadRoot) {
+                                LiveConversation(thread, threads, workspace, jump, rooms, people, { id, name -> person = id to name })
+                            } } } }
+                            // Kept while a thread or a profile covers it, so Back returns to the same place.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace, jump, rooms) { root, row -> threads?.open(selected.room, root, root = row) }
+                                LiveConversation(selected, workspace, workspace, jump, rooms, people, { id, name -> person = id to name }) { root, row ->
+                                    threads?.open(selected.room, root, root = row)
+                                }
                             } } } }
                             else -> null
                         }) {
@@ -216,7 +235,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
 private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
-    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?,
+    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?, people: MatrixPeople?,
+    onPerson: (userId: String, name: String?) -> Unit,
     onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     // The room as the list follows it, so a change of name, topic or permissions shows while it's open; read only
@@ -231,6 +251,11 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
     val scope = rememberCoroutineScope()
     var details by rememberSaveable(open.room.id) { mutableStateOf(false) }
+    // A direct message's header opens the other person once its room info names exactly one, as Slack's does.
+    val counterpart by produceState<Person?>(null, open.room.id, people) {
+        if (open.room.direct) value = people?.counterpart(open.room.id)
+    }
+    val profile = { id: String -> onPerson(id, timeline.rows.firstNotNullOfOrNull { (it as? ConversationMessage)?.takeIf { row -> row.senderId == id }?.senderName }) }
     Box(Modifier.fillMaxSize()) {
         LiveChannelScreen(room, timeline, draft, { composer?.edit(it); if (draft.target !is ComposerTarget.Edit) open.typing?.changed(it) }, { composer?.send(); open.typing?.stopped() },
             { owner?.back() }, { conversation?.loadOlder() },
@@ -248,8 +273,9 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
                 onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
             // A quote doesn't know its parent's thread, so it asks before jumping.
-            { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } }, { details = true },
-            typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty())
+            { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } },
+            { counterpart?.let { onPerson(it.id, it.name) } ?: run { details = true } },
+            typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty(), onPerson = profile)
         val actions = remember(rooms, open.room.id, conversation) {
             rooms?.client?.let { client ->
                 val channel = MatrixChannel(client, open.room.id)
@@ -274,7 +300,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 details = false
                 // A pin doesn't know its thread, so it asks before jumping.
                 scope.launch { jump(open.room, id, main?.threadRootOf(open.room.id, id)) }
-            }) { details = false }
+            }, onPerson = profile) { details = false }
         }
     }
 }

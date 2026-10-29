@@ -87,7 +87,7 @@ fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetails
     val details = { page = DetailsPage.Details }
     when (page) {
         DetailsPage.Details -> DetailsPage(room, notifications?.getOrNull(), actions, scope, onLeft, onBack, open)
-        DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, details)
+        DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, onPerson, details)
         DetailsPage.Edit -> EditPage(room, actions, scope, details)
         DetailsPage.Notifications -> NotificationsPage(notifications, actions, scope, { notifications = Result.success(it) },
             { loads++ }, details)
@@ -230,7 +230,8 @@ private fun NotificationsPage(loaded: Result<NotificationSetting>?, actions: Cha
 }
 
 @Composable
-private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsActions, onAddPeople: () -> Unit, onBack: () -> Unit) {
+private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsActions, onAddPeople: () -> Unit,
+    onPerson: (String) -> Unit, onBack: () -> Unit) {
     val colors = SlatrixTheme.colors
     var query by rememberSaveable { mutableStateOf("") }
     var tries by remember { mutableIntStateOf(0) }
@@ -261,7 +262,8 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
         when {
             shown != null -> {
                 items(shown, key = { it.id }) { member ->
-                    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow).padding(horizontal = UiMetrics.GapLarge),
+                    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow)
+                        .clickable(role = Role.Button) { onPerson(member.id) }.padding(horizontal = UiMetrics.GapLarge),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
                         LiveAvatar(member.initials, member.colorIndex, UiMetrics.ListAvatar)
                         Text(member.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
