@@ -75,13 +75,24 @@ data class ConversationMessage(
     /** The failure paused the room's send queue, so retrying resumes the queue, as on the Mac. */
     val queuePaused: Boolean = false,
     val edited: Boolean = false,
+    val reactions: List<MessageReaction> = emptyList(),
+    /** Set on a thread's root: the summary under it. */
+    val thread: MessageThread? = null,
 ) : ConversationRow {
     /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
     val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
 }
 
+/** One emoji's reactions: how many, whether one is yours, and who, as user IDs in the order they reacted. */
+data class MessageReaction(val key: String, val count: Int, val mine: Boolean, val senders: List<String>)
+
+/** Slack's "N replies" line under a thread's root. */
+data class MessageThread(val replies: Int, val lastReplier: String?, val lastReplyAt: Long?)
+
 data class ConversationState(
     val rows: List<ConversationRow> = emptyList(),
+    /** Whose reactions are "yours" and whose mentions stand out. */
+    val ownUserId: String? = null,
     val loading: Boolean = true,
     val loadingHistory: Boolean = false,
     val hasMore: Boolean = true,

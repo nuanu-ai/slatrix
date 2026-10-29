@@ -4,15 +4,27 @@ import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.MessageKind
+import ai.nuanu.slatrix.core.MessageReaction
+import ai.nuanu.slatrix.core.MessageThread
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
+import ai.nuanu.slatrix.ui.account.MessageActions
+import ai.nuanu.slatrix.ui.designsystem.DesignTokens
+import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
@@ -34,11 +46,15 @@ class MessageContentTest {
     @get:Rule val compose = createComposeRule()
     private val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
 
+    private var toggled: Pair<ConversationMessage, String>? = null
+    private var thread: String? = null
+
     private fun show(vararg messages: ConversationMessage) {
         compose.setContent {
             SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(messages.toList(), loading = false, hasMore = false),
-                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+                LiveChannelScreen(room, ConversationState(messages.toList(), loading = false, hasMore = false, ownUserId = "@me:example.org"),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    onOpenThread = { thread = it }, actions = MessageActions(onReact = { message, key -> toggled = message to key }))
             }
         }
     }
@@ -66,6 +82,48 @@ class MessageContentTest {
     @Test fun anEditedMessageEndsWithSlacksEditedMark() {
         show(message("Fixed the typo").copy(edited = true))
         compose.onNodeWithText("Fixed the typo (edited)", useUnmergedTree = true).assertExists()
+    }
+
+    // capability: message.rich-text
+    @Test fun aMentionOfYouStandsOutFromOtherMentions() {
+        show(message("@me @sam", html = "<a href=\"https://matrix.to/#/@me:example.org\">Me</a> " +
+            "<a href=\"https://matrix.to/#/@sam:example.org\">Sam</a>"))
+        val text = compose.onNodeWithText("@Me @Sam", useUnmergedTree = true).text()
+        fun fill(name: String) = text.spanStyles.single { text.substring(it.start, it.end) == name }.item.background
+        val tokens = DesignTokens.colors(false, SidebarPalette.Aubergine)
+        assertEquals(tokens.getValue("mentionYouFill"), fill("@Me"))
+        assertEquals(tokens.getValue("mentionFill"), fill("@Sam"))
+    }
+
+    // capability: message.reactions.show
+    // capability: message.reactions.toggle
+    @Test fun reactionsShowAsChipsWithYoursSelectedAndATapTogglesOne() {
+        val shipped = message("Ship it").copy(reactions = listOf(
+            MessageReaction("👍", 2, true, listOf("@mira:example.org", "@me:example.org")),
+            MessageReaction("🎉", 1, false, listOf("@sam:example.org")),
+        ))
+        show(shipped)
+        compose.onNode(hasText("👍") and hasText("2")).assertIsSelected()
+        compose.onNode(hasText("🎉") and hasText("1")).assertIsNotSelected().performClick()
+        compose.runOnIdle { assertEquals(shipped to "🎉", toggled) }
+    }
+
+    // capability: message.reactions.show
+    @Test fun longPressingAReactionShowsWhoReacted() {
+        show(message("Ship it").copy(reactions = listOf(
+            MessageReaction("👍", 3, true, listOf("@mira:example.org", "@me:example.org", "@sam:example.org")),
+        )))
+        compose.onNode(hasText("👍") and hasText("3")).performTouchInput { longClick() }
+        compose.onNodeWithText("Mira, You and sam", substring = true).assertIsDisplayed()
+    }
+
+    // capability: message.thread-summary
+    @Test fun aThreadRootShowsItsRepliesAndOpensTheThread() {
+        show(message("Plan?").copy(thread = MessageThread(3, "Sam Okafor", System.currentTimeMillis() - 2 * 3_600_000L)))
+        compose.onNodeWithText("3 replies", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Last reply 2 hours ago", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("3 replies", useUnmergedTree = true).performClick()
+        compose.runOnIdle { assertEquals("\$Plan?", thread) }
     }
 
     // capability: message.deleted
