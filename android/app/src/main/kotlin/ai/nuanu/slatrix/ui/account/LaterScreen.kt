@@ -23,10 +23,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -37,27 +35,28 @@ import androidx.compose.ui.text.style.TextOverflow
 @Composable
 fun LaterScreen(saved: List<SavedMessage>, rooms: List<RoomSummary>, load: suspend (SavedMessage) -> SavedPreview?,
     onOpen: (SavedMessage) -> Unit, onRemove: (SavedMessage) -> Unit, onBack: () -> Unit) {
+    val newestFirst = remember(saved) { saved.sortedByDescending { it.savedAt } }
+    // Read once per message while the page is open, so scrolling back to a card shows it at once.
+    val previews = remember { mutableStateMapOf<SavedMessage, SavedPreview?>() }
     PushedPage("Later", onBack) {
         if (saved.isEmpty()) item {
             Text("Nothing saved for later", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyLarge,
                 color = SlatrixTheme.colors.textSecondary)
         }
-        items(saved, key = { it.roomId + it.eventId }) { item ->
-            SavedCard(item, rooms.firstOrNull { it.id == item.roomId }, load, { onOpen(item) }) { onRemove(item) }
+        // The room's length first, as the Mac's ID does, so two different pairs never make the same key.
+        items(newestFirst, key = { "${it.roomId.length}:${it.roomId}${it.eventId}" }) { item ->
+            SavedCard(item, rooms.firstOrNull { it.id == item.roomId }, previews, load, { onOpen(item) }) { onRemove(item) }
         }
     }
 }
 
 @Composable
-private fun SavedCard(saved: SavedMessage, room: RoomSummary?, load: suspend (SavedMessage) -> SavedPreview?, onOpen: () -> Unit,
-    onRemove: () -> Unit) {
+private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: MutableMap<SavedMessage, SavedPreview?>,
+    load: suspend (SavedMessage) -> SavedPreview?, onOpen: () -> Unit, onRemove: () -> Unit) {
     val colors = SlatrixTheme.colors
-    var preview by remember(saved) { mutableStateOf<SavedPreview?>(null) }
-    var loaded by remember(saved) { mutableStateOf(false) }
-    LaunchedEffect(saved) {
-        preview = load(saved)
-        loaded = true
-    }
+    LaunchedEffect(saved) { if (saved !in previews) previews[saved] = load(saved) }
+    val loaded = saved in previews
+    val preview = previews[saved]
     Column(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen)
         .padding(start = UiMetrics.GapLarge, bottom = UiMetrics.GapMedium)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -91,8 +90,8 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, load: suspend (Sa
 @Composable
 internal fun LaterCard(count: Int, onClick: () -> Unit) {
     val colors = SlatrixTheme.colors
-    Surface(Modifier.width(UiMetrics.HomeCard).clickable(role = Role.Button, onClick = onClick), shape = MaterialTheme.shapes.large,
-        color = colors.canvas, border = BorderStroke(UiMetrics.Divider, colors.border)) {
+    Surface(onClick, Modifier.width(UiMetrics.HomeCard), shape = MaterialTheme.shapes.large, color = colors.canvas,
+        border = BorderStroke(UiMetrics.Divider, colors.border)) {
         Column(Modifier.padding(UiMetrics.GapMedium), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
             Icon(SlackIcons.Bookmark, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.textPrimary)
             Text("Later", style = MaterialTheme.typography.bodyLarge, color = colors.textPrimary, maxLines = 1)

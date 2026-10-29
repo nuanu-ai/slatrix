@@ -9,6 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.DateDividerMode
+import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.Membership
 import org.matrix.rustcomponents.sdk.ProfileDetails
 import org.matrix.rustcomponents.sdk.TimelineConfiguration
@@ -82,6 +83,7 @@ class MatrixSaved(private val client: Client) {
                     trackReadReceipts = TimelineReadReceiptTracking.DISABLED, reportUtds = false,
                 )).use { timeline ->
                     val event = timeline.getEventTimelineItemByEventId(saved.eventId)
+                    if ((event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId != saved.eventId) return@use null
                     val body = previewText(event.content) ?: return@use null
                     SavedPreview((event.senderProfile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: event.sender,
                         body, event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())

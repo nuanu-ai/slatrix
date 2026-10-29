@@ -160,6 +160,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         you = false
                         preferences = false
                         channels = null
+                        later = false
                         jump(room, target.eventId, target.threadRoot)
                         onNotificationHandled(target)
                     }
@@ -184,9 +185,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
                             later -> { { LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
                                 { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
-                                    later = false
-                                    // A saved reply opens in its thread, so it is looked up first.
-                                    laterScope.launch { jump(room, item.eventId, workspace?.threadRootOf(room.id, item.eventId)) }
+                                    // A saved reply opens in its thread, so it is looked up first, with Later still up.
+                                    laterScope.launch {
+                                        val root = workspace?.threadRootOf(room.id, item.eventId)
+                                        later = false
+                                        jump(room, item.eventId, root)
+                                    }
                                 } }, { item -> toggleSaved(item.roomId, item.eventId) }) { later = false } } }
                             thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms, saved, toggleSaved) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
@@ -272,10 +276,11 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { actions ->
                 val savedHere = remember(saved, open.room.id) { saved.filter { it.roomId == open.room.id }.map { it.eventId }.toSet() }
                 remember(actions, savedHere) {
-                    actions.copy(saved = savedHere, onSave = { message, _ -> message.eventId?.let { onToggleSaved(open.room.id, it) } },
-                        onForward = { m ->
-                            scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { forwarded = "This message can’t be forwarded." } }
-                        })
+                    actions.copy(saved = savedHere, onSave = { message, save ->
+                        message.eventId?.takeIf { (it in savedHere) != save }?.let { onToggleSaved(open.room.id, it) }
+                    }, onForward = { m ->
+                        scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { forwarded = "This message can’t be forwarded." } }
+                    })
                 }
             },
             ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
