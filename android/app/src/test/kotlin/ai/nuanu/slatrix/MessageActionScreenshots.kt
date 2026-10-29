@@ -47,10 +47,10 @@ class MessageActionScreenshots(private val dark: Boolean) {
             MessageKind.Text, MessageSendState.Sent, sender == "Jordan", sender.take(1), if (sender == "Mira") 2 else 5)
         val rows = listOf(
             message("a", "Mira", "The new onboarding flow is up on staging. Would love eyes on the empty states.", 0),
-            message("b", "Jordan", "Looking now. The illustrations read well in dark mode too.", 10),
+            message("b", "Jordan", "Looking now. The illustrations read well in dark mode too.", 10).copy(editable = true),
         )
         val actions = MessageActions(quick = listOf("🙂", "❤️", "👍", "💯", "🐛"), recent = listOf("🙂", "❤️", "👍"),
-            onReact = { _, _ -> }, link = { "" }, onDelete = {})
+            onReact = { _, _ -> }, link = { "" }, onDelete = {}, onQuote = {}, onEdit = {})
         compose.setContent {
             SlatrixTheme(dark = dark) {
                 LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), ComposerState(loading = false),
