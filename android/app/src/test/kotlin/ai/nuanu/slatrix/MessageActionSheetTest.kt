@@ -40,11 +40,11 @@ class MessageActionSheetTest {
     private val mine = message("On it", "Jordan")
     private val reactions = mutableListOf<Pair<String, String>>()
 
-    private fun show(actions: MessageActions) {
+    private fun show(actions: MessageActions, onOpenThread: ((String) -> Unit)? = null, notice: String? = null) {
         compose.setContent {
             SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(listOf(theirs, mine), loading = false, hasMore = false),
-                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, actions)
+                LiveChannelScreen(room, ConversationState(listOf(theirs, mine), loading = false, hasMore = false, notice = notice),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, actions, onOpenThread)
             }
         }
     }
@@ -99,10 +99,16 @@ class MessageActionSheetTest {
 
     @Test fun replyOpensTheMessagesThread() {
         var thread: String? = null
-        show(MessageActions(onOpenThread = { thread = it }))
+        show(MessageActions(), onOpenThread = { thread = it })
         open("Ship it")
         compose.onNodeWithText("Reply").performClick()
         compose.runOnIdle { assertEquals("\$Ship it", thread) }
+    }
+
+    @Test fun aNoticeShowsWithoutOfferingRetry() {
+        show(MessageActions(), notice = "Couldn’t delete this message.")
+        compose.onNodeWithText("Couldn’t delete this message.").assertExists()
+        compose.onNodeWithText("Retry").assertDoesNotExist()
     }
 
     private fun clip() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)

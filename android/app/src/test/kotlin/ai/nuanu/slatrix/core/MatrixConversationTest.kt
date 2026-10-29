@@ -219,13 +219,14 @@ class MatrixConversationTest {
     }
 
     // capability: message.react.quick
-    @Test fun reactingTogglesTheReactionOnTheMessageAndSaysWhetherItAddedOne() = runTest {
+    @Test fun reactingTogglesTheReactionOnTheMessageAndSaysWhenItAddedOne() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
         val message = conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single()
-        timeline.reactionAdded = false
-        assertFalse(conversation.react(message, "👍"))
+        val added = CompletableDeferred<Unit>()
+        conversation.react(message, "👍") { added.complete(Unit) }
         assertEquals(EventOrTransactionId.EventId("\$one") to "👍", timeline.reactions.receive())
+        added.await()
         conversation.close()
     }
 
@@ -236,6 +237,18 @@ class MatrixConversationTest {
         val message = conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single()
         conversation.delete(message)
         assertEquals(EventOrTransactionId.EventId("\$one"), timeline.redacted.receive())
+        conversation.close()
+    }
+
+    @Test fun aFailedDeleteSaysSoForAMoment() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        timeline.redactFailure = IllegalStateException("Offline")
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val message = conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single()
+        conversation.delete(message)
+        assertEquals("Couldn’t delete this message.", conversation.state.first { it.notice != null }.notice)
+        conversation.state.first { it.notice == null }
+        assertEquals(listOf("Hello"), conversation.state.value.rows.messages.map { it.body })
         conversation.close()
     }
 
@@ -330,7 +343,11 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     var reactionAdded = true
     override suspend fun toggleReaction(itemId: EventOrTransactionId, key: String): Boolean { reactions.send(itemId to key); return reactionAdded }
     val redacted = Channel<EventOrTransactionId>(Channel.UNLIMITED)
-    override suspend fun redactEvent(eventOrTransactionId: EventOrTransactionId, reason: String?) { redacted.send(eventOrTransactionId) }
+    var redactFailure: Exception? = null
+    override suspend fun redactEvent(eventOrTransactionId: EventOrTransactionId, reason: String?) {
+        redactFailure?.let { throw it }
+        redacted.send(eventOrTransactionId)
+    }
     override suspend fun addListener(listener: TimelineListener): TaskHandle {
         this.listener = listener
         listener.onUpdate(listOf(TimelineDiff.Reset(cached)))

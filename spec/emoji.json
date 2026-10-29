@@ -7,6 +7,7 @@
     { "name": "A bare shortcode", "query": "tada", "first": "🎉" },
     { "name": "An exact shortcode wins over longer ones", "query": "smile", "first": "😄" },
     { "name": "Words of the name", "query": "thumbs up", "first": "👍" },
+    { "name": "A name that runs over two lines of the catalog", "query": "hand covering mouth", "first": "🤭" },
     { "name": "An exact shortcode, then one it starts, then a later word", "query": "heart", "first": "❤️", "order": ["😍", "💔"] },
     { "name": "Nothing matches", "query": "zzzqqq", "first": null },
     { "name": "Blank finds nothing", "query": "  ", "first": null }
