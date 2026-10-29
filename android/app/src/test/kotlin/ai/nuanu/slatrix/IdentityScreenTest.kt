@@ -34,7 +34,7 @@ class IdentityScreenTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test fun conversationsStayHiddenUntilIdentityIsConfirmed() {
-        val identity = mutableStateOf(IdentityState(phase = IdentityPhase.ChooseMethod))
+        val identity = mutableStateOf(IdentityState(status = IdentityStatus.Unverified, phase = IdentityPhase.ChooseMethod))
         val rooms = RoomListState(listOf(RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)), loading = false)
         compose.setContent {
             SlatrixTheme {
@@ -49,10 +49,23 @@ class IdentityScreenTest {
         compose.onNodeWithText("Team").assertExists()
     }
 
+    @Test fun aDeviceStillCheckingItsIdentityOpensWithoutTheConfirmationScreen() {
+        val rooms = RoomListState(listOf(RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)), loading = false)
+        compose.setContent {
+            SlatrixTheme {
+                ConnectedAccountScreen(IdentityState(), {}, {}, {}, {}, {}, {}, {}) {
+                    LiveHomeScreen("@alex:example.org", rooms, {}, {}, {})
+                }
+            }
+        }
+        compose.onNodeWithText("Team").assertExists()
+        compose.onNodeWithText("Confirm it’s you").assertDoesNotExist()
+    }
+
     @Test fun aRecoveryKeyScrollsHorizontallyWithoutWrapping() {
         compose.setContent {
             SlatrixTheme {
-                ConnectedAccountScreen(IdentityState(phase = IdentityPhase.ChooseMethod, recoveryAvailable = true),
+                ConnectedAccountScreen(IdentityState(IdentityStatus.Unverified, IdentityPhase.ChooseMethod, recoveryAvailable = true),
                     {}, {}, {}, {}, {}, {}, {}) {}
             }
         }
