@@ -4,10 +4,10 @@ import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
-import ai.nuanu.slatrix.ui.account.OfflineBanner
+import ai.nuanu.slatrix.ui.account.LocalOffline
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
-import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
@@ -35,9 +35,8 @@ class OfflineBannerScreenshots(private val dark: Boolean) {
         )
         compose.setContent {
             SlatrixTheme(dark = dark) {
-                Box {
+                CompositionLocalProvider(LocalOffline provides true) {
                     LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {})
-                    OfflineBanner(true)
                 }
             }
         }

@@ -13,13 +13,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,21 +32,30 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
+
+/** Whether the SDK has lost the server, for the banner each screen floats under its header. */
+val LocalOffline = compositionLocalOf { false }
+
+/** Collects the connection here, so a change recomposes only the banners. */
+@Composable
+fun ProvideOffline(offline: StateFlow<Boolean>?, content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalOffline provides (offline?.collectAsState()?.value == true), content)
+}
 
 /**
- * Says the app is offline once a drop has lasted a moment, as the Mac's connection notice does: the SDK restores most
- * drops at once. It floats over the screen, so nothing under it moves.
+ * Says the app is offline once a drop has lasted a moment, as the Mac's connection notice does. It floats at the top
+ * of the box it is in, under the screen's header, so nothing under it moves.
  */
 @Composable
-fun OfflineBanner(offline: Boolean) {
+fun OfflineBanner() {
+    val offline = LocalOffline.current
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(offline) {
         if (offline) delay(UiMetrics.ConnectionNoticeMillis)
         shown = offline
     }
-    // Just under the header, so the screen's title and actions stay in reach.
-    Box(Modifier.fillMaxWidth().statusBarsPadding().padding(top = UiMetrics.RootHeaderHeight + UiMetrics.GapSmall),
-        contentAlignment = Alignment.TopCenter) {
+    Box(Modifier.fillMaxWidth().padding(top = UiMetrics.GapSmall), contentAlignment = Alignment.TopCenter) {
         AnimatedVisibility(shown, enter = fadeIn(tween(UiMetrics.OverlayMillis)), exit = fadeOut(tween(UiMetrics.OverlayMillis))) {
             val colors = SlatrixTheme.colors
             Surface(Modifier.semantics { liveRegion = LiveRegionMode.Polite }, shape = MaterialTheme.shapes.extraLarge,

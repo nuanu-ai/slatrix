@@ -27,7 +27,7 @@ object UiMetrics {
     val FormWidth = 480.dp
     const val ProgressDelayMillis = 400L
     const val NoticeMillis = 4_000L
-    /** The SDK restores most drops within a moment; only one that lasts gets the offline notice, as on the Mac. */
+    /** How long the connection must be down before the offline banner shows, as on the Mac. */
     const val ConnectionNoticeMillis = 2_000L
     /** Overlays ease in and out this fast; everything else is instant. */
     const val OverlayMillis = 150

@@ -144,7 +144,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                     }
                 }
                 Box(Modifier.fillMaxSize()) {
-                    ConnectedAccountScreen(identityState,
+                    ProvideOffline(rooms?.offline) { ConnectedAccountScreen(identityState,
                         { identity?.requestVerification() }, { identity?.acceptVerification() },
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {
@@ -166,8 +166,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 }
                             }
                         }
-                    }
-                    OfflineBanner(rooms?.offline?.collectAsState()?.value == true)
+                    } }
                     (state as AccountState.Connected).warning?.let { warning ->
                         Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(warning) }
                     }

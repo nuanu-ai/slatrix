@@ -111,6 +111,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                             HomeTab.Activity -> activity()
                             HomeTab.Search -> search()
                         }
+                        OfflineBanner()
                         val failure = notice
                         if (failure != null) {
                             Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)
