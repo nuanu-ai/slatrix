@@ -64,7 +64,7 @@ import androidx.compose.ui.text.withStyle
  */
 @Composable
 fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchState, onSearch: (MessageSearchQuery?) -> Unit,
-    onMore: () -> Unit, onRoom: (String) -> Unit) {
+    onMore: () -> Unit, onMessage: (SearchHit) -> Unit, onRoom: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     var submitted by rememberSaveable { mutableStateOf(false) }
     val focus = remember { FocusRequester() }

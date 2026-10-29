@@ -48,7 +48,7 @@ class SearchScreenTest {
         compose.setContent {
             SlatrixTheme {
                 LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
-                    search = { SearchScreen(rooms, "@alex:example.org", MessageSearchState(), {}, {}, {}) })
+                    search = { SearchScreen(rooms, "@alex:example.org", MessageSearchState(), {}, {}, {}, {}) })
             }
         }
         compose.onNode(hasText("Search") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
@@ -59,7 +59,7 @@ class SearchScreenTest {
     // capability: search.people
     @Test fun typingFindsChannelsAndPeopleBestMatchFirst() {
         val opened = mutableListOf<String>()
-        compose.setContent { SlatrixTheme { SearchScreen(rooms, "@alex:example.org", MessageSearchState(), {}, {}) { opened += it } } }
+        compose.setContent { SlatrixTheme { SearchScreen(rooms, "@alex:example.org", MessageSearchState(), {}, {}, {}) { opened += it } } }
         compose.onNode(hasSetTextAction()).performTextInput("des")
 
         assertTrue("A name that starts with the query leads", top("design") < top("Product design"))
@@ -70,12 +70,12 @@ class SearchScreenTest {
     }
 
     // capability: search.messages
-    @Test fun searchingMessagesShowsEachHitWithItsConversation() {
+    @Test fun searchingMessagesShowsEachHitWithItsConversationAndOpensItWhereItIs() {
         val asked = mutableListOf<MessageSearchQuery?>()
-        val opened = mutableListOf<String>()
+        val jumped = mutableListOf<SearchHit>()
         val messages = mutableStateOf(MessageSearchState())
         compose.setContent {
-            SlatrixTheme { SearchScreen(rooms, "@alex:example.org", messages.value, { asked += it }, {}) { opened += it } }
+            SlatrixTheme { SearchScreen(rooms, "@alex:example.org", messages.value, { asked += it }, {}, { jumped += it }) {} }
         }
         compose.onNode(hasSetTextAction()).performTextInput("budget in:#design")
         compose.onNode(hasSetTextAction()).performImeAction()
@@ -89,7 +89,7 @@ class SearchScreenTest {
         compose.onNodeWithText("Sam").assertIsDisplayed()
         compose.onNodeWithText("#design").assertIsDisplayed()
         compose.onNodeWithText("The budget is ready for review").performClick()
-        compose.runOnIdle { assertEquals(listOf("!design:example.org"), opened) }
+        compose.runOnIdle { assertEquals(listOf("!design:example.org" to "\$1"), jumped.map { it.roomId to it.eventId }) }
     }
 
     @Test fun aSearchWhosePageHasNoHitsHereAsksForTheNextInsteadOfSayingNoResults() {
@@ -98,7 +98,7 @@ class SearchScreenTest {
         compose.setContent {
             SlatrixTheme {
                 SearchScreen(rooms, "@alex:example.org", MessageSearchState(MessageSearchQuery("budget"), listOf(elsewhere), endReached = false),
-                    {}, { more++ }, {})
+                    {}, { more++ }, {}, {})
             }
         }
         compose.onNode(hasSetTextAction()).performTextInput("budget")
@@ -109,7 +109,7 @@ class SearchScreenTest {
 
     @Test fun aSearchWithNoHitsSaysSo() {
         compose.setContent {
-            SlatrixTheme { SearchScreen(rooms, "@alex:example.org", MessageSearchState(MessageSearchQuery("zebra")), {}, {}, {}) }
+            SlatrixTheme { SearchScreen(rooms, "@alex:example.org", MessageSearchState(MessageSearchQuery("zebra")), {}, {}, {}, {}) }
         }
         compose.onNode(hasSetTextAction()).performTextInput("zebra")
         compose.onNode(hasSetTextAction()).performImeAction()

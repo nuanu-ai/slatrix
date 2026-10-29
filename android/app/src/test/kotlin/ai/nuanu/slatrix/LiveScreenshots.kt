@@ -82,7 +82,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
                     Box(Modifier.weight(1f)) {
                         if (tab == "You") LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, {})
                         else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spaces = spaces, spacesKnown = true),
-                            {}, {}, {}, Harbor, search = { SearchScreen(rooms, "@alex:example.org", hits, {}, {}, {}) })
+                            {}, {}, {}, Harbor, search = { SearchScreen(rooms, "@alex:example.org", hits, {}, {}, {}, {}) })
                     }
                     Box(Modifier.fillMaxWidth().height(GestureBar).background(if (tab == "You") colors.canvas else colors.raised))
                 }

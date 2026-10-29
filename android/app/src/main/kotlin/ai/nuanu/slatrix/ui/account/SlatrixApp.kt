@@ -233,7 +233,7 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
                 state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
             }
             SearchScreen(inScope, userId, messages, { query -> if (query == null) search?.clear() else search?.search(query) },
-                { search?.loadMore() }, open)
+                { search?.loadMore() }, {}, open)
         }, activity = activity)
 }
 
