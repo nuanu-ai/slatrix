@@ -17,22 +17,73 @@ struct WorkspaceRailTests {
         result.membership = membership
         return result
     }
+    struct RailRoom: Decodable {
+        var id: String
+        var spaces: [String]?
+        var direct: Bool?
+        var membership: String?
+        var room: ChatRoom {
+            WorkspaceRailTests.room(id, spaces: spaces ?? [], direct: direct ?? false, membership: membership ?? "join")
+        }
+    }
+    struct RailWorkspace: Decodable {
+        var id: String
+        var name: String
+        var topLevel: Bool?
+    }
+    struct EntriesCase: Decodable, CustomTestStringConvertible {
+        var name: String
+        var workspaces: [String]
+        var rooms: [RailRoom]
+        var expected: [String?]
+        var testDescription: String { name }
+    }
+    struct ChooseCase: Decodable, CustomTestStringConvertible {
+        var name: String
+        var remembered: String?
+        var workspaces: [String]
+        var busy: Bool?
+        var rooms: [RailRoom]?
+        var extraRooms: [RailRoom]?
+        var showing: String?
+        var expected: String?
+        var testDescription: String { name }
+    }
+    struct RailSpec: Decodable {
+        var workspaces: [RailWorkspace]
+        var entries: [EntriesCase]
+        var choose: [ChooseCase]
+        var busyRooms: [RailRoom]
+        func workspaces(_ ids: [String]) -> [Workspace] {
+            ids.map { id in
+                let known = workspaces.first { $0.id == id }!
+                return Workspace(id: id, name: known.name, isTopLevel: known.topLevel ?? true)
+            }
+        }
+    }
+    private static let spec = try! SharedSpec.decode("spec/workspace-rail.json", as: RailSpec.self)
+
+    // capability: home.workspace-switcher
+    @Test("The switcher offers the shared cases' workspaces", arguments: spec.entries)
+    func entries(spec: EntriesCase) {
+        let rail = WorkspaceRail.entries(
+            workspaces: Self.spec.workspaces(spec.workspaces), rooms: spec.rooms.map(\.room))
+        #expect(rail.map { $0?.id } == spec.expected)
+    }
+
+    @Test("The shared cases' workspace opens", arguments: spec.choose)
+    func choose(spec: ChooseCase) {
+        let base = spec.busy == true ? Self.spec.busyRooms : spec.rooms ?? []
+        let rooms = (base + (spec.extraRooms ?? [])).map(\.room)
+        #expect(
+            WorkspaceRail.choose(
+                remembered: spec.remembered, showing: rooms.first { $0.id == spec.showing },
+                workspaces: Self.spec.workspaces(spec.workspaces), rooms: rooms) == spec.expected)
+    }
+
     private static let lab = Workspace(id: "!lab", name: "Harbor")
     private static let test = Workspace(id: "!test", name: "Test space")
     private static let nested = Workspace(id: "!nested", name: "Design", isTopLevel: false)
-
-    // capability: home.workspace-switcher
-    @Test("The rail lists top-level workspaces, then All only while a channel belongs to no workspace")
-    func entries() {
-        let workspaces = [Self.nested, Self.lab, Self.test]
-        let inSpaces = [
-            Self.room("a", spaces: ["!lab"]), Self.room("dm", direct: true), Self.room("invited", membership: "invite"),
-        ]
-        #expect(WorkspaceRail.entries(workspaces: workspaces, rooms: inSpaces) == [Self.lab, Self.test])
-        #expect(
-            WorkspaceRail.entries(workspaces: workspaces, rooms: inSpaces + [Self.room("orphan")])
-                == [Self.lab, Self.test, nil])
-    }
 
     @Test("The search field names the open workspace or space, and all conversations when none is open")
     func searchPrompt() {
@@ -69,43 +120,6 @@ struct WorkspaceRailTests {
     func allBadge() {
         let rooms = [Self.room("a", spaces: ["!lab"], mentions: 5), Self.room("orphan", mentions: 1)]
         #expect(WorkspaceRail.badge(nil, rooms: rooms) == .count("1"))
-    }
-
-    private static let alpha = Workspace(id: "!alpha", name: "Alpha")
-    private static let busy = [
-        room("a", spaces: ["!lab"]), room("b", spaces: ["!lab"]), room("c", spaces: ["!test"]),
-        room("d", spaces: ["!alpha"]), room("dm1", spaces: ["!alpha"], direct: true),
-        room("dm2", spaces: ["!alpha"], direct: true), room("i1", spaces: ["!alpha"], membership: "invite"),
-        room("i2", spaces: ["!alpha"], membership: "invite"),
-    ]
-
-    @Test(
-        "The remembered workspace opens while it is still there; otherwise the one with the most joined channels",
-        arguments: [
-            // (remembered, workspaces, rooms, expected)
-            (nil, [alpha, lab, test], busy, "!lab"),  // first launch: most channels, not first by name
-            ("!test", [alpha, lab, test], busy, "!test"),
-            ("!nested", [alpha, lab, nested], busy, "!nested"),  // a space opened from a link
-            ("!gone", [alpha, lab, test], busy, "!lab"),  // left since
-            ("__all__", [alpha, lab, test], busy + [room("orphan")], nil),
-            ("__all__", [alpha, lab, test], busy, "!lab"),  // All left the rail
-            (nil, [alpha, test], [room("a", spaces: ["!test"]), room("b", spaces: ["!alpha"])], "!alpha"),  // tie
-            (nil, [alpha, nested], [room("a", spaces: ["!nested"]), room("b", spaces: ["!nested"])], "!alpha"),
-            (nil, [], [room("orphan")], nil),
-        ] as [(String?, [Workspace], [ChatRoom], String?)])
-    func choose(remembered: String?, workspaces: [Workspace], rooms: [ChatRoom], expected: String?) {
-        #expect(WorkspaceRail.choose(remembered: remembered, workspaces: workspaces, rooms: rooms) == expected)
-    }
-
-    @Test(
-        "When the remembered choice is gone, the workspace of the conversation on screen wins over the busiest",
-        arguments: [("__all__", "!test"), ("!gone", "!test"), ("!lab", "!lab")])
-    func keepsShownConversation(remembered: String, expected: String) {
-        let joined = Self.room("joined", spaces: ["!test"])
-        #expect(
-            WorkspaceRail.choose(
-                remembered: remembered, showing: joined, workspaces: [Self.alpha, Self.lab, Self.test],
-                rooms: Self.busy + [joined]) == expected)
     }
 
     @Test(

@@ -13,6 +13,8 @@ object UiMetrics {
     val Touch = 48.dp
     /** Slack's conversation list row. */
     val ListRow = 44.dp
+    val WorkspaceRow = 56.dp
+    val SmallIcon = 16.dp
     val Icon = 20.dp
     val LargeIcon = 24.dp
     val Divider = 1.dp

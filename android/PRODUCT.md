@@ -22,8 +22,8 @@ Read and send conversations, find channels and direct messages, and notice unrea
 
 The app connects to Matrix accounts through supported password or browser sign-in,
 restores sessions, and supports identity verification and recovery. Home lists starred
-conversations, channels and direct messages in sections that collapse, with Matrix
-spaces as workspace choices. Starring uses Matrix's favourite tag, so it follows the
+conversations, channels and direct messages in sections that collapse, with top-level
+Matrix spaces as workspaces. A first launch opens the workspace with the most channels. Starring uses Matrix's favourite tag, so it follows the
 account's other clients. Conversations show messages, load earlier history, mark visible
 messages read and send text. Drafts are stored encrypted on the device.
 

@@ -275,6 +275,44 @@ class LiveHomeScreenTest {
         compose.onNodeWithText("Sam").assertIsDisplayed()
     }
 
+    // capability: home.workspace-switcher
+    @Test fun theWorkspaceIconAndNameOpenASwitcherOfTopLevelWorkspaces() {
+        val chosen = mutableListOf<String?>()
+        val spaces = listOf(SpaceSummary("!design:example.org", "Design", isTopLevel = false),
+            SpaceSummary("!harbor:example.org", "Harbor"), SpaceSummary("!studio:example.org", "Studio"))
+        val rooms = listOf(channel("!work:example.org", "work").copy(spaceIds = setOf("!harbor:example.org")))
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spaces = spaces, spacesKnown = true), {}, {}, {},
+                    "!harbor:example.org", { chosen += it })
+            }
+        }
+        compose.onNode(hasText("Harbor") and hasContentDescription("Switch workspace")).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Switch workspace").performClick()
+
+        compose.onNode(hasText("Harbor") and hasAnyAncestor(isDialog())).assertIsSelected()
+        compose.onNode(hasText("Design") and hasAnyAncestor(isDialog())).assertDoesNotExist()
+        // Every channel has a workspace, so there is nothing for All to add.
+        compose.onNodeWithText("All conversations").assertDoesNotExist()
+        compose.onNode(hasText("Studio") and hasAnyAncestor(isDialog())).performClick()
+        compose.runOnIdle { assertEquals(listOf<String?>("!studio:example.org"), chosen) }
+        compose.onNode(isDialog()).assertDoesNotExist()
+    }
+
+    @Test fun allConversationsJoinsTheSwitcherWhileAChannelHasNoWorkspace() {
+        val chosen = mutableListOf<String?>()
+        val rooms = listOf(channel("!work:example.org", "work").copy(spaceIds = setOf("!harbor:example.org")), channel("!loose:example.org", "loose"))
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spaces = listOf(SpaceSummary("!harbor:example.org", "Harbor")),
+                    spacesKnown = true), {}, {}, {}, "!harbor:example.org", { chosen += it })
+            }
+        }
+        compose.onNodeWithContentDescription("Switch workspace").performClick()
+        compose.onNode(hasText("All conversations") and hasAnyAncestor(isDialog())).performClick()
+        compose.runOnIdle { assertEquals(listOf<String?>(null), chosen) }
+    }
+
     @Test fun theWorkspaceHeaderSitsOnTheWorkspaceColorInLightMode() {
         compose.setContent { SlatrixTheme(dark = false) { LiveHomeScreen("@alex:example.org", RoomListState(loading = false, spacesKnown = true), {}, {}, {}) } }
 

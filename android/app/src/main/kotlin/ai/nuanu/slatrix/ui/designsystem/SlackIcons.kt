@@ -1,0 +1,60 @@
+package ai.nuanu.slatrix.ui.designsystem
+
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.unit.dp
+
+/**
+ * Slack's thin outlined icons, drawn on a 24-unit grid. Material's outlined set is drawn heavier, which reads as
+ * another app beside Slack's text. `Icon` tints them like any other vector.
+ */
+object SlackIcons {
+    val Hash = outline("hash", "M9.6 4 7.6 20 M16.4 4 14.4 20 M4.5 9 H20 M4 15 H19.5")
+    val Lock = outline("lock", "M7 10.5 H17 A2 2 0 0 1 19 12.5 V18.5 A2 2 0 0 1 17 20.5 H7 A2 2 0 0 1 5 18.5 V12.5 A2 2 0 0 1 7 10.5 Z " +
+        "M8.5 10.5 V8 A3.5 3.5 0 0 1 15.5 8 V10.5")
+    val Messages = outline("messages", "$SmallBubble M9.52 12.13 A5.75 5.75 0 1 1 18.9 12.95 L20.25 16 L16.7 14.55")
+    val MessagesFilled = filled("messages-filled", "$SmallBubble $BigBubble")
+    val Home = vector("home", stroke = "$House", fill = Door)
+    val HomeFilled = filled("home-filled", "$House $Door", evenOdd = true)
+    val Search = outline("search", "M10.75 4.5 A6.25 6.25 0 1 1 10.75 17 A6.25 6.25 0 1 1 10.75 4.5 Z M15.4 15.4 L20 20")
+    val SearchSelected = outline("search-selected", "M10.75 4.5 A6.25 6.25 0 1 1 10.75 17 A6.25 6.25 0 1 1 10.75 4.5 Z M15.4 15.4 L20 20", width = 2.5f)
+    val Bell = outline("bell", "$BellBody M10 20.5 A2 2 0 0 0 14 20.5")
+    val BellFilled = vector("bell-filled", stroke = "M10 20.5 A2 2 0 0 0 14 20.5", fill = BellBody)
+    val Star = outline("star", Star5)
+    val StarFilled = filled("star-filled", Star5)
+    val ChevronRight = outline("chevron-right", "M9.5 6.5 L15 12 L9.5 17.5", width = 2f)
+    val ChevronUp = outline("chevron-up", "M6.5 14.75 L12 9.25 L17.5 14.75", width = 2f)
+    val ChevronDown = outline("chevron-down", "M6.5 9.25 L12 14.75 L17.5 9.25", width = 2f)
+    val Check = outline("check", "M5 12.5 L10 17.5 L19 7", width = 2f)
+    val Tray = outline("tray", "M4 13 H8.5 L9.5 15.5 H14.5 L15.5 13 H20 M4 13 V18.5 A1.5 1.5 0 0 0 5.5 20 H18.5 " +
+        "A1.5 1.5 0 0 0 20 18.5 V13 L17.5 5.5 H6.5 Z")
+
+    private const val BellBody = "M6 16.75 V11 A6 6 0 0 1 18 11 V16.75 L19.5 18.25 H4.5 Z"
+    private const val SmallBubble = "M4 20.5 V16.25 A4.25 4.25 0 1 1 8.25 20.5 Z"
+    private const val BigBubble = "M9.52 12.13 A5.75 5.75 0 1 1 18.9 12.95 L20.25 16 L16.7 14.55 A5.75 5.75 0 0 1 9.52 12.13 Z"
+    private const val House = "M4.5 10.25 L12 4 L19.5 10.25 V18.5 A2 2 0 0 1 17.5 20.5 H6.5 A2 2 0 0 1 4.5 18.5 Z"
+    private const val Door = "M10.75 14.5 A1.25 1.25 0 1 0 13.25 14.5 A1.25 1.25 0 1 0 10.75 14.5 Z"
+    private const val Star5 = "M12 4 L14.29 9.59 L20.32 10.05 L15.71 13.96 L17.14 19.83 L12 16.65 L6.86 19.83 L8.29 13.96 " +
+        "L3.68 10.05 L9.71 9.59 Z"
+
+    private fun outline(name: String, path: String, width: Float = 1.75f) = vector(name, stroke = path, width = width)
+
+    private fun filled(name: String, path: String, evenOdd: Boolean = false) = vector(name, fill = path, evenOdd = evenOdd)
+
+    private fun vector(name: String, stroke: String? = null, fill: String? = null, width: Float = 1.75f, evenOdd: Boolean = false) =
+        ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
+            stroke?.let {
+                addPath(PathParser().parsePathString(it).toNodes(), stroke = SolidColor(Color.Black), strokeLineWidth = width,
+                    strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)
+            }
+            fill?.let {
+                addPath(PathParser().parsePathString(it).toNodes(), fill = SolidColor(Color.Black),
+                    pathFillType = if (evenOdd) PathFillType.EvenOdd else PathFillType.NonZero)
+            }
+        }.build()
+}
