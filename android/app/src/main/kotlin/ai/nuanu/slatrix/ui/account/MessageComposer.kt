@@ -144,7 +144,8 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
             }
         }
         composer.target?.let { TargetBar(it, actions.onCancelTarget) }
-        ReceiveKeyboardMedia(actions.onAttach?.takeIf { !editing }) {
+        val attach = actions.onAttach?.takeIf { !editing }
+        ReceiveKeyboardMedia(attach) {
             BasicTextField(shown, { next ->
                 field = next
                 pending = null
@@ -165,7 +166,7 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                 })
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
-            actions.onAttach?.takeIf { !editing }?.let { AttachButton(it) }
+            attach?.let { AttachButton(it) }
             IconButton(onClick = { picking = true }, enabled = !composer.loading) {
                 Icon(Icons.Outlined.EmojiEmotions, "Emoji", tint = colors.textPrimary)
             }
@@ -205,7 +206,7 @@ private fun AttachButton(onAttach: (List<Uri>) -> Unit) {
                 choosing = false
                 media.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             }
-            AttachChoice(Icons.Outlined.PhotoCamera, "Camera") { choosing = false; camera() }
+            camera?.let { AttachChoice(Icons.Outlined.PhotoCamera, "Camera") { choosing = false; it() } }
             AttachChoice(Icons.Outlined.Description, "Files") { choosing = false; files.launch(arrayOf("*/*")) }
         }
     }
