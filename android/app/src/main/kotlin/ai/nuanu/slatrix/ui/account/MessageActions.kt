@@ -8,6 +8,7 @@ import ai.nuanu.slatrix.core.MatrixConversation
 import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
+import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.content.ClipData
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material3.AlertDialog
@@ -70,6 +72,11 @@ data class MessageActions(
     val onQuote: ((ConversationMessage) -> Unit)? = null,
     val onEdit: ((ConversationMessage) -> Unit)? = null,
     val onDelete: ((ConversationMessage) -> Unit)? = null,
+    /** The room's pinned messages, which the sheet offers to unpin; [onPin] is null where you may not pin. */
+    val pinned: Set<String> = emptySet(),
+    val onPin: ((ConversationMessage, pin: Boolean) -> Unit)? = null,
+    /** What the room is called in Pin to channel. */
+    val place: String = "channel",
 )
 
 /** Slack Android's sheet holds five, beside Add reaction. */
@@ -155,6 +162,12 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
                 scope.launch { link(message)?.let { copy(it) } ?: onDismiss() }
             }
             if (message.kind in textKinds) SheetAction(Icons.Outlined.Title, "Copy message", colors.textPrimary) { copy(message.body) }
+            val pin = actions.onPin
+            if (eventId != null && pin != null) {
+                val pinned = eventId in actions.pinned
+                SheetAction(Icons.Outlined.PushPin, if (pinned) "Unpin from ${actions.place}" else "Pin to ${actions.place}",
+                    colors.textPrimary) { pin(message, !pinned); onDismiss() }
+            }
             val edit = actions.onEdit?.takeIf { message.editable }
             val delete = eventId != null && message.own && actions.onDelete != null
             if (eventId != null && (edit != null || delete)) {
@@ -196,9 +209,10 @@ private fun SheetAction(icon: ImageVector, label: String, color: Color, onClick:
 
 /** The sheet's actions on an open conversation; reacting also moves the emoji up your recent list. */
 @Composable
-internal fun rememberMessageActions(conversation: MatrixConversation?, composer: MatrixComposer?, workspace: MatrixWorkspace?): MessageActions {
+internal fun rememberMessageActions(conversation: MatrixConversation?, composer: MatrixComposer?, workspace: MatrixWorkspace?,
+    room: RoomSummary): MessageActions {
     val recent = workspace?.emojiHistory?.state?.collectAsState()?.value.orEmpty()
-    return remember(conversation, composer, workspace, recent) {
+    return remember(conversation, composer, workspace, recent, room.pinned, room.canPin, room.direct) {
         if (conversation == null) return@remember MessageActions()
         MessageActions(
             quick = EmojiRecents.quick(recent, QUICK_REACTIONS), recent = recent,
@@ -207,6 +221,9 @@ internal fun rememberMessageActions(conversation: MatrixConversation?, composer:
             onDelete = conversation::delete,
             onQuote = { message -> ComposerTarget.reply(message)?.let { composer?.reply(it) } },
             onEdit = { message -> ComposerTarget.edit(message)?.let { composer?.editMessage(it) } },
+            pinned = room.pinned.toSet(),
+            onPin = conversation::pin.takeIf { room.canPin },
+            place = if (room.direct) "conversation" else "channel",
         )
     }
 }

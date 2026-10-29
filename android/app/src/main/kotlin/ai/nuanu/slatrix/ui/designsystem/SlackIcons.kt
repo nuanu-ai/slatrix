@@ -36,6 +36,7 @@ object SlackIcons {
     val History = outline("history", "M4.75 12 A7.25 7.25 0 1 0 6.9 6.85 M4.75 4.5 V8.25 H8.5 M12 8.25 V12 L14.75 14")
     val Offline = outline("offline", "M2.5 8.75 A13.5 13.5 0 0 1 21.5 8.75 M5.5 12.25 A9 9 0 0 1 18.5 12.25 " +
         "M8.75 15.75 A4.5 4.5 0 0 1 15.25 15.75 M12 19.5 L12 19.5 M4 4 L20 20")
+    val Plus = outline("plus", "M12 5 V19 M5 12 H19")
     val Tray = outline("tray", "M4 13 H8.5 L9.5 15.5 H14.5 L15.5 13 H20 M4 13 V18.5 A1.5 1.5 0 0 0 5.5 20 H18.5 " +
         "A1.5 1.5 0 0 0 20 18.5 V13 L17.5 5.5 H6.5 Z")
 

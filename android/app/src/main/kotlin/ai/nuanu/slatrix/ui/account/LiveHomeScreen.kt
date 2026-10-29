@@ -67,10 +67,12 @@ fun LiveWorkspace(cover: (@Composable () -> Unit)?, home: @Composable () -> Unit
 @Composable
 fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Unit, onYou: () -> Unit, onRetry: () -> Unit,
     selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}, onStar: suspend (String, Boolean) -> Boolean = { _, _ -> true },
+    onBrowseChannels: (() -> Unit)? = null, onCreateChannel: (() -> Unit)? = null,
     search: @Composable () -> Unit = {}, activity: @Composable () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     var actions by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var adding by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     // A star shows at once, as Slack's does, and holds until the account's tag catches up or the change fails.
     var starring by remember { mutableStateOf(emptyMap<String, Boolean>()) }
@@ -106,7 +108,8 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                 Surface(Modifier.weight(1f).fillMaxWidth(), shape = SlatrixTheme.topPanelShape, color = colors.canvas) {
                     Box(Modifier.fillMaxSize()) {
                         when (tab) {
-                            HomeTab.Home -> HomeList(homeList, shown, selectedSpaceId, onRoom) { actions = it.id }
+                            HomeTab.Home -> HomeList(homeList, shown, selectedSpaceId, onRoom, onBrowseChannels,
+                                (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } }) { actions = it.id }
                             HomeTab.Dms -> DirectList(directList, shown, onRoom) { actions = it.id }
                             HomeTab.Activity -> activity()
                             HomeTab.Search -> search()
@@ -153,6 +156,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
             }
         }) { actions = null }
     }
+    if (adding) AddChannelSheet(onBrowseChannels, onCreateChannel) { adding = false }
     notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
 }
 
@@ -247,7 +251,7 @@ private enum class HomeSection(val label: String, val icon: ImageVector) {
 
 @Composable
 private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId: String?, onRoom: (String) -> Unit,
-    onActions: (RoomSummary) -> Unit) {
+    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, onActions: (RoomSummary) -> Unit) {
     // A saved workspace's channels are known only with its spaces, so its list waits for them rather than filling in.
     val waiting = state.loading || (selectedSpaceId != null && !state.spacesKnown)
     val sections = remember(state.rooms, selectedSpaceId) {
@@ -268,32 +272,51 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
                 if (index > 0) item(key = "divider-${section.name}") { SectionDivider() }
                 val open = section.name !in collapsed
                 item(key = section.name) {
-                    SectionHeader(section, open) { collapsed = if (open) collapsed + section.name else collapsed - section.name }
+                    SectionHeader(section, open, onBrowseChannels.takeIf { section == HomeSection.Channels }) {
+                        collapsed = if (open) collapsed + section.name else collapsed - section.name
+                    }
                 }
                 // A collapsed section keeps its unread conversations in view, as Slack's does.
                 items(if (open) rooms else rooms.filter { it.unread != UnreadBadge.None }, key = { it.id }) {
                     LiveRoomRow(it, onRoom, onActions)
                 }
+                if (open && section == HomeSection.Channels && onAddChannel != null) item(key = "add-channel") { AddChannelRow(onAddChannel) }
             }
         }
     }
 }
 
 @Composable
-private fun SectionHeader(section: HomeSection, open: Boolean, onToggle: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow)
-        .clickable(role = Role.Button, onClickLabel = if (open) "Collapse" else "Expand", onClick = onToggle)
+private fun SectionHeader(section: HomeSection, open: Boolean, onOpen: (() -> Unit)?, onToggle: () -> Unit) {
+    val toggle = Modifier.clickable(role = Role.Button, onClickLabel = if (open) "Collapse" else "Expand", onClick = onToggle)
         .semantics(mergeDescendants = true) { stateDescription = if (open) "Expanded" else "Collapsed" }
-        .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+    // A section that opens something, as Slack's Channels › does, leaves collapsing to the arrow at its end.
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).then(if (onOpen == null) toggle else Modifier)
+        .padding(start = UiMetrics.GapLarge, end = if (onOpen == null) UiMetrics.GapLarge else UiMetrics.GapTiny),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
         Icon(section.icon, null, Modifier.size(UiMetrics.Icon))
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).then(if (onOpen != null) Modifier.heightIn(min = UiMetrics.Touch)
+            .clickable(role = Role.Button, onClick = onOpen) else Modifier), verticalAlignment = Alignment.CenterVertically) {
             // Slack's section titles are 14 sp, a step under the rows.
             Text(section.label, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Icon(SlackIcons.ChevronRight, null, Modifier.size(UiMetrics.SmallIcon))
         }
-        Icon(if (open) SlackIcons.ChevronUp else SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.LargeIcon))
+        val arrow = @Composable { Icon(if (open) SlackIcons.ChevronUp else SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.LargeIcon)) }
+        if (onOpen == null) arrow()
+        else Box(Modifier.size(UiMetrics.Touch).then(toggle).semantics { contentDescription = section.label },
+            contentAlignment = Alignment.Center) { arrow() }
+    }
+}
+
+/** Slack's Add channel row, closing the Channels section. */
+@Composable
+private fun AddChannelRow(onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button, onClick = onClick)
+        .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+        Icon(SlackIcons.Plus, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.textBody)
+        Text("Add channel", style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textBody)
     }
 }
 

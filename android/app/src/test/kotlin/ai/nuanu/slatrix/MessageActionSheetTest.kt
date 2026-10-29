@@ -23,6 +23,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.test.assertIsDisplayed
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -75,6 +76,24 @@ class MessageActionSheetTest {
     }
 
     // capability: message.copy-link
+    // capability: message.pin
+    @Test fun pinOrUnpinIsOfferedWhereYouMayPin() {
+        val pins = mutableListOf<Pair<String, Boolean>>()
+        show(MessageActions(pinned = setOf(mine.eventId!!), onPin = { message, pin -> pins += message.body to pin }))
+        open("Ship it")
+        compose.onNodeWithText("Pin to channel").performClick()
+        open("On it")
+        compose.onNodeWithText("Unpin from channel").performClick()
+        compose.runOnIdle { assertEquals(listOf("Ship it" to true, "On it" to false), pins) }
+    }
+
+    @Test fun withoutThePowerToPinThereIsNoPin() {
+        show(MessageActions())
+        open("Ship it")
+        compose.onNodeWithText("Copy message").assertIsDisplayed()
+        compose.onNodeWithText("Pin to channel").assertDoesNotExist()
+    }
+
     @Test fun copyLinkPutsTheMessagesLinkOnTheClipboard() {
         show(MessageActions(link = { "https://matrix.to/#/!design:example.org/${it.eventId}" }))
         open("Ship it")
