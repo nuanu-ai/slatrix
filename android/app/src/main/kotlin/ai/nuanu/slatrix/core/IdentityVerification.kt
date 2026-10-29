@@ -43,7 +43,9 @@ data class IdentityState(
     val requestDeviceName: String? = null,
 ) {
     val verified: Boolean get() = status == IdentityStatus.Verified
-    val requiresVerification: Boolean get() = !verified && hasIdentity != false
+    // An unknown status is still loading, unless checking failed and only a retry can settle it.
+    val requiresVerification: Boolean get() = hasIdentity != false &&
+        (status == IdentityStatus.Unverified || status == IdentityStatus.Unknown && phase == IdentityPhase.Failed)
 }
 
 class IdentityVerification(private val scope: CoroutineScope, private val client: Client) : AutoCloseable {

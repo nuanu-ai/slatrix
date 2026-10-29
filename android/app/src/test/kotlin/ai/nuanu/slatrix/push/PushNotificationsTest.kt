@@ -39,7 +39,8 @@ class PushNotificationsTest {
         }
 
         manager.cancelAll()
-        PushNotifications(context).show("@alex:example.org", "!team:example.org", "\$new-account", notificationMessage(), IdentityState(hasIdentity = false))
+        PushNotifications(context).show("@alex:example.org", "!team:example.org", "\$new-account", notificationMessage(),
+            IdentityState(status = IdentityStatus.Unverified, hasIdentity = false))
         assertEquals("Sam: Review budget?", manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
 
