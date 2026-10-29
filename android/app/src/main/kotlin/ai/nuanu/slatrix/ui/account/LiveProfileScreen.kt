@@ -44,7 +44,7 @@ import kotlinx.coroutines.CancellationException
  */
 @Composable
 fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
-    onBack: () -> Unit, avatarUrl: String? = null) {
+    onViewProfile: (() -> Unit)? = null, onBack: () -> Unit, avatarUrl: String? = null) {
     val colors = SlatrixTheme.colors
     val localpart = userId.removePrefix("@").substringBefore(':')
     val name by produceState<String?>(null, userId) {
@@ -69,6 +69,13 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
                     Text(name ?: localpart, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(userId, style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
+                }
+            }
+            onViewProfile?.let { view ->
+                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button, onClick = view)
+                    .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(SlackIcons.Person, null, Modifier.size(UiMetrics.Icon))
+                    Text("View profile", style = MaterialTheme.typography.bodyLarge)
                 }
             }
             Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button, onClick = onPreferences)

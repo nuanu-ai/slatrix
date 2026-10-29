@@ -78,6 +78,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     onMarkAllRead: suspend (List<String>) -> List<String> = { emptyList() },
     /** How many messages wait in Later, for its card at the top of Home; null leaves the card out. */
     laterCount: Int? = null, onLater: () -> Unit = {},
+    onNewMessage: (() -> Unit)? = null,
     search: @Composable () -> Unit = {}, userAvatarUrl: String? = null, activity: @Composable () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     var actions by remember { mutableStateOf<String?>(null) }
@@ -132,15 +133,25 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                 HomeHeader(tab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
                 Surface(Modifier.weight(1f).fillMaxWidth(), shape = SlatrixTheme.topPanelShape, color = colors.canvas) {
                     Box(Modifier.fillMaxSize()) {
+                        // The lists end clear of the +, so it never covers their last row.
+                        val bottom = if (onNewMessage == null) UiMetrics.GapSmall else UiMetrics.Fab + UiMetrics.GapLarge
                         when (tab) {
                             HomeTab.Home -> HomeList(homeList, shown, selectedSpaceId, onRoom, onBrowseChannels,
                                 (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } },
-                                laterCount?.let { count -> { LaterCard(count, onLater) } }, onInvitation) { actions = it.id }
-                            HomeTab.Dms -> DirectList(directList, shown, onRoom) { actions = it.id }
+                                laterCount?.let { count -> { LaterCard(count, onLater) } }, onInvitation, bottom) { actions = it.id }
+                            HomeTab.Dms -> DirectList(directList, shown, onRoom, bottom) { actions = it.id }
                             HomeTab.Activity -> activity()
                             HomeTab.Search -> search()
                         }
                         OfflineBanner()
+                        // Slack's + on Home and DMs, which starts a new message.
+                        if (onNewMessage != null && (tab == HomeTab.Home || tab == HomeTab.Dms)) {
+                            FloatingActionButton(onNewMessage, Modifier.align(Alignment.BottomEnd)
+                                .padding(end = UiMetrics.GapLarge, bottom = UiMetrics.GapSmall).semantics { contentDescription = "New message" },
+                                shape = MaterialTheme.shapes.large, containerColor = colors.textPrimary, contentColor = colors.canvas) {
+                                Icon(SlackIcons.Plus, null, Modifier.size(UiMetrics.LargeIcon))
+                            }
+                        }
                         val failure = notice
                         if (failure != null) {
                             Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)
@@ -296,7 +307,7 @@ private enum class HomeSection(val label: String, val icon: ImageVector) {
 
 @Composable
 private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId: String?, onRoom: (String) -> Unit,
-    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, cards: (@Composable () -> Unit)?, onInvitation: (String) -> Unit,
+    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, cards: (@Composable () -> Unit)?, onInvitation: (String) -> Unit, bottom: Dp,
     onActions: (RoomSummary) -> Unit) {
     // A saved workspace's channels are known only with its spaces, so its list waits for them rather than filling in.
     val waiting = state.loading || (selectedSpaceId != null && !state.spacesKnown)
@@ -310,7 +321,7 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
         )
     }
     var collapsed by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
+    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(top = UiMetrics.GapSmall, bottom = bottom)) {
         // Slack's cards above the sections; they're kept on this device, so they show while the list loads.
         if (cards != null) item(key = "cards") {
             Column {
@@ -384,9 +395,9 @@ private fun SectionDivider() {
 }
 
 @Composable
-private fun DirectList(list: LazyListState, state: RoomListState, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) {
+private fun DirectList(list: LazyListState, state: RoomListState, onRoom: (String) -> Unit, bottom: Dp, onActions: (RoomSummary) -> Unit) {
     val direct = remember(state.rooms) { state.rooms.filter { it.direct } }
-    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
+    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(top = UiMetrics.GapSmall, bottom = bottom)) {
         if (state.loading) item { ConnectionIndicator(true, null) }
         items(direct, key = { it.id }) { LiveDirectRow(it, onRoom, onActions) }
         if (!state.loading && direct.isEmpty()) item { EmptyList("No direct messages") }

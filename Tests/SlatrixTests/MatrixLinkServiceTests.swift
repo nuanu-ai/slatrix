@@ -112,44 +112,52 @@ private func entity(_ link: String) throws -> MatrixEntity {
     return try #require(try MatrixLinkService.parse(url))
 }
 
+/// The shared cases in `spec/matrix-links.json`.
+struct MatrixLinkSpec: Decodable {
+    struct Target: Decodable, Equatable {
+        var kind: String
+        var id: String
+        var event: String?
+        var via: [String]?
+    }
+    struct Open: Decodable, CustomTestStringConvertible {
+        var name: String
+        var link: String
+        var target: Target
+        var testDescription: String { name }
+    }
+    struct Link: Decodable, CustomTestStringConvertible {
+        var name: String
+        var link: String
+        var testDescription: String { name }
+    }
+    var open: [Open]
+    var ignore: [Link]
+    var reject: [Link]
+
+    static let cases = try! SharedSpec.decode("spec/matrix-links.json", as: MatrixLinkSpec.self)
+}
+
 @MainActor
 struct MatrixLinkParsingTests {
-    @Test(
-        "matrix.to and matrix: links parse into the right typed target",
-        arguments: [
-            ("https://matrix.to/#/%40alice%3Aexample.org", MatrixId.user(id: "@alice:example.org")),
-            ("https://matrix.to/#/!room:example.org", .room(id: "!room:example.org")),
-            ("https://matrix.to/#/%23design%3Aexample.org", .roomAlias(alias: "#design:example.org")),
-            (
-                "https://matrix.to/#/!room:example.org/$event",
-                .eventOnRoomId(roomId: "!room:example.org", eventId: "$event")
-            ),
-            (
-                "https://matrix.to/#/%23design:example.org/$event",
-                .eventOnRoomAlias(alias: "#design:example.org", eventId: "$event")
-            ),
-            ("matrix:u/alice:example.org?action=chat", .user(id: "@alice:example.org")),
-            ("matrix:roomid/room:example.org/e/event", .eventOnRoomId(roomId: "!room:example.org", eventId: "$event")),
-        ])
-    func parses(link: String, expected: MatrixId) throws {
-        #expect(try entity(link).id == expected)
+    @Test("matrix.to and matrix: links parse into the right typed target", arguments: MatrixLinkSpec.cases.open)
+    func parses(spec: MatrixLinkSpec.Open) throws {
+        let parsed = try entity(spec.link)
+        let target: MatrixLinkSpec.Target =
+            switch parsed.id {
+            case .user(let id): .init(kind: "user", id: id)
+            case .room(let id): .init(kind: "room", id: id)
+            case .roomAlias(let alias): .init(kind: "alias", id: alias)
+            case .eventOnRoomId(let room, let event): .init(kind: "room", id: room, event: event)
+            case .eventOnRoomAlias(let alias, let event): .init(kind: "alias", id: alias, event: event)
+            }
+        #expect(target == MatrixLinkSpec.Target(kind: spec.target.kind, id: spec.target.id, event: spec.target.event))
+        #expect(parsed.via == (spec.target.via ?? []))
     }
 
-    @Test("Routing hints keep their order, repeats included")
-    func keepsRoutingHints() throws {
-        let routed = try entity(
-            "https://matrix.to/#/!room:example.org/$event?via=one.example.org&via=two.example.org&via=one.example.org")
-        #expect(routed.via == ["one.example.org", "two.example.org", "one.example.org"])
-    }
-
-    @Test(
-        "Ordinary and look-alike hosts are not treated as Matrix links",
-        arguments: [
-            "https://example.org/#/!room:example.org", "https://matrix.to.evil/#/!room:example.org",
-            "https://matrix.to@evil.example/#/!room:example.org",
-        ])
-    func ignoresOtherHosts(link: String) throws {
-        let url = try #require(URL(string: link))
+    @Test("Ordinary and look-alike hosts are not treated as Matrix links", arguments: MatrixLinkSpec.cases.ignore)
+    func ignoresOtherHosts(spec: MatrixLinkSpec.Link) throws {
+        let url = try #require(URL(string: spec.link))
         #expect(!MatrixLinkService.isMatrixCandidate(url))
         #expect(try MatrixLinkService.parse(url) == nil)
     }
@@ -161,23 +169,16 @@ struct MatrixLinkParsingTests {
     }
 
     @Test(
-        "Malformed, credential-bearing, oversized or control-character Matrix links are rejected",
-        arguments: [
-            "https://matrix.to/#///$event", "https://matrix.to/#/!room:example.org///", "https://matrix.to/#//",
-            "https://matrix.to/", "https://matrix.to/!room:example.org", "https://matrix.to/?via=server.org",
-            "https://matrix.to/#/invalid", "http://matrix.to/#/!room:example.org",
-            "https://matrix.to:443/#/!room:example.org", "https://alice:secret@matrix.to/#/!room:example.org",
-            "https://matrix.to/other#/!room:example.org", "matrix://evil.example/u/alice:example.org",
-            "matrix://alice:secret@evil.example/u/alice:example.org", "matrix:u/alice:example.org#fragment",
-            "https://matrix.to/#/@ali%00ce:example.org", "matrix:u/ali%0Ace:example.org",
-            "matrix:u/alice:example.org?via=server%0A.example.org",
-            "matrix:roomid/room:example.org?via=https%3A%2F%2Fevil.example",
-            "matrix:roomid/room:example.org?via=user%40evil.example",
-            "https://matrix.to/#/!room:example.org?unexpected=value",
-            "matrix:u/" + String(repeating: "a", count: 9_000) + ":example.org",
-        ])
-    func rejectsMalformed(link: String) throws {
-        let url = try #require(URL(string: link))
+        "Malformed, credential-bearing or control-character Matrix links are rejected",
+        arguments: MatrixLinkSpec.cases.reject)
+    func rejectsMalformed(spec: MatrixLinkSpec.Link) throws {
+        let url = try #require(URL(string: spec.link))
+        #expect(throws: (any Error).self) { try MatrixLinkService.parse(url) }
+    }
+
+    @Test("An oversized Matrix link is rejected")
+    func rejectsOversized() throws {
+        let url = try #require(URL(string: "matrix:u/" + String(repeating: "a", count: 9_000) + ":example.org"))
         #expect(throws: (any Error).self) { try MatrixLinkService.parse(url) }
     }
 

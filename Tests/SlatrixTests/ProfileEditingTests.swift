@@ -54,56 +54,27 @@ struct ProfileEditingTests {
         #expect(throws: ProfilePhoto.Failure.self) { try ProfilePhoto.image(contentsOf: folder.file("notes.txt")) }
     }
 
-    @Test("The crop frame starts as the largest square in the middle")
-    func centeredCrop() {
-        #expect(PhotoCrop.centered(in: CGSize(width: 300, height: 200)) == CGRect(x: 50, y: 0, width: 200, height: 200))
-        #expect(PhotoCrop.centered(in: CGSize(width: 200, height: 300)) == CGRect(x: 0, y: 50, width: 200, height: 200))
+    @Test("The crop frame starts as in every shared case", arguments: try PhotoCropSpec.shared.centered)
+    func centeredCrop(spec: PhotoCropSpec.Case) {
+        #expect(PhotoCrop.centered(in: spec.photo.size) == spec.expected.rect)
     }
 
-    @Test("Dragging the crop frame stops at the photo's edges")
-    func moveCrop() {
-        let photo = CGSize(width: 400, height: 300)
-        let square = CGRect(x: 100, y: 100, width: 100, height: 100)
-
-        #expect(
-            PhotoCrop.moved(square, by: CGSize(width: 20, height: -30), in: photo) == square.offsetBy(dx: 20, dy: -30))
-        #expect(
-            PhotoCrop.moved(square, by: CGSize(width: 900, height: -900), in: photo)
-                == CGRect(x: 300, y: 0, width: 100, height: 100))
-        #expect(
-            PhotoCrop.moved(square, by: CGSize(width: -900, height: 900), in: photo)
-                == CGRect(x: 0, y: 200, width: 100, height: 100))
+    @Test("Dragging the crop frame moves it as in every shared case", arguments: try PhotoCropSpec.shared.moved)
+    func moveCrop(spec: PhotoCropSpec.Case) throws {
+        let square = try #require(spec.square).rect
+        #expect(PhotoCrop.moved(square, by: try #require(spec.by).size, in: spec.photo.size) == spec.expected.rect)
     }
 
-    @Test("A corner resizes the crop frame around the opposite corner, square and inside the photo")
-    func resizeCrop() {
-        let photo = CGSize(width: 400, height: 300)
-        let square = CGRect(x: 100, y: 100, width: 100, height: 100)
-
+    @Test("A corner resizes the crop frame as in every shared case", arguments: try PhotoCropSpec.shared.resized)
+    func resizeCrop(spec: PhotoCropSpec.Case) throws {
+        let corners: [String: PhotoCrop.Corner] = [
+            "topLeft": .topLeft, "topRight": .topRight, "bottomLeft": .bottomLeft, "bottomRight": .bottomRight,
+        ]
+        let corner = try #require(spec.corner.flatMap { corners[$0] })
+        let square = try #require(spec.square).rect
         #expect(
-            PhotoCrop.resized(square, from: .topLeft, by: CGSize(width: -30, height: -30), in: photo)
-                == CGRect(x: 70, y: 70, width: 130, height: 130))
-        // Below, the photo ends 200 pixels from the top-left corner that stays put.
-        #expect(
-            PhotoCrop.resized(square, from: .bottomRight, by: CGSize(width: 500, height: 20), in: photo)
-                == CGRect(x: 100, y: 100, width: 200, height: 200))
-        #expect(
-            PhotoCrop.resized(square, from: .topRight, by: CGSize(width: 20, height: -20), in: photo)
-                == CGRect(x: 100, y: 80, width: 120, height: 120))
-    }
-
-    @Test("The crop frame shrinks only so far")
-    func smallestCrop() {
-        let photo = CGSize(width: 400, height: 300)
-        let square = CGRect(x: 100, y: 100, width: 100, height: 100)
-
-        let smallest = PhotoCrop.resized(square, from: .bottomLeft, by: CGSize(width: 900, height: -900), in: photo)
-
-        #expect(smallest.width > 0)
-        #expect(
-            smallest == PhotoCrop.resized(smallest, from: .bottomLeft, by: CGSize(width: 50, height: -50), in: photo))
-        #expect(smallest.maxX == square.maxX)
-        #expect(smallest.minY == square.minY)
+            PhotoCrop.resized(square, from: corner, by: try #require(spec.by).size, in: spec.photo.size)
+                == spec.expected.rect)
     }
 
     // capability: profile.edit-photo
@@ -259,4 +230,28 @@ private final class ProfileClient: Client, @unchecked Sendable {
         await profiles.wait()
         return profile
     }
+}
+
+/// The crop frame's rules, from the shared cases in `spec/photo-crop.json`.
+struct PhotoCropSpec: Decodable {
+    struct Case: Decodable, CustomTestStringConvertible {
+        var name: String
+        var photo: [Double]
+        var square: [Double]?
+        var corner: String?
+        var by: [Double]?
+        var expected: [Double]
+        var testDescription: String { name }
+    }
+
+    var centered: [Case]
+    var moved: [Case]
+    var resized: [Case]
+
+    static var shared: PhotoCropSpec { get throws { try SharedSpec.decode("spec/photo-crop.json") } }
+}
+
+extension [Double] {
+    fileprivate var size: CGSize { CGSize(width: self[0], height: self[1]) }
+    fileprivate var rect: CGRect { CGRect(x: self[0], y: self[1], width: self[2], height: self[3]) }
 }

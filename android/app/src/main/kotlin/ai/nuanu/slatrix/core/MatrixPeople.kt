@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.core
 
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -9,6 +10,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.plus
@@ -28,6 +35,10 @@ import org.matrix.rustcomponents.sdk.RoomVisibility
 /** Someone on the server: their Matrix ID, the name to show and their picture. */
 data class Person(val id: String, val name: String, val avatarUrl: String? = null)
 
+/** People the directory found for [query], or why it couldn't search. */
+data class PeopleSearchState(val query: String = "", val people: List<Person> = emptyList(), val loading: Boolean = false,
+    val error: String? = null)
+
 /** Which direct message Message reuses, as `spec/direct-message.json` has it. */
 object DirectMessages {
     /** Reused only while its active members are exactly you, joined, and [target]. */
@@ -45,6 +56,48 @@ class MatrixPeople(scope: CoroutineScope, private val client: Client) {
     private val opening = mutableMapOf<String, Deferred<String>>()
     /** A room just made for someone, until sync knows it and the next Message finds it like any other. */
     private val made = mutableMapOf<String, String>()
+    private val mutableResults = MutableStateFlow(PeopleSearchState())
+    val results: StateFlow<PeopleSearchState> = mutableResults.asStateFlow()
+    private val searches = AtomicLong()
+    private var searching: Job? = null
+
+    /**
+     * Searches the server's user directory for [query], as the Mac does: after a pause in typing, so a query replaced
+     * meanwhile never asks, and a full Matrix ID is found even where the directory doesn't list it. A late answer for an
+     * older query never lands.
+     */
+    fun search(query: String) {
+        val token = searches.incrementAndGet()
+        searching?.cancel()
+        val term = query.trim()
+        when {
+            term.isEmpty() -> return run { mutableResults.value = PeopleSearchState() }
+            term.toByteArray().size > 1_024 -> return run { mutableResults.value = PeopleSearchState(term, error = "Use a shorter name or Matrix ID.") }
+        }
+        // What was found stays until the new answer replaces it, so typing never blanks the list.
+        mutableResults.update { it.copy(query = term, loading = true, error = null) }
+        searching = work.launch(Dispatchers.Default) {
+            delay(250)
+            val directory = try {
+                client.searchUsers(term, 50u).results
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            val found = directory.orEmpty().filter { ComposerFormat.userID.matches(it.userId) }
+                .map { person(it.userId, it.displayName, it.avatarUrl) }.toMutableList()
+            if (ComposerFormat.userID.matches(term) && found.none { it.id == term }) {
+                // Someone without a public profile can still be messaged by their ID.
+                found.add(0, profile(term)?.takeIf { it.id == term } ?: Person(term, term))
+            }
+            val people = found.distinctBy { it.id }
+            mutableResults.update {
+                if (searches.get() != token) it
+                else PeopleSearchState(term, people, error = if (directory == null && people.isEmpty()) "Couldn’t search people." else null)
+            }
+        }
+    }
 
     /** [userId]'s profile from the server, or null when it can't be loaded. */
     suspend fun profile(userId: String): Person? = quietly {

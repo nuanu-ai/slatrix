@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
+import ai.nuanu.slatrix.core.ConversationRow
 import ai.nuanu.slatrix.core.caption
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -103,16 +105,21 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val rows by rememberUpdatedState(state.rows)
     // The New line stays where it first showed, as on the Mac, though reading moves the SDK's marker past the newest. A
     // resumed conversation opens with it at the top, decided when its first rows show, unless a jump says where.
-    val newLine = remember { object { var at: String? = null; var start: String? = null; var decided = false } }
+    // Where the reader left it: the row at the bottom of the screen and how far it was scrolled, as the Mac anchors a row;
+    // null at the newest. Kept while the conversation is left, and restored when its rows still hold that row.
+    var place by rememberSaveable { mutableStateOf<Pair<String, Int>?>(null) }
+    val newLine = remember { object { var at: String? = null; var start: String? = null; var decided = false; var back: Pair<String, Int>? = null } }
     if (newLine.at == null && state.rows.any { it is ConversationMessage && it.eventId != null && it.eventId == state.firstUnread }) {
         newLine.at = state.firstUnread
     }
     if (!newLine.decided && !state.loading && state.rows.isNotEmpty()) {
         newLine.decided = true
         newLine.start = newLine.at.takeIf { state.startsAtUnread && state.highlight == null }
+        newLine.back = place?.takeIf { (id) -> newLine.start == null && state.highlight == null && state.rows.any { it.id == id } }
     }
     val line = newLine.at
-    val opensAt = state.highlight ?: newLine.start
+    val opensAt = state.highlight ?: newLine.start ?: newLine.back?.first
+    fun opens(row: ConversationRow) = row.id == opensAt || (row as? ConversationMessage)?.eventId == opensAt
     var jumped by remember(opensAt) { mutableStateOf(opensAt == null) }
     val latest = state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?
     val read by rememberUpdatedState(onRead)
@@ -125,6 +132,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     item.offset + item.size > list.layoutInfo.viewportStartOffset
             }
         }.distinctUntilChanged().collect { visible -> if (visible) read(event) }
+    }
+    LaunchedEffect(list, jumped) {
+        if (!jumped) return@LaunchedEffect
+        snapshotFlow { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }.collect { (index, offset) ->
+            place = if (index == 0 && offset == 0) null else rows.asReversed().getOrNull(index)?.let { it.id to offset }
+        }
     }
     val newest = state.rows.lastOrNull() as? ConversationMessage
     var following by remember { mutableStateOf(true) }
@@ -141,9 +154,13 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     var lit by remember(opensAt) { mutableStateOf<String?>(null) }
     LaunchedEffect(opensAt) {
         val target = opensAt ?: return@LaunchedEffect
-        val index = snapshotFlow { rows.indexOfLast { (it as? ConversationMessage)?.eventId == target } }.first { it >= 0 }
+        val index = snapshotFlow { rows.indexOfLast { it.id == target || (it as? ConversationMessage)?.eventId == target } }.first { it >= 0 }
         following = false
         try {
+            newLine.back?.takeIf { it.first == target }?.let { (_, offset) ->
+                list.scrollToItem(rows.size - 1 - index, offset)
+                return@LaunchedEffect
+            }
             list.scrollToItem(rows.size - 1 - index)
             if (target == newLine.start) {
                 // The line tops the screen with the unread messages under it; fewer than a screenful sit at the bottom.
@@ -246,7 +263,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 rows.getOrNull(rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot } + 1)?.id.takeIf { threadRoot != null }
             }
             // A thread reads down from its root, as in Slack, so a short one sits at the top.
-            LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none { (it as? ConversationMessage)?.eventId == opensAt }) 1f else 0f),
+            LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none(::opens)) 1f else 0f),
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
                 contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {

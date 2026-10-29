@@ -607,9 +607,10 @@ private class RoomsSync : SyncService(NoHandle) {
     }
     val running = MutableStateFlow(false)
     override suspend fun start() {
-        started.complete(Unit)
         running.value = true
         emitState(SyncServiceState.RUNNING)
+        // Only once its RUNNING is queued, so a state the test emits next lands after it rather than being cleared by it.
+        started.complete(Unit)
     }
     override suspend fun stop() {
         running.value = false

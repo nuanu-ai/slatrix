@@ -10,6 +10,8 @@ object UiMetrics {
     val GapSection = 24.dp
     val Avatar = 40.dp
     val ProfileAvatar = 56.dp
+    /** Slack's floating + button. */
+    val Fab = 56.dp
     /** A profile page's picture. */
     val ProfilePhoto = 120.dp
     val Touch = 48.dp

@@ -34,6 +34,8 @@ data class OpenChannel(
     val typing: MatrixTyping? = null,
 )
 
+private const val RECENT = 4
+
 class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
     /** Read once a conversation needs it; the thread workspace shares the main one's. */
     val emojiHistory by lazy { EmojiHistory(scope, client) }
@@ -46,6 +48,11 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
     private var conversation: MatrixConversation? = null
     private var composer: MatrixComposer? = null
     private var current: OpenChannel? = null
+    /**
+     * The channels left most recently, oldest first, still open with their rooms, so coming back is instant and finds
+     * the rows the reader left, as the Mac's RecentTimelines keeps them. With the open one, five: what a reader flips between.
+     */
+    private val recent = LinkedHashMap<String, Pair<MatrixConversation, Room>>()
     private val worker = scope.launch {
         try {
             for ((token, requested) in requests) {
@@ -60,11 +67,21 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                 currentCoroutineContext().ensureActive()
                 if (requested == null || generation.get() != token) continue
                 try {
-                    conversationRoom = checkNotNull(client.getRoom(requested.room.id))
+                    // Kept only while nothing is new: a conversation opened somewhere in particular, or unread, opens fresh,
+                    // and one marked unread on its last visit holds its reads back.
+                    val kept = recent.remove(requested.room.id)?.let { (conversation, room) ->
+                        val state = conversation.state.value
+                        if (requested.at == null && requested.threadRoot == null && requested.room.unread == UnreadBadge.None &&
+                            !state.focused && state.error == null) conversation to room
+                        else { closeKept(conversation, room); null }
+                    }
+                    // Held at once, so a failure below closes a kept timeline along with the rest.
+                    conversation = kept?.first
+                    conversationRoom = kept?.second ?: checkNotNull(client.getRoom(requested.room.id))
                     composerRoom = checkNotNull(client.getRoom(requested.room.id))
                     currentCoroutineContext().ensureActive()
-                    val timeline = MatrixConversation(scope, checkNotNull(conversationRoom), requested.threadRoot, requested.at,
-                        requested.root, requested.resume)
+                    val timeline = kept?.first?.also { it.revisit() } ?: MatrixConversation(scope, checkNotNull(conversationRoom),
+                        requested.threadRoot, requested.at, requested.root, requested.resume)
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
                     if (generation.get() == token) {
@@ -84,6 +101,8 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
             }
         } finally {
             release()
+            withContext(NonCancellable) { recent.values.forEach { (conversation, room) -> closeKept(conversation, room) } }
+            recent.clear()
             mutableSelected.value = null
             requests.close()
         }
@@ -135,11 +154,24 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
         composer = null
         runCatching { composerRoom?.close() }
         composerRoom = null
-        runCatching { conversation?.close() }
+        val left = conversation
+        val room = conversationRoom
         conversation = null
-        // A cancelled constructor task may never enter the conversation's cleanup.
-        runCatching { conversationRoom?.close() }
         conversationRoom = null
+        val channel = current?.takeIf { it.threadRoot == null }?.room?.id
         current = null
+        if (left == null || room == null) {
+            runCatching { left?.close() }
+            // A cancelled constructor task may never enter the conversation's cleanup.
+            runCatching { room?.close() }
+        } else if (channel != null && !left.state.value.focused && left.state.value.error == null) {
+            recent[channel] = left to room
+            while (recent.size > RECENT) recent.remove(recent.keys.first())?.let { (conversation, kept) -> closeKept(conversation, kept) }
+        } else closeKept(left, room)
+    }
+
+    private suspend fun closeKept(conversation: MatrixConversation, room: Room) {
+        runCatching { conversation.close() }
+        runCatching { room.close() }
     }
 }

@@ -107,7 +107,7 @@ private fun DirectoryRow(channel: DirectoryChannel, joined: Boolean, joining: Bo
         }
         // The progress takes the label's place, so the row never changes size.
         Box(Modifier.widthIn(min = UiMetrics.Icon), contentAlignment = Alignment.CenterEnd) {
-            if (joining) DelayedSpinner()
+            if (joining) WaitingSpinner()
             else if (joined) Text("Joined", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
         }
     }
@@ -137,7 +137,7 @@ fun CreateChannelScreen(workspace: String?, creating: Boolean, error: String?, o
                     TextButton({ onCreate(name.trim(), topic.trim()) }, enabled = name.isNotBlank() && !creating) {
                         Text("Create", fontWeight = FontWeight.Bold)
                     }
-                    if (creating) DelayedSpinner()
+                    if (creating) WaitingSpinner()
                 }
             }
             HorizontalDivider(color = colors.border)
@@ -235,7 +235,7 @@ fun LiveCreateChannel(rooms: MatrixRooms?, spaceId: String?, workspace: String?,
 
 /** A spinner that shows only after a moment, so a quick answer never flashes one. */
 @Composable
-private fun DelayedSpinner() {
+internal fun WaitingSpinner() {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(UiMetrics.ProgressDelayMillis); visible = true }
     if (visible) CircularProgressIndicator(Modifier.size(UiMetrics.Icon))
