@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.core
 
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.Client
@@ -17,7 +18,15 @@ class MatrixMedia(private val client: Client, private val folder: File) {
         val original = attachment.source.takeIf { attachment.kind == MessageAttachment.Kind.Image && small(attachment.size) }
         val thumbnail = attachment.thumbnail?.takeIf { small(attachment.thumbnailSize) }
         val source = (if (full) original ?: thumbnail else thumbnail ?: original) ?: return null
-        return client.getMediaThumbnail(source, width.toULong(), height.toULong()).takeIf { small(it.size.toLong()) }
+        val bytes = try {
+            client.getMediaThumbnail(source, width.toULong(), height.toULong())
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // A photo still sending sits whole in the send queue's store, and the server has no thumbnail of it yet.
+            client.getMediaContent(source)
+        }
+        return bytes.takeIf { small(it.size.toLong()) }
     }
 
     /** The whole file, downloaded once into a folder of its own and named as sent, for another app to open. */

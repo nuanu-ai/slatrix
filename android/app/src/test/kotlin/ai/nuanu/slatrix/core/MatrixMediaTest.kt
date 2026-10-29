@@ -42,6 +42,18 @@ class MatrixMediaTest {
         assertNull("Nor a huge thumbnail", inline(image(50_000_000, thumbnailSize = 50_000_000)))
     }
 
+    // capability: message.image
+    @Test fun aPhotoStillSendingShowsFromTheFileBeingSent() = runTest {
+        // The send queue keeps a photo from the camera or the keyboard as a whole file; the server has no thumbnail yet.
+        val client = object : Client(NoHandle) {
+            override suspend fun getMediaThumbnail(mediaSource: MediaSource, width: ULong, height: ULong): ByteArray =
+                throw IllegalStateException("Not on the server yet")
+            override suspend fun getMediaContent(mediaSource: MediaSource): ByteArray = "the photo being sent".toByteArray()
+        }
+        val media = MatrixMedia(client, Files.createTempDirectory("media").toFile())
+        assertEquals("the photo being sent", media.picture(image(2_000_000), 400, 300)?.decodeToString())
+    }
+
     // capability: message.media-viewer
     @Test fun theViewerShowsTheOriginalWhenItIsSmallEnoughAndTheThumbnailOtherwise() = runTest {
         val media = MatrixMedia(MediaClient(File("unused")), Files.createTempDirectory("media").toFile())
