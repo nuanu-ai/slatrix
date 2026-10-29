@@ -12,10 +12,17 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.NotificationProcessSetup
+import org.matrix.rustcomponents.sdk.NotificationStatus
 import org.matrix.rustcomponents.sdk.Membership
 import org.matrix.rustcomponents.sdk.Room
 import org.matrix.rustcomponents.sdk.RoomInfo
@@ -60,6 +67,8 @@ data class RoomListState(
 )
 
 class MatrixRooms(scope: CoroutineScope, private val client: Client) {
+    private val syncLock = Mutex()
+    private val activeSync = MutableStateFlow<SyncService?>(null)
     private val mutableState = MutableStateFlow(RoomListState())
     val state: StateFlow<RoomListState> = mutableState.asStateFlow()
     private val events = Channel<Event>(Channel.UNLIMITED)
@@ -129,6 +138,16 @@ class MatrixRooms(scope: CoroutineScope, private val client: Client) {
     fun retry() { retries.trySend(Unit); requestSpaces() }
 
     suspend fun close() { worker.cancelAndJoin() }
+
+    suspend fun notification(roomId: String, eventId: String): NotificationStatus? = withTimeoutOrNull(15_000) {
+        val service = activeSync.filterNotNull().first()
+        syncLock.withLock {
+            if (activeSync.value !== service) return@withLock null
+            client.notificationClient(NotificationProcessSetup.SingleProcess(service)).use {
+                it.getNotification(roomId, eventId)
+            }
+        }
+    }
 
     private suspend fun refresh(rooms: List<Room>, replace: Boolean) {
         if (replace) {
@@ -266,6 +285,7 @@ class MatrixRooms(scope: CoroutineScope, private val client: Client) {
                 controller = entries.controller()
                 check(controller.setFilter(RoomListEntriesDynamicFilterKind.All(emptyList())))
                 service.start()
+                syncLock.withLock { activeSync.value = service }
                 retries.receive()
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -278,8 +298,13 @@ class MatrixRooms(scope: CoroutineScope, private val client: Client) {
                 controller?.close()
                 entries?.close()
                 list?.close()
-                withContext(NonCancellable) { runCatching { service?.stop() } }
-                service?.close()
+                withContext(NonCancellable) {
+                    syncLock.withLock {
+                        if (activeSync.value === service) activeSync.value = null
+                        runCatching { service?.stop() }
+                        service?.close()
+                    }
+                }
             }
         }
     }
