@@ -155,9 +155,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                 if (!mutableState.value.hasMore || blankPages >= MAX_BLANK_PAGES) return@launch
                 mutableState.update { it.copy(loadingHistory = true, error = null) }
                 val timeline = ready.await()
-                blankPages++
                 val endReached = timeline.paginateBackwards(50u)
                 currentCoroutineContext().ensureActive()
+                // Counted once it went through: a failed request says nothing about what the room holds.
+                blankPages++
                 mutableState.update { it.copy(hasMore = !endReached) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
