@@ -88,7 +88,8 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
                             NotificationRows(NotifyAbout.DirectAndMentions, true, null, {}, {})
                         }
                         else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spaces = spaces, spacesKnown = true),
-                            {}, {}, {}, Harbor, search = { SearchScreen(rooms, "@alex:example.org", hits, {}, {}, {}, {}) })
+                            {}, {}, {}, Harbor, onBrowseChannels = {}, onCreateChannel = {},
+                            search = { SearchScreen(rooms, "@alex:example.org", hits, {}, {}, {}, listOf("release notes", "offsite photos", "budget in:#design"), onRoom = {}) })
                     }
                     Box(Modifier.fillMaxWidth().height(GestureBar).background(if (tab in Pushed) colors.canvas else colors.raised))
                 }
@@ -98,6 +99,8 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
             "DMs" -> compose.onNode(hasText(tab) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
             "Switcher" -> compose.onNodeWithContentDescription("Switch workspace").performClick()
             "Sheet" -> compose.onNodeWithText("general").performTouchInput { longClick() }
+            "Recent" -> compose.onNode(hasText("Search") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
+            "AddChannel" -> compose.onNodeWithText("Add channel").performClick()
             "Search", "SearchResults" -> {
                 compose.onNode(hasText("Search") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
                 compose.onNode(hasSetTextAction()).performTextInput(if (tab == "Search") "d" else "release")
@@ -118,7 +121,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
 
         @JvmStatic @Parameters(name = "{0}-{1}-{2}")
         fun cases(): List<Array<Any>> = buildList {
-            for (tab in listOf("Home", "DMs", "You", "Preferences", "Switcher", "Sheet", "Search", "SearchResults")) for (dark in listOf(false, true)) add(arrayOf(tab, dark, SidebarPalette.Aubergine))
+            for (tab in listOf("Home", "DMs", "You", "Preferences", "Switcher", "Sheet", "AddChannel", "Recent", "Search", "SearchResults")) for (dark in listOf(false, true)) add(arrayOf(tab, dark, SidebarPalette.Aubergine))
             add(arrayOf("Home", false, SidebarPalette.Lagoon))
         }
     }

@@ -41,15 +41,40 @@ struct ConversationSwitcherTests {
     }
 }
 
-struct SearchSuggestionsTests {
-    // capability: search.recent
-    @Test("An empty bar offers recent searches only")
-    func emptyQuery() {
-        #expect(
-            SearchSuggestions.items(query: "", recents: ["budget", "launch"], rooms: [room("Design")], visited: [])
-                == [.recent("budget"), .recent("launch")])
+/// Recent searches, from the shared cases in `spec/recent-searches.json`.
+struct RecentSearchesTests {
+    struct Case: Decodable, CustomTestStringConvertible {
+        var name: String
+        var recents: [String]
+        var query: String
+        var expected: [String]
+        var testDescription: String { name }
     }
 
+    struct Spec: Decodable {
+        var adding: [Case]
+        var offered: [Case]
+    }
+
+    private static let spec = Result { try SharedSpec.decode("spec/recent-searches.json", as: Spec.self) }
+
+    @Test("A search joins the recent list as in every shared case", arguments: try spec.get().adding)
+    func adding(spec: Case) {
+        #expect(RecentSearches.adding(spec.query, to: spec.recents) == spec.expected)
+    }
+
+    // capability: search.recent
+    @Test("The search bar offers recent searches as in every shared case", arguments: try spec.get().offered)
+    func offered(spec: Case) {
+        let recents = SearchSuggestions.items(query: spec.query, recents: spec.recents, rooms: [], visited: [])
+            .compactMap {
+                if case .recent(let value) = $0 { value } else { nil }
+            }
+        #expect(recents == spec.expected)
+    }
+}
+
+struct SearchSuggestionsTests {
     @Test("Typing offers the search itself first, then matching recent searches, then conversations")
     func typedQuery() {
         let design = room("Design")
@@ -60,33 +85,10 @@ struct SearchSuggestionsTests {
         #expect(items == [.search("des"), .recent("design review"), .conversation(design), .conversation(alex)])
     }
 
-    @Test("At most a few recent searches and conversations")
+    @Test("At most five conversations")
     func capped() {
         let rooms = (0..<10).map { room("Design \($0)") }
-        let recents = (0..<10).map { "design \($0)" }
-        let items = SearchSuggestions.items(query: "design", recents: recents, rooms: rooms, visited: [])
-        #expect(items.filter { if case .recent = $0 { true } else { false } }.count == 3)
+        let items = SearchSuggestions.items(query: "design", recents: [], rooms: rooms, visited: [])
         #expect(items.filter { if case .conversation = $0 { true } else { false } }.count == 5)
-    }
-}
-
-struct RecentSearchesTests {
-    @Test("A search moves to the front once, whatever its case or spacing")
-    func dedupes() {
-        #expect(RecentSearches.adding("  Budget ", to: ["launch", "budget"]) == ["Budget", "launch"])
-    }
-
-    @Test("Blank searches aren't kept")
-    func ignoresBlank() {
-        #expect(RecentSearches.adding(" \n", to: ["launch"]) == ["launch"])
-    }
-
-    @Test("Only the newest ten are kept")
-    func capped() {
-        let full = (0..<10).map { "query \($0)" }
-        let next = RecentSearches.adding("newest", to: full)
-        #expect(next.count == 10)
-        #expect(next.first == "newest")
-        #expect(!next.contains("query 9"))
     }
 }

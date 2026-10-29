@@ -12,6 +12,7 @@ import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import android.content.ClipData
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -46,6 +47,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -72,7 +74,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Asked, with the oldest message on screen, once the reader reaches the newest of a conversation opened at an older one. */
     onLoadNewer: (anchor: String?) -> Unit = {},
     /** Opens a message where it is, highlighted, as a tap on a reply's quote does. */
-    onOpenMessage: (eventId: String) -> Unit = {}) {
+    onOpenMessage: (eventId: String) -> Unit = {},
+    /** Opens the conversation's details, as a tap on Slack's header pill does. */
+    onOpenDetails: () -> Unit = {}) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -164,7 +168,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 Text("Thread", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = colors.textPrimary)
                 Text(if (room.direct) room.name else "#${room.name}", style = MaterialTheme.typography.bodyMedium,
                     color = colors.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            } else Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.extraLarge, color = colors.raised, contentColor = colors.textPrimary) {
+            } else Surface(onOpenDetails, Modifier.weight(1f), shape = MaterialTheme.shapes.extraLarge, color = colors.raised, contentColor = colors.textPrimary) {
                 Row(Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapTiny),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                     if (!room.direct) Icon(Icons.Outlined.Tag, null, Modifier.size(UiMetrics.Icon))
@@ -229,8 +233,18 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             else -> "Message #${room.name}"
         }
         val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
-        MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders)
+        if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders) else CannotPost()
     }
+}
+
+/** The Mac's line in place of the composer, in a panel like the composer's. */
+@Composable
+private fun CannotPost() {
+    val colors = SlatrixTheme.colors
+    Text("You don’t have permission to post in this channel.", Modifier.fillMaxWidth()
+        .border(UiMetrics.Divider, colors.border, SlatrixTheme.topPanelShape).background(colors.canvas, SlatrixTheme.topPanelShape)
+        .heightIn(min = UiMetrics.ComposerMinHeight).wrapContentHeight().padding(horizontal = UiMetrics.GapLarge),
+        style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, textAlign = TextAlign.Center)
 }
 
 /** Slack's bar between a thread's root and its replies. */
