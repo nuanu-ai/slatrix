@@ -87,6 +87,51 @@ class MatrixComposerTest {
         sent.close()
     }
 
+    // capability: message.reply
+    @Test fun aReplyGoesWithTheNextSendAndTheBarCanBeClosed() = runTest {
+        val sent = Channel<ComposerMessage>(Channel.UNLIMITED)
+        val composer = MatrixComposer(backgroundScope, ComposerRoom()) { sent.send(it); true }
+        composer.state.first { !it.loading }
+        val target = ComposerTarget.Reply("\$one", "Mira Chen", "Ship it?")
+        composer.reply(target)
+        composer.cancelTarget()
+        composer.edit("Not a reply")
+        composer.send()
+        assertNull(sent.receive().target)
+
+        composer.reply(target)
+        composer.edit("Yes")
+        composer.send()
+        assertEquals(target, sent.receive().target)
+        assertNull(composer.state.first { !it.sending }.target)
+        composer.close()
+    }
+
+    // capability: message.edit
+    @Test fun editingFillsTheComposerAndGivesTheDraftBackAfterwards() = runTest {
+        val room = ComposerRoom(ComposerDraft("Half a thought", null, ComposerDraftType.NewMessage, emptyList()))
+        val sent = Channel<ComposerMessage>(Channel.UNLIMITED)
+        val composer = MatrixComposer(backgroundScope, room) { sent.send(it); true }
+        composer.state.first { !it.loading }
+        val target = ComposerTarget.Edit("\$one", "Shipped")
+        composer.editMessage(target)
+        assertEquals("Shipped", composer.state.value.text)
+        composer.edit("Shipped today")
+        advanceTimeBy(1_000)
+        assertEquals("Editing never replaces the saved draft", "Half a thought", room.draft?.plainText)
+        composer.send()
+        val edit = sent.receive()
+        assertEquals("Shipped today", edit.body)
+        assertEquals(target, edit.target)
+        assertEquals("Half a thought", composer.state.first { !it.sending }.text)
+        assertNull(composer.state.value.target)
+
+        composer.editMessage(target)
+        composer.cancelTarget()
+        assertEquals("Half a thought", composer.state.value.text)
+        composer.close()
+    }
+
     @Test fun storageFailuresRetryWithoutReplacingTheUnrestoredDraftOrSendingIt() = runTest {
         val room = ComposerRoom(ComposerDraft("Stored safely", null, ComposerDraftType.NewMessage, emptyList()))
         room.loadFailure = IllegalStateException("Store unavailable")

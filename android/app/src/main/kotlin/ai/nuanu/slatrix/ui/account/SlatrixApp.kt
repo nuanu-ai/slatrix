@@ -185,7 +185,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         },
         { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot) },
         { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) }, onOpenThread, open.threadRoot,
-        rememberMessageActions(conversation, main))
+        rememberMessageActions(conversation, composer, main),
+        ComposerActions(onCancelTarget = { composer?.cancelTarget() }))
 }
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */

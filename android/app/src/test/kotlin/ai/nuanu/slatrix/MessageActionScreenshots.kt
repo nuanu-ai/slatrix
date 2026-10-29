@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix
 
 import ai.nuanu.slatrix.core.ComposerState
+import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.MessageKind
@@ -11,6 +12,7 @@ import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -27,7 +29,7 @@ import org.robolectric.ParameterizedRobolectricTestRunner.Parameters
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Renders the message sheet and emoji picker at the size of the Slack reference screens, for visual review. */
+/** Renders the message sheet, emoji picker and composer bars at the size of the Slack reference screens, for visual review. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(application = Application::class, sdk = [35], qualifiers = "w411dp-h914dp-420dpi")
@@ -58,6 +60,23 @@ class MessageActionScreenshots(private val dark: Boolean) {
         compose.onNodeWithContentDescription("Add reaction").performClick()
         compose.waitUntil { compose.onAllNodes(hasContentDescription("grinning face")).fetchSemanticsNodes().isNotEmpty() }
         captureScreenRoboImage("build/outputs/roborazzi/EmojiPicker-$theme.png")
+    }
+
+    @Test fun composerBars() {
+        val room = RoomSummary("!design:example.org", "design", false, "Launch reviews and critique", UnreadBadge.None, "D", 0)
+        val composer = mutableStateOf(ComposerState(loading = false,
+            target = ComposerTarget.Reply("\$a", "Mira", "The new onboarding flow is up on staging. Would love eyes on the empty states.")))
+        compose.setContent {
+            SlatrixTheme(dark = dark) {
+                LiveChannelScreen(room, ConversationState(emptyList(), loading = false, hasMore = false), composer.value,
+                    {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        val theme = if (dark) "dark" else "light"
+        captureScreenRoboImage("build/outputs/roborazzi/ReplyBar-$theme.png")
+        compose.runOnIdle { composer.value = ComposerState("Looking now.", loading = false, target = ComposerTarget.Edit("\$b", "Looking now.")) }
+        compose.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/Editing-$theme.png")
     }
 
     companion object {

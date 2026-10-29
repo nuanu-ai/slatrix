@@ -1,6 +1,8 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.ConversationMessage
+import ai.nuanu.slatrix.core.MatrixComposer
 import ai.nuanu.slatrix.core.EmojiRecents
 import ai.nuanu.slatrix.core.MatrixConversation
 import ai.nuanu.slatrix.core.MatrixWorkspace
@@ -25,6 +27,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddReaction
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Title
@@ -63,6 +67,8 @@ data class MessageActions(
     val recent: List<String> = emptyList(),
     val onReact: ((ConversationMessage, String) -> Unit)? = null,
     val link: (suspend (ConversationMessage) -> String?)? = null,
+    val onQuote: ((ConversationMessage) -> Unit)? = null,
+    val onEdit: ((ConversationMessage) -> Unit)? = null,
     val onDelete: ((ConversationMessage) -> Unit)? = null,
 )
 
@@ -130,10 +136,14 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
                     }
                 }
             }
-            if (eventId != null && onOpenThread != null) {
+            val quote = actions.onQuote
+            if (eventId != null && (onOpenThread != null || quote != null)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge).padding(bottom = UiMetrics.GapSmall),
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                    ActionTile(Icons.Outlined.ChatBubbleOutline, "Reply", Modifier.weight(1f)) { onOpenThread(eventId); onDismiss() }
+                    if (onOpenThread != null) ActionTile(Icons.Outlined.ChatBubbleOutline, "Reply", Modifier.weight(1f)) {
+                        onOpenThread(eventId); onDismiss()
+                    }
+                    if (quote != null) ActionTile(Icons.Outlined.FormatQuote, "Quote", Modifier.weight(1f)) { quote(message); onDismiss() }
                 }
             }
             if (message.sendState == MessageSendState.Failed) {
@@ -145,9 +155,12 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
                 scope.launch { link(message)?.let { copy(it) } ?: onDismiss() }
             }
             if (message.kind in textKinds) SheetAction(Icons.Outlined.Title, "Copy message", colors.textPrimary) { copy(message.body) }
-            if (eventId != null && message.own && actions.onDelete != null) {
+            val edit = actions.onEdit?.takeIf { message.editable }
+            val delete = eventId != null && message.own && actions.onDelete != null
+            if (eventId != null && (edit != null || delete)) {
                 HorizontalDivider(Modifier.padding(vertical = UiMetrics.GapSmall), color = colors.border)
-                SheetAction(Icons.Outlined.Delete, "Delete message", colors.destructive) { onStep(Step.ConfirmDelete) }
+                if (edit != null) SheetAction(Icons.Outlined.Edit, "Edit message", colors.textPrimary) { edit(message); onDismiss() }
+                if (delete) SheetAction(Icons.Outlined.Delete, "Delete message", colors.destructive) { onStep(Step.ConfirmDelete) }
             }
         }
     }
@@ -183,15 +196,17 @@ private fun SheetAction(icon: ImageVector, label: String, color: Color, onClick:
 
 /** The sheet's actions on an open conversation; reacting also moves the emoji up your recent list. */
 @Composable
-internal fun rememberMessageActions(conversation: MatrixConversation?, workspace: MatrixWorkspace?): MessageActions {
+internal fun rememberMessageActions(conversation: MatrixConversation?, composer: MatrixComposer?, workspace: MatrixWorkspace?): MessageActions {
     val recent = workspace?.emojiHistory?.state?.collectAsState()?.value.orEmpty()
-    return remember(conversation, workspace, recent) {
+    return remember(conversation, composer, workspace, recent) {
         if (conversation == null) return@remember MessageActions()
         MessageActions(
             quick = EmojiRecents.quick(recent, QUICK_REACTIONS), recent = recent,
             onReact = { message, emoji -> conversation.react(message, emoji) { workspace?.emojiHistory?.use(emoji) } },
             link = conversation::link,
             onDelete = conversation::delete,
+            onQuote = { message -> ComposerTarget.reply(message)?.let { composer?.reply(it) } },
+            onEdit = { message -> ComposerTarget.edit(message)?.let { composer?.editMessage(it) } },
         )
     }
 }

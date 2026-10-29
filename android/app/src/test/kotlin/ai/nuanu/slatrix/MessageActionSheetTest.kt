@@ -1,12 +1,14 @@
 package ai.nuanu.slatrix
 
 import ai.nuanu.slatrix.core.ComposerState
+import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
+import ai.nuanu.slatrix.ui.account.ComposerActions
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -23,6 +25,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -103,6 +106,53 @@ class MessageActionSheetTest {
         open("Ship it")
         compose.onNodeWithText("Reply").performClick()
         compose.runOnIdle { assertEquals("\$Ship it", thread) }
+    }
+
+    // capability: message.reply
+    @Test fun quoteRepliesInTheComposerUnderABarThatCloses() {
+        var quoted: ConversationMessage? = null
+        var cancelled = false
+        val composer = androidx.compose.runtime.mutableStateOf(ComposerState(loading = false))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(theirs, mine), loading = false, hasMore = false),
+                    composer.value, {}, {}, {}, {}, {}, {}, {}, {}, actions = MessageActions(onQuote = { quoted = it }),
+                    composerActions = ComposerActions(onCancelTarget = { cancelled = true }))
+            }
+        }
+        open("Ship it")
+        compose.onNodeWithText("Quote").performClick()
+        compose.runOnIdle {
+            assertEquals(theirs, quoted)
+            composer.value = ComposerState(loading = false, target = ComposerTarget.Reply("\$Ship it", "Mira", "Ship it"))
+        }
+        compose.onNodeWithText("Replying to Mira").assertExists()
+        compose.onNodeWithContentDescription("Cancel reply").performClick()
+        compose.runOnIdle { assertTrue(cancelled) }
+    }
+
+    // capability: message.edit
+    @Test fun editIsOfferedOnYourOwnMessagesAndTheComposerSaysSo() {
+        var editing: ConversationMessage? = null
+        val composer = androidx.compose.runtime.mutableStateOf(ComposerState(loading = false))
+        val editable = mine.copy(editable = true)
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(theirs.copy(editable = false), editable), loading = false, hasMore = false),
+                    composer.value, {}, {}, {}, {}, {}, {}, {}, {}, actions = MessageActions(onEdit = { editing = it }))
+            }
+        }
+        open("Ship it")
+        compose.onNodeWithText("Edit message").assertDoesNotExist()
+        compose.onNodeWithText("Copy message").performClick()
+        open("On it")
+        compose.onNodeWithText("Edit message").performClick()
+        compose.runOnIdle {
+            assertEquals(editable, editing)
+            composer.value = ComposerState(text = "On it", loading = false, target = ComposerTarget.Edit("\$On it", "On it"))
+        }
+        compose.onNodeWithText("Editing message").assertExists()
+        compose.onNodeWithContentDescription("Save changes").assertExists()
     }
 
     @Test fun aNoticeShowsWithoutOfferingRetry() {

@@ -26,6 +26,7 @@ data class ComposerState(
     val loading: Boolean = true,
     val sending: Boolean = false,
     val error: String? = null,
+    val target: ComposerTarget? = null,
 )
 
 private const val SAVE_DELAY_MILLIS = 500L
@@ -43,6 +44,8 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     private var failure: Failure? = null
     private var revision = 0L
     private var savedRevision = 0L
+    /** The draft set aside while you edit a sent message; the store keeps it, never the edit. */
+    private var setAside: String? = null
     private val worker = operations.launch {
         try {
             restore()
@@ -59,15 +62,37 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
 
     fun edit(text: String) {
         if (!loaded || !worker.isActive || text == mutableState.value.text) return
-        revision++
         mutableState.value = mutableState.value.copy(text = text)
+        if (setAside != null) return
+        revision++
         edits.trySend(Unit)
+    }
+
+    fun reply(target: ComposerTarget.Reply) {
+        if (!loaded || mutableState.value.sending) return
+        cancelTarget()
+        mutableState.value = mutableState.value.copy(target = target)
+    }
+
+    fun editMessage(target: ComposerTarget.Edit) {
+        if (!loaded || mutableState.value.sending) return
+        cancelTarget()
+        setAside = mutableState.value.text
+        mutableState.value = mutableState.value.copy(text = target.body, target = target)
+    }
+
+    /** Closes the reply bar, or leaves editing with the draft back in the composer. */
+    fun cancelTarget() {
+        if (mutableState.value.sending) return
+        val draft = setAside
+        setAside = null
+        mutableState.value = mutableState.value.copy(text = draft ?: mutableState.value.text, target = null)
     }
 
     fun send() {
         val current = mutableState.value
         if (!loaded || !lifetime.isActive || current.sending) return
-        val message = ComposerFormat.message(ComposerFormat.plainTextDraft(current.text))
+        val message = ComposerFormat.message(ComposerFormat.plainTextDraft(current.text)).copy(target = current.target)
         if (message.body.isBlank()) return
         val sendingRevision = revision
         failure = null
@@ -76,7 +101,11 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
             try {
                 val accepted = sendMessage(message)
                 currentCoroutineContext().ensureActive()
-                if (accepted) {
+                if (accepted && message.target is ComposerTarget.Edit) {
+                    mutableState.value = mutableState.value.copy(text = setAside.orEmpty(), target = null)
+                    setAside = null
+                } else if (accepted) {
+                    mutableState.value = mutableState.value.copy(target = null)
                     if (revision == sendingRevision) {
                         revision++
                         mutableState.value = mutableState.value.copy(text = "")
@@ -133,7 +162,7 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
         if (!loaded) return false
         if (revision == savedRevision) return true
         val savingRevision = revision
-        val text = mutableState.value.text
+        val text = setAside ?: mutableState.value.text
         try {
             if (text.isEmpty()) room.clearComposerDraft(threadRoot)
             else room.saveComposerDraft(ComposerDraft(text, null, ComposerDraftType.NewMessage, emptyList()), threadRoot)

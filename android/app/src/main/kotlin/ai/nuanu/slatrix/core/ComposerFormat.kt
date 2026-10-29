@@ -6,7 +6,8 @@ import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
 import org.jsoup.nodes.TextNode
 
-data class ComposerMessage(val body: String, val html: String?, val mentions: List<String>, val mentionsRoom: Boolean)
+data class ComposerMessage(val body: String, val html: String?, val mentions: List<String>, val mentionsRoom: Boolean,
+    val target: ComposerTarget? = null)
 
 object ComposerFormat {
     private const val userPattern = "@[A-Za-z0-9._=/+\\-]+:(?:\\[[0-9A-Fa-f:]+\\]|[A-Za-z0-9](?:[A-Za-z0-9.\\-]*[A-Za-z0-9])?)(?::[0-9]{1,5})?"
