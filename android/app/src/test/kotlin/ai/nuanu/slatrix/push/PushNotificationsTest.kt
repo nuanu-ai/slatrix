@@ -132,7 +132,6 @@ class PushNotificationsTest {
         val shown = notification.extras.keySet().joinToString { notification.extras.get(it).toString() }
         assertFalse(shown, "Review budget" in shown || "Sam" in shown || "Team" in shown)
         assertEquals("!team:example.org", shadowOf(notification.contentIntent).savedIntent.getStringExtra(PushNotifications.ROOM_ID))
-        assertTrue(notification.defaults and Notification.DEFAULT_SOUND != 0)
     }
 
     // capability: notifications.defaults

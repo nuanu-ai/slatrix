@@ -147,9 +147,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {
                         LiveWorkspace(when {
-                            preferences -> { { LivePreferencesScreen(dark, darkOverride, palette,
+                            preferences -> { val client = (state as AccountState.Connected).client; { LivePreferencesScreen(dark, darkOverride, palette,
                                 { darkOverride = it; appearance.darkMode = it },
-                                { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
+                                { palette = it; appearance.paletteName = it.name }, { preferences = false }) {
+                                    LiveNotificationSettings { client.getNotificationSettings() }
+                                } } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
                             thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.

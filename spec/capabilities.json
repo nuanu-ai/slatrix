@@ -106,8 +106,8 @@
     {"id": "notifications.alert", "what": "A new message that should notify you raises a notification.", "mac": "done", "android": "done"},
     {"id": "notifications.open", "what": "Opening a notification opens its conversation.", "mac": "done", "android": "done"},
     {"id": "notifications.permission", "what": "The app asks for permission before it notifies.", "mac": "done", "android": "done"},
-    {"id": "notifications.previews", "what": "Hide message text in notifications.", "mac": "done", "android": "missing"},
-    {"id": "notifications.defaults", "what": "Choose how direct messages and group conversations notify you by default.", "mac": "done", "android": "missing"},
+    {"id": "notifications.previews", "what": "Hide message text in notifications.", "mac": "done", "android": "done"},
+    {"id": "notifications.defaults", "what": "Choose how direct messages and group conversations notify you by default.", "mac": "done", "android": "done"},
 
     {"id": "verify.device", "what": "Confirm this device by comparing emoji with another of your devices.", "mac": "done", "android": "done"},
     {"id": "verify.recovery-key", "what": "Unlock encrypted history with a recovery key.", "mac": "done", "android": "done"},
