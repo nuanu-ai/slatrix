@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.core.ComposerStyle
 import ai.nuanu.slatrix.core.ComposerStyle.Kind
 import ai.nuanu.slatrix.core.ComposerStyles
 import ai.nuanu.slatrix.ui.designsystem.AppColors
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.background
@@ -31,9 +32,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -94,7 +92,6 @@ fun RowScope.FormattingBar(active: Set<Kind>, enabled: Boolean, onFormat: (Kind)
  * Slack's link sheet; with nothing selected it asks for the text too. It opens on [current], a link being changed, which
  * an empty address removes. [onSave] gets the text, if asked, and the address.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LinkSheet(askText: Boolean, current: String?, onSave: (text: String?, href: String) -> Unit, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
@@ -105,8 +102,7 @@ fun LinkSheet(askText: Boolean, current: String?, onSave: (text: String?, href: 
     val href = if (typed.isEmpty() || Regex("^[A-Za-z][A-Za-z0-9+.-]*:(?!\\d)").containsMatchIn(typed)) typed else "https://$typed"
     // The address must be one a message may link to, as the Mac asks.
     val valid = if (href.isEmpty()) current != null else ComposerFormat.safeLink(href) != null
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = SlatrixTheme.topPanelShape, containerColor = colors.canvas) {
+    BottomSheet(onDismissRequest = onDismiss, containerColor = colors.canvas) {
         Column(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge).padding(bottom = UiMetrics.GapLarge),
             verticalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

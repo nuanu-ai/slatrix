@@ -91,7 +91,7 @@ fun EditProfileScreen(userId: String, name: String, photo: ImageBitmap?, hasPhot
         PushedPage("Edit profile", onBack, action = {
             Box(Modifier.padding(end = UiMetrics.GapSmall), contentAlignment = Alignment.Center) {
                 TextButton({ onSave(trimmed) }, enabled = canSave) { Text("Save", fontWeight = FontWeight.Bold) }
-                if (saving) DelayedSpinner()
+                if (saving) WaitingSpinner()
             }
         }) {
             item {

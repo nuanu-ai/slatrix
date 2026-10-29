@@ -6,10 +6,12 @@ import ai.nuanu.slatrix.core.MatrixComposer
 import ai.nuanu.slatrix.core.EmojiRecents
 import ai.nuanu.slatrix.core.MatrixConversation
 import ai.nuanu.slatrix.core.MatrixWorkspace
+import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.content.ClipData
@@ -36,11 +38,9 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -82,6 +82,8 @@ data class MessageActions(
     val onPin: ((ConversationMessage, pin: Boolean) -> Unit)? = null,
     /** What the room is called in Pin to channel. */
     val place: String = "channel",
+    /** Sets your media's caption; null removes it. */
+    val onEditCaption: ((ConversationMessage, String?) -> Unit)? = null,
     /** Event IDs saved for later here, which the sheet offers to remove; [onSave] saves (true) or removes one. */
     val saved: Set<String> = emptySet(),
     val onSave: ((ConversationMessage, Boolean) -> Unit)? = null,
@@ -92,7 +94,7 @@ private const val QUICK_REACTIONS = 5
 
 private val textKinds = setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)
 
-/** What a forward can copy. A row doesn't know an attachment's kind, so a video or audio one says it can't go once tapped. */
+/** What a forward can copy: text, and any attachment, which goes as the same media. */
 private val forwardKinds = textKinds + MessageKind.Attachment
 
 /** Slack's long-press sheet, the emoji picker it opens and the delete confirmation, one after another. */
@@ -113,12 +115,12 @@ internal fun MessageActionsHost(message: ConversationMessage, actions: MessageAc
             },
             dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
             containerColor = SlatrixTheme.colors.overlay)
+        Step.Caption -> CaptionSheet(message, { caption -> actions.onEditCaption?.invoke(message, caption); onDismiss() }, onDismiss)
     }
 }
 
-private enum class Step { Sheet, Picker, ConfirmDelete }
+private enum class Step { Sheet, Picker, ConfirmDelete, Caption }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MessageActionSheet(message: ConversationMessage, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
     onRetrySend: (ConversationMessage) -> Unit,
@@ -131,7 +133,7 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
         clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(message.senderName, text)))
         onDismiss()
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, shape = SlatrixTheme.topPanelShape, containerColor = colors.canvas) {
+    BottomSheet(onDismissRequest = onDismiss, containerColor = colors.canvas) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             Row(Modifier.padding(horizontal = UiMetrics.GapLarge).padding(bottom = UiMetrics.GapSmall),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
@@ -192,10 +194,14 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
                     colors.textPrimary) { pin(message, !pinned); onDismiss() }
             }
             val edit = actions.onEdit?.takeIf { message.editable }
+            // As on the Mac, an image's or a file's.
+            val caption = eventId != null && message.own && actions.onEditCaption != null &&
+                message.attachment?.kind in setOf(MessageAttachment.Kind.Image, MessageAttachment.Kind.File)
             val delete = eventId != null && message.own && actions.onDelete != null
-            if (eventId != null && (edit != null || delete)) {
+            if (eventId != null && (edit != null || caption || delete)) {
                 HorizontalDivider(Modifier.padding(vertical = UiMetrics.GapSmall), color = colors.border)
                 if (edit != null) SheetAction(Icons.Outlined.Edit, "Edit message", colors.textPrimary) { edit(message); onDismiss() }
+                if (caption) SheetAction(Icons.Outlined.Edit, "Edit caption", colors.textPrimary) { onStep(Step.Caption) }
                 if (delete) SheetAction(Icons.Outlined.Delete, "Delete message", colors.destructive) { onStep(Step.ConfirmDelete) }
             }
         }
@@ -242,6 +248,7 @@ internal fun rememberMessageActions(conversation: MatrixConversation?, composer:
             onReact = { message, emoji -> conversation.react(message, emoji) { workspace?.emojiHistory?.use(emoji) } },
             link = conversation::link,
             onDelete = conversation::delete,
+            onEditCaption = conversation::editCaption,
             onQuote = { message -> ComposerTarget.reply(message)?.let { composer?.reply(it) } },
             onEdit = { message -> ComposerTarget.edit(message)?.let { composer?.editMessage(it) } },
             pinned = room.pinned.toSet(),

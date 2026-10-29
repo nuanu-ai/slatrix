@@ -8,6 +8,7 @@ import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.listed
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.compose.BackHandler
@@ -30,17 +31,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -109,7 +107,7 @@ private fun DirectoryRow(channel: DirectoryChannel, joined: Boolean, joining: Bo
         }
         // The progress takes the label's place, so the row never changes size.
         Box(Modifier.widthIn(min = UiMetrics.Icon), contentAlignment = Alignment.CenterEnd) {
-            if (joining) DelayedSpinner()
+            if (joining) WaitingSpinner()
             else if (joined) Text("Joined", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
         }
     }
@@ -139,7 +137,7 @@ fun CreateChannelScreen(workspace: String?, creating: Boolean, error: String?, o
                     TextButton({ onCreate(name.trim(), topic.trim()) }, enabled = name.isNotBlank() && !creating) {
                         Text("Create", fontWeight = FontWeight.Bold)
                     }
-                    if (creating) DelayedSpinner()
+                    if (creating) WaitingSpinner()
                 }
             }
             HorizontalDivider(color = colors.border)
@@ -157,18 +155,14 @@ fun CreateChannelScreen(workspace: String?, creating: Boolean, error: String?, o
 }
 
 /** Slack's Add channel sheet: browse the channels there are, or create one. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AddChannelSheet(onBrowse: (() -> Unit)?, onCreate: (() -> Unit)?, onDismiss: () -> Unit) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, shape = SlatrixTheme.topPanelShape,
-        containerColor = SlatrixTheme.colors.overlay) {
+    BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             @Composable
             fun choice(icon: ImageVector, label: String, action: () -> Unit) {
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) {
-                    scope.launch { sheet.hide() }.invokeOnCompletion { onDismiss(); action() }
+                    onDismiss(); action()
                 }.padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge),
                     verticalAlignment = Alignment.CenterVertically) {
                     Icon(icon, null, Modifier.size(UiMetrics.Icon))
@@ -241,7 +235,7 @@ fun LiveCreateChannel(rooms: MatrixRooms?, spaceId: String?, workspace: String?,
 
 /** A spinner that shows only after a moment, so a quick answer never flashes one. */
 @Composable
-internal fun DelayedSpinner() {
+internal fun WaitingSpinner() {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(UiMetrics.ProgressDelayMillis); visible = true }
     if (visible) CircularProgressIndicator(Modifier.size(UiMetrics.Icon))
