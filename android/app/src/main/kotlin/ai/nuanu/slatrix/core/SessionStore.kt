@@ -27,6 +27,7 @@ class SessionStore(context: Context) {
     private val alias = "${context.packageName}.session.v1"
 
     fun load(): StoredSession? = synchronized(lock) {
+        requireDirectory()
         if (!hasFile()) return@synchronized null
         try {
             val bytes = readFile()
@@ -95,8 +96,16 @@ class SessionStore(context: Context) {
     }
 
     fun clear() = synchronized(lock) {
+        requireDirectory()
         file.delete()
         if (hasFile()) throw IOException("Saved session could not be removed")
+    }
+
+    private fun requireDirectory() {
+        val directory = file.baseFile.parentFile
+        if (directory == null || !directory.isDirectory || !directory.canRead() || !directory.canExecute()) {
+            throw IOException("Session storage is unavailable")
+        }
     }
 
     private fun hasFile(): Boolean = listOf("", ".bak", ".new").any {
