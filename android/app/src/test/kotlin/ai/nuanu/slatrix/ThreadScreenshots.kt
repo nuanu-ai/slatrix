@@ -1,6 +1,10 @@
 package ai.nuanu.slatrix
 
 import ai.nuanu.slatrix.core.ComposerState
+import ai.nuanu.slatrix.core.ComposerStyle
+import ai.nuanu.slatrix.ui.account.ComposerActions
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.MessageKind
@@ -45,15 +49,23 @@ class ThreadScreenshots(private val dark: Boolean) {
         )
         // The moment it opens: the channel's root, with the replies still on their way.
         var state by mutableStateOf(ConversationState(rows.take(1), loading = false, hasMore = true))
+        var draft by mutableStateOf(ComposerState(loading = false))
         compose.setContent {
             SlatrixTheme(dark = dark) {
-                LiveChannelScreen(room, state, ComposerState(loading = false),
-                    {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root")
+                LiveChannelScreen(room, state, draft,
+                    {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root", composerActions = ComposerActions(onFormat = { _, _, _, _ -> }))
             }
         }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/Thread-opening-${if (dark) "dark" else "light"}.png")
         state = ConversationState(rows, loading = false, hasMore = false)
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/Thread-${if (dark) "dark" else "light"}.png")
+        // Slack's Aa open over a draft with each kind of format.
+        val text = "Agenda for the call\nreview the launch list\nsee docs"
+        draft = ComposerState(text, loading = false, styles = listOf(
+            ComposerStyle(0, 6, ComposerStyle.Kind.Bold), ComposerStyle(19, 42, ComposerStyle.Kind.Bullet),
+            ComposerStyle(38, 42, ComposerStyle.Kind.Italic), ComposerStyle(47, 51, ComposerStyle.Kind.Link, "https://example.org")))
+        compose.onNodeWithContentDescription("Formatting").performClick()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/Thread-formatting-${if (dark) "dark" else "light"}.png")
     }
 
     companion object {

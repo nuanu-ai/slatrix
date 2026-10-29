@@ -170,6 +170,22 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: channel.link-workspace
+    @Test fun aChannelKnowsTheWorkspacesItSitsInDirectlyAndWhichYouMayManage() = runTest {
+        val client = RoomsClient(listOf(
+            TestRoom(roomInfo("!studio:example.org", "Studio", space = true).copy(powerLevels = TestPowers(spaceChild = false))),
+            TestRoom(roomInfo("!design:example.org", "Design", space = true)),
+            TestRoom(roomInfo("!work:example.org", "Operations")),
+        ))
+        client.spaces = RoomsSpaces(mapOf("!work:example.org" to listOf("!design:example.org"),
+            "!design:example.org" to listOf("!studio:example.org")))
+        val rooms = MatrixRooms(backgroundScope, client)
+        val state = rooms.state.first { state -> state.rooms.any { it.spaceIds.size == 2 } }
+        assertEquals(setOf("!design:example.org"), state.rooms.single().parentIds)
+        assertEquals(mapOf("Design" to true, "Studio" to false), state.spaces.associate { it.name to it.canManageRooms })
+        rooms.close()
+    }
+
     // capability: home.star-toggle
     @Test fun starringAConversationTagsItAsAFavourite() = runTest {
         val alpha = TestRoom(roomInfo("!a:example.org", "Alpha"))
@@ -182,6 +198,23 @@ class MatrixRoomsTest {
         assertEquals(false, alpha.favourite)
         alpha.failFavourite = true
         assertFalse(rooms.setStarred("!a:example.org", true))
+        rooms.close()
+    }
+
+    // capability: home.workspace-switcher
+    @Test fun workspacesAndDirectMessagesCarryTheirPictures() = runTest {
+        val client = RoomsClient(listOf(
+            TestRoom(roomInfo("!harbor:example.org", "Harbor", space = true).copy(avatarUrl = "mxc://example.org/harbor")),
+            TestRoom(roomInfo("!sam:example.org", "Sam", direct = true)
+                .copy(heroes = listOf(RoomHero("@sam:example.org", "Sam", "mxc://example.org/sam", null, null)))),
+            TestRoom(roomInfo("!team:example.org", "Team")),
+        ))
+        val rooms = MatrixRooms(backgroundScope, client)
+        val state = rooms.state.first { !it.loading && it.spaces.isNotEmpty() }
+
+        assertEquals("mxc://example.org/harbor", state.spaces.single().avatarUrl)
+        assertEquals("A direct message shows the other person", "mxc://example.org/sam", state.rooms.single { it.direct }.avatarUrl)
+        assertNull(state.rooms.single { it.name == "Team" }.avatarUrl)
         rooms.close()
     }
 
@@ -287,6 +320,16 @@ class MatrixRoomsTest {
         room.emit(room.info.copy(displayName = "Stale room", membership = Membership.JOINED))
         other.emit(other.info.copy(displayName = "Beta renamed"))
         assertEquals(listOf("Beta renamed"), rooms.state.first { state -> state.rooms.any { it.name == "Beta renamed" } }.rooms.map { it.name })
+        rooms.close()
+    }
+
+    // capability: conversation.unread-line
+    @Test fun anUnreadRoomKnowsWhereItsUnreadMessagesStart() = runTest {
+        val room = TestRoom(roomInfo("!a:example.org", "Alpha", messages = 2u).copy(fullyReadEventId = "\$read"))
+        val client = RoomsClient(listOf(room))
+        client.services.trySend(RoomsSync())
+        val rooms = MatrixRooms(backgroundScope, client)
+        assertEquals("\$read", rooms.state.first { !it.loading }.rooms.single().resumeAt)
         rooms.close()
     }
 
@@ -409,7 +452,8 @@ class MatrixRoomsTest {
         val foreground = MutableStateFlow(false)
         val rooms = MatrixRooms(backgroundScope, client, foreground)
 
-        assertSame(NotificationStatus.EventNotFound, rooms.notification("!team:example.org", "\$event"))
+        // The lookup waits for the sync on the clock; on the test's virtual time its timeout would fire before the rooms publish it.
+        assertSame(NotificationStatus.EventNotFound, withContext(Dispatchers.Default) { rooms.notification("!team:example.org", "\$event") })
         assertSame(sync, (client.notificationSetup as NotificationProcessSetup.SingleProcess).syncService)
         sync.stopped.await()
         assertFalse("A hidden app keeps its sync stopped", sync.running.value)
@@ -515,11 +559,12 @@ private class RoomsSync : SyncService(NoHandle) {
 
 /** What you may do in a room; the event type objects compare through the SDK, so they're told apart by type. */
 internal class TestPowers(private val post: Boolean = true, private val name: Boolean = true, private val topic: Boolean = true,
-    private val invite: Boolean = true, private val pin: Boolean = true) : RoomPowerLevels(NoHandle) {
+    private val invite: Boolean = true, private val pin: Boolean = true, private val spaceChild: Boolean = true) : RoomPowerLevels(NoHandle) {
     override fun canOwnUserSendMessage(message: MessageLikeEventType): Boolean = post || message !is MessageLikeEventType.RoomMessage
     override fun canOwnUserSendState(stateEvent: StateEventType): Boolean = when (stateEvent) {
         is StateEventType.RoomName -> name
         is StateEventType.RoomTopic -> topic
+        is StateEventType.SpaceChild -> spaceChild
         else -> true
     }
     override fun canOwnUserInvite(): Boolean = invite

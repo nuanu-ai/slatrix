@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.ui.account
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
+import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.compose.BackHandler
@@ -15,9 +16,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Brush
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -39,7 +38,7 @@ import kotlinx.coroutines.CancellationException
  */
 @Composable
 fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
-    onBack: () -> Unit) {
+    onBack: () -> Unit, avatarUrl: String? = null) {
     val colors = SlatrixTheme.colors
     val localpart = userId.removePrefix("@").substringBefore(':')
     val name by produceState<String?>(null, userId) {
@@ -59,22 +58,21 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
         item {
             Row(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                LiveAvatar(AvatarPlaceholder.initials(localpart), AvatarPlaceholder.colorIndex(userId), UiMetrics.ProfileAvatar)
+                LiveAvatar(AvatarPlaceholder.initials(localpart), AvatarPlaceholder.colorIndex(userId), UiMetrics.ProfileAvatar, avatarUrl)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
-                    Text(name ?: localpart, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                    Text(name ?: localpart, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(userId, style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = UiMetrics.GapSmall), color = colors.border)
-            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button, onClick = onPreferences)
+            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button, onClick = onPreferences)
                 .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Tune, null, Modifier.size(UiMetrics.GapSection))
+                Icon(SlackIcons.Preferences, null, Modifier.size(UiMetrics.Icon))
                 Text("Preferences", style = MaterialTheme.typography.bodyLarge)
             }
-            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) { confirming = true }
+            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button) { confirming = true }
                 .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.AutoMirrored.Outlined.Logout, null, Modifier.size(UiMetrics.GapSection))
+                Icon(SlackIcons.SignOut, null, Modifier.size(UiMetrics.Icon))
                 Text("Sign out", style = MaterialTheme.typography.bodyLarge)
             }
         }
@@ -107,6 +105,7 @@ fun LivePreferencesScreen(
     onColorMode: (Boolean?) -> Unit,
     onPalette: (SidebarPalette) -> Unit,
     onBack: () -> Unit,
+    notifications: @Composable () -> Unit = {},
 ) {
     var choosingMode by rememberSaveable { mutableStateOf(false) }
     val colors = SlatrixTheme.colors
@@ -134,6 +133,7 @@ fun LivePreferencesScreen(
     }
     PushedPage("Preferences", onBack) {
             item {
+                notifications()
                 Text("Appearance", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ComposerMinHeight).clickable(role = Role.Button) { choosingMode = true }
                     .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),

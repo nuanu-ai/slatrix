@@ -75,17 +75,13 @@ class MessageSearchQuery(text: String, val mode: Mode = Mode.Query, val roomId: 
                     roomId = rooms.firstOrNull { it.name.equals(name, ignoreCase = true) }?.id
                     if (roomId != null) continue
                 } else if (key == "from:" && senderId == null) {
-                    senderId = if (value.equals("me", ignoreCase = true)) me else value.takeIf(::isUserId)
+                    senderId = if (value.equals("me", ignoreCase = true)) me else value.takeIf { isMatrixId(it, "@") }
                     if (senderId != null) continue
                 }
                 text += consumed
             }
             return MessageSearchQuery(text.joinToString(" "), roomId = roomId, senderId = senderId)
         }
-
-        /** An untrusted user ID: the sigil, something after it, a bounded length and no control characters. */
-        private fun isUserId(value: String) =
-            value.startsWith("@") && value.length > 1 && value.toByteArray().size <= 2_048 && value.none(Char::isISOControl)
     }
 }
 

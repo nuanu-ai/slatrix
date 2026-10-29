@@ -35,6 +35,29 @@ private let marker = FakeTimelineItem(virtual: .readMarker)
 
 private func remote(_ id: String) -> FakeTimelineItem { FakeTimelineItem(textEvent(id, body: "Message")) }
 
+/// The shared cases in `spec/unread-line.json`.
+struct UnreadLineSpec: Decodable {
+    struct Line: Decodable, CustomTestStringConvertible {
+        var name: String
+        var items: [String]
+        var line: String?
+        var testDescription: String { name }
+    }
+    struct Room: Decodable {
+        var messages, notifications: Int?
+        var markedUnread: Bool?
+        var membership, fullyRead: String?
+    }
+    struct Resume: Decodable, CustomTestStringConvertible {
+        var name: String
+        var room: Room
+        var anchor: String?
+        var testDescription: String { name }
+    }
+    var line: [Line]
+    var resume: [Resume]
+}
+
 struct UnreadMappingTests {
     // capability: conversation.unread-line
     @Test("The first unread message is the next remote message after the SDK's read marker")
@@ -52,10 +75,18 @@ struct UnreadMappingTests {
         #expect(UnreadMapping.firstUnreadEventID(in: items, roomID: roomID, ownUserID: nil) == "$first")
     }
 
-    @Test("Without a read marker, or with nothing after it, there is no unread boundary", arguments: [false, true])
-    func noBoundary(trailingMarker: Bool) {
-        let items = trailingMarker ? [remote("$message"), marker] : [remote("$message")]
-        #expect(UnreadMapping.firstUnreadEventID(in: items, roomID: roomID, ownUserID: nil) == nil)
+    @Test(
+        "Where the New line goes",
+        arguments: try SharedSpec.decode("spec/unread-line.json", as: UnreadLineSpec.self).line)
+    func line(spec: UnreadLineSpec.Line) {
+        let marks = spec.items.map { item in
+            switch item {
+            case "marker": UnreadMapping.Mark(isReadMarker: true)
+            case "hidden": UnreadMapping.Mark()
+            default: UnreadMapping.Mark(shownEventID: item)
+            }
+        }
+        #expect(UnreadMapping.firstUnreadEventID(in: marks) == spec.line)
     }
 
     @Test("A deleted message after the marker is still the boundary")
@@ -75,9 +106,17 @@ struct UnreadNavigationTests {
             for: room, selectedRoomID: selected, explicitEventID: explicit, opensThread: thread)
     }
 
-    @Test("Opening an unread room resumes at its synced fully-read anchor")
-    func resumesAtAnchor() {
-        #expect(anchor(room) == "$anchor")
+    @Test(
+        "Where an unread conversation opens",
+        arguments: try SharedSpec.decode("spec/unread-line.json", as: UnreadLineSpec.self).resume)
+    func resume(spec: UnreadLineSpec.Resume) {
+        var room = ChatRoom(id: roomID, name: "Room")
+        room.unreadMessages = spec.room.messages ?? 0
+        room.unread = spec.room.notifications ?? 0
+        room.isMarkedUnread = spec.room.markedUnread ?? false
+        room.membership = spec.room.membership ?? "join"
+        room.fullyReadEventID = spec.room.fullyRead
+        #expect(anchor(room) == spec.anchor)
     }
 
     @Test("Re-selecting the room, a search target or a thread overrides the resume point")
@@ -87,27 +126,9 @@ struct UnreadNavigationTests {
         #expect(anchor(room, thread: true) == nil)
     }
 
-    @Test("A room that is only marked unread has no history to resume; one with notifications does")
-    func manualUnreadOnly() {
-        var marked = room
-        marked.unreadMessages = 0
-        marked.isMarkedUnread = true
-        #expect(anchor(marked) == nil)
-        marked.unread = 2
-        #expect(anchor(marked) == "$anchor")
-    }
-
-    @Test("An invitation has no history to resume")
-    func invitation() {
-        var invite = room
-        invite.membership = "invite"
-        #expect(anchor(invite) == nil)
-    }
-
-    @Test(
-        "A missing or malformed anchor is never replaced by a guess",
-        arguments: [nil, "transaction", "$", "$bad\nvalue", String(repeating: "$", count: 2_049)])
-    func invalidAnchor(id: String?) {
+    @Test("An anchor too long to be an event ID is never replaced by a guess")
+    func overlongAnchor() {
+        let id = String(repeating: "$", count: 2_049)
         var broken = room
         broken.fullyReadEventID = id
         #expect(anchor(broken) == nil)

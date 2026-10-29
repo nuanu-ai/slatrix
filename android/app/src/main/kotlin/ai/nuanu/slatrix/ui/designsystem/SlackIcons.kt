@@ -30,6 +30,11 @@ object SlackIcons {
     val ChevronRight = outline("chevron-right", "M9.5 6.5 L15 12 L9.5 17.5", width = 2f)
     val ChevronUp = outline("chevron-up", "M6.5 14.75 L12 9.25 L17.5 14.75", width = 2f)
     val ChevronDown = outline("chevron-down", "M6.5 9.25 L12 14.75 L17.5 9.25", width = 2f)
+    val Preferences = outline("preferences", "M4 7.5 H8.5 M12.5 7.5 H20 M4 12 H14 M18 12 H20 M4 16.5 H6.5 M10.5 16.5 H20 " +
+        "M10.5 5.5 A2 2 0 1 1 10.5 9.5 A2 2 0 1 1 10.5 5.5 Z M16 10 A2 2 0 1 1 16 14 A2 2 0 1 1 16 10 Z " +
+        "M8.5 14.5 A2 2 0 1 1 8.5 18.5 A2 2 0 1 1 8.5 14.5 Z")
+    val SignOut = outline("sign-out", "M10 4.5 H6.5 A1.5 1.5 0 0 0 5 6 V18 A1.5 1.5 0 0 0 6.5 19.5 H10 M14.5 8 L18.5 12 L14.5 16 " +
+        "M18.5 12 H9.5")
     val Close = outline("close", "M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5")
     val Check = outline("check", "M5 12.5 L10 17.5 L19 7", width = 2f)
     /** A clock with a turning-back arrow, for recent searches. */
@@ -37,6 +42,8 @@ object SlackIcons {
     val Offline = outline("offline", "M2.5 8.75 A13.5 13.5 0 0 1 21.5 8.75 M5.5 12.25 A9 9 0 0 1 18.5 12.25 " +
         "M8.75 15.75 A4.5 4.5 0 0 1 15.25 15.75 M12 19.5 L12 19.5 M4 4 L20 20")
     val Plus = outline("plus", "M12 5 V19 M5 12 H19")
+    /** Slack's forward: an arrow that turns off to the right. */
+    val Forward = outline("forward", "M14 5.5 L19.5 10.75 L14 16 M19.5 10.75 H11.5 A6.5 6.5 0 0 0 5 17.25 V18.5")
     val Tray = outline("tray", "M4 13 H8.5 L9.5 15.5 H14.5 L15.5 13 H20 M4 13 V18.5 A1.5 1.5 0 0 0 5.5 20 H18.5 " +
         "A1.5 1.5 0 0 0 20 18.5 V13 L17.5 5.5 H6.5 Z")
 
@@ -53,7 +60,9 @@ object SlackIcons {
     private fun filled(name: String, path: String, evenOdd: Boolean = false) = vector(name, fill = path, evenOdd = evenOdd)
 
     private fun vector(name: String, stroke: String? = null, fill: String? = null, width: Float = 1.75f, evenOdd: Boolean = false) =
-        ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
+        // The paths sit on a 24-unit grid with a 4-unit margin; Slack's glyphs fill more of their box, so 2 units are cropped.
+        ImageVector.Builder(name, 24.dp, 24.dp, 20f, 20f).apply {
+            addGroup(translationX = -2f, translationY = -2f)
             stroke?.let {
                 addPath(PathParser().parsePathString(it).toNodes(), stroke = SolidColor(Color.Black), strokeLineWidth = width,
                     strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)
@@ -62,5 +71,6 @@ object SlackIcons {
                 addPath(PathParser().parsePathString(it).toNodes(), fill = SolidColor(Color.Black),
                     pathFillType = if (evenOdd) PathFillType.EvenOdd else PathFillType.NonZero)
             }
+            clearGroup()
         }.build()
 }

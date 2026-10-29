@@ -59,6 +59,8 @@ data class RoomSummary(
     val latest: LatestMessage? = null,
     val starred: Boolean = false,
     val isPrivate: Boolean = false,
+    /** Where its unread messages start, which it opens at; null when it has none to resume. */
+    val resumeAt: String? = null,
     /** False where the room's power levels keep you from posting; unknown ones leave the composer. */
     val canPost: Boolean = true,
     val memberCount: Int = 0,
@@ -69,6 +71,9 @@ data class RoomSummary(
     val canPin: Boolean = false,
     /** The pinned messages' event IDs, in the order they were pinned. */
     val pinned: List<String> = emptyList(),
+    val avatarUrl: String? = null,
+    /** The workspaces holding it directly; [spaceIds] adds the ones holding those. */
+    val parentIds: Set<String> = emptySet(),
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
@@ -80,6 +85,9 @@ data class SpaceSummary(
     val isTopLevel: Boolean = true,
     val initials: String = AvatarPlaceholder.initials(name),
     val colorIndex: Int = AvatarPlaceholder.colorIndex(name),
+    val avatarUrl: String? = null,
+    /** Whether your power level lets you add channels or take them out; unknown ones leave it to the action to check. */
+    val canManageRooms: Boolean = true,
 )
 
 data class RoomListState(
@@ -139,6 +147,9 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
 
     fun retry() { retries.trySend(Unit); spaceRequests.trySend(SpaceRequest.Rebuild) }
 
+    /** Reads the workspaces again, after a channel was added to one or taken out. */
+    fun reloadSpaces() { spaceRequests.trySend(SpaceRequest.Rebuild) }
+
     suspend fun close() { worker.cancelAndJoin() }
 
     /** Stars or unstars a conversation with Matrix's favourite tag, which the account's other clients show as starred too. */
@@ -174,7 +185,11 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             is Event.Spaces -> {
                 if (event.parents != null) {
                     parents = event.parents
-                    summaries.replaceAll { _, room -> ancestors(room.id).let { if (it == room.spaceIds) room else room.copy(spaceIds = it) } }
+                    summaries.replaceAll { _, room ->
+                        val ancestors = ancestors(room.id)
+                        val parentIds = parentIds(room.id)
+                        if (ancestors == room.spaceIds && parentIds == room.parentIds) room else room.copy(spaceIds = ancestors, parentIds = parentIds)
+                    }
                     spaces.replaceAll { id, space -> topLevel(id).let { if (it == space.isTopLevel) space else space.copy(isTopLevel = it) } }
                 } else if (parents == null) {
                     parents = emptyMap()
@@ -248,24 +263,30 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         val name = info.displayName?.takeIf { it.isNotBlank() } ?: info.id
         if (info.isSpace) {
             summaries.remove(info.id)
-            val space = SpaceSummary(id = info.id, name = name, isTopLevel = topLevel(info.id))
+            val space = SpaceSummary(id = info.id, name = name, isTopLevel = topLevel(info.id), avatarUrl = info.avatarUrl,
+                canManageRooms = info.powerLevels?.canOwnUserSendState(StateEventType.SpaceChild) ?: true)
             if (spaces[info.id] != space) spaces[info.id] = space
             return
         }
         spaces.remove(info.id)
+        val unread = RoomUnread(
+            direct = info.isDirect, muted = info.cachedUserDefinedNotificationMode == RoomNotificationMode.MUTE,
+            markedUnread = info.isMarkedUnread, messages = info.numUnreadMessages.clampedLong(),
+            notifications = info.numUnreadNotifications.clampedLong(), mentions = info.numUnreadMentions.clampedLong(),
+        )
         val summary = RoomSummary(
             id = info.id, name = name, direct = info.isDirect, topic = info.topic.orEmpty(),
-            unread = UnreadBadge.forRoom(RoomUnread(
-                direct = info.isDirect, muted = info.cachedUserDefinedNotificationMode == RoomNotificationMode.MUTE,
-                markedUnread = info.isMarkedUnread, messages = info.numUnreadMessages.clampedLong(),
-                notifications = info.numUnreadNotifications.clampedLong(), mentions = info.numUnreadMentions.clampedLong(),
-            )),
+            unread = UnreadBadge.forRoom(unread),
             initials = AvatarPlaceholder.initials(name), colorIndex = AvatarPlaceholder.colorIndex(name),
             spaceIds = ancestors(info.id),
+            parentIds = parentIds(info.id),
             latest = if (info.isDirect) followed[info.id]?.let { latest(it.room) } else null,
             starred = info.isFavourite,
+            // A direct message without a picture of its own shows the other person's.
+            avatarUrl = info.avatarUrl ?: info.heroes.singleOrNull()?.avatarUrl?.takeIf { info.isDirect },
             // Slack's private channel: only an invitation lets someone in. A restricted room is open to its space, a public channel.
             isPrivate = info.joinRule.let { it is JoinRule.Invite || it is JoinRule.Knock || it is JoinRule.Private },
+            resumeAt = UnreadLine.resumeAt(unread, info.fullyReadEventId),
             canPost = info.powerLevels?.canOwnUserSendMessage(MessageLikeEventType.RoomMessage) ?: true,
             memberCount = info.joinedMembersCount.coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
             canEditName = info.powerLevels?.canOwnUserSendState(StateEventType.RoomName) ?: false,
@@ -309,6 +330,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     }
 
     private fun topLevel(id: String): Boolean = parents?.get(id).isNullOrEmpty()
+
+    private fun parentIds(id: String): Set<String> = parents?.get(id).orEmpty().toSet()
 
     private fun ancestors(id: String): Set<String> {
         val known = parents ?: return emptySet()
