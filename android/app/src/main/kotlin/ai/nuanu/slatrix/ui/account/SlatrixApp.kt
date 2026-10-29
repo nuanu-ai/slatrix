@@ -33,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -151,10 +152,10 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 { darkOverride = it; appearance.darkMode = it },
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
-                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump) } } }
+                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, roomList) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace, jump) { root, row -> threads?.open(selected.room, root, root = row) }
+                                LiveConversation(selected, workspace, workspace, jump, roomList) { root, row -> threads?.open(selected.room, root, root = row) }
                             } } } }
                             else -> null
                         }) {
@@ -197,14 +198,19 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
 private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
-    jump: (RoomSummary, String, String?) -> Unit, onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
+    jump: (RoomSummary, String, String?) -> Unit, roomList: State<RoomListState>?,
+    onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
+    // The room as the list follows it, so a change of name, topic or permissions shows while it's open.
+    val room by remember(open.room, roomList) {
+        derivedStateOf { roomList?.value?.rooms?.firstOrNull { it.id == open.room.id } ?: open.room }
+    }
     val conversation = open.conversation
     val composer = open.composer
     val timeline = conversation?.state?.collectAsState()?.value ?: ConversationState(error = open.error)
     val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
     val scope = rememberCoroutineScope()
-    LiveChannelScreen(open.room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
+    LiveChannelScreen(room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
         { owner?.back() }, { conversation?.loadOlder() },
         { event ->
             scope.launch {

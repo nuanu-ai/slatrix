@@ -44,6 +44,7 @@ import org.matrix.rustcomponents.sdk.SyncServiceState
 import org.matrix.rustcomponents.sdk.SyncServiceStateObserver
 import org.matrix.rustcomponents.sdk.TaskHandle
 import org.matrix.rustcomponents.sdk.TimelineItemContent
+import uniffi.ruma_events.MessageLikeEventType
 
 data class RoomSummary(
     val id: String,
@@ -251,6 +252,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             starred = info.isFavourite,
             // Slack's private channel: only an invitation lets someone in. A restricted room is open to its space, a public channel.
             isPrivate = info.joinRule.let { it is JoinRule.Invite || it is JoinRule.Knock || it is JoinRule.Private },
+            canPost = info.powerLevels?.canOwnUserSendMessage(MessageLikeEventType.RoomMessage) ?: true,
         )
         // An unchanged room keeps its instance, so its row skips recomposition.
         if (summaries[info.id] != summary) summaries[info.id] = summary
