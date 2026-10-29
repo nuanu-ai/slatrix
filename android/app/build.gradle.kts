@@ -42,7 +42,6 @@ extensions.configure<ApplicationExtension> {
         buildConfigField("String", "PUSH_GATEWAY", "\"$pushGateway\"")
         manifestPlaceholders["authRedirectScheme"] = "com.github.nuanu-ai.slatrix"
         minSdk = 24
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
@@ -60,12 +59,15 @@ extensions.configure<ApplicationExtension> {
     }
     buildTypes {
         debug {
+            // x86_64 runs on emulators; phones are arm64.
+            ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
             applicationIdSuffix = ".dev"
             manifestPlaceholders["authRedirectScheme"] = "com.github.nuanu-ai.slatrix.dev"
             versionNameSuffix = "-dev"
             resValue("string", "app_name", "Slatrix Dev")
         }
         release {
+            ndk { abiFilters += "arm64-v8a" }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
