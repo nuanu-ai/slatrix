@@ -45,7 +45,9 @@ struct ChatRoom: Identifiable, Hashable {
     static func directMessages(_ rooms: [ChatRoom]) -> [ChatRoom] {
         rooms.filter(\.isDirect).sorted {
             let (first, second) = ($0.latest?.timestamp ?? .distantPast, $1.latest?.timestamp ?? .distantPast)
-            return first != second ? first > second : $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            if first != second { return first > second }
+            let names = $0.name.localizedStandardCompare($1.name)
+            return names != .orderedSame ? names == .orderedAscending : $0.id < $1.id
         }
     }
 }

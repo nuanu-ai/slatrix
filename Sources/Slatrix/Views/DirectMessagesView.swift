@@ -30,11 +30,12 @@ struct DirectMessageRow: View {
     @EnvironmentObject private var appearance: AppearanceStore
     private var colors: AppColors { appearance.colors }
     var body: some View {
+        let badge = UnreadBadge(room)
         HStack(spacing: m.sp12) {
             AvatarView(name: room.name, size: m.avatar, matrix: matrix, source: room.avatarURL)
             VStack(alignment: .leading, spacing: m.sp2) {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
-                    Text(room.name).font(m.font(.body, room.hasUnread ? .bold : .regular))
+                    Text(room.name).font(m.font(.body, badge != .none ? .bold : .regular))
                         .foregroundStyle(colors.textPrimary).lineLimit(1)
                     Spacer(minLength: 0)
                     if let latest = room.latest {
@@ -43,9 +44,10 @@ struct DirectMessageRow: View {
                 }
                 // A space until the message arrives, so the row keeps its height.
                 Text(room.latest?.preview ?? " ").font(m.font(.secondary))
-                    .foregroundStyle(room.hasUnread ? colors.textPrimary : colors.textSecondary).lineLimit(1)
+                    .foregroundStyle(badge != .none ? colors.textPrimary : colors.textSecondary).lineLimit(1)
             }
+            if case .count(let count) = badge { CountBadge(text: count) }
         }.padding(.horizontal, m.sp24).padding(.vertical, m.sp12).contentShape(Rectangle())
-            .accessibilityElement(children: .combine).accessibilityValue(room.hasUnread ? "Unread" : "")
+            .accessibilityElement(children: .combine).accessibilityValue(badge != .none ? "Unread" : "")
     }
 }
