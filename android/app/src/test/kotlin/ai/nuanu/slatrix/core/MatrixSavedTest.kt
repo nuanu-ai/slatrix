@@ -12,7 +12,6 @@ class MatrixSavedTest {
         val room = SavedRoom(Membership.JOINED)
         val preview = MatrixSaved(SavedClient(room)).preview(SavedMessage("!design:example.org", "\$one", 0))
         assertEquals(SavedPreview("Mira Chen", "Edited to this", 1_700_000_000_000L), preview)
-        assertEquals(TimelineFocus.Event("\$one", 0u, uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode.Automatic(false)), room.focus)
     }
 
     @Test fun aConversationYouLeftHasNothingToShow() = runTest {
@@ -25,10 +24,8 @@ private class SavedClient(private val room: Room) : Client(NoHandle) {
 }
 
 private class SavedRoom(private val membership: Membership) : Room(NoHandle) {
-    var focus: TimelineFocus? = null
     override fun membership(): Membership = membership
     override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline {
-        focus = configuration.focus
         return object : Timeline(NoHandle) {
             override suspend fun getEventTimelineItemByEventId(eventId: String): EventTimelineItem = EventTimelineItem(
                 isRemote = true, eventOrTransactionId = EventOrTransactionId.EventId(eventId), sender = "@mira:example.org",

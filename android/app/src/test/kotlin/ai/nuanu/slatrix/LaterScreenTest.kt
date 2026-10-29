@@ -33,7 +33,7 @@ class LaterScreenTest {
 
     // capability: message.save
     @Test fun laterListsSavedMessagesNewestFirstOpensOneAndRemovesOne() {
-        val saved = listOf(SavedMessage("!design:example.org", "\$two", 2_000), SavedMessage("!general:example.org", "\$one", 1_000))
+        val saved = listOf(SavedMessage("!general:example.org", "\$one", 1_000), SavedMessage("!design:example.org", "\$two", 2_000))
         val previews = mapOf("\$two" to SavedPreview("Mira Chen", "Ship it on Thursday", 1_700_000_000_000L),
             "\$one" to SavedPreview("Sam Okafor", "Budget is in the doc", 1_700_000_000_000L))
         val opened = mutableListOf<String>()
