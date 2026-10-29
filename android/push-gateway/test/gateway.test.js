@@ -91,3 +91,25 @@ test('untrusted notification fields are rejected before any push is emitted', as
   }
   assert.deepEqual(delivered, []);
 });
+
+test('badge-count updates are acknowledged without FCM while partial event IDs are invalid', async (t) => {
+  const delivered = [];
+  t.mock.method(getMessaging(), 'send', async (message) => {
+    delivered.push(message);
+    return 'projects/test/messages/unexpected';
+  });
+  for (const counts of [{ unread: 14, missed_calls: 2 }, {}]) {
+    const response = await post({ notification: { devices: notification().devices, counts } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { rejected: [] });
+  }
+  for (const fields of [
+    { counts: { unread: 1 }, event_id: '$partial' },
+    { counts: { unread: 1 }, room_id: '!partial:example.org' },
+    {}, { counts: [] }, { counts: { unread: -1 } }, { counts: { missed_calls: 0.5 } },
+  ]) {
+    const response = await post({ notification: { devices: notification().devices, ...fields } });
+    assert.equal(response.status, 400);
+  }
+  assert.deepEqual(delivered, []);
+});
