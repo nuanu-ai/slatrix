@@ -51,6 +51,7 @@ class PushConfigurationTests(unittest.TestCase):
                 with self.subTest(gateway=gateway):
                     result = self.configure(gateway, google_services)
                     self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn("slatrixPushGateway must be an HTTPS /_matrix/push/v1/notify endpoint.", result.stdout)
 
     def test_relative_firebase_file_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -60,6 +61,7 @@ class PushConfigurationTests(unittest.TestCase):
                 PUSH_GATEWAY, os.path.relpath(google_services, ANDROID)
             )
         self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("slatrixGoogleServices must name an existing absolute file.", result.stdout)
 
     def test_external_firebase_file_generates_debug_resources(self):
         with tempfile.TemporaryDirectory() as directory:
