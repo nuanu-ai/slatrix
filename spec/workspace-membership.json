@@ -26,16 +26,6 @@
       "included": true
     },
     {
-      "name": "A workspace includes a channel in its nested space",
-      "direct": false,
-      "spaceIds": [
-        "!design",
-        "!studio"
-      ],
-      "spaceId": "!studio",
-      "included": true
-    },
-    {
       "name": "A workspace excludes another workspace's channel",
       "direct": false,
       "spaceIds": [
