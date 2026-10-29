@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import tempfile
@@ -13,11 +14,11 @@ CLOUD_FUNCTION = (
 
 
 class PushConfigurationTests(unittest.TestCase):
-    def configure(self, gateway, google_services):
+    def configure(self, gateway, google_services, task=":app:help"):
         return subprocess.run(
             [
                 str(ANDROID / "gradlew"),
-                ":app:help",
+                task,
                 "--offline",
                 "--console=plain",
                 f"-PslatrixGoogleServices={google_services}",
@@ -61,3 +62,28 @@ class PushConfigurationTests(unittest.TestCase):
                 CLOUD_FUNCTION, os.path.relpath(google_services, ANDROID)
             )
         self.assertNotEqual(result.returncode, 0, result.stdout)
+
+    def test_external_firebase_file_generates_debug_resources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            google_services = Path(directory) / "google-services.json"
+            google_services.write_text(
+                json.dumps({
+                    "project_info": {
+                        "project_number": "123456789012",
+                        "project_id": "slatrix-test-fixture",
+                    },
+                    "client": [{
+                        "client_info": {
+                            "mobilesdk_app_id": "1:123456789012:android:0123456789abcdef",
+                            "android_client_info": {"package_name": "ai.nuanu.slatrix.dev"},
+                        },
+                        "api_key": [{"current_key": "fictional-test-api-key"}],
+                    }],
+                    "configuration_version": "1",
+                }),
+                encoding="utf-8",
+            )
+            result = self.configure(
+                CLOUD_FUNCTION, google_services, ":app:processDebugGoogleServices"
+            )
+        self.assertEqual(result.returncode, 0, result.stdout)
