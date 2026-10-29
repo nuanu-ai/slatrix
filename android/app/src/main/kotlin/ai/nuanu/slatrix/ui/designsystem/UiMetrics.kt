@@ -24,4 +24,6 @@ object UiMetrics {
     /** Slack's message sheet: its icons and its Reply tile. */
     val SheetIcon = 24.dp
     val ActionTile = 86.dp
+    /** The accent rule beside a quoted message. */
+    val QuoteBar = 3.dp
 }

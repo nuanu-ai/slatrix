@@ -21,6 +21,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.DateDividerMode
+import org.matrix.rustcomponents.sdk.EditedContent
 import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.EventSendState
 import org.matrix.rustcomponents.sdk.FormattedBody
@@ -74,6 +75,8 @@ data class ConversationMessage(
     val canRetry: Boolean = false,
     /** The failure paused the room's send queue, so retrying resumes the queue, as on the Mac. */
     val queuePaused: Boolean = false,
+    /** Your own text message, which you can edit. */
+    val editable: Boolean = false,
 ) : ConversationRow
 
 data class ConversationState(
@@ -201,7 +204,12 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                 val content = checkNotNull(timeline.createMessageContent(MessageType.Text(TextMessageContent(message.body, formatted))))
                 content.use { raw ->
                     raw.withMentions(Mentions(message.mentions, message.mentionsRoom)).use { outgoing ->
-                        timeline.send(outgoing).close()
+                        when (val target = message.target) {
+                            is ComposerTarget.Reply -> timeline.sendReply(outgoing, target.eventId).close()
+                            is ComposerTarget.Edit ->
+                                timeline.edit(EventOrTransactionId.EventId(target.eventId), EditedContent.RoomMessage(outgoing))
+                            null -> timeline.send(outgoing).close()
+                        }
                     }
                 }
                 currentCoroutineContext().ensureActive()
@@ -389,6 +397,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
             canRetry = failure != null && failure.error !is QueueWedgeError.ExpiredAccessToken &&
                 failure.error !is QueueWedgeError.MissingMediaContent && failure.error !is QueueWedgeError.InvalidMimeType,
             queuePaused = failure?.isRecoverable == true,
+            editable = event.isEditable && kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote),
         )
     }
 }

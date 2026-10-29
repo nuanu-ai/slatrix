@@ -114,7 +114,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     { event -> scope.launch { if (conversation?.markRead(event) == true) PushNotifications(context).clear(selected.room.id) } },
                                     { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) workspace?.open(selected.room) },
                                     { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
-                                    rememberMessageActions(conversation, workspace))
+                                    rememberMessageActions(conversation, composer, workspace),
+                                    composerActions = ComposerActions(onCancelTarget = { composer?.cancelTarget() }))
                             } } }
                             else -> null
                         }) {

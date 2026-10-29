@@ -64,7 +64,8 @@ import java.util.Locale
 fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: ComposerState,
     onDraft: (String) -> Unit, onSend: () -> Unit, onBack: () -> Unit, onLoadOlder: () -> Unit, onRead: (String) -> Unit,
     onRetry: () -> Unit, onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit,
-    actions: MessageActions = MessageActions(), onOpenThread: ((String) -> Unit)? = null) {
+    actions: MessageActions = MessageActions(), onOpenThread: ((String) -> Unit)? = null,
+    composerActions: ComposerActions = ComposerActions()) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -152,29 +153,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
             }
         }
-        val description = if (room.direct) "Message ${room.name}" else "Message #${room.name}"
-        // Slack's composer: a rounded field on a bar under a hairline, with send inside the field.
-        HorizontalDivider(color = colors.border)
-        Surface(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall),
-            shape = MaterialTheme.shapes.extraLarge, color = colors.raised) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                BasicTextField(composer.text, onDraft, enabled = !composer.loading,
-                    modifier = Modifier.weight(1f).heightIn(min = UiMetrics.Touch).padding(start = UiMetrics.GapMedium)
-                        .semantics { contentDescription = description },
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
-                    cursorBrush = SolidColor(colors.accent), maxLines = 5,
-                    decorationBox = { inner ->
-                        Box(Modifier.padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.CenterStart) {
-                            if (composer.text.isEmpty()) Text(description, style = MaterialTheme.typography.bodyLarge,
-                                color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            inner()
-                        }
-                    })
-                IconButton(onClick = onSend, enabled = !composer.loading && !composer.sending && composer.text.isNotBlank()) {
-                    Icon(Icons.AutoMirrored.Outlined.Send, "Send message", tint = if (composer.text.isNotBlank()) colors.accent else colors.textTertiary)
-                }
-            }
-        }
+        MessageComposer(room, composer, onDraft, onSend, composerActions)
     }
 }
 
