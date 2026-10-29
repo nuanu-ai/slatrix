@@ -110,7 +110,7 @@ private val pictures = object : LruCache<String, ImageBitmap>((Runtime.getRuntim
  * full screen. Null while it loads or when there's none.
  */
 @Composable
-private fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): ImageBitmap? {
+internal fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): ImageBitmap? {
     val key = "${attachment.source.url()}@${width}x$height${if (full) " full" else ""}"
     val picture by produceState(pictures[key], key) {
         if (value != null) return@produceState
