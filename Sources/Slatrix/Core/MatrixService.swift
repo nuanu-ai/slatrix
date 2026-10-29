@@ -1402,11 +1402,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         return true
     }
 
-    /// Shows the open conversation's timeline as it changes, until another conversation or timeline takes its place.
+    /// Shows the open conversation's timeline as it changes, once it is on screen and until another conversation or
+    /// timeline takes its place.
     private func mainObserver(roomID id: String, token: UUID, focus eventID: String?) -> TimelineObserver {
         TimelineObserver { [weak self] items, revision in
             Task { @MainActor [weak self] in
-                guard let self, self.selection == token, self.focusedEventID == eventID else { return }
+                guard let self, self.selection == token, self.shownSelection == token, self.focusedEventID == eventID
+                else { return }
                 self.showTimeline((items, revision), roomID: id)
             }
         }
@@ -1414,34 +1416,37 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// Read down to its newest message, a conversation opened at an older one turns live where it is, as Slack's does:
     /// new messages arrive and it can be marked read again. It keeps its selection, so the thread pane and a reply or
-    /// edit in progress stay. It stays as it is unless the live timeline holds `anchor`, the oldest message on screen.
-    func goLive(holding anchor: String) async {
+    /// edit in progress stay. It turns only when the live timeline holds `anchor`, the oldest message on screen, which
+    /// the screen gives only while the reader is at the newest one and which is read again just before the swap.
+    func goLive(anchor: () -> String?) async {
         guard let focused = focusedEventID, timeline != nil, !hasMoreForwardHistory, let id = selectedRoomID,
             let room = try? requireRoom(id)
         else { return }
         let token = selection
-        func current() -> Bool { !Task.isCancelled && selection == token && focusedEventID == focused }
+        func unchanged() -> Bool { selection == token && focusedEventID == focused }
         guard
             let next = try? await room.timelineWithConfiguration(
                 configuration: Self.timelineConfiguration(.live(hideThreadedEvents: true))),
-            current()
+            unchanged()
         else { return }
         let observer = mainObserver(roomID: id, token: token, focus: nil)
         let listener = await next.addListener(listener: observer)
+        func holds(_ eventID: String?) -> Bool { eventID.map { Self.contains(observer.snapshot.items, $0) } ?? false }
         // The screen ends at the newest message, so a page or two back reaches it unless the reader is offline.
-        for _ in 0..<3 where !Self.contains(observer.snapshot.items, anchor) {
-            guard current(), (try? await next.paginateBackwards(numEvents: 100)) == false else { break }
+        for _ in 0..<3 where unchanged() && anchor() != nil && !holds(anchor()) {
+            guard (try? await next.paginateBackwards(numEvents: 100)) == false else { break }
         }
-        guard current(), Self.contains(observer.snapshot.items, anchor) else {
+        guard unchanged(), holds(anchor()) else {
             listener.cancel()
             return
         }
+        // Loaded back to its start, the conversation keeps its intro if the live timeline holds its first message.
+        hasMoreHistory = hasMoreHistory || !holds(messages.first?.eventID)
         timelineHandle?.cancel()
         focusedEventID = nil
         timeline = next
         timelineHandle = listener
         liveTimeline = KeptTimeline(roomID: id, token: token, timeline: next, observer: observer, listener: listener)
-        hasMoreHistory = true
         timelineRevision = 0
         showTimeline(observer.snapshot, roomID: id)
     }

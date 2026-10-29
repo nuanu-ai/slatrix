@@ -1040,7 +1040,7 @@ struct RootView: View {
                             visibleBottomRoomID = nil
                         }
                     }, onJumpToLatest: { selectRoom(room.id) }, startsAtUnread: isResumingUnread,
-                    onForward: startForward, onEditCaption: startCaption,
+                    editing: editTarget?.surface == .conversation, onForward: startForward, onEditCaption: startCaption,
                     onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) }
                 ).id("\(room.id):\(matrix.timelineSelectionID)")
                 VStack(spacing: 0) {

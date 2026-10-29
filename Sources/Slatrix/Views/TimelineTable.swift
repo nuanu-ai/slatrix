@@ -91,8 +91,8 @@ struct TimelineMessageEntry: Hashable {
     fileprivate var bottom: (() -> Void)?
     fileprivate var anchor: (() -> String?)?
     func scrollToBottom() { bottom?() }
-    /// The oldest message the screen depends on: the one above the first on screen, whose sender and time decide how
-    /// that one is grouped.
+    /// While the newest message is on screen, the oldest message the screen depends on: the one above the first on
+    /// screen, whose sender and time decide how that one is grouped.
     var screenAnchorEventID: String? { anchor?() }
 }
 
@@ -294,6 +294,8 @@ struct TimelineTable: NSViewRepresentable {
                     table.removeRows(at: [offset], withAnimation: [])
                 }
                 for case .insert(let offset, _, _) in difference.insertions {
+                    // A new timeline numbers its rows afresh: a height kept under this ID was another message's.
+                    known[next[offset].id] = nil
                     rows.insert(next[offset], at: offset)
                     table.insertRows(at: [offset], withAnimation: [])
                 }
@@ -583,7 +585,9 @@ struct TimelineTable: NSViewRepresentable {
     }
 
     private func screenAnchor() -> String? {
-        guard let first = firstVisibleRow(excluding: []), let row = index[first.id] else { return nil }
+        guard viewport.isAtBottom, let first = firstVisibleRow(excluding: []), let row = index[first.id] else {
+            return nil
+        }
         return rows[..<row].last { $0.messageEventID != nil }?.messageEventID ?? rows[row].messageEventID
     }
 

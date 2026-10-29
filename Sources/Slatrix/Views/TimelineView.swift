@@ -23,6 +23,8 @@ struct TimelineView: View {
     var onBottomVisibilityChange: ((Bool) -> Void)? = nil
     var onJumpToLatest: (() -> Void)? = nil
     var startsAtUnread = false
+    /// Whether an edit to a message in this conversation is open.
+    var editing = false
     var onForward: ((MessageActionTarget) -> Void)? = nil
     var onEditCaption: ((MessageActionTarget) -> Void)? = nil
     var onOpenMedia: ((ChatMessage) -> Void)? = nil
@@ -53,9 +55,8 @@ struct TimelineView: View {
         thread ? threadRootID.flatMap { matrix.jump?.eventID(inThread: $0) } : matrix.jump?.eventID(inThread: nil)
     }
     private var hasNewer: Bool { !thread && matrix.focusedEventID != nil && matrix.hasMoreForwardHistory }
-    /// Scrolled to the newest message of a conversation opened at an older one, which then turns live, as in Slack.
-    private var atNewest: Bool {
-        !thread && atBottom && matrix.focusedEventID != nil && !matrix.hasMoreForwardHistory
+    private var turnsLive: Bool {
+        TimelineScrollPolicy.turnsLive(atBottom: atBottom, live: live, hasNewer: hasNewer, editing: editing)
     }
 
     var body: some View {
@@ -94,10 +95,9 @@ struct TimelineView: View {
             }
         }
         .animation(Motion.overlay, value: jumpVisible)
-        // Scrolling away cancels it, before it changes anything.
-        .task(id: atNewest) {
-            guard atNewest, let anchor = scroller.screenAnchorEventID else { return }
-            await matrix.goLive(holding: anchor)
+        .task(id: turnsLive) {
+            guard turnsLive else { return }
+            await matrix.goLive { scroller.screenAnchorEventID }
         }
         .task(id: jumpTarget == nil ? nil : matrix.jump?.id) {
             highlighted = jumpTarget
