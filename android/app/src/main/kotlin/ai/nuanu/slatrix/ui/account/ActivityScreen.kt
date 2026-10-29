@@ -49,31 +49,34 @@ private enum class ActivityFilter(val label: String) { All("All"), Dms("DMs"), M
 
 /** Slack's Activity tab: filter chips over what notified you, newest first. A thread reply opens its thread. */
 @Composable
-fun ActivityScreen(items: List<ActivityItem>, onOpenRoom: (String) -> Unit, onOpenThread: (roomId: String, root: String) -> Unit) {
+fun ActivityScreen(items: List<ActivityItem>, onOpenRoom: (String) -> Unit, onOpenThread: (roomId: String, root: String) -> Unit,
+    threads: @Composable (onOpenThread: (roomId: String, root: String) -> Unit) -> Unit = {}) {
     var filter by rememberSaveable { mutableStateOf(ActivityFilter.All) }
     val shown = remember(items, filter) {
         when (filter) {
             ActivityFilter.All -> items
+            ActivityFilter.Threads -> emptyList()
             ActivityFilter.Dms -> items.filter { it.direct }
             ActivityFilter.Mentions -> items.filter { it.kind == ActivityKind.Mention }
-            ActivityFilter.Threads -> items.filter { it.threadRoot != null }
         }
     }
-    LazyColumn(Modifier.fillMaxSize()) {
-        item(key = "filters") {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapLarge),
-                horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                ActivityFilter.entries.forEach { ActivityChip(it.label, it == filter) { filter = it } }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapLarge),
+            horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+            ActivityFilter.entries.forEach { ActivityChip(it.label, it == filter) { filter = it } }
+        }
+        // Threads lists the threads you're in, as Slack's Threads view does, rather than only the replies that notified you.
+        if (filter == ActivityFilter.Threads) threads(onOpenThread)
+        else LazyColumn(Modifier.fillMaxSize()) {
+            if (shown.isEmpty()) item(key = "empty") {
+                Text(if (filter == ActivityFilter.All) "You’re all caught up" else "Nothing here yet", Modifier.padding(UiMetrics.GapLarge),
+                    style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textSecondary)
             }
-        }
-        if (shown.isEmpty()) item(key = "empty") {
-            Text(if (filter == ActivityFilter.All) "You’re all caught up" else "Nothing here yet", Modifier.padding(UiMetrics.GapLarge),
-                style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textSecondary)
-        }
-        items(shown, key = { it.id }) { item ->
-            HorizontalDivider(color = SlatrixTheme.colors.border)
-            ActivityRow(item) { item.threadRoot?.let { onOpenThread(item.roomId, it) } ?: onOpenRoom(item.roomId) }
+            items(shown, key = { it.id }) { item ->
+                HorizontalDivider(color = SlatrixTheme.colors.border)
+                ActivityRow(item) { item.threadRoot?.let { onOpenThread(item.roomId, it) } ?: onOpenRoom(item.roomId) }
+            }
         }
     }
 }
