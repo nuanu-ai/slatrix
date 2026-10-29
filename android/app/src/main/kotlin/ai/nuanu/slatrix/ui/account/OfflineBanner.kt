@@ -1,12 +1,12 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -56,7 +56,7 @@ fun OfflineBanner() {
         shown = offline
     }
     Box(Modifier.fillMaxWidth().padding(top = UiMetrics.GapSmall), contentAlignment = Alignment.TopCenter) {
-        AnimatedVisibility(shown, enter = fadeIn(tween(UiMetrics.OverlayMillis)), exit = fadeOut(tween(UiMetrics.OverlayMillis))) {
+        AnimatedVisibility(shown, enter = fadeIn(Motion.pane()), exit = ExitTransition.None) {
             val colors = SlatrixTheme.colors
             Surface(Modifier.semantics { liveRegion = LiveRegionMode.Polite }, shape = MaterialTheme.shapes.extraLarge,
                 color = colors.tooltip, contentColor = colors.onTooltip) {
