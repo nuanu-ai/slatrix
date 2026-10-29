@@ -41,6 +41,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
@@ -309,6 +310,20 @@ class LiveChannelScreenTest {
         compose.runOnIdle { shown.value = RoomSummary("!sam:example.org", "Sam", true, "", UnreadBadge.None, "S", 0, memberCount = 2) }
         compose.waitForIdle()
         compose.onNodeWithText("2 members").assertDoesNotExist()
+    }
+
+    @Test fun aPrivateChannelsIntroShowsItsLockRatherThanAHash() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room.copy(isPrivate = true), ConversationState(loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("This is the very beginning of the design channel.").assertIsDisplayed()
+        compose.onNodeWithText("# design").assertDoesNotExist()
+        compose.onAllNodesWithContentDescription("Private channel").assertCountEquals(2)
+        // Slack's composer names a private channel without a hash too.
+        compose.onNodeWithContentDescription("Message design").assertIsDisplayed()
     }
 
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
