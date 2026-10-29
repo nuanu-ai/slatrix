@@ -19,7 +19,7 @@ class MatrixConversationTest {
     @Test fun cachedMessagesAppearWhileOlderHistoryIsStillLoading() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        val message = conversation.state.first { it.messages.isNotEmpty() }.messages.single()
+        val message = conversation.state.first { it.rows.messages.isNotEmpty() }.rows.messages.single()
         assertEquals("stable-1", message.id)
         assertEquals("\$one", message.eventId)
         assertEquals("Hello", message.body)
@@ -36,18 +36,18 @@ class MatrixConversationTest {
         conversation.state.first { !it.hasMore }
 
         timeline.emit(listOf(TimelineDiff.Reset(listOf(conversationItem("stable-2", "\$two", "Again")))))
-        assertTrue(conversation.state.first { it.messages.firstOrNull()?.id == "stable-2" }.hasMore)
+        assertTrue(conversation.state.first { it.rows.messages.firstOrNull()?.id == "stable-2" }.hasMore)
         conversation.loadOlder()
         conversation.state.first { !it.hasMore }
         timeline.emit(listOf(TimelineDiff.Clear))
-        assertTrue(conversation.state.first { it.messages.isEmpty() }.hasMore)
+        assertTrue(conversation.state.first { it.rows.messages.isEmpty() }.hasMore)
         conversation.close()
     }
 
     @Test fun aFailedReadReceiptStaysQuietAndALaterReadRetries() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        conversation.state.first { it.messages.isNotEmpty() }
+        conversation.state.first { it.rows.messages.isNotEmpty() }
         timeline.receiptFailure = IllegalStateException("Offline")
 
         assertFalse(conversation.markRead("\$one"))
@@ -72,7 +72,7 @@ class MatrixConversationTest {
         assertTrue(conversation.retry())
         val loaded = conversation.state.first { !it.hasMore }
         assertNull(loaded.error)
-        assertEquals(listOf("Hello"), loaded.messages.map { it.body })
+        assertEquals(listOf("Hello"), loaded.rows.messages.map { it.body })
         conversation.close()
     }
 
@@ -90,8 +90,33 @@ class MatrixConversationTest {
         var mappedOn: Thread? = null
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello") { mappedOn = Thread.currentThread() }))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        conversation.state.first { it.messages.isNotEmpty() }
+        conversation.state.first { it.rows.messages.isNotEmpty() }
         assertNotSame(caller, mappedOn)
+        conversation.close()
+    }
+
+    @Test fun dayDividersSplitTheTimelineAndASendersRunGroupsWithinFiveMinutes() = runTest {
+        val start = 1_700_000_000_000uL
+        val minute = 60_000uL
+        val timeline = ConversationTimeline(listOf(
+            dateDivider("day-1", start),
+            conversationItem("a", "\$a", "First", timestamp = start),
+            conversationItem("b", "\$b", "Second", timestamp = start + minute),
+            conversationItem("c", "\$c", "Third", sender = "@sam:example.org", timestamp = start + 2u * minute),
+            conversationItem("d", "\$d", "Fourth", sender = "@sam:example.org", timestamp = start + 7u * minute),
+            dateDivider("day-2", start + 8u * minute),
+            conversationItem("e", "\$e", "Fifth", sender = "@sam:example.org", timestamp = start + 8u * minute),
+        ))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val rows = conversation.state.first { it.rows.isNotEmpty() }.rows
+        assertEquals(listOf("day", "First", "+Second", "Third", "Fourth", "day", "Fifth"), rows.map {
+            when (it) { is DayDivider -> "day"; is ConversationMessage -> if (it.grouped) "+${it.body}" else it.body }
+        })
+        assertEquals(1_700_000_000_000L, (rows.first() as DayDivider).timestamp)
+
+        timeline.emit(listOf(TimelineDiff.Remove(1u)))
+        assertEquals("Removing the run's first message ungroups the next", listOf("day", "Second", "Third"),
+            conversation.state.first { it.rows.size == 6 }.rows.take(3).map { (it as? ConversationMessage)?.body ?: "day" })
         conversation.close()
     }
 
@@ -112,10 +137,10 @@ class MatrixConversationTest {
         assertEquals("Hello <strong>Mira</strong>", text.formatted?.body)
         assertEquals(listOf("@mira:example.org"), content.mentions?.userIds)
         assertEquals(true, content.mentions?.room)
-        assertEquals(emptyList<ConversationMessage>(), conversation.state.value.messages)
+        assertEquals(emptyList<ConversationMessage>(), conversation.state.value.rows.messages)
         timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
         assertTrue(sending.await())
-        assertEquals(emptyList<ConversationMessage>(), conversation.state.value.messages)
+        assertEquals(emptyList<ConversationMessage>(), conversation.state.value.rows.messages)
 
         val rejected = async { conversation.send(message) }
         timeline.submissions.receive()
@@ -126,7 +151,10 @@ class MatrixConversationTest {
     }
 
     @Test fun onlyVisibleLatestMessagesAreReadAndClosedTimelinesRejectLateUpdates() = runTest {
-        val divider = object : TimelineItem(NoHandle) { override fun asEvent(): EventTimelineItem? = null }
+        val divider = object : TimelineItem(NoHandle) {
+            override fun asEvent(): EventTimelineItem? = null
+            override fun asVirtual(): VirtualTimelineItem = VirtualTimelineItem.ReadMarker
+        }
         val timeline = ConversationTimeline(listOf(
             divider,
             conversationItem("stable-old", "\$old", "Earlier"),
@@ -135,20 +163,20 @@ class MatrixConversationTest {
         val room = ConversationRoom(timeline)
         val conversation = MatrixConversation(backgroundScope, room)
         timeline.pageStarted.await()
-        assertEquals(MessageSendState.Sending, conversation.state.first { it.messages.size == 2 }.messages.last().sendState)
+        assertEquals(MessageSendState.Sending, conversation.state.first { it.rows.messages.size == 2 }.rows.messages.last().sendState)
 
         timeline.emit(listOf(TimelineDiff.Set(2u, conversationItem("stable-new", "\$new", "Delivered"))))
-        conversation.state.first { it.messages.last().body == "Delivered" }
-        assertEquals("stable-new", conversation.state.value.messages.last().id)
-        assertEquals("\$new", conversation.state.value.messages.last().eventId)
-        assertEquals(MessageSendState.Sent, conversation.state.value.messages.last().sendState)
+        conversation.state.first { it.rows.messages.last().body == "Delivered" }
+        assertEquals("stable-new", conversation.state.value.rows.messages.last().id)
+        assertEquals("\$new", conversation.state.value.rows.messages.last().eventId)
+        assertEquals(MessageSendState.Sent, conversation.state.value.rows.messages.last().sendState)
         val encrypted = TimelineItemContent.MsgLike(MsgLikeContent(
             MsgLikeKind.UnableToDecrypt(EncryptedMessage.Unknown), null, null, null,
         ))
         timeline.emit(listOf(TimelineDiff.Set(2u, conversationItem("stable-new", "\$new", "", content = encrypted))))
-        conversation.state.first { it.messages.last().kind == MessageKind.Encrypted }
-        assertEquals(MessageKind.Encrypted, conversation.state.value.messages.last().kind)
-        assertEquals("Waiting for this message", conversation.state.value.messages.last().body)
+        conversation.state.first { it.rows.messages.last().kind == MessageKind.Encrypted }
+        assertEquals(MessageKind.Encrypted, conversation.state.value.rows.messages.last().kind)
+        assertEquals("Waiting for this message", conversation.state.value.rows.messages.last().body)
 
         assertFalse(conversation.markRead("\$old"))
         assertTrue(timeline.receipts.tryReceive().isFailure)
@@ -230,19 +258,21 @@ private fun conversationItem(
     body: String,
     local: Boolean = false,
     content: TimelineItemContent? = null,
+    sender: String = "@mira:example.org",
+    timestamp: ULong = 1_700_000_000_000u,
     onMap: () -> Unit = {},
 ): TimelineItem {
     val event = EventTimelineItem(
         isRemote = !local,
         eventOrTransactionId = if (local) EventOrTransactionId.TransactionId(eventId) else EventOrTransactionId.EventId(eventId),
-        sender = "@mira:example.org",
-        senderProfile = ProfileDetails.Ready("Mira Chen", false, null, null, null),
+        sender = sender,
+        senderProfile = ProfileDetails.Ready(if (sender == "@mira:example.org") "Mira Chen" else "Sam Okafor", false, null, null, null),
         forwarder = null, forwarderProfile = null, isOwn = false, isEditable = false,
         content = content ?: TimelineItemContent.MsgLike(MsgLikeContent(
             MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)),
             null, null, null,
         )),
-        reactions = emptyList(), eventTypeRaw = "m.room.message", timestamp = 1_700_000_000_000u,
+        reactions = emptyList(), eventTypeRaw = "m.room.message", timestamp = timestamp,
         localSendState = if (local) EventSendState.NotSentYet(null) else null, editSendState = null, redactionSendState = null, localCreatedAt = null,
         readReceipts = emptyMap(), origin = null, canBeRepliedTo = true,
         lazyProvider = object : LazyTimelineItemProvider(NoHandle) {},
@@ -252,3 +282,11 @@ private fun conversationItem(
         override fun asEvent(): EventTimelineItem = event.also { onMap() }
     }
 }
+
+private fun dateDivider(stableId: String, timestamp: ULong) = object : TimelineItem(NoHandle) {
+    override fun uniqueId(): TimelineUniqueId = TimelineUniqueId(stableId)
+    override fun asEvent(): EventTimelineItem? = null
+    override fun asVirtual(): VirtualTimelineItem = VirtualTimelineItem.DateDivider(timestamp)
+}
+
+private val List<ConversationRow>.messages get() = filterIsInstance<ConversationMessage>()
