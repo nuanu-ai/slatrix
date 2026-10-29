@@ -29,7 +29,11 @@ class DesignTokenDetector : Detector(), SourceCodeScanner {
         return object : UElementHandler() {
             override fun visitCallExpression(node: UCallExpression) {
                 val method = node.resolve() ?: return
-                if (method.isConstructor && method.containingClass?.qualifiedName == COLOR) {
+                val owner = method.containingClass?.qualifiedName ?: return
+                if ((method.isConstructor && owner == COLOR) ||
+                    (method.name == "Color" && owner.startsWith("androidx.compose.ui.graphics.") &&
+                        method.returnType?.canonicalText == COLOR)
+                ) {
                     context.report(ISSUE, node, context.getLocation(node), "Use a design system color role.")
                 }
             }
