@@ -1,4 +1,7 @@
 import com.android.build.api.dsl.ApplicationExtension
+import com.google.gms.googleservices.GoogleServicesTask
+import java.net.URI
+import java.io.File
 
 plugins {
     id("com.android.application")
@@ -6,11 +9,28 @@ plugins {
     id("io.github.takahirom.roborazzi")
 }
 
+val googleServices = providers.gradleProperty("slatrixGoogleServices").orNull?.let(::File)
+val pushGateway = providers.gradleProperty("slatrixPushGateway").orNull.orEmpty()
+require((googleServices == null) == pushGateway.isEmpty()) {
+    "Supply slatrixGoogleServices and slatrixPushGateway together."
+}
+if (googleServices != null) {
+    require(googleServices.isAbsolute && googleServices.isFile) { "slatrixGoogleServices must name an existing absolute file." }
+    val gateway = URI(pushGateway)
+    require(gateway.scheme == "https" && !gateway.host.isNullOrEmpty() && gateway.rawUserInfo == null &&
+        gateway.rawQuery == null && gateway.rawFragment == null && gateway.path == "/_matrix/push/v1/notify") {
+        "slatrixPushGateway must be an HTTPS /_matrix/push/v1/notify endpoint."
+    }
+    apply(plugin = "com.google.gms.google-services")
+    tasks.withType<GoogleServicesTask>().configureEach { googleServicesJsonFiles.set(listOf(googleServices)) }
+}
+
 extensions.configure<ApplicationExtension> {
     namespace = "ai.nuanu.slatrix"
     compileSdk = 36
     defaultConfig {
         applicationId = "ai.nuanu.slatrix"
+        buildConfigField("String", "PUSH_GATEWAY", "\"$pushGateway\"")
         manifestPlaceholders["authRedirectScheme"] = "com.github.nuanu-ai.slatrix"
         minSdk = 24
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
@@ -21,6 +41,7 @@ extensions.configure<ApplicationExtension> {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
         resValues = true
     }
     compileOptions {
@@ -55,6 +76,9 @@ kotlin { compilerOptions { jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 dependencies {
     implementation(project(":matrix-sdk"))
+    implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
+    implementation("com.google.firebase:firebase-messaging")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("androidx.browser:browser:1.10.0")
     implementation("org.jsoup:jsoup:1.23.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
