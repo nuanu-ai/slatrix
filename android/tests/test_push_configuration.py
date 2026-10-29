@@ -7,10 +7,7 @@ from pathlib import Path
 
 
 ANDROID = Path(__file__).resolve().parents[1]
-CLOUD_FUNCTION = (
-    "https://europe-west1-slatrix-18cdc.cloudfunctions.net/"
-    "matrixPush/_matrix/push/v1/notify"
-)
+PUSH_GATEWAY = "https://matrixpush-mfdhzgmbba-ew.a.run.app/_matrix/push/v1/notify"
 
 
 class PushConfigurationTests(unittest.TestCase):
@@ -31,11 +28,11 @@ class PushConfigurationTests(unittest.TestCase):
             timeout=180,
         )
 
-    def test_cloud_function_gateway_configures_with_external_firebase_file(self):
+    def test_cloud_run_gateway_configures_with_external_firebase_file(self):
         with tempfile.TemporaryDirectory() as directory:
             google_services = Path(directory) / "google-services.json"
             google_services.write_text("{}", encoding="utf-8")
-            result = self.configure(CLOUD_FUNCTION, google_services)
+            result = self.configure(PUSH_GATEWAY, google_services)
         self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_unsafe_gateway_urls_are_rejected(self):
@@ -43,6 +40,7 @@ class PushConfigurationTests(unittest.TestCase):
             google_services = Path(directory) / "google-services.json"
             google_services.write_text("{}", encoding="utf-8")
             for gateway in (
+                "https://europe-west1-slatrix-18cdc.cloudfunctions.net/matrixPush/_matrix/push/v1/notify",
                 "http://push.example.org/_matrix/push/v1/notify",
                 "https://owner@push.example.org/_matrix/push/v1/notify",
                 "https://push.example.org/_matrix/push/v1/notify?token=secret",
@@ -59,7 +57,7 @@ class PushConfigurationTests(unittest.TestCase):
             google_services = Path(directory) / "google-services.json"
             google_services.write_text("{}", encoding="utf-8")
             result = self.configure(
-                CLOUD_FUNCTION, os.path.relpath(google_services, ANDROID)
+                PUSH_GATEWAY, os.path.relpath(google_services, ANDROID)
             )
         self.assertNotEqual(result.returncode, 0, result.stdout)
 
@@ -84,6 +82,6 @@ class PushConfigurationTests(unittest.TestCase):
                 encoding="utf-8",
             )
             result = self.configure(
-                CLOUD_FUNCTION, google_services, ":app:processDebugGoogleServices"
+                PUSH_GATEWAY, google_services, ":app:processDebugGoogleServices"
             )
         self.assertEqual(result.returncode, 0, result.stdout)
