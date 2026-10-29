@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasProgressBarRangeInfo
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -72,7 +73,7 @@ class LiveChannelScreenTest {
         compose.runOnIdle { assertEquals("The newest page is far from the top", 0, requests) }
         compose.onNodeWithText("Earlier messages").assertDoesNotExist()
 
-        repeat(20) { compose.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performTouchInput { swipeDown() } }
+        repeat(20) { compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown() } }
         compose.waitUntil { requests == 1 }
         compose.runOnIdle { state.value = state.value.copy(loadingHistory = true) }
         compose.waitForIdle()
@@ -101,7 +102,7 @@ class LiveChannelScreenTest {
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
             }
         }
-        repeat(10) { compose.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performTouchInput { swipeDown() } }
+        repeat(10) { compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown() } }
         val indicator = compose.onNode(progress).fetchSemanticsNode().boundsInRoot
         assertTrue("The indicator sits above the oldest message",
             indicator.bottom <= compose.onNodeWithText("Message 1").fetchSemanticsNode().boundsInRoot.top)
@@ -286,7 +287,7 @@ class LiveChannelScreenTest {
         compose.runOnIdle { assertEquals("Newer messages wait until the reader reaches the newest", 0, newer) }
 
         // On the conversation itself: a swipe that starts on the composer doesn't scroll it.
-        repeat(30) { compose.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performTouchInput { swipeUp() } }
+        repeat(30) { compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeUp() } }
         compose.waitUntil { newer > 0 }
     }
 

@@ -95,7 +95,7 @@ fun BrowseChannelsScreen(title: String, state: ChannelDirectoryState, joined: Se
 @Composable
 private fun DirectoryRow(channel: DirectoryChannel, joined: Boolean, joining: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val colors = SlatrixTheme.colors
-    val members = if (channel.members == 1L) "1 member" else "${channel.members} members"
+    val members = membersLabel(channel.members)
     Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow)
         .then(if (joined || channel.canJoin) Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick) else Modifier)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
