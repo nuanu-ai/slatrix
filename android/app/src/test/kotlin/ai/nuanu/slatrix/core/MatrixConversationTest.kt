@@ -132,6 +132,21 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    @Test fun aDayWithOnlyEventsTheAppHidesShowsNoDivider() = runTest {
+        val start = 1_700_000_000_000uL
+        val day = 86_400_000uL
+        // The SDK starts a day at its first event of any kind, so days of joins or topic changes still get a divider.
+        val timeline = ConversationTimeline(listOf(
+            dateDivider("joins-only", start),
+            dateDivider("with-message", start + day),
+            conversationItem("a", "\$a", "First", timestamp = start + day),
+            dateDivider("topic-only", start + 2u * day),
+        ))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        assertEquals(listOf("with-message", "a"), conversation.state.first { it.rows.isNotEmpty() }.rows.map { it.id })
+        conversation.close()
+    }
+
     @Test fun historyStopsAfterPagesOfHiddenEventsUntilAnOlderMessageShows() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.page.complete(false)
