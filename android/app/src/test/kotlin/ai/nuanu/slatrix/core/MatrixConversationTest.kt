@@ -287,6 +287,29 @@ class MatrixConversationTest {
         assertTrue("Asked once for a parent two replies quote", timeline.fetched.tryReceive().isFailure)
     }
 
+    // capability: message.image
+    // capability: message.file
+    @Test fun attachmentsCarryWhatTheirRowNeedsAndACaptionIsTheirText() = runTest {
+        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/photo" }
+        val thumbnail = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/thumb" }
+        fun item(id: String, body: String, type: MessageType) = conversationItem(id, "\$$id", body, content = TimelineItemContent.MsgLike(
+            MsgLikeContent(MsgLikeKind.Message(MessageContent(type, body, false, null)), null, null, null)))
+        val timeline = ConversationTimeline(listOf(
+            item("a", "Our new office", MessageType.Image(ImageMessageContent("office.jpg", "Our new office", null, source,
+                ImageInfo(900u, 1600u, "image/jpeg", 2_000_000u, null, thumbnail, null, false)))),
+            item("b", "Q3 report.pdf", MessageType.File(FileMessageContent("Q3 report.pdf", null, null, source,
+                FileInfo("application/pdf", 250_000u, null, null)))),
+        ))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val (image, file) = conversation.state.first { it.rows.isNotEmpty() }.rows.messages
+        assertEquals(MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, source, thumbnail),
+            image.attachment)
+        assertEquals("Our new office", image.body)
+        assertEquals(MessageAttachment(MessageAttachment.Kind.File, "Q3 report.pdf", "application/pdf", 250_000, null, null, source),
+            file.attachment)
+        conversation.close()
+    }
+
     // capability: message.edited
     @Test fun anEditedMessageSaysSo() = runTest {
         val edited = TimelineItemContent.MsgLike(MsgLikeContent(
