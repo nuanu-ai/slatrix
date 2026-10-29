@@ -35,8 +35,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 
 @Composable
+fun LiveWorkspace(cover: (@Composable () -> Unit)?, home: @Composable () -> Unit) {
+    if (cover != null) cover() else home()
+}
+
+@Composable
 fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Unit, onYou: () -> Unit, onRetry: () -> Unit,
-    selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}) {
+    selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}, @Suppress("UNUSED_PARAMETER") onSignOut: () -> Unit = {}) {
     var directOnly by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var switching by remember { mutableStateOf(false) }
