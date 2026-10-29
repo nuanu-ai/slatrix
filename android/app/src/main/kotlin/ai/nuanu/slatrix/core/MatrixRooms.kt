@@ -69,6 +69,9 @@ data class RoomSummary(
     val canEditName: Boolean = false,
     val canEditTopic: Boolean = false,
     val canInvite: Boolean = true,
+    val canPin: Boolean = false,
+    /** The pinned messages' event IDs, in the order they were pinned. */
+    val pinned: List<String> = emptyList(),
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
@@ -291,6 +294,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             canEditName = info.powerLevels?.canOwnUserSendState(StateEventType.RoomName) ?: false,
             canEditTopic = info.powerLevels?.canOwnUserSendState(StateEventType.RoomTopic) ?: false,
             canInvite = info.powerLevels?.canOwnUserInvite() ?: true,
+            canPin = info.powerLevels?.canOwnUserPinUnpin() ?: false,
+            pinned = info.pinnedEventIds,
         )
         // An unchanged room keeps its instance, so its row skips recomposition.
         if (summaries[info.id] != summary) summaries[info.id] = summary
