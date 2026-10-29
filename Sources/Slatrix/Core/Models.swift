@@ -91,7 +91,15 @@ struct ChatMessage: Identifiable, Hashable {
 struct MessageJump: Equatable {
     let roomID: String
     let eventID: String
+    /// Set when the message is a thread reply: the conversation shows the root, the thread's pane the reply.
+    var threadRootID: String? = nil
     let id = UUID()
+
+    /// The message a pane scrolls to and highlights: the conversation's when `thread` is nil, else that thread's.
+    func eventID(inThread thread: String?) -> String? {
+        guard let thread else { return threadRootID ?? eventID }
+        return thread == threadRootID ? eventID : nil
+    }
 }
 
 struct ChatReplyPreview: Hashable {
