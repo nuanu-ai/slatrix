@@ -69,16 +69,17 @@ struct SavedMessagesRuleTests {
         var testDescription: String { name }
     }
 
-    struct Toggling: Decodable, Sendable, CustomTestStringConvertible {
+    struct Setting: Decodable, Sendable, CustomTestStringConvertible {
         var name: String
         var list: JSONValue
         var roomID: String
         var eventID: String
+        var saved: Bool
         var now: Int64
         var expected: JSONValue
         var testDescription: String { name }
         enum CodingKeys: String, CodingKey {
-            case name, list, now, expected
+            case name, list, saved, now, expected
             case roomID = "room_id"
             case eventID = "event_id"
         }
@@ -88,7 +89,7 @@ struct SavedMessagesRuleTests {
         var eventType: String
         var reading: [Reading]
         var merging: [Merging]
-        var toggling: [Toggling]
+        var setting: [Setting]
     }
 
     static let spec = Result { try SharedSpec.decode("spec/saved-messages.json", as: Spec.self) }
@@ -104,25 +105,38 @@ struct SavedMessagesRuleTests {
         let remote = SavedMessages(json: spec.remote == .null ? nil : spec.remote.text)
         let merged = SavedMessages(json: spec.local.text).merged(with: remote)
         #expect(try JSONValue(json: merged.json) == spec.expected)
-        #expect((merged != remote) == spec.writes)
+        #expect((merged.content(over: remote) != nil) == spec.writes)
     }
 
-    @Test("Saving and removing change Later as in every shared case", arguments: try spec.get().toggling)
-    func toggling(spec: Toggling) throws {
-        let toggled = SavedMessages(json: spec.list.text).toggled(
-            roomID: spec.roomID, eventID: spec.eventID, at: Date(timeIntervalSince1970: Double(spec.now) / 1_000))
-        #expect(try JSONValue(json: toggled.json) == spec.expected)
+    @Test("Saving and removing change Later as in every shared case", arguments: try spec.get().setting)
+    func setting(spec: Setting) throws {
+        let changed = SavedMessages(json: spec.list.text).setting(
+            roomID: spec.roomID, eventID: spec.eventID, saved: spec.saved,
+            at: Date(timeIntervalSince1970: Double(spec.now) / 1_000))
+        #expect(try JSONValue(json: changed.json) == spec.expected)
     }
 
-    @Test("Each list keeps its newest ten thousand")
-    func limit() throws {
-        let saved = (0...10_000).map {
+    private static func references(_ count: Int) -> [SavedMessageReference] {
+        (1...count).map {
             SavedMessageReference(
                 roomID: "!design:example.org", eventID: "$\($0)", savedAt: Date(timeIntervalSince1970: Double($0)))
         }
-        let list = SavedMessages(saved: saved, removed: [])
-        #expect(list.saved.first?.eventID == "$10000")
-        #expect(list.saved.last?.eventID == "$1")
+    }
+
+    @Test("Later keeps its newest ten thousand saved messages")
+    func savedLimit() {
+        let list = SavedMessages(saved: Self.references(10_001))
+        #expect(list.saved.first?.eventID == "$10001")
+        #expect(list.saved.last?.eventID == "$2")
+    }
+
+    @Test("Later remembers its newest thousand removals, however far ahead a device's clock runs")
+    func removalLimit() {
+        let ahead = SavedMessageReference(
+            roomID: "!general:example.org", eventID: "$ahead", savedAt: Date(timeIntervalSince1970: 4_000_000_000))
+        let list = SavedMessages(saved: [ahead], removed: Self.references(1_001))
+        #expect(list.removed.first?.eventID == "$1001")
+        #expect(list.removed.last?.eventID == "$2")
     }
 }
 
