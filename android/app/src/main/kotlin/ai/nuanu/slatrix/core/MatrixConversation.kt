@@ -101,7 +101,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                 loadOlder()
                 for (batch in updates) {
                     batch.forEach(::apply)
-                    mutableState.update { it.copy(messages = items.filterNotNull(), loading = false) }
+                    // A cleared or reset timeline starts over from the live end.
+                    val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
+                    mutableState.update { it.copy(messages = items.filterNotNull(), loading = false, hasMore = it.hasMore || reset) }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
