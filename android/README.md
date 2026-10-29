@@ -19,11 +19,35 @@ Colors and radii live in `design/tokens.json` and `DesignTokens.kt`. Change both
 Android type and spacing tokens live in the design system. Screens use those roles;
 Android lint rejects raw Compose colors and literal sizes outside that package.
 
+## Using the app
+
+Choose a homeserver, sign in with the method it offers, and verify the device with
+another device or a recovery key. Home lists joined spaces and conversations.
+The workspace menu filters channels; direct messages remain available in every workspace.
+Open You, then Preferences, to change the color mode and sidebar palette.
+Color mode follows the system until you choose Light or Dark.
+
+Use a dedicated test account and room for automated message checks.
+
+## Push notifications
+
+Push builds need a Firebase Android client and an HTTPS Sygnal gateway. Keep the
+Firebase configuration outside the repository, then pass its absolute path:
+
+```sh
+./gradlew :app:assembleDebug \
+  -PslatrixGoogleServices=/absolute/path/google-services.json \
+  -PslatrixPushGateway=https://push.example.org/_matrix/push/v1/notify
+```
+
+The Firebase file must include `ai.nuanu.slatrix.dev` for debug builds or
+`ai.nuanu.slatrix` for release builds. Sygnal uses the same package as its app ID
+and sends through that Firebase project. Its service-account key stays on the
+server. Builds without these properties leave push disabled.
+
 ## Screen mockups
 
-The app opens with fictional conversations. Home, DMs and Activity share the tab bar;
-open the profile photo for You. Appearance offers Aubergine and Lagoon in light or dark.
-Messages sent here stay in the local preview.
+Render the six fictional screen fixtures without signing in:
 
 ```sh
 ./gradlew :app:recordRoborazziDebug
@@ -31,4 +55,3 @@ Messages sent here stay in the local preview.
 
 The PNGs in `app/build/outputs/roborazzi/` cover all six screens, both themes and palettes,
 plus larger text. Android CI attaches them with its test reports and APKs.
-The owner chooses the direction before these screens connect to Matrix.

@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-29T09:05:31.227730+00:00",
+  "title": "Design System: Slatrix for Android",
+  "extensions": {
+    "breakpoints": [
+      {
+        "name": "expanded",
+        "value": "600dp"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Account action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Full-width primary account action.",
+      "html": "<button class=\"ds-account\">Continue</button>",
+      "css": ".ds-account { width:100%; background:#007a5a; color:#fff; border:0; border-radius:4px; font-family:sans-serif; font-weight:500; cursor:pointer; } .ds-account:hover { background-image:linear-gradient(#ffffff14,#ffffff14); } .ds-account:active { background-image:linear-gradient(#ffffff24,#ffffff24); } .ds-account:focus-visible { outline:2px solid #1d9bd1; outline-offset:2px; }"
+    },
+    {
+      "name": "Text action",
+      "kind": "button",
+      "description": "Retry or Cancel uses the accent without a filled container.",
+      "html": "<button class=\"ds-text\">Retry</button>",
+      "css": ".ds-text { color:#8195ff; background:transparent; border:0; border-radius:4px; font-family:sans-serif; font-weight:500; cursor:pointer; } .ds-text:hover { background:#ffffff14; } .ds-text:active { background:#ffffff24; } .ds-text:focus-visible { outline:2px solid #1d9bd1; }"
+    },
+    {
+      "name": "Conversation search",
+      "kind": "input",
+      "description": "Dark-mode outlined conversation filter.",
+      "html": "<input class=\"ds-search\" aria-label=\"Find a channel or conversation\" placeholder=\"Find a channel or conversation\">",
+      "css": ".ds-search { background:#1c1d21; color:#f5f5f5; border:1px solid #5a5c61; border-radius:8px; padding:16px; font-family:sans-serif; } .ds-search::placeholder { color:#abadb1; } .ds-search:hover { border-color:#f5f5f5; } .ds-search:focus-visible { outline:2px solid #8195ff; outline-offset:-2px; }"
+    },
+    {
+      "name": "Home navigation",
+      "kind": "nav",
+      "description": "Selected navigation in the dark Aubergine palette.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Main\"><button aria-current=\"page\">Home</button><button>DMs</button><button>You</button></nav>",
+      "css": ".ds-nav { display:flex; gap:16px; background:#1c1d21; padding:8px 16px; } .ds-nav button { color:#abadb1; background:transparent; border:0; padding:12px 16px; font-family:sans-serif; font-weight:500; cursor:pointer; } .ds-nav button[aria-current] { color:#f5f5f5; background:#713783; } .ds-nav button:hover { background-image:linear-gradient(#ffffff14,#ffffff14); } .ds-nav button:focus-visible { outline:2px solid #1d9bd1; } .ds-nav button:active { background-image:linear-gradient(#ffffff24,#ffffff24); }"
+    },
+    {
+      "name": "Conversation header",
+      "kind": "card",
+      "refersTo": "conversation-header-dark",
+      "description": "Tonal container for a conversation title and optional topic.",
+      "html": "<section class=\"ds-header\"><strong>design</strong><span>Discuss the next release</span></section>",
+      "css": ".ds-header { background:#24262a; color:#f5f5f5; border-radius:12px; padding:4px 12px; font-family:sans-serif; } .ds-header strong { display:block; font-weight:700; } .ds-header span { display:block; color:#abadb1; font-family:sans-serif; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Slack on Android",
+    "overview": "Conversations lead. Familiar Slack navigation, compact rows and clear unread states sit inside native Android controls. The workspace frame carries the chosen palette; the conversation canvas stays neutral.",
+    "keyCharacteristics": [
+      "Dense, readable conversation lists.",
+      "Quiet surfaces with restrained color.",
+      "Native text scaling, Back and keyboard behavior."
+    ],
+    "rules": [
+      {
+        "name": "The Role Color Rule",
+        "body": "Read colors through `SlatrixTheme.colors`; preserve the light and dark role pairs.",
+        "section": "colors"
+      },
+      {
+        "name": "The Scaled Type Rule",
+        "body": "Use theme type roles and allow Android system font scaling. Do not replace them with fixed text sizes. The app inherits Material's font metrics; it has no separate display face.",
+        "section": "typography"
+      }
+    ],
+    "dos": [
+      "Do follow Slack Android conventions for supported actions and wording.",
+      "Do use shared color roles, shared radii and Android spacing tokens.",
+      "Do preserve readable foregrounds in both modes and at larger text sizes.",
+      "Do show cached content immediately and keep rows still as details arrive."
+    ],
+    "donts": [
+      "Don't expose controls without a working action.",
+      "Don't replace native icons with text glyphs.",
+      "Don't cover visible content with loading UI or add loading explanations."
+    ]
+  }
+}
