@@ -115,7 +115,7 @@ class MatrixWorkspaceTest {
     }
 
     // capability: composer.drafts
-    @Test fun navigationRestoresEachRoomsDraftAndBackReleasesItsSdkResources() = runTest {
+    @Test fun navigationRestoresEachRoomsDraftAndReleasesAllButTheKeptTimelines() = runTest {
         val client = WorkspaceClient()
         val workspace = MatrixWorkspace(backgroundScope, client)
         val alpha = workspaceRoom("!alpha:example.org", "Alpha")
@@ -149,7 +149,8 @@ class MatrixWorkspaceTest {
         assertSame("Keep the channel mounted until its draft is saved", beforeBack, workspace.selected.value)
         runCurrent()
         assertNull(workspace.selected.value)
-        assertEquals(true, client.handles.all { it.uniffiIsDestroyed })
+        assertEquals("Only Alpha's and Beta's timelines stay open, kept for coming back", 2,
+            client.handles.count { !it.uniffiIsDestroyed })
 
         workspace.open(alpha)
         runCurrent()

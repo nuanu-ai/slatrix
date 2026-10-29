@@ -359,6 +359,8 @@ class LiveChannelScreenTest {
             }
         }
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(60)
+        // Partway through a row, so the place has an offset.
+        compose.onNode(hasScrollToIndexAction()).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 150f) }
         val before = compose.onNodeWithText("Message 140").fetchSemanticsNode().boundsInRoot
 
         compose.runOnIdle { shown.value = false }

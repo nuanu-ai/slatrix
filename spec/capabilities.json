@@ -39,7 +39,7 @@
     {"id": "conversation.read", "what": "Reading a conversation's newest messages marks it read.", "mac": "done", "android": "done"},
     {"id": "conversation.mark-read", "what": "Mark a conversation, or every conversation, read.", "mac": "done", "android": "missing"},
     {"id": "conversation.mark-unread", "what": "Mark a conversation unread.", "mac": "done", "android": "missing"},
-    {"id": "conversation.keep-position", "what": "Coming back to a conversation returns to where you were reading.", "mac": "done", "android": "missing"},
+    {"id": "conversation.keep-position", "what": "Coming back to a conversation returns to where you were reading.", "mac": "done", "android": "done"},
     {"id": "conversation.jump-to-message", "what": "A message opened from search or a link shows highlighted in its conversation.", "mac": "done", "android": "done"},
     {"id": "conversation.members", "what": "See a conversation's members from its header.", "mac": "done", "android": "done"},
     {"id": "conversation.files", "what": "See the files and links shared in a conversation.", "mac": "done", "android": "done"},
