@@ -78,7 +78,11 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
     val focusManager = LocalFocusManager.current
     // Coming back to results leaves the keyboard down, so it doesn't cover them; after the process was gone, it asks again.
     LaunchedEffect(Unit) {
-        if (!submitted) { focus.requestFocus(); keyboard?.show() }
+        if (!submitted) {
+            focus.requestFocus()
+            keyboard?.show()
+            if (text.isNotBlank()) onPeopleQuery(text)
+        }
         else if (messages.query == null) onSearch(MessageSearchQuery.parse(text, rooms, me))
     }
     val submit = {
@@ -141,8 +145,8 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<St
     onRecent: (String) -> Unit, onPerson: (Person) -> Unit, onRoom: (String) -> Unit) {
     val channels = remember(text, rooms) { ConversationSearch.results(rooms.filterNot { it.direct }, text).take(SuggestionCount) }
     val people = remember(text, rooms) { ConversationSearch.results(rooms.filter { it.direct }, text).take(SuggestionCount) }
-    // Then the server's directory, past the people you already have a conversation with.
-    val others = remember(directory, people) { directory.filter { person -> people.none { it.name == person.name } }.take(SuggestionCount) }
+    // Then the server's directory.
+    val others = remember(directory) { directory.take(SuggestionCount) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = UiMetrics.GapSmall)) {
         item {
             SearchRow(onSubmit) {
@@ -174,9 +178,14 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<St
         }
         items(others, key = { "person ${it.id}" }) { person ->
             SearchRow({ onPerson(person) }) {
-                LiveAvatar(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), UiMetrics.CompactAvatar)
+                LiveAvatar(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), UiMetrics.CompactAvatar, person.avatarUrl)
                 Spacer(Modifier.width(UiMetrics.GapMedium))
-                RowTitle(person.name)
+                // The Matrix ID tells namesakes apart, and someone you have a conversation with from their profile.
+                Text(buildAnnotatedString {
+                    append(person.name)
+                    withStyle(SpanStyle(color = SlatrixTheme.colors.textSecondary)) { append("  ${person.id}") }
+                }, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textBody, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
             }
         }
     }

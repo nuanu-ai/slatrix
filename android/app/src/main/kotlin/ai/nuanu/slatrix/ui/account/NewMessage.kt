@@ -55,18 +55,22 @@ fun NewMessageScreen(state: PeopleSearchState, recent: List<RoomSummary>, openin
     onPerson: (Person) -> Unit, onRoom: (String) -> Unit, onBack: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
+    LaunchedEffect(Unit) {
+        focus.requestFocus()
+        // After the page was recreated, such as on rotation, the query it still shows asks again.
+        if (query.isNotBlank()) onQuery(query)
+    }
     Box(Modifier.fillMaxSize()) {
         PushedPage("New message", onBack) {
             item { SearchField(query, { query = it; onQuery(it) }, { onQuery(query) }, Modifier.focusRequester(focus), "To: a name or Matrix ID") }
             if (query.isBlank()) {
                 if (recent.isNotEmpty()) item { Section("Direct messages") }
                 items(recent, key = { it.id }) { room ->
-                    PersonRow(room.initials, room.colorIndex, room.name, null, false, opening == null) { onRoom(room.id) }
+                    PersonRow(room.initials, room.colorIndex, room.avatarUrl, room.name, null, false, opening == null) { onRoom(room.id) }
                 }
             } else {
                 items(state.people, key = { it.id }) { person ->
-                    PersonRow(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), person.name,
+                    PersonRow(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), person.avatarUrl, person.name,
                         person.id.takeIf { it != person.name }, opening == person.id, opening == null) { onPerson(person) }
                 }
                 when {
@@ -84,12 +88,12 @@ fun NewMessageScreen(state: PeopleSearchState, recent: List<RoomSummary>, openin
 }
 
 @Composable
-private fun PersonRow(initials: String, colorIndex: Int, name: String, id: String?, opening: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun PersonRow(initials: String, colorIndex: Int, url: String?, name: String, id: String?, opening: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val colors = SlatrixTheme.colors
     Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow).clickable(enabled, role = Role.Button, onClick = onClick)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-        LiveAvatar(initials, colorIndex, UiMetrics.ListAvatar)
+        LiveAvatar(initials, colorIndex, UiMetrics.ListAvatar, url)
         Column(Modifier.weight(1f)) {
             Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -108,8 +112,9 @@ private fun Section(text: String) {
 
 /** New message, live: the directory's answers as you type, and the conversation once picked. */
 @Composable
-fun LiveNewMessage(people: MatrixPeople?, rooms: MatrixRooms?, onOpen: (RoomSummary) -> Unit, onBack: () -> Unit) {
-    val state = people?.results?.collectAsState()?.value ?: PeopleSearchState()
+fun LiveNewMessage(me: String, people: MatrixPeople?, rooms: MatrixRooms?, onOpen: (RoomSummary) -> Unit, onBack: () -> Unit) {
+    // You can't message yourself, so the directory's answer leaves you out.
+    val state = (people?.results?.collectAsState()?.value ?: PeopleSearchState()).let { it.copy(people = it.people.filter { person -> person.id != me }) }
     val known = rooms?.state?.collectAsState()?.value?.rooms.orEmpty()
     val recent = remember(known) { known.filter { it.direct } }
     val scope = rememberCoroutineScope()
@@ -118,7 +123,7 @@ fun LiveNewMessage(people: MatrixPeople?, rooms: MatrixRooms?, onOpen: (RoomSumm
     // Search shares the answers, so they go with the page.
     DisposableEffect(people) { onDispose { people?.search("") } }
     NewMessageScreen(state, recent, opening, error, { people?.search(it) }, { person ->
-        if (people == null || rooms == null) return@NewMessageScreen
+        if (people == null || rooms == null || opening != null) return@NewMessageScreen
         opening = person.id
         error = null
         scope.launch {

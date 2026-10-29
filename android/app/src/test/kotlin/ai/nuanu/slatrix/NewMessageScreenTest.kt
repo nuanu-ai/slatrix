@@ -15,6 +15,9 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -22,6 +25,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -51,6 +55,20 @@ class NewMessageScreenTest {
         compose.onNode(hasText("DMs") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
         compose.onNodeWithContentDescription("New message").performClick()
         compose.runOnIdle { assertEquals(2, started) }
+    }
+
+    @Test fun thePlusNeverCoversTheLastConversation() {
+        val many = (1..30).map { RoomSummary("!dm$it:example.org", "Person $it", true, "", UnreadBadge.None, "P", 0) }
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(many, loading = false, spacesKnown = true), {}, {}, {}, onNewMessage = {})
+            }
+        }
+        compose.onNode(hasText("DMs") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
+        repeat(10) { compose.onNode(hasScrollAction()).performTouchInput { swipeUp() } }
+        val last = compose.onNodeWithText("Person 30").fetchSemanticsNode().boundsInRoot
+        val plus = compose.onNodeWithContentDescription("New message").fetchSemanticsNode().boundsInRoot
+        assertTrue("The last row ends above the +", last.bottom <= plus.top)
     }
 
     // capability: people.start-dm
@@ -87,7 +105,7 @@ class NewMessageScreenTest {
             }
         }
         compose.onNode(hasSetTextAction()).performTextInput("sa")
-        compose.onNodeWithText("Sam Lee").performClick()
+        compose.onNodeWithText("Sam Lee", substring = true).performClick()
         compose.runOnIdle {
             assertEquals("sa", asked.last())
             assertEquals(listOf(sam), opened)

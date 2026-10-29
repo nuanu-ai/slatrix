@@ -204,7 +204,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
                                     { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
                             } } }
-                            newMessage -> { { LiveNewMessage(people, rooms, { room -> newMessage = false; workspace?.open(room) }) { newMessage = false } } }
+                            newMessage -> { { LiveNewMessage(userId, people, rooms, { room -> newMessage = false; workspace?.open(room) }) { newMessage = false } } }
                             person != null -> { { person?.let { (id, name) ->
                                 LivePersonProfile(id, name, userId, people, rooms?.state, { room ->
                                     person = null
