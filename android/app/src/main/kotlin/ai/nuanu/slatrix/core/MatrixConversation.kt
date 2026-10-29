@@ -459,34 +459,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                             ImageInfo(attachment.height.toULong(), attachment.width.toULong(), attachment.mimeType, size, null, null, null, null),
                             null)
                         else AttachmentKind.File(FileInfo(attachment.mimeType, size, null, null))
-                        ready.await().sendAttachment(params, kind).use { it.join() }
-                    } finally {
-                        java.io.File(attachment.path).parentFile?.deleteRecursively()
-                    }
-                }
-                if (sent == null) announce("Couldn’t send this file.")
-            }
-        }
-    }
-
-    /** Prepares and sends each in turn, so they arrive in the order picked; the copies go once uploaded. */
-    fun sendAttachments(attachments: List<suspend () -> OutgoingAttachment>) {
-        operations.launch {
-            for (prepare in attachments) {
-                val sent = quietly {
-                    val attachment = prepare()
-                    try {
-                        val params = UploadParameters(UploadSource.File(attachment.path), null, null, null, null,
-                            threadRoot?.let(::threadRelation))
-                        val size = attachment.size.toULong()
-                        val kind = if (attachment.mimeType.startsWith("video/")) AttachmentKind.Video(VideoInfo(
-                            attachment.durationMillis?.let(java.time.Duration::ofMillis), attachment.height?.toULong(),
-                            attachment.width?.toULong(), attachment.mimeType, size, null, null, null), null)
-                        else if (attachment.width != null && attachment.height != null) AttachmentKind.Image(
-                            ImageInfo(attachment.height.toULong(), attachment.width.toULong(), attachment.mimeType, size, null, null, null, null),
-                            null)
-                        else AttachmentKind.File(FileInfo(attachment.mimeType, size, null, null))
-                        ready.await().sendAttachment(params, kind).use { it.join() }
+                        timeline().sendAttachment(params, kind).use { it.join() }
                     } finally {
                         java.io.File(attachment.path).parentFile?.deleteRecursively()
                     }
