@@ -4,7 +4,7 @@ import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.MessageBlock
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageRun
-import ai.nuanu.slatrix.core.TextStyle
+import ai.nuanu.slatrix.core.MessageTextStyle
 import ai.nuanu.slatrix.ui.designsystem.AppColors
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -38,6 +38,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 
 /** One line of a message, without its line break, and the block it sits in. */
@@ -52,7 +54,7 @@ private class Line(val runs: MutableList<MessageRun> = mutableListOf(), var bloc
     val marker get() = runs.firstOrNull()?.takeIf { it.marker }
 }
 
-/** Lines that sit together: text, a list item with its marker, a quote or a code block. */
+/** Lines that sit together: text, or a list item with its marker, which an item's continued text leaves empty. */
 private sealed interface Piece {
     data class Text(val lines: List<Line>) : Piece
     data class Item(val depth: Int, val marker: String, val lines: List<Line>) : Piece
@@ -86,6 +88,7 @@ private fun pieces(lines: List<Line>): List<Piece> {
         when {
             marker != null -> pieces += Piece.Item(depth, marker.text.trimEnd(), listOf(Line(line.runs.drop(1).toMutableList(), line.block)))
             depth > 0 && last is Piece.Item && last.depth == depth -> pieces[pieces.lastIndex] = last.copy(lines = last.lines + line)
+            depth > 0 -> pieces += Piece.Item(depth, "", listOf(line))
             last is Piece.Text -> pieces[pieces.lastIndex] = last.copy(lines = last.lines + line)
             else -> pieces += Piece.Text(listOf(line))
         }
@@ -93,14 +96,24 @@ private fun pieces(lines: List<Line>): List<Piece> {
     return pieces
 }
 
+/** Lines in a quote, a code block, both or neither, grouped as the Mac draws them; a nested quote shows one bar. */
+private fun groups(runs: List<MessageRun>): List<Pair<MessageBlock, List<Piece>>> =
+    lines(runs).fold(mutableListOf<MutableList<Line>>()) { groups, line ->
+        val last = groups.lastOrNull()?.last()?.block ?: MessageBlock()
+        val block = line.block ?: MessageBlock()
+        if (groups.isNotEmpty() && (last.quote > 0) == (block.quote > 0) && last.code == block.code) groups.last() += line
+        else groups += mutableListOf(line)
+        groups
+    }.map { (it.first().block ?: MessageBlock()) to pieces(it) }
+
 private fun AnnotatedString.Builder.append(lines: List<Line>, colors: AppColors, codeSize: TextUnit) {
     lines.forEachIndexed { index, line ->
         if (index > 0) append('\n')
         for (run in line.runs) {
-            val code = TextStyle.Code in run.styles
+            val code = MessageTextStyle.Code in run.styles
             val decorations = listOfNotNull(
-                TextDecoration.LineThrough.takeIf { TextStyle.Strike in run.styles },
-                TextDecoration.Underline.takeIf { TextStyle.Underline in run.styles },
+                TextDecoration.LineThrough.takeIf { MessageTextStyle.Strike in run.styles },
+                TextDecoration.Underline.takeIf { MessageTextStyle.Underline in run.styles },
             )
             val style = SpanStyle(
                 color = when {
@@ -108,8 +121,8 @@ private fun AnnotatedString.Builder.append(lines: List<Line>, colors: AppColors,
                     run.link != null -> colors.accent
                     else -> Color.Unspecified
                 },
-                fontWeight = FontWeight.Bold.takeIf { TextStyle.Bold in run.styles },
-                fontStyle = FontStyle.Italic.takeIf { TextStyle.Italic in run.styles },
+                fontWeight = FontWeight.Bold.takeIf { MessageTextStyle.Bold in run.styles },
+                fontStyle = FontStyle.Italic.takeIf { MessageTextStyle.Italic in run.styles },
                 fontFamily = FontFamily.Monospace.takeIf { code },
                 fontSize = if (code) codeSize else TextUnit.Unspecified,
                 textDecoration = decorations.takeIf { it.isNotEmpty() }?.let(TextDecoration::combine),
@@ -137,57 +150,45 @@ fun MessageBody(message: ConversationMessage, color: Color) {
         }, style = textStyle, color = colors.textSecondary)
         MessageKind.Encrypted -> return Row(verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
-            Icon(Icons.Outlined.Lock, null, Modifier.size(with(LocalDensity.current) { textStyle.fontSize.toDp() }), tint = colors.textSecondary)
+            val secondary = MaterialTheme.typography.bodyMedium
+            Icon(Icons.Outlined.Lock, null, Modifier.size(with(LocalDensity.current) { secondary.fontSize.toDp() }), tint = colors.textSecondary)
             Text(buildAnnotatedString { withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(message.body) } },
-                style = textStyle, color = colors.textSecondary)
+                style = secondary, color = colors.textSecondary)
         }
         else -> {}
     }
-    val pieces = remember(message.runs) {
-        // A quote's or code block's lines stay together; a nested quote shows one bar, as on the Mac.
-        lines(message.runs).fold(mutableListOf<MutableList<Line>>()) { groups, line ->
-            val last = groups.lastOrNull()?.last()?.block
-            val block = line.block ?: MessageBlock()
-            if (last != null && (last.quote > 0) == (block.quote > 0) && last.code == block.code) groups.last() += line
-            else groups += mutableListOf(line)
-            groups
-        }.map { it.first().block to pieces(it) }
-    }
-    val emote = message.kind == MessageKind.Emote
+    val groups = remember(message.runs) { groups(message.runs) }
+    // The marker fills the list indent, so a wrapped line starts under the item's first word, as on the Mac.
+    val indent = with(LocalDensity.current) { (textStyle.fontSize * UiMetrics.ListIndentScale).toDp() }
+    // Slack ends an edited message's last line with a quiet "(edited)", or puts it under a code block.
+    val editedBelow = message.edited && groups.lastOrNull()?.first?.code == true
     Column(verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
-        pieces.forEachIndexed { index, (block, group) ->
-            // Slack ends an edited message's last line with a quiet "(edited)".
-            val suffix = message.edited && index == pieces.lastIndex && block?.code != true
+        groups.forEachIndexed { index, (block, pieces) ->
             val content = @Composable {
-                MessagePieces(group, colors, color, textStyle,
-                    emote, suffix)
+                MessagePieces(pieces, colors, color, textStyle, indent, message.kind == MessageKind.Emote,
+                    message.edited && !editedBelow && index == groups.lastIndex)
             }
-            when {
-                block?.code == true -> Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small, color = colors.codeBlock,
-                    border = BorderStroke(UiMetrics.Divider, colors.codeBlockEdge)) {
+            val text = @Composable {
+                if (block.code) Surface(Modifier.padding(start = indent * block.list).fillMaxWidth(), shape = MaterialTheme.shapes.small,
+                    color = colors.codeBlock, border = BorderStroke(UiMetrics.Divider, colors.codeBlockEdge)) {
                     Box(Modifier.padding(UiMetrics.GapSmall)) { content() }
-                }
-                (block?.quote ?: 0) > 0 -> Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-                    Box(Modifier.width(UiMetrics.QuoteBar).fillMaxHeight().background(colors.quoteBar, MaterialTheme.shapes.extraSmall))
-                    content()
-                }
-                else -> content()
+                } else content()
             }
+            if (block.quote > 0) Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+                Box(Modifier.width(UiMetrics.QuoteBar).fillMaxHeight().background(colors.quoteBar, MaterialTheme.shapes.extraSmall))
+                text()
+            } else text()
         }
-        if (message.edited && pieces.lastOrNull()?.first?.code == true) {
-            Text("(edited)", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-        }
+        if (editedBelow) Text("(edited)", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
     }
 }
 
 @Composable
-private fun MessagePieces(pieces: List<Piece>, colors: AppColors, color: Color, style: androidx.compose.ui.text.TextStyle,
+private fun MessagePieces(pieces: List<Piece>, colors: AppColors, color: Color, style: TextStyle, indent: Dp,
     emote: Boolean, edited: Boolean) {
-    // The marker fills the list indent, so a wrapped line starts under the item's first word, as on the Mac.
-    val indent = with(LocalDensity.current) { (style.fontSize * 1.6f).toDp() }
     val caption = MaterialTheme.typography.bodySmall
     fun text(lines: List<Line>, last: Boolean) = buildAnnotatedString {
-        val codeSize = style.fontSize * 0.9f
+        val codeSize = style.fontSize * UiMetrics.CodeTextScale
         if (emote) withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(lines, colors, codeSize) } else append(lines, colors, codeSize)
         if (edited && last) withStyle(SpanStyle(color = colors.textSecondary, fontSize = caption.fontSize)) { append(" (edited)") }
     }
