@@ -1,0 +1,360 @@
+{
+  "about": "How a message's text shows: its formatted_body (html) when it has one, else its plain body. The result is a list of runs, each a piece of text and what it looks like, merged wherever two neighbours look the same. style lists bold, italic, strike, code and underline; link is where a tap goes; mention is the user ID a pill names, or @room. quote and list give the depth of the quote or list a line sits in, and a line break belongs to the line it ends. code is true inside a code block; marker is true for a list item's bullet or number. A field left out is empty, zero or false. HTML the app can't show safely or fully falls back to the plain body. Web and mail addresses and user IDs typed as text become links and mentions, outside code.",
+  "cases": [
+    {
+      "name": "A plain body shows as typed, never as Markdown",
+      "body": "**literal** _too_",
+      "html": null,
+      "runs": [{ "text": "**literal** _too_" }]
+    },
+    {
+      "name": "Bold, italic, strike and inline code",
+      "body": "bold italic struck inline",
+      "html": "<strong>bold</strong> <em>italic</em> <del>struck</del> <code>inline</code>",
+      "runs": [
+        { "text": "bold", "style": ["bold"] },
+        { "text": " " },
+        { "text": "italic", "style": ["italic"] },
+        { "text": " " },
+        { "text": "struck", "style": ["strike"] },
+        { "text": " " },
+        { "text": "inline", "style": ["code"] }
+      ]
+    },
+    {
+      "name": "Nested styles combine",
+      "body": "very much",
+      "html": "<b>very <i>much</i></b> <u>under</u>",
+      "runs": [
+        { "text": "very ", "style": ["bold"] },
+        { "text": "much", "style": ["bold", "italic"] },
+        { "text": " " },
+        { "text": "under", "style": ["underline"] }
+      ]
+    },
+    {
+      "name": "The normal-weight bold that Google Docs wraps around copied text is not bold",
+      "body": "plain",
+      "html": "<b style=\"font-weight:normal;\">plain</b>",
+      "runs": [{ "text": "plain" }]
+    },
+    {
+      "name": "Paragraphs and line breaks start new lines",
+      "body": "one two three",
+      "html": "<p>one</p><p>two<br>three</p>",
+      "runs": [{ "text": "one\ntwo\nthree" }]
+    },
+    {
+      "name": "Whitespace collapses to one space and never starts a line",
+      "body": "one two three",
+      "html": "<p>  one \n\t two</p><p> three</p>",
+      "runs": [{ "text": "one two\nthree" }]
+    },
+    {
+      "name": "Two line breaks leave an empty line",
+      "body": "one two",
+      "html": "one<br><br>two",
+      "runs": [{ "text": "one\n\ntwo" }]
+    },
+    {
+      "name": "Entities read as their characters",
+      "body": "Tom & Jerry <3",
+      "html": "Tom &amp; Jerry &lt;3",
+      "runs": [{ "text": "Tom & Jerry <3" }]
+    },
+    {
+      "name": "A heading is a bold line",
+      "body": "Title text",
+      "html": "<h3>Title</h3><p>text</p>",
+      "runs": [{ "text": "Title", "style": ["bold"] }, { "text": "\ntext" }]
+    },
+    {
+      "name": "A rule is a line of its own",
+      "body": "one two",
+      "html": "one<hr>two",
+      "runs": [{ "text": "one\n—\ntwo" }]
+    },
+    {
+      "name": "A code block keeps its spaces and line breaks",
+      "body": "let x = 1",
+      "html": "<pre><code class=\"language-swift\">let x = 1\n    let y = 2</code></pre>",
+      "runs": [{ "text": "let x = 1\n    let y = 2", "style": ["code"], "code": true }]
+    },
+    {
+      "name": "Text after a code block starts below it",
+      "body": "make test then ship",
+      "html": "<pre><code>make test\n</code></pre><p>then ship</p>",
+      "runs": [{ "text": "make test\n", "style": ["code"], "code": true }, { "text": "then ship" }]
+    },
+    {
+      "name": "Addresses and user IDs in inline code stay text",
+      "body": "https://example.org @alice:example.org",
+      "html": "<code>https://example.org @alice:example.org</code>",
+      "runs": [{ "text": "https://example.org @alice:example.org", "style": ["code"] }]
+    },
+    {
+      "name": "A quote's lines, its line breaks included, carry its depth",
+      "body": "first second after",
+      "html": "<blockquote>first<br>second</blockquote><p>after</p>",
+      "runs": [{ "text": "first\nsecond\n", "quote": 1 }, { "text": "after" }]
+    },
+    {
+      "name": "A quote inside a quote goes one deeper",
+      "body": "outer inner",
+      "html": "<blockquote>outer<blockquote>inner</blockquote></blockquote>",
+      "runs": [{ "text": "outer\n", "quote": 1 }, { "text": "inner", "quote": 2 }]
+    },
+    {
+      "name": "A bulleted list puts a bullet before each item",
+      "body": "one two",
+      "html": "<ul>\n<li>one</li>\n<li>two</li>\n</ul>",
+      "runs": [
+        { "text": "• ", "list": 1, "marker": true },
+        { "text": "one\n", "list": 1 },
+        { "text": "• ", "list": 1, "marker": true },
+        { "text": "two", "list": 1 }
+      ]
+    },
+    {
+      "name": "A numbered list counts from its start",
+      "body": "three four",
+      "html": "<ol start=\"3\"><li>three</li><li>four</li></ol>",
+      "runs": [
+        { "text": "3. ", "list": 1, "marker": true },
+        { "text": "three\n", "list": 1 },
+        { "text": "4. ", "list": 1, "marker": true },
+        { "text": "four", "list": 1 }
+      ]
+    },
+    {
+      "name": "A list inside a list goes one deeper",
+      "body": "one inner two",
+      "html": "<ul><li>one<ul><li>inner</li></ul></li><li>two</li></ul>",
+      "runs": [
+        { "text": "• ", "list": 1, "marker": true },
+        { "text": "one\n", "list": 1 },
+        { "text": "• ", "list": 2, "marker": true },
+        { "text": "inner\n", "list": 2 },
+        { "text": "• ", "list": 1, "marker": true },
+        { "text": "two", "list": 1 }
+      ]
+    },
+    {
+      "name": "A list starts on the line after the text above it",
+      "body": "Plan: ship",
+      "html": "<p>Plan:</p><ul><li>ship</li></ul>",
+      "runs": [{ "text": "Plan:\n" }, { "text": "• ", "list": 1, "marker": true }, { "text": "ship", "list": 1 }]
+    },
+    {
+      "name": "Paragraphs inside list items stay on the bullet's line",
+      "body": "a b",
+      "html": "<ul><li><p>a</p></li><li><p>b</p></li></ul>",
+      "runs": [
+        { "text": "• ", "list": 1, "marker": true },
+        { "text": "a\n", "list": 1 },
+        { "text": "• ", "list": 1, "marker": true },
+        { "text": "b", "list": 1 }
+      ]
+    },
+    {
+      "name": "A link to a room stays a link",
+      "body": "#room:example.org",
+      "html": "<a href=\"https://matrix.to/#/#room:example.org\">#room:example.org</a>",
+      "runs": [{ "text": "#room:example.org", "link": "https://matrix.to/#/%23room:example.org" }]
+    },
+    {
+      "name": "A link with characters a web address can't hold has them escaped",
+      "body": "notes",
+      "html": "<a href=\"https://my_host.example.org/a b\">notes</a>",
+      "runs": [{ "text": "notes", "link": "https://my_host.example.org/a%20b" }]
+    },
+    {
+      "name": "A link keeps its text and goes to its target",
+      "body": "See the docs",
+      "html": "See <a href=\"https://example.org/docs\">the docs</a>",
+      "runs": [{ "text": "See " }, { "text": "the docs", "link": "https://example.org/docs" }]
+    },
+    {
+      "name": "A script link is only text",
+      "body": "unsafe",
+      "html": "<a href=\"javascript:alert(1)\">unsafe</a>",
+      "runs": [{ "text": "unsafe" }]
+    },
+    {
+      "name": "A link that carries a password is only text",
+      "body": "site",
+      "html": "<a href=\"https://user:secret@example.org\">site</a>",
+      "runs": [{ "text": "site" }]
+    },
+    {
+      "name": "A link to a person is a pill with @ and the link's text",
+      "body": "Hi Alice!",
+      "html": "Hi <a href=\"https://matrix.to/#/@alice:example.org\">Alice</a>!",
+      "runs": [
+        { "text": "Hi " },
+        { "text": "@Alice", "link": "https://matrix.to/#/@alice:example.org", "mention": "@alice:example.org" },
+        { "text": "!" }
+      ]
+    },
+    {
+      "name": "A person link whose text already starts with @ gets no second one",
+      "body": "@Alice",
+      "html": "<a href=\"https://matrix.to/#/@alice:example.org\">@Alice</a>",
+      "runs": [{ "text": "@Alice", "link": "https://matrix.to/#/@alice:example.org", "mention": "@alice:example.org" }]
+    },
+    {
+      "name": "A person link that shows the bare ID reads @ and its localpart",
+      "body": "@alice:example.org",
+      "html": "<a href=\"https://matrix.to/#/@alice:example.org\">@alice:example.org</a>",
+      "runs": [{ "text": "@alice", "link": "https://matrix.to/#/@alice:example.org", "mention": "@alice:example.org" }]
+    },
+    {
+      "name": "A matrix: link to a person is a pill too",
+      "body": "Alice",
+      "html": "<a href=\"matrix:u/alice:example.org?action=chat\">Alice</a>",
+      "runs": [{ "text": "@Alice", "link": "matrix:u/alice:example.org?action=chat", "mention": "@alice:example.org" }]
+    },
+    {
+      "name": "Links to one person with nothing between them are one pill",
+      "body": "deadlock agent",
+      "html": "<a href=\"https://matrix.to/#/@dl:example.org\">deadlock agen</a><a href=\"https://matrix.to/#/@dl:example.org\">t</a>",
+      "runs": [{ "text": "@deadlock agent", "link": "https://matrix.to/#/@dl:example.org", "mention": "@dl:example.org" }]
+    },
+    {
+      "name": "Links to two people side by side stay two pills",
+      "body": "Alice Bob",
+      "html": "<a href=\"https://matrix.to/#/@alice:example.org\">Alice</a><a href=\"https://matrix.to/#/@bob:example.org\">Bob</a>",
+      "runs": [
+        { "text": "@Alice", "link": "https://matrix.to/#/@alice:example.org", "mention": "@alice:example.org" },
+        { "text": "@Bob", "link": "https://matrix.to/#/@bob:example.org", "mention": "@bob:example.org" }
+      ]
+    },
+    {
+      "name": "A typed user ID reads @ and its localpart, and @room mentions everyone",
+      "body": "@room ping @alice:example.org.",
+      "html": null,
+      "runs": [
+        { "text": "@room", "mention": "@room" },
+        { "text": " ping " },
+        { "text": "@alice", "link": "https://matrix.to/#/@alice:example.org", "mention": "@alice:example.org" },
+        { "text": "." }
+      ]
+    },
+    {
+      "name": "Words that only start like a mention stay text",
+      "body": "@roommate and me@room",
+      "html": null,
+      "runs": [{ "text": "@roommate and me@room" }]
+    },
+    {
+      "name": "A typed web address becomes a link",
+      "body": "See https://example.org/docs?a=1 today",
+      "html": null,
+      "runs": [
+        { "text": "See " },
+        { "text": "https://example.org/docs?a=1", "link": "https://example.org/docs?a=1" },
+        { "text": " today" }
+      ]
+    },
+    {
+      "name": "A typed www address links over http and leaves the full stop after it",
+      "body": "Docs at www.example.org.",
+      "html": null,
+      "runs": [{ "text": "Docs at " }, { "text": "www.example.org", "link": "http://www.example.org" }, { "text": "." }]
+    },
+    {
+      "name": "A typed domain becomes a link, while file names and version numbers stay text",
+      "body": "See example.com and github.com/nuanu-ai today, or notes.txt and v1.2",
+      "html": null,
+      "runs": [
+        { "text": "See " },
+        { "text": "example.com", "link": "http://example.com" },
+        { "text": " and " },
+        { "text": "github.com/nuanu-ai", "link": "http://github.com/nuanu-ai" },
+        { "text": " today, or notes.txt and v1.2" }
+      ]
+    },
+    {
+      "name": "A typed address keeps its own closing parenthesis and leaves the sentence's",
+      "body": "Read https://en.wikipedia.org/wiki/Foo_(bar) (or https://example.org/x).",
+      "html": null,
+      "runs": [
+        { "text": "Read " },
+        { "text": "https://en.wikipedia.org/wiki/Foo_(bar)", "link": "https://en.wikipedia.org/wiki/Foo_(bar)" },
+        { "text": " (or " },
+        { "text": "https://example.org/x", "link": "https://example.org/x" },
+        { "text": ")." }
+      ]
+    },
+    {
+      "name": "A typed mail address becomes a mail link",
+      "body": "Write to hello@example.org",
+      "html": null,
+      "runs": [{ "text": "Write to " }, { "text": "hello@example.org", "link": "mailto:hello@example.org" }]
+    },
+    {
+      "name": "A typed address keeps the style around it",
+      "body": "Read https://example.org now",
+      "html": "<p>Read <b>https://example.org</b> now</p>",
+      "runs": [
+        { "text": "Read " },
+        { "text": "https://example.org", "style": ["bold"], "link": "https://example.org" },
+        { "text": " now" }
+      ]
+    },
+    {
+      "name": "An address shown as a link's text keeps the link's own target",
+      "body": "https://example.org/shown",
+      "html": "<a href=\"https://example.org/target\">https://example.org/shown</a>",
+      "runs": [{ "text": "https://example.org/shown", "link": "https://example.org/target" }]
+    },
+    {
+      "name": "A reply's quoted fallback is not shown",
+      "body": "> quoted\n\nAnswer",
+      "html": "<mx-reply><blockquote>quoted</blockquote></mx-reply>Answer",
+      "runs": [{ "text": "Answer" }]
+    },
+    {
+      "name": "A spoiler stays hidden",
+      "body": "secret plot",
+      "html": "<span data-mx-spoiler>secret</span> plot",
+      "runs": [{ "text": "[Spoiler hidden] plot" }]
+    },
+    {
+      "name": "An image in the text shows its description",
+      "body": "see diagram",
+      "html": "<p>see <img src=\"mxc://example.org/x\" alt=\"diagram\"></p>",
+      "runs": [{ "text": "see diagram" }]
+    },
+    {
+      "name": "Scripts never show",
+      "body": "safe",
+      "html": "safe<script>secret()</script>",
+      "runs": [{ "text": "safe" }]
+    },
+    {
+      "name": "HTML that shows nothing falls back to the plain body",
+      "body": "Look",
+      "html": "<script>hidden()</script>",
+      "runs": [{ "text": "Look" }]
+    },
+    {
+      "name": "Markup the app can't show falls back to the plain body",
+      "body": "2 cubed",
+      "html": "2<sup>3</sup>",
+      "runs": [{ "text": "2 cubed" }]
+    },
+    {
+      "name": "Maths falls back to the plain body",
+      "body": "x^2",
+      "html": "<span data-mx-maths=\"x^2\">x2</span>",
+      "runs": [{ "text": "x^2" }]
+    },
+    {
+      "name": "A spoiler stays hidden when its message falls back to the plain body",
+      "body": "secret 2^3",
+      "html": "<span data-mx-spoiler>secret</span> 2<sup>3</sup>",
+      "runs": [{ "text": "[Spoiler hidden]" }]
+    }
+  ]
+}

@@ -12,7 +12,7 @@ data class ComposerMessage(val body: String, val html: String?, val mentions: Li
 object ComposerFormat {
     private const val userPattern = "@[A-Za-z0-9._=/+\\-]+:(?:\\[[0-9A-Fa-f:]+\\]|[A-Za-z0-9](?:[A-Za-z0-9.\\-]*[A-Za-z0-9])?)(?::[0-9]{1,5})?"
     private val userID = Regex("^$userPattern$")
-    private val mentioned = Regex("(?<![A-Za-z0-9_])(?:$userPattern|@room(?![A-Za-z0-9_:]))")
+    internal val mentioned = Regex("(?<![A-Za-z0-9_])(?:$userPattern|@room(?![A-Za-z0-9_:]))")
 
     fun plainTextDraft(text: String): String = text.replace("\r\n", "\n").replace("\r", "\n").split('\n').joinToString("<br>") { line ->
         line.mapIndexed { index, character ->
@@ -142,7 +142,7 @@ object ComposerFormat {
         }
     }
 
-    private fun mentionedUser(link: String): String? {
+    internal fun mentionedUser(link: String): String? {
         val uri = runCatching { URI(link) }.getOrNull() ?: return null
         val id = when {
             uri.scheme == "https" && uri.host.equals("matrix.to", ignoreCase = true) -> uri.fragment?.takeIf { it.startsWith("/@") }?.drop(1)?.substringBefore('?')
@@ -155,7 +155,7 @@ object ComposerFormat {
     private fun safeLink(link: String): String? = runCatching { URI(link) }.getOrNull()
         ?.takeIf { it.scheme?.lowercase() in setOf("https", "http", "mailto", "matrix") }?.toString()
 
-    private fun localpart(id: String) = id.drop(1).substringBefore(':')
-    private fun permalink(id: String) = "https://matrix.to/#/$id"
+    internal fun localpart(id: String) = id.drop(1).substringBefore(':')
+    internal fun permalink(id: String) = "https://matrix.to/#/$id"
     private fun escape(text: String): String = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("\u00a0", "&nbsp;")
 }

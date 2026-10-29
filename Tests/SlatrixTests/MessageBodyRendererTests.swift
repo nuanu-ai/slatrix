@@ -8,6 +8,45 @@ struct MessageBodyRendererTests {
         MessageBodyRenderer().render(body: body, formattedBody: html, revealSpoilers: reveal)
     }
 
+    struct FormatCase: Decodable, CustomTestStringConvertible {
+        struct Run: Decodable, Equatable {
+            var text: String
+            var style: Set<String>? = nil
+            var link: String? = nil
+            var mention: String? = nil
+            var quote: Int? = nil
+            var list: Int? = nil
+            var code: Bool? = nil
+            var marker: Bool? = nil
+        }
+        var name: String
+        var body: String
+        var html: String?
+        var runs: [Run]
+        var testDescription: String { name }
+    }
+
+    struct FormatSpec: Decodable { var cases: [FormatCase] }
+
+    // capability: message.rich-text
+    @Test(
+        "A message's text shows as spec/message-format.json says",
+        arguments: try SharedSpec.decode("spec/message-format.json", as: FormatSpec.self).cases)
+    func sharedFormat(spec: FormatCase) {
+        let styles: [(MessageTextStyle, String)] = [
+            (.bold, "bold"), (.italic, "italic"), (.strike, "strike"), (.code, "code"), (.underline, "underline"),
+        ]
+        let shown = render(spec.html, body: spec.body).runs.map { run in
+            let style = Set(styles.filter { run.style.contains($0.0) }.map(\.1))
+            return FormatCase.Run(
+                text: run.text, style: style.isEmpty ? nil : style,
+                link: run.link?.absoluteString, mention: run.mention,
+                quote: run.block.quote == 0 ? nil : run.block.quote, list: run.block.list == 0 ? nil : run.block.list,
+                code: run.block.code ? true : nil, marker: run.marker ? true : nil)
+        }
+        #expect(shown == spec.runs)
+    }
+
     @Test("Entities and line breaks render as text")
     func entitiesAndBreaks() {
         let text = render("<p>Hello &amp; &nbsp; &#x1F44B;<br>next</p>").plainText
