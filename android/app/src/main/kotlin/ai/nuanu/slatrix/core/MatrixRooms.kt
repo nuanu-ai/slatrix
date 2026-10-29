@@ -241,8 +241,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         val value = room.latestEvent()
         try {
             when (value) {
-                is LatestEventValue.Remote -> LatestMessage(preview(value.content), value.timestamp.clampedLong(), value.isOwn)
-                is LatestEventValue.Local -> LatestMessage(preview(value.content), value.timestamp.clampedLong(), own = true)
+                is LatestEventValue.Remote -> LatestMessage(previewText(value.content), value.timestamp.clampedLong(), value.isOwn)
+                is LatestEventValue.Local -> LatestMessage(previewText(value.content), value.timestamp.clampedLong(), own = true)
                 else -> null
             }
         } finally {
@@ -253,16 +253,6 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     } catch (_: Exception) {
         null
     }
-
-    private fun preview(content: TimelineItemContent): String? =
-        when (val kind = (content as? TimelineItemContent.MsgLike)?.content?.kind) {
-            is MsgLikeKind.Message -> kind.content.body
-            is MsgLikeKind.Sticker -> kind.body
-            is MsgLikeKind.Poll -> kind.question
-            is MsgLikeKind.Redacted -> "This message was deleted"
-            is MsgLikeKind.UnableToDecrypt -> "Waiting for this message"
-            else -> null
-        }
 
     private fun publish() {
         mutableState.value = RoomListState(
@@ -423,3 +413,14 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         data class Connection(val error: String?, val generation: Long, val running: Boolean = false) : Event
     }
 }
+
+/** A message's text for a one-line preview; null when there is nothing to show, such as a membership change. */
+internal fun previewText(content: TimelineItemContent): String? =
+    when (val kind = (content as? TimelineItemContent.MsgLike)?.content?.kind) {
+        is MsgLikeKind.Message -> kind.content.body
+        is MsgLikeKind.Sticker -> kind.body
+        is MsgLikeKind.Poll -> kind.question
+        is MsgLikeKind.Redacted -> "This message was deleted"
+        is MsgLikeKind.UnableToDecrypt -> "Waiting for this message"
+        else -> null
+    }
