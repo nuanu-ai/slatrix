@@ -3,6 +3,7 @@ package ai.nuanu.slatrix
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageReaction
 import ai.nuanu.slatrix.core.MessageThread
@@ -16,6 +17,12 @@ import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import android.graphics.Bitmap
+import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.CompletableDeferred
+import org.matrix.rustcomponents.sdk.MediaSource
+import org.matrix.rustcomponents.sdk.NoHandle
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.runtime.mutableStateOf
@@ -23,10 +30,14 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
@@ -51,6 +62,9 @@ class MessageContentTest {
     private var toggled: Pair<ConversationMessage, String>? = null
     private var thread: String? = null
     private var jumped: String? = null
+    private var opened: MessageAttachment? = null
+    private val picture = CompletableDeferred<ByteArray?>()
+    private val opening = CompletableDeferred<String?>()
 
     private fun show(vararg messages: ConversationMessage) {
         compose.setContent {
@@ -58,10 +72,13 @@ class MessageContentTest {
                 LiveChannelScreen(room, ConversationState(messages.toList(), loading = false, hasMore = false, ownUserId = "@me:example.org"),
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
                     onOpenThread = { thread = it }, actions = MessageActions(onReact = { message, key -> toggled = message to key }),
-                    onOpenMessage = { jumped = it })
+                    onOpenMessage = { jumped = it }, loadPicture = { _, _, _, _ -> picture.await() },
+                    onOpenFile = { opened = it; opening.await() })
             }
         }
     }
+
+    private val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office" }
 
     private fun SemanticsNodeInteraction.text(): AnnotatedString =
         fetchSemanticsNode().config[SemanticsProperties.Text].single()
@@ -152,6 +169,49 @@ class MessageContentTest {
         compose.runOnIdle { reply.value = reply.value.copy(replyTo = ReplyPreview("\$p", ReplyPreview.State.Ready, "Sam", "Ship it?")) }
         compose.onNodeWithText("Ship it?", useUnmergedTree = true).assertExists()
         assertEquals(loading, top())
+    }
+
+    // capability: message.image
+    @Test fun anImageTakesItsBoxBeforeItLoadsAndKeepsItAfter() {
+        show(message("office.jpg").copy(kind = MessageKind.Attachment,
+            attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, source)))
+        val before = compose.onNodeWithContentDescription("office.jpg").fetchSemanticsNode().boundsInRoot
+        assertEquals("The box keeps the image's shape", 900f / 1600f, before.height / before.width, 0.01f)
+        val png = ByteArrayOutputStream().also { Bitmap.createBitmap(16, 9, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        picture.complete(png.toByteArray())
+        compose.waitForIdle()
+        assertEquals(before, compose.onNodeWithContentDescription("office.jpg").fetchSemanticsNode().boundsInRoot)
+        compose.onNodeWithText("office.jpg", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    // capability: message.media-viewer
+    @Test fun tappingAnImageOpensItFullScreenUntilClosed() {
+        show(message("office.jpg").copy(kind = MessageKind.Attachment,
+            attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, source)))
+        compose.onNodeWithContentDescription("office.jpg").performClick()
+        compose.onNodeWithContentDescription("Close").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("Close").assertDoesNotExist()
+    }
+
+    // capability: message.file
+    @Test fun aFileShowsAsSlacksFileRowAndATapOpensIt() {
+        val report = MessageAttachment(MessageAttachment.Kind.File, "Q3 report.pdf", "application/pdf", 250_000, null, null, source)
+        show(message("Q3 report.pdf").copy(kind = MessageKind.Attachment, attachment = report))
+        compose.onNodeWithText("PDF", substring = true, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Q3 report.pdf", useUnmergedTree = true).performClick()
+        compose.runOnIdle { assertEquals(report, opened) }
+    }
+
+    // capability: message.file
+    @Test fun aFileKeepsOpeningAfterItsRowScrollsAwayAndSaysWhenItCannot() {
+        val report = MessageAttachment(MessageAttachment.Kind.File, "Q3 report.pdf", "application/pdf", 250_000, null, null, source)
+        show(message("Q3 report.pdf").copy(kind = MessageKind.Attachment, attachment = report), *(1..40).map { message("Message $it") }.toTypedArray())
+        repeat(10) { compose.onNode(hasScrollAction()).performTouchInput { swipeDown() } }
+        compose.onNodeWithText("Q3 report.pdf", useUnmergedTree = true).performClick()
+        repeat(10) { compose.onNode(hasScrollAction()).performTouchInput { swipeUp() } }
+        compose.onNodeWithText("Q3 report.pdf", useUnmergedTree = true).assertDoesNotExist()
+        opening.complete("Couldn’t download Q3 report.pdf.")
+        compose.onNodeWithText("Couldn’t download Q3 report.pdf.").assertIsDisplayed()
     }
 
     // capability: message.deleted

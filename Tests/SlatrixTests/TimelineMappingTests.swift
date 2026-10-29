@@ -126,32 +126,26 @@ struct TimelineMappingTests {
         #expect(attachment.duration == 83 && attachment.width == 1_280 && attachment.height == 720)
     }
 
+    struct FileKindCase: Decodable, CustomTestStringConvertible {
+        var name: String
+        var mime: String?
+        var kind: String
+        var label: String
+        var testDescription: String { name }
+    }
+
+    struct FileKindSpec: Decodable { var cases: [FileKindCase] }
+
+    // capability: message.file
     @Test(
-        "A file is classified by its extension first, then by its MIME type",
-        arguments: [
-            ("Q3 report.pdf", "application/octet-stream", FileKind.pdf),
-            ("scan", "application/pdf", .pdf),
-            ("notes.docx", nil, .document),
-            ("readme.txt", "text/plain", .document),
-            ("budget.xlsx", nil, .spreadsheet),
-            ("export.csv", "text/plain", .spreadsheet),
-            ("pitch.key", nil, .presentation),
-            ("deck", "application/vnd.openxmlformats-officedocument.presentationml.presentation", .presentation),
-            ("assets.zip", "application/zip", .archive),
-            ("backup.tar.gz", nil, .archive),
-            ("main.swift", "text/plain", .code),
-            ("config.json", "application/json", .code),
-            ("memo.m4a", nil, .audio),
-            ("voice", "audio/ogg", .audio),
-            ("clip.mov", nil, .video),
-            ("photo.heic", nil, .image),
-            ("data.bin", "application/octet-stream", .generic),
-            ("unknown", nil, .generic),
-        ] as [(String, String?, FileKind)])
-    func fileKind(name: String, mime: String?, kind: FileKind) throws {
+        "A file's kind and type label follow spec/file-kind.json",
+        arguments: try SharedSpec.decode("spec/file-kind.json", as: FileKindSpec.self).cases)
+    func fileKind(spec: FileKindCase) throws {
         let file = FileMessageContent(
-            filename: name, caption: nil, formattedCaption: nil, source: try encryptedSource(),
-            info: FileInfo(mimetype: mime, size: 2_000_000, thumbnailInfo: nil, thumbnailSource: nil))
-        #expect(try mapped(.file(content: file), body: name).fileKind == kind)
+            filename: spec.name, caption: nil, formattedCaption: nil, source: try encryptedSource(),
+            info: FileInfo(mimetype: spec.mime, size: 2_000_000, thumbnailInfo: nil, thumbnailSource: nil))
+        let attachment = try mapped(.file(content: file), body: spec.name)
+        #expect(String(describing: attachment.fileKind) == spec.kind)
+        #expect(attachment.typeLabel == spec.label)
     }
 }
