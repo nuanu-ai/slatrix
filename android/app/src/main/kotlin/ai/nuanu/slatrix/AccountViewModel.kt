@@ -22,6 +22,9 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     val rooms = runtime.rooms
     private val mutableWorkspace = MutableStateFlow<MatrixWorkspace?>(null)
     val workspace = mutableWorkspace.asStateFlow()
+    /** The thread pushed over whatever is open, with its own timeline and draft. */
+    private val mutableThreads = MutableStateFlow<MatrixWorkspace?>(null)
+    val threads = mutableThreads.asStateFlow()
     private val mutableNotificationTarget = MutableStateFlow<NotificationTarget?>(null)
     val notificationTarget = mutableNotificationTarget.asStateFlow()
 
@@ -38,13 +41,16 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 account.state.collect { state ->
                     val next = (state as? AccountState.Connected)?.client
                     if (next !== client) {
+                        mutableThreads.value?.close()
                         mutableWorkspace.value?.close()
                         client = next
                         mutableWorkspace.value = next?.let { MatrixWorkspace(viewModelScope, it) }
+                        mutableThreads.value = next?.let { MatrixWorkspace(viewModelScope, it) }
                     }
                 }
             } finally {
                 withContext(NonCancellable) {
+                    mutableThreads.value?.close()
                     mutableWorkspace.value?.close()
                 }
             }

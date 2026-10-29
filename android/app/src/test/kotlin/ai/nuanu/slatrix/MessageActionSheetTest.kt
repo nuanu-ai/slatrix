@@ -43,11 +43,11 @@ class MessageActionSheetTest {
     private val mine = message("On it", "Jordan")
     private val reactions = mutableListOf<Pair<String, String>>()
 
-    private fun show(actions: MessageActions, onOpenThread: ((String) -> Unit)? = null, notice: String? = null) {
+    private fun show(actions: MessageActions, onOpenThread: (String) -> Unit = {}, notice: String? = null) {
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(listOf(theirs, mine), loading = false, hasMore = false, notice = notice),
-                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, actions, onOpenThread)
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread, actions = actions)
             }
         }
     }
@@ -116,7 +116,7 @@ class MessageActionSheetTest {
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(listOf(theirs, mine), loading = false, hasMore = false),
-                    composer.value, {}, {}, {}, {}, {}, {}, {}, {}, MessageActions(onQuote = { quoted = it }),
+                    composer.value, {}, {}, {}, {}, {}, {}, {}, {}, actions = MessageActions(onQuote = { quoted = it }),
                     composerActions = ComposerActions(onCancelTarget = { cancelled = true }))
             }
         }
@@ -139,7 +139,7 @@ class MessageActionSheetTest {
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(listOf(theirs.copy(editable = false), editable), loading = false, hasMore = false),
-                    composer.value, {}, {}, {}, {}, {}, {}, {}, {}, MessageActions(onEdit = { editing = it }))
+                    composer.value, {}, {}, {}, {}, {}, {}, {}, {}, actions = MessageActions(onEdit = { editing = it }))
             }
         }
         open("Ship it")

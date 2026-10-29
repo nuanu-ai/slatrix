@@ -2,7 +2,6 @@ package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ComposerTarget
-import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.background
@@ -45,10 +44,9 @@ data class ComposerActions(
 
 /** Slack's composer: a rounded field on a bar under a hairline, with send inside the field. */
 @Composable
-internal fun MessageComposer(room: RoomSummary, composer: ComposerState, onDraft: (String) -> Unit, onSend: () -> Unit,
+internal fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (String) -> Unit, onSend: () -> Unit,
     actions: ComposerActions) {
     val colors = SlatrixTheme.colors
-    val description = if (room.direct) "Message ${room.name}" else "Message #${room.name}"
     val editing = composer.target is ComposerTarget.Edit
     HorizontalDivider(color = colors.border)
     composer.target?.let { TargetBar(it, actions.onCancelTarget) }
@@ -57,12 +55,12 @@ internal fun MessageComposer(room: RoomSummary, composer: ComposerState, onDraft
         Row(verticalAlignment = Alignment.Bottom) {
             BasicTextField(composer.text, onDraft, enabled = !composer.loading,
                 modifier = Modifier.weight(1f).heightIn(min = UiMetrics.Touch).padding(start = UiMetrics.GapMedium)
-                    .semantics { contentDescription = description },
+                    .semantics { contentDescription = placeholder },
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
                 cursorBrush = SolidColor(colors.accent), maxLines = 5,
                 decorationBox = { inner ->
                     Box(Modifier.padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.CenterStart) {
-                        if (composer.text.isEmpty()) Text(description, style = MaterialTheme.typography.bodyLarge,
+                        if (composer.text.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge,
                             color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         inner()
                     }

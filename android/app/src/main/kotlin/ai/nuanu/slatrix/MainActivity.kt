@@ -26,13 +26,15 @@ class MainActivity : ComponentActivity() {
             val identity by accountModel.identity.collectAsState()
             val rooms by accountModel.rooms.collectAsState()
             val workspace by accountModel.workspace.collectAsState()
+            val threads by accountModel.threads.collectAsState()
             val notification by accountModel.notificationTarget.collectAsState()
-            SlatrixApp(accountModel.account, identity, rooms, workspace, notification) { target ->
+            SlatrixApp(accountModel.account, identity, rooms, workspace, notification, threads) { target ->
                 accountModel.notificationHandled(target)
                 if (intent.getStringExtra(PushNotifications.USER_ID) == target.userId &&
                     intent.getStringExtra(PushNotifications.ROOM_ID) == target.roomId) {
                     intent.removeExtra(PushNotifications.USER_ID)
                     intent.removeExtra(PushNotifications.ROOM_ID)
+                    intent.removeExtra(PushNotifications.THREAD_ID)
                 }
             }
         }
@@ -64,7 +66,8 @@ class MainActivity : ComponentActivity() {
             val eventId = intent.getStringExtra(PushNotifications.EVENT_ID)
             // The launcher activity is exported, so only a notification this app posted may open a room.
             if (userId != null && roomId != null && eventId != null && PushNotifications(this).delivered(userId, roomId, eventId)) {
-                accountModel.openNotification(NotificationTarget(userId, roomId))
+                val thread = intent.getStringExtra(PushNotifications.THREAD_ID)?.takeIf { it.startsWith('$') }
+                accountModel.openNotification(NotificationTarget(userId, roomId, thread))
             }
         }
         intent.data = null

@@ -13,7 +13,7 @@ import ai.nuanu.slatrix.push.PushMessagingService
 import ai.nuanu.slatrix.push.PushNotifications
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
-import org.matrix.rustcomponents.sdk.NotificationStatus
+import org.matrix.rustcomponents.sdk.*
 import org.robolectric.Shadows.shadowOf
 import com.google.firebase.messaging.RemoteMessage
 import org.junit.Assert.assertEquals
@@ -59,6 +59,32 @@ class PushDeliveryTest {
                 scenario.onActivity { activity ->
                     assertEquals(expected, ViewModelProvider(activity)[AccountViewModel::class.java].notificationTarget.value)
                 }
+            }
+        }
+    }
+
+    // capability: thread.from-notification
+    @Test fun aThreadRepliesNotificationTargetsItsThread() {
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = application.getSystemService(NotificationManager::class.java)
+        val reply = NotificationStatus.Event(NotificationItem(
+            event = NotificationEvent.Timeline(object : TimelineEvent(NoHandle) {
+                override fun content(): TimelineEventContent = TimelineEventContent.MessageLike(
+                    MessageLikeEventContent.RoomMessage(MessageType.Text(TextMessageContent("Agreed", null)), null))
+                override fun senderId(): String = "@sam:example.org"
+            }),
+            rawEvent = "{}", senderInfo = NotificationSenderInfo("Sam", null, false),
+            roomInfo = NotificationRoomInfo("Team", null, null, null, null, 2u, 0u, emptyList(), true, false, false, false),
+            isNoisy = true, hasMention = false, threadId = "\$root", actions = null,
+        ))
+        PushNotifications(application).show("@alex:example.org", "!team:example.org", "\$reply", reply)
+        val tap = shadowOf(manager.activeNotifications.single().notification.contentIntent).savedIntent
+
+        ActivityScenario.launch<MainActivity>(tap).use { scenario ->
+            scenario.onActivity { activity ->
+                assertEquals(NotificationTarget("@alex:example.org", "!team:example.org", threadRoot = "\$root"),
+                    ViewModelProvider(activity)[AccountViewModel::class.java].notificationTarget.value)
             }
         }
     }

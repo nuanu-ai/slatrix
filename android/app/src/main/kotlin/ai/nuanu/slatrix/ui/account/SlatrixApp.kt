@@ -34,6 +34,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.rememberCoroutineScope
+import ai.nuanu.slatrix.core.OpenChannel
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
@@ -47,7 +50,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: MatrixRooms?, workspace: MatrixWorkspace?,
-    notification: NotificationTarget? = null, onNotificationHandled: (NotificationTarget) -> Unit = {}) {
+    notification: NotificationTarget? = null, threads: MatrixWorkspace? = null, onNotificationHandled: (NotificationTarget) -> Unit = {}) {
     val state by account.state.collectAsState()
     RequestNotificationPermission(signedIn = state is AccountState.Connected, configured = BuildConfig.PUSH_GATEWAY.isNotEmpty())
     val context = LocalContext.current
@@ -81,6 +84,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 var selectedSpaceId by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
+                val thread = threads?.selected?.collectAsState()?.value
+                val covered = rememberSaveableStateHolder()
                 LaunchedEffect(notification, userId, rooms, workspace) {
                     val target = notification ?: return@LaunchedEffect
                     if (target.userId != userId) {
@@ -90,6 +95,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         you = false
                         preferences = false
                         workspace.open(room)
+                        if (target.threadRoot != null) threads?.open(room, target.threadRoot) else threads?.back()
                         onNotificationHandled(target)
                     }
                 }
@@ -103,20 +109,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 { darkOverride = it; appearance.darkMode = it },
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
-                            selected != null -> { { key(selected.room.id) {
-                                val conversation = selected.conversation
-                                val composer = selected.composer
-                                val timeline = conversation?.state?.collectAsState()?.value ?: ConversationState(error = selected.error)
-                                val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
-                                val scope = androidx.compose.runtime.rememberCoroutineScope()
-                                LiveChannelScreen(selected.room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
-                                    { workspace?.back() }, { conversation?.loadOlder() },
-                                    { event -> scope.launch { if (conversation?.markRead(event) == true) PushNotifications(context).clear(selected.room.id) } },
-                                    { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) workspace?.open(selected.room) },
-                                    { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
-                                    rememberMessageActions(conversation, composer, workspace),
-                                    composerActions = ComposerActions(onCancelTarget = { composer?.cancelTarget() }))
-                            } } }
+                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace) } } }
+                            // Kept while a thread covers it, so Back returns to the same place in the channel.
+                            selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
+                                LiveConversation(selected, workspace, workspace) { root -> threads?.open(selected.room, root) }
+                            } } } }
                             else -> null
                         }) {
                             LiveHome(userId, rooms, workspace, { you = true }, selectedSpaceId,
@@ -150,6 +147,28 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 { account.selectHomeserver(server) }, account::cancel)
         }
     }
+}
+
+/** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
+@Composable
+private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?, onOpenThread: (String) -> Unit = {}) {
+    val context = LocalContext.current
+    val conversation = open.conversation
+    val composer = open.composer
+    val timeline = conversation?.state?.collectAsState()?.value ?: ConversationState(error = open.error)
+    val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
+    val scope = rememberCoroutineScope()
+    LiveChannelScreen(open.room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
+        { owner?.back() }, { conversation?.loadOlder() },
+        { event ->
+            scope.launch {
+                if (conversation?.markRead(event) == true && open.threadRoot == null) PushNotifications(context).clear(open.room.id)
+            }
+        },
+        { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot) },
+        { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) }, onOpenThread, open.threadRoot,
+        rememberMessageActions(conversation, composer, main),
+        ComposerActions(onCancelTarget = { composer?.cancelTarget() }))
 }
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
