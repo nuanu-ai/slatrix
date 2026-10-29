@@ -63,6 +63,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
@@ -90,6 +93,7 @@ data class ComposerActions(
  * Slack Android's composer: the field, then a toolbar of what works here (emoji and @) with send at its end. The
  * thread screen uses it too; [recentSenders], latest first, rank who an @ suggests.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (String) -> Unit, onSend: () -> Unit,
     actions: ComposerActions, recentSenders: List<String> = emptyList()) {
@@ -170,8 +174,16 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         var attaching by remember { mutableStateOf(false) }
         // Its launchers stay registered whichever "+" opened it, so a pick always comes back.
         attach?.let { AttachSheet(attaching, it) { attaching = false } }
-        // Slack's composer rests as one row, "+" and the field; the toolbar shows while you write.
-        val expanded = focused || composer.text.isNotEmpty() || composer.target != null || formatting || picking || linking != null
+        // Slack's composer rests as one row, "+" and the field, a draft too; the toolbar shows once you tap in, so
+        // nothing grows while you read.
+        val expanded = focused || composer.target != null || formatting || picking || linking != null
+        // Hiding the keyboard puts the composer back to rest, as in Slack.
+        val keyboard = WindowInsets.isImeVisible
+        var keyboardShown by remember { mutableStateOf(false) }
+        LaunchedEffect(keyboard) {
+            if (keyboardShown && !keyboard && !picking && linking == null) { focus.clearFocus(); formatting = false }
+            keyboardShown = keyboard
+        }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (!expanded) attach?.let { Box(Modifier.padding(start = UiMetrics.GapTiny)) { AttachButton { attaching = true } } }
             Box(Modifier.weight(1f)) { ReceiveKeyboardMedia(attach) {
@@ -194,7 +206,7 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                     visualTransformation = remember(composer.styles, composer.mentions, composer.typing, colors) {
                         ComposerVisual(composer.styles, composer.mentions, composer.typing?.takeIf { it.position == 0 }?.kinds?.firstOrNull { it.block }, colors)
                     },
-                    cursorBrush = SolidColor(colors.accent), maxLines = 5,
+                    cursorBrush = SolidColor(colors.accent), maxLines = if (expanded) 5 else 1,
                     decorationBox = { inner ->
                         Box(Modifier.padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.CenterStart) {
                             if (composer.text.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge,
