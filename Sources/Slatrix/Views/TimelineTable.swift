@@ -89,7 +89,11 @@ struct TimelineMessageEntry: Hashable {
 /// Lets the SwiftUI shell move the list without owning it.
 @MainActor final class TimelineScroller {
     fileprivate var bottom: (() -> Void)?
+    fileprivate var anchor: (() -> String?)?
     func scrollToBottom() { bottom?() }
+    /// The oldest message the screen depends on: the one above the first on screen, whose sender and time decide how
+    /// that one is grouped.
+    var screenAnchorEventID: String? { anchor?() }
 }
 
 /// The timeline list: an AppKit table of SwiftUI rows with measured, cached heights. Every change to the rows, their
@@ -245,6 +249,7 @@ struct TimelineTable: NSViewRepresentable {
             DispatchQueue.main.async { [weak self] in self?.placeTooltip() }
         }
         configuration.scroller.bottom = { [weak self] in self?.scrollToBottom(animated: true) }
+        configuration.scroller.anchor = { [weak self] in self?.screenAnchor() }
         if previous?.focusedEventID != configuration.focusedEventID || previous?.jumpID != configuration.jumpID {
             pendingFocus = configuration.focusedEventID
         }
@@ -575,6 +580,11 @@ struct TimelineTable: NSViewRepresentable {
         let candidates = measured.isEmpty ? shown : measured
         let row = candidates.first { if case .message = rows[$0].kind { true } else { false } } ?? candidates.first
         return row.flatMap { frame(rows[$0].id) }
+    }
+
+    private func screenAnchor() -> String? {
+        guard let first = firstVisibleRow(excluding: []), let row = index[first.id] else { return nil }
+        return rows[..<row].last { $0.messageEventID != nil }?.messageEventID ?? rows[row].messageEventID
     }
 
     private func position(excluding excluded: IndexSet = []) -> Policy.Position {

@@ -16,7 +16,8 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     private var reachedStart = false
     /// Read receipts sent through this timeline, as "read:" or "fully:" and the event.
     let receipts = Recorder<String>()
-    var allListenersCancelled: Bool { lock.withLock { handles.allSatisfy(\.isCancelled) } }
+    /// False until a listener is added: a timeline still being set up is not closed.
+    var allListenersCancelled: Bool { lock.withLock { !handles.isEmpty && handles.allSatisfy(\.isCancelled) } }
     init(_ cached: [TimelineItem]) {
         self.cached = cached
         super.init(noHandle: .init())

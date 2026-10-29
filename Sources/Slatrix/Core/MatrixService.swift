@@ -1361,12 +1361,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             if room.membership() == .invited { return true }
             let next = try await room.timelineWithConfiguration(configuration: Self.timelineConfiguration(focus))
             guard selection == token else { return true }
-            let observer = TimelineObserver { [weak self] items, revision in
-                Task { @MainActor [weak self] in
-                    guard let self, self.selection == token else { return }
-                    self.showTimeline((items, revision), roomID: id)
-                }
-            }
+            let observer = mainObserver(roomID: id, token: token, focus: eventID)
             let listenerHandle = await next.addListener(listener: observer)
             guard selection == token else {
                 listenerHandle.cancel()
@@ -1405,6 +1400,50 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             errorMessage = Self.safeError(error)
         }
         return true
+    }
+
+    /// Shows the open conversation's timeline as it changes, until another conversation or timeline takes its place.
+    private func mainObserver(roomID id: String, token: UUID, focus eventID: String?) -> TimelineObserver {
+        TimelineObserver { [weak self] items, revision in
+            Task { @MainActor [weak self] in
+                guard let self, self.selection == token, self.focusedEventID == eventID else { return }
+                self.showTimeline((items, revision), roomID: id)
+            }
+        }
+    }
+
+    /// Read down to its newest message, a conversation opened at an older one turns live where it is, as Slack's does:
+    /// new messages arrive and it can be marked read again. It keeps its selection, so the thread pane and a reply or
+    /// edit in progress stay. It stays as it is unless the live timeline holds `anchor`, the oldest message on screen.
+    func goLive(holding anchor: String) async {
+        guard let focused = focusedEventID, timeline != nil, !hasMoreForwardHistory, let id = selectedRoomID,
+            let room = try? requireRoom(id)
+        else { return }
+        let token = selection
+        func current() -> Bool { !Task.isCancelled && selection == token && focusedEventID == focused }
+        guard
+            let next = try? await room.timelineWithConfiguration(
+                configuration: Self.timelineConfiguration(.live(hideThreadedEvents: true))),
+            current()
+        else { return }
+        let observer = mainObserver(roomID: id, token: token, focus: nil)
+        let listener = await next.addListener(listener: observer)
+        // The screen ends at the newest message, so a page or two back reaches it unless the reader is offline.
+        for _ in 0..<3 where !Self.contains(observer.snapshot.items, anchor) {
+            guard current(), (try? await next.paginateBackwards(numEvents: 100)) == false else { break }
+        }
+        guard current(), Self.contains(observer.snapshot.items, anchor) else {
+            listener.cancel()
+            return
+        }
+        timelineHandle?.cancel()
+        focusedEventID = nil
+        timeline = next
+        timelineHandle = listener
+        liveTimeline = KeptTimeline(roomID: id, token: token, timeline: next, observer: observer, listener: listener)
+        hasMoreHistory = true
+        timelineRevision = 0
+        showTimeline(observer.snapshot, roomID: id)
     }
 
     private func showTimeline(_ snapshot: (items: [TimelineItem], revision: Int), roomID: String) {
@@ -1665,7 +1704,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let target = try requireTimeline()
         let token = selection
         let endReached = try await paginateBackwards(target)
-        if selection == token { hasMoreHistory = !endReached }
+        // The timeline may have turned live meanwhile; this page says nothing about the live one.
+        if selection == token, timeline === target { hasMoreHistory = !endReached }
         return endReached
     }
 

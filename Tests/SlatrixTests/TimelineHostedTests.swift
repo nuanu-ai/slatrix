@@ -432,8 +432,10 @@ struct TimelineHostedTests {
         #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
     }
 
-    @Test("A conversation opened at an older message turns live once scrolled to its newest, and no row moves")
-    func turnsLiveAtNewest() async throws {
+    @Test(
+        "Scrolled to its newest, a conversation opened at an older message turns live if the live one fills the screen",
+        arguments: zip([10, 35], [true, false]))
+    func turnsLiveAtNewest(cachedFrom: Int, turnsLive: Bool) async throws {
         // Like the SDK's, each timeline numbers its own items, so one ID names different messages in each.
         func items(_ range: Range<Int>) -> [TimelineItem] {
             range.enumerated().map { offset, index in
@@ -444,26 +446,36 @@ struct TimelineHostedTests {
                     uniqueID: "\(offset)")
             }
         }
-        let room = FakeOpenRoom(Self.room.id, cached: items(10..<40))
+        let room = FakeOpenRoom(Self.room.id, cached: items(cachedFrom..<40))
         room.context = items(0..<40)
         let harness = Harness(opening: room)
         defer { harness.close() }
         await harness.service.jumpToMessage(roomID: Self.room.id, eventID: "$m5")
-        await settle(harness) { harness.top(of: "Message 5") != nil && !harness.service.hasMoreForwardHistory }
-        #expect(harness.service.focusedEventID == "$m5")
+        await settle(harness) { harness.top(of: "Message 5") != nil }
+        // The live timeline waits here, so the screen can be read before it takes over.
+        room.buildGate.arm()
         harness.scroll(toTop: harness.clip.bounds.minY + 10_000)
-        let shown = (10..<40).map { "Message \($0)" }.filter { harness.top(of: $0) != nil }
+        await settle(harness) { room.buildGate.isWaiting }
+        #expect(harness.service.focusedEventID == "$m5" && !harness.service.hasMoreForwardHistory)
+        let screen = harness.clip.convert(harness.clip.bounds, to: nil)
+        let shown = (0..<40).map { "Message \($0)" }.filter { body in
+            harness.top(of: body).map { $0 > screen.minY && $0 <= screen.maxY } ?? false
+        }
         let before = shown.map { harness.top(of: $0) }
         #expect(shown.contains("Message 39"))
-        // The first layout with the live timeline's rows already shows every row where it was.
+        room.buildGate.release()
+        // The first layout with the live timeline's rows already shows every row where it was. A live timeline that
+        // doesn't reach the screen is closed, the conversation left as it was.
         var after: [CGFloat?] = []
         _ = await eventually {
             harness.layout()
-            guard harness.service.focusedEventID == nil else { return false }
+            let closed = room.timelines.all.count == 3 && room.timelines.all[2].allListenersCancelled
+            guard turnsLive ? harness.service.focusedEventID == nil : closed else { return false }
             after = shown.map { harness.top(of: $0) }
             return true
         }
-        #expect(harness.service.focusedEventID == nil && harness.service.messages.first?.body == "Message 10")
+        #expect(harness.service.focusedEventID == (turnsLive ? nil : "$m5"))
+        #expect(harness.service.messages.first?.body == "Message \(turnsLive ? cachedFrom : 0)")
         #expect(after == before)
     }
 
