@@ -10,6 +10,9 @@ import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -40,12 +43,16 @@ class ThreadScreenshots(private val dark: Boolean) {
             message("a", "Jordan", "Works for me.", noon + 4 * 60_000L),
             message("b", "Mira", "Great, sending the invite now.", noon + 9 * 60_000L),
         )
+        // The moment it opens: the channel's root, with the replies still on their way.
+        var state by mutableStateOf(ConversationState(rows.take(1), loading = false, hasMore = true))
         compose.setContent {
             SlatrixTheme(dark = dark) {
-                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), ComposerState(loading = false),
+                LiveChannelScreen(room, state, ComposerState(loading = false),
                     {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root")
             }
         }
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/Thread-opening-${if (dark) "dark" else "light"}.png")
+        state = ConversationState(rows, loading = false, hasMore = false)
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/Thread-${if (dark) "dark" else "light"}.png")
     }
 

@@ -39,6 +39,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
 import ai.nuanu.slatrix.core.OpenChannel
+import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.MatrixActivity
 import ai.nuanu.slatrix.core.inWorkspace
 import ai.nuanu.slatrix.core.MatrixThreadFeed
@@ -150,7 +151,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace) { root -> threads?.open(selected.room, root) }
+                                LiveConversation(selected, workspace, workspace) { root, row -> threads?.open(selected.room, root, root = row) }
                             } } } }
                             else -> null
                         }) {
@@ -192,7 +193,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
-private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?, onOpenThread: (String) -> Unit = {}) {
+private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
+    onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     val conversation = open.conversation
     val composer = open.composer
@@ -207,8 +209,9 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             }
         },
         { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
-        { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) }, onOpenThread, open.threadRoot,
-        rememberMessageActions(conversation, composer, main),
+        { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
+        { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
+        open.threadRoot, rememberMessageActions(conversation, composer, main),
         ComposerActions(onCancelTarget = { composer?.cancelTarget() }), { conversation?.loadNewer(it) })
 }
 

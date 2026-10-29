@@ -412,13 +412,15 @@ class MatrixConversationTest {
 
         val first = conversation.state.value
         assertFalse("The root needs no wait", first.loading)
-        assertEquals(listOf("channel-row"), first.rows.map { it.id })
+        assertEquals(listOf("\$root"), first.rows.map { (it as ConversationMessage).eventId })
         assertFalse("The root starts the thread, so it shows its sender", first.rows.messages.single().grouped)
 
-        timeline.emit(listOf(TimelineDiff.Reset(listOf(
+        runCurrent()
+        // The day's divider sits above the root in the thread's timeline; above the root, nothing shows.
+        timeline.emit(listOf(TimelineDiff.Reset(listOf(dateDivider("day", 1_700_000_000_000u),
             conversationItem("thread-root", "\$root", "Plan?"), conversationItem("reply", "\$reply", "Yes")))))
         val loaded = conversation.state.first { it.rows.size == 2 }
-        assertEquals("The root keeps its row, so it never redraws", listOf("channel-row", "reply"), loaded.rows.map { it.id })
+        assertEquals("The root keeps its row, so it never redraws", listOf(first.rows.single().id, "reply"), loaded.rows.map { it.id })
         conversation.close()
     }
 }
