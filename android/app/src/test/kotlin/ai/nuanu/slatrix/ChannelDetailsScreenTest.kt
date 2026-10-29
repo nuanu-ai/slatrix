@@ -55,7 +55,7 @@ class ChannelDetailsScreenTest {
         memberCount = 3, canEditName = true, canEditTopic = true)
 
     // capability: channel.details
-    @Test fun theHeaderPillOpensTheDetails() {
+    @Test fun theHeaderPillNamesTheChannelAndItsMembersAndOpensTheDetails() {
         var opened = false
         compose.setContent {
             SlatrixTheme {
@@ -63,7 +63,8 @@ class ChannelDetailsScreenTest {
                     {}, {}, {}, {}, {}, {}, {}, {}, onOpenDetails = { opened = true })
             }
         }
-        compose.onNodeWithText("Launch reviews").performClick()
+        compose.onNodeWithText("Launch reviews").assertDoesNotExist()
+        compose.onNodeWithText("3 members").performClick()
         compose.runOnIdle { assertTrue(opened) }
     }
 

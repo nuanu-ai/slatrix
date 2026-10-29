@@ -249,6 +249,24 @@ class LiveChannelScreenTest {
         compose.onNodeWithContentDescription("Add a reply").assertDoesNotExist()
     }
 
+    @Test fun theMemberLineHoldsItsPlaceUntilTheCountArrivesAndADirectMessageHasNone() {
+        val shown = mutableStateOf(room.copy(topic = "Launch reviews"))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(shown.value, ConversationState(loading = false, hasMore = false), ComposerState(loading = false),
+                    {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        val waiting = compose.onNodeWithText("design").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { shown.value = shown.value.copy(memberCount = 1) }
+        compose.onNodeWithText("1 member").assertIsDisplayed()
+        assertEquals("Nothing moves when the count arrives", waiting, compose.onNodeWithText("design").fetchSemanticsNode().boundsInRoot)
+
+        compose.runOnIdle { shown.value = RoomSummary("!sam:example.org", "Sam", true, "", UnreadBadge.None, "S", 0, memberCount = 2) }
+        compose.onNodeWithText("Sam").assertIsDisplayed()
+        compose.onNodeWithText("2 members").assertDoesNotExist()
+    }
+
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
 
     private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)
