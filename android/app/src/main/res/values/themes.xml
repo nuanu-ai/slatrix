@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The canvas color from design/tokens.json, so a launch never flashes another color. -->
-    <style name="Theme.Slatrix" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">#ffffff</item>
+    <style name="Base.Theme.Slatrix" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/canvas</item>
     </style>
+    <style name="Theme.Slatrix" parent="Base.Theme.Slatrix" />
 </resources>

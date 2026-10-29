@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Config/AppIcon/Slatrix-small.svg: its 824-unit body fills the 72 dp that launchers show of the 108 dp layer. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="1236" android:viewportHeight="1236">
+    <group android:translateX="106" android:translateY="106">
+        <path android:pathData="M733,342L384.5,342A85,85 0 0,0 384.5,512L639.5,512A85,85 0 0,1 639.5,682L291,682" android:strokeWidth="104" android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round" android:strokeLineJoin="round" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M660.20,342.00a72.80,72.80 0 1,0 145.60,0a72.80,72.80 0 1,0 -145.60,0ZM218.20,682.00a72.80,72.80 0 1,0 145.60,0a72.80,72.80 0 1,0 -145.60,0Z" />
+    </group>
+</vector>
