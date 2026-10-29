@@ -1,9 +1,12 @@
 package ai.nuanu.slatrix
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import ai.nuanu.slatrix.core.RoomListState
+import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
-import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
@@ -44,8 +47,7 @@ class LiveForegroundTest {
         }
         for (isDark in listOf(false, true)) for (sidebar in SidebarPalette.entries) {
             compose.runOnIdle { dark.value = isDark; palette.value = sidebar }
-            compose.onNodeWithText("All conversations", useUnmergedTree = true)
-                .assertReadableOn(DesignTokens.colors(true, sidebar).getValue("frame"))
+            compose.onNodeWithText("All conversations", useUnmergedTree = true).assertReadable()
         }
     }
 
@@ -59,25 +61,47 @@ class LiveForegroundTest {
         }
         for (isDark in listOf(false, true)) for (sidebar in SidebarPalette.entries) {
             compose.runOnIdle { dark.value = isDark; palette.value = sidebar }
-            val canvas = DesignTokens.colors(isDark, sidebar).getValue("canvas")
             tab("Home").performClick()
-            compose.onNodeWithText("Home", useUnmergedTree = true).assertReadableOn(canvas)
+            compose.onNodeWithText("Home", useUnmergedTree = true).assertReadable()
             tab("DMs").performClick()
             compose.onNodeWithText("Direct messages").assertExists()
-            compose.onNodeWithText("DMs", useUnmergedTree = true).assertReadableOn(canvas)
+            compose.onNodeWithText("DMs", useUnmergedTree = true).assertReadable()
+        }
+    }
+
+    @Test fun unreadCountsStayReadableOnTheMentionBadgeInBothThemes() {
+        val dark = mutableStateOf(false)
+        val rooms = RoomListState(listOf(RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.Count("3"), "T", 0)), loading = false)
+        compose.setContent { SlatrixTheme(dark = dark.value) { LiveHomeScreen("@alex:example.org", rooms, {}, {}, {}) } }
+        for (isDark in listOf(false, true)) {
+            compose.runOnIdle { dark.value = isDark }
+            compose.onNodeWithText("3", useUnmergedTree = true).assertReadable()
         }
     }
 
     private fun tab(label: String) =
         compose.onNode(hasText(label) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected))
 
-    private fun SemanticsNodeInteraction.assertReadableOn(background: Color) {
+    /** Compares the text's resolved color with the color drawn most inside its bounds, which is its background. */
+    private fun SemanticsNodeInteraction.assertReadable() {
+        var foreground = Color.Unspecified
         performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action ->
             val layouts = mutableListOf<TextLayoutResult>()
             assertTrue("Rendered text must expose its resolved style", action(layouts))
-            val foreground = layouts.single().layoutInput.style.color.luminance()
-            val backdrop = background.luminance()
-            val contrast = (maxOf(foreground, backdrop) + 0.05f) / (minOf(foreground, backdrop) + 0.05f)
+            foreground = layouts.single().layoutInput.style.color
+        }
+        val bounds = fetchSemanticsNode().boundsInWindow
+        compose.runOnIdle {
+            val window = compose.activity.window.decorView
+            val bitmap = Bitmap.createBitmap(window.width, window.height, Bitmap.Config.ARGB_8888)
+            window.draw(Canvas(bitmap))
+            val width = bounds.width.toInt()
+            val height = bounds.height.toInt()
+            val pixels = IntArray(width * height)
+            bitmap.getPixels(pixels, 0, width, bounds.left.toInt(), bounds.top.toInt(), width, height)
+            val background = Color(pixels.groupBy { it }.maxBy { it.value.size }.key).luminance()
+            val text = foreground.luminance()
+            val contrast = (maxOf(text, background) + 0.05f) / (minOf(text, background) + 0.05f)
             assertTrue("Rendered label needs 4.5:1 contrast, got $contrast", contrast >= 4.5f)
         }
     }
