@@ -29,6 +29,7 @@ class WindowAppearanceTest {
             assertEquals(lightBars, compose.activity.window.insetsController!!.systemBarsAppearance and lightBars)
         }
         compose.onNodeWithContentDescription("You").performClick()
+        compose.onNodeWithText("Preferences").performClick()
         compose.onNodeWithText("Dark mode").performScrollTo().performClick().assertIsOn()
         compose.runOnIdle {
             assertEquals(0, compose.activity.window.insetsController!!.systemBarsAppearance and lightBars)

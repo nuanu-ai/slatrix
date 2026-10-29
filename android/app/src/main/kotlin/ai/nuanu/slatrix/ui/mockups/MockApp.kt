@@ -20,6 +20,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -69,13 +70,14 @@ fun SlatrixMockups(
                 val root = screen in rootScreens
                 Row(Modifier.fillMaxSize()) {
                     if (root && expanded) {
-                        NavigationRail(containerColor = colors.frame) {
+                        NavigationRail(containerColor = colors.raised) {
                             rootScreens.forEach { destination ->
                                 NavigationRailItem(
                                     selected = screen == destination,
                                     onClick = { tab = destination; screen = destination },
                                     icon = { Icon(destination.icon(), contentDescription = null) },
                                     label = { Text(destination.label()) },
+                                    colors = NavigationRailItemDefaults.colors(selectedIconColor = colors.textPrimary, selectedTextColor = colors.textPrimary, indicatorColor = colors.selection, unselectedIconColor = colors.textSecondary, unselectedTextColor = colors.textSecondary),
                                 )
                             }
                         }
@@ -84,17 +86,18 @@ fun SlatrixMockups(
                         Box(Modifier.weight(1f)) {
                             stateHolder.SaveableStateProvider(if (screen == MockScreen.Channel) "channel:$roomId" else screen.name) {
                             when (screen) {
-                                MockScreen.Home -> HomeScreen(MockData.channels,
+                                MockScreen.Home -> SlackHomeScreen(MockData.channels,
+                                    conversations = MockData.conversations, onDm = { roomId = it; screen = MockScreen.Channel },
                                     onChannel = { roomId = it; screen = MockScreen.Channel },
                                     onThread = { threadReturn = screen; roomId = "design"; screen = MockScreen.Thread },
                                     onYou = { screen = MockScreen.You })
-                                MockScreen.Dms -> DmsScreen(MockData.conversations,
+                                MockScreen.Dms -> SlackDmsScreen(MockData.conversations,
                                     onOpen = { roomId = it; screen = MockScreen.Channel },
                                     onYou = { screen = MockScreen.You })
-                                MockScreen.Activity -> ActivityScreen(MockData.activity,
+                                MockScreen.Activity -> SlackActivityScreen(MockData.activity,
                                     onThread = { threadReturn = screen; roomId = "design"; screen = MockScreen.Thread },
                                     onYou = { screen = MockScreen.You })
-                                MockScreen.Channel -> ChannelScreen(room, visibleMessages,
+                                MockScreen.Channel -> SlackChannelScreen(room, visibleMessages,
                                     draft = drafts["channel:$roomId"].orEmpty(),
                                     onDraft = { drafts = drafts + ("channel:$roomId" to it) },
                                     onSend = {
@@ -106,7 +109,7 @@ fun SlatrixMockups(
                                             drafts = drafts - key
                                         }
                                     }, onThread = { threadReturn = screen; screen = MockScreen.Thread }, onBack = back)
-                                MockScreen.Thread -> ThreadScreen(MockData.threadParent, MockData.replies + sentReplies,
+                                MockScreen.Thread -> SlackThreadScreen(MockData.threadParent, MockData.replies + sentReplies,
                                     draft = drafts["thread:${MockData.threadParent.id}"].orEmpty(),
                                     onDraft = { drafts = drafts + ("thread:${MockData.threadParent.id}" to it) },
                                     onSend = {
@@ -124,7 +127,7 @@ fun SlatrixMockups(
                             }
                         }
                         if (root && !expanded) {
-                            NavigationBar(containerColor = colors.frame) {
+                            NavigationBar(containerColor = colors.raised) {
                                 rootScreens.forEach { destination ->
                                     NavigationBarItem(
                                         selected = screen == destination,

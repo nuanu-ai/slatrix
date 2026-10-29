@@ -43,7 +43,9 @@ class MockScreenshots(
         }
         if (palette == SidebarPalette.Lagoon) {
             compose.onNodeWithContentDescription("You").performClick()
+            compose.onNodeWithText("Preferences").performClick()
             compose.onNodeWithText("Lagoon").performScrollTo().performClick()
+            compose.onNodeWithContentDescription("Back").performClick()
             compose.onNodeWithContentDescription("Back").performClick()
         }
         when (screen) {
@@ -57,7 +59,7 @@ class MockScreenshots(
         val landmark = when (screen) {
             MockScreen.Home -> "Channels"
             MockScreen.Dms -> "Ava Patel"
-            MockScreen.Activity -> "All notifications"
+            MockScreen.Activity -> "All"
             MockScreen.Channel -> "Message #design"
             MockScreen.Thread -> "Reply…"
             MockScreen.You -> "Jordan Lee"

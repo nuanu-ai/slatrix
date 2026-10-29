@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.ui.designsystem
 
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -63,6 +64,7 @@ class AppColors internal constructor(roles: Map<String, Color>) {
 private val LocalColors = staticCompositionLocalOf { AppColors(DesignTokens.colors(false, SidebarPalette.Aubergine)) }
 
 object SlatrixTheme {
+    val topPanelShape @Composable get() = MaterialTheme.shapes.extraLarge.copy(bottomStart = ZeroCornerSize, bottomEnd = ZeroCornerSize)
     val colors: AppColors @Composable get() = LocalColors.current
 }
 
@@ -132,6 +134,6 @@ fun SlatrixTheme(
         )
     }
     CompositionLocalProvider(LocalColors provides colors) {
-        MaterialTheme(colorScheme = scheme, typography = Typography(), shapes = shapes, content = content)
+        MaterialTheme(colorScheme = scheme, typography = Typography().let { it.copy(titleSmall = it.titleMedium) }, shapes = shapes, content = content)
     }
 }

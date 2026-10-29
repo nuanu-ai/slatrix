@@ -75,7 +75,7 @@ class MockNavigationTest {
     @Test fun activityFiltersAndReturnsFromItsThread() {
         compose.setContent { SlatrixMockups() }
         compose.onNodeWithText("Activity").performClick()
-        compose.onNodeWithText("All notifications").assertIsDisplayed()
+        compose.onNodeWithText("All").assertIsDisplayed()
         compose.onNodeWithText("Mentions").performClick()
         compose.onNodeWithText("Sam Taylor").assertDoesNotExist()
         compose.onNodeWithText("Threads").performClick()
@@ -89,7 +89,7 @@ class MockNavigationTest {
     @Test fun statusEditingUsesAnOverlayAndCancelKeepsTheSavedStatus() {
         compose.setContent { SlatrixMockups() }
         compose.onNodeWithContentDescription("You").performClick()
-        compose.onNodeWithText("Set a status").performClick()
+        compose.onNodeWithText("Update your status").performClick()
         compose.onNode(isDialog()).assertExists()
         compose.onNode(hasSetTextAction()).performTextInput("Reviewing designs")
         compose.onNodeWithText("Save").performClick()
@@ -112,10 +112,13 @@ class MockNavigationTest {
         compose.setContent { SlatrixMockups() }
         compose.onNodeWithContentDescription("You").performClick()
         compose.onNodeWithText("Jordan Lee").assertIsDisplayed()
+        compose.onNodeWithText("Preferences").performClick()
         compose.onNodeWithText("Dark mode").performScrollTo().performClick().assertIsOn()
         compose.onNodeWithText("Lagoon").performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithContentDescription("You").performClick()
+        compose.onNodeWithText("Preferences").performClick()
         compose.onNodeWithText("Dark mode").assertIsOn()
         compose.onNodeWithText("Lagoon").assertIsSelected()
     }
