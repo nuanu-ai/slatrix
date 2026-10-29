@@ -31,6 +31,7 @@ struct DropToUploadTests {
         #expect(!types.contains(.string))
     }
 
+    // capability: composer.attachments
     @Test("Files dragged over a pane show its overlay and, dropped, go to its composer")
     func dropsFiles() throws {
         let scratch = try TemporaryDirectory()

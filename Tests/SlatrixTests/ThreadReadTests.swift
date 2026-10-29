@@ -11,6 +11,7 @@ struct ThreadReadPolicyTests {
         identity: identity, eventID: "$reply", isPresented: true, isReady: true, isAtBottom: true,
         isWindowActive: true, isWindowVisible: true, isWindowUnoccluded: true)
 
+    // capability: thread.read-state
     @Test("The latest reply of a ready thread scrolled to the bottom of a visible window is read")
     func visibleBottomIsRead() {
         #expect(
@@ -82,6 +83,7 @@ struct ThreadReadTests {
         ThreadReadReceiptTarget(identity: try #require(f.service.threadReadIdentity), eventID: "$reply")
     }
 
+    // capability: thread.open
     @Test("Opening a thread shows what is cached at once, and makes it readable only once its first page has loaded")
     func readyAfterInitialPage() async throws {
         let f = fixture()
@@ -118,6 +120,7 @@ struct ThreadReadTests {
         #expect(f.thread.writes.all.isEmpty && f.main.writes.all.isEmpty)
     }
 
+    // capability: thread.read-state
     @Test("Reading a thread sends one read receipt on the thread timeline and nothing else")
     func sendsThreadReceiptOnce() async throws {
         let f = fixture()

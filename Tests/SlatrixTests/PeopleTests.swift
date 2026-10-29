@@ -143,6 +143,7 @@ struct PeopleSearchTests {
     let people = PeopleService()
     init() { people.attach(client) }
 
+    // capability: search.people
     @Test("A query replaced while it is still debouncing never reaches the server")
     func debounceSkipsSupersededQuery() async {
         let discarded = Task { await people.search("discarded") }
@@ -164,6 +165,7 @@ struct PeopleSearchTests {
         #expect(people.results.map(\.id) == ["@new:example.org"] && people.searchState == "ready")
     }
 
+    // capability: search.people
     @Test("A full Matrix ID is found even when the directory search is limited")
     func exactIDOutsideDirectory() async {
         client.directory = SearchUsersResults(results: [], limited: true)
@@ -181,6 +183,7 @@ struct PeopleSearchTests {
         #expect(client.creations.all.isEmpty)
     }
 
+    // capability: people.profile
     @Test("Opening a profile that can't load keeps the room member's name and creates nothing")
     func profileFallback() async {
         client.unavailableProfiles = [alice]
@@ -224,6 +227,7 @@ struct DirectRoomTests {
     let people = PeopleService()
     let exact = [member(me), member(alice, .invite)]
 
+    // capability: people.start-dm
     @Test("An existing encrypted DM is reused over a plaintext one, without encrypting or creating anything")
     func prefersEncryptedDM() async throws {
         let plaintext = DirectRoom("!a:example.org", members: exact, encrypted: false)
@@ -251,6 +255,7 @@ struct DirectRoomTests {
         await #expect(throws: MatrixServiceError.self) { _ = try await people.directRoom(userID: alice) }
     }
 
+    // capability: people.start-dm
     @Test("A new DM is an encrypted, private, direct room inviting exactly the person")
     func newDMParameters() async throws {
         people.attach(client)

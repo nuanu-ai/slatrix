@@ -39,6 +39,7 @@ struct EmojiTests {
     }
     private static let spec = Result { try SharedSpec.decode("spec/emoji.json", as: Spec.self) }
 
+    // capability: message.react.picker
     @Test("Shared search case", arguments: try spec.get().search)
     func search(spec: Search) throws {
         let results = EmojiCatalog.search(spec.query).map(\.value)
@@ -52,6 +53,7 @@ struct EmojiTests {
         #expect(EmojiCatalog.shortcode(for: spec.value) == spec.shortcode)
     }
 
+    // capability: message.react.quick
     @Test("Shared quick reactions case", arguments: try spec.get().quick)
     func quick(spec: Quick) {
         #expect(EmojiRecents.quick(spec.recent, count: spec.count) == spec.quick)
@@ -97,6 +99,7 @@ struct EmojiTests {
         #expect(move(1, .up) == 1)
     }
 
+    // capability: message.reactions.show
     @Test("A reaction's tooltip names who reacted, you first, and counts the rest")
     func reactionTooltip() {
         let names = ["@a:x": "Alice", "@b:x": "Bob", "@c:x": "Carol", "@d:x": "Dan", "@e:x": "Erin"]
@@ -112,6 +115,7 @@ struct EmojiTests {
         #expect(tooltip(["@zoe:example.org"]) == "zoe reacted with :+1:")
     }
 
+    // capability: message.thread-summary
     @Test("The replies bar says how long ago the last reply came")
     func lastReply() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)

@@ -26,6 +26,7 @@ struct MediaViewerHostedTests {
         window.sendEvent(event)
     }
 
+    // capability: message.media-viewer
     @Test("The arrow keys step through the conversation's images and videos, and Esc closes the viewer")
     func keys() async throws {
         _ = NSApplication.shared

@@ -9,6 +9,7 @@ private func room(_ name: String, direct: Bool = false, membership: String = "jo
 }
 
 struct ConversationSwitcherTests {
+    // capability: search.rooms
     @Test("A name that starts with the query ranks above one that only contains it, however recent")
     func prefixBeatsSubstring() {
         let rooms = [room("Product design"), room("Design")]
@@ -56,6 +57,7 @@ struct ConversationSwitcherTests {
 }
 
 struct SearchSuggestionsTests {
+    // capability: search.recent
     @Test("An empty bar offers recent searches only")
     func emptyQuery() {
         #expect(

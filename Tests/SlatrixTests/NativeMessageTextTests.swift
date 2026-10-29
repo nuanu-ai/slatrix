@@ -25,6 +25,7 @@ struct NativeMessageTextTests {
         #expect(text.string == "BoldItalicCodeStrikeLinkUnsafe\n› Quote\n• Item")
     }
 
+    // capability: message.rich-text
     @Test("Bold and italic runs get bold and italic fonts")
     func emphasis() {
         #expect(traits(at: 0)?.contains(.bold) == true)
@@ -50,6 +51,7 @@ struct NativeMessageTextTests {
         #expect(text.attribute(.link, at: 24, effectiveRange: nil) == nil)
     }
 
+    // capability: message.mention-pills
     @Test("A mention of someone else is a blue pill; one of you, or of the room, is yellow; none is underlined")
     func mentionPills() {
         let profile = URL(string: "https://matrix.to/#/@alice:example.org")!

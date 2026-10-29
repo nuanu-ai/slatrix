@@ -254,6 +254,7 @@ struct WindowHostedTests {
         #expect(time < .milliseconds(1_700), "\(time)")
     }
 
+    // capability: conversation.members
     @Test("A click on the member facepile opens channel details on Members")
     func facepileOpensMembers() async throws {
         let harness = Harness()
@@ -283,6 +284,7 @@ struct WindowHostedTests {
             })
     }
 
+    // capability: conversation.files
     @Test("Files & links shows the channel's files under its header, and Messages brings its messages back")
     func filesTab() async throws {
         let harness = Harness()
@@ -301,6 +303,7 @@ struct WindowHostedTests {
         #expect(await eventually { !filesShown() && (try? harness.newest().window) != nil })
     }
 
+    // capability: message.save
     @Test("Saving a message for later confirms it with a toast above the composer that leaves on its own")
     func saveToast() async throws {
         let harness = Harness()
@@ -328,6 +331,7 @@ struct WindowHostedTests {
         #expect(await eventually(timeout: .seconds(8)) { !toastShown() })
     }
 
+    // capability: app.offline-banner
     @Test("Going offline shows a banner over the conversation, and reconnecting clears it, with the timeline still")
     func offlineBanner() async throws {
         let harness = Harness()
@@ -370,6 +374,7 @@ struct WindowHostedTests {
             Harness.views(in: harness.hosting).contains { ($0 as? NSTextView)?.isEditable == true && $0.window != nil })
     }
 
+    // capability: channel.read-only
     @Test("A channel you may not post in shows a line in place of both composers, with the timeline still")
     func cannotPost() async throws {
         let harness = Harness()
@@ -445,6 +450,7 @@ struct WindowHostedTests {
         #expect(await eventually { harness.dividers == 2 && harness.sidebarShown && harness.searchFieldShown })
     }
 
+    // capability: app.narrow-window
     @Test("In a narrow window the sidebar opens as a drawer, and picking a conversation or Esc closes it")
     func drawer() async {
         let harness = Harness()

@@ -20,6 +20,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Capabilities
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          scripts/check-capabilities.py
+
       - name: Restore Matrix SDK package
         id: sdk-cache
         uses: actions/cache/restore@v4

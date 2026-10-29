@@ -31,6 +31,7 @@ struct MessageEditTargetTests {
         { $0.attachment = MessageAttachment(name: "Photo", url: "mxc://example.org/photo") },
     ]
 
+    // capability: message.edit
     @Test("Your own sent text message can be edited and saved from the conversation")
     func editsOwnMessage() throws {
         let target = try #require(

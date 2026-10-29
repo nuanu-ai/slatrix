@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.push.PushRegistration
 import ai.nuanu.slatrix.push.PushRegistrationWorker
 import android.app.NotificationManager
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,6 +37,8 @@ class AccountRuntime private constructor(application: Application) {
     val identity = mutableIdentity.asStateFlow()
     private val mutableRooms = MutableStateFlow<MatrixRooms?>(null)
     val rooms = mutableRooms.asStateFlow()
+    private val mutableActivity = MutableStateFlow<MatrixActivity?>(null)
+    val activity = mutableActivity.asStateFlow()
 
     // A push wakes the process without the UI; sync and push registration wait until the app is visible.
     private val foreground = ProcessLifecycleOwner.get().lifecycle.currentStateFlow
@@ -57,6 +60,19 @@ class AccountRuntime private constructor(application: Application) {
                     // One sync service per client: a second would run a second encryption sync.
                     mutableRooms.value = next?.let { MatrixRooms(scope, it, foreground) }
                     mutableIdentity.value = next?.let { IdentityVerification(scope, it) }
+                    mutableActivity.value = next?.let { client ->
+                        MatrixActivity((state as AccountState.Connected).userId).also {
+                            scope.launch {
+                                try {
+                                    client.registerNotificationHandler(it.listener)
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    // Activity then lists only what pushes deliver.
+                                }
+                            }
+                        }
+                    }
                 }
                 if (next != null && visible && !registered) {
                     registered = true

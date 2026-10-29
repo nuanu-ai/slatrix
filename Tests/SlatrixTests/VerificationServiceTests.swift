@@ -4,12 +4,19 @@ import Testing
 
 @testable import Slatrix
 
+private struct WrongRecoveryKey: Error {}
+
 private final class FakeEncryption: Encryption, @unchecked Sendable {
     override func verificationState() -> VerificationState { .unverified }
     override func verificationStateListener(listener: VerificationStateListener) -> TaskHandle {
         FakeCancellableHandle(noHandle: .init())
     }
     override func hasDevicesToVerifyAgainst() async throws -> Bool { true }
+    let recovered = Recorder<String>()
+    override func recover(recoveryKey: String) async throws {
+        guard recoveryKey != "wrong" else { throw WrongRecoveryKey() }
+        recovered.append(recoveryKey)
+    }
 }
 
 private final class FakeVerificationController: SessionVerificationController, @unchecked Sendable {
@@ -66,6 +73,7 @@ struct VerificationServiceTests {
         #expect(await eventually { service.phase != .exchanging })
     }
 
+    // capability: verify.device
     @Test("Verification finishes only after the person confirms the codes match")
     func finishesAfterHumanConfirmation() async {
         await compare()
@@ -122,5 +130,17 @@ struct VerificationServiceTests {
         #expect(!service.isPresented && !service.isWorking)
         controller.requestGate.release()
         await request.value
+    }
+
+    // capability: verify.recovery-key
+    @Test("A recovery key unlocks history through the SDK, and a key the SDK refuses fails the unlock")
+    func recoveryKey() async throws {
+        let matrix = MatrixService()
+        matrix.configureMessageActionsForChecks(
+            client: client, main: nil, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(),
+            threadID: UUID())
+        await #expect(throws: WrongRecoveryKey.self) { try await matrix.recoverEncryption(recoveryKey: "wrong") }
+        try await matrix.recoverEncryption(recoveryKey: "EsTc 1234")
+        #expect(client.crypto.recovered.all == ["EsTc 1234"])
     }
 }

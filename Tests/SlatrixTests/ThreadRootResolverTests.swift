@@ -20,6 +20,7 @@ struct ThreadRootResolverTests {
             roomID: room, rootID: root.id, candidates: candidates, load: load, validate: validate)
     }
 
+    // capability: thread.open
     @Test("A cached root from the same room is used without fetching")
     func cachedRoot() async throws {
         var fetched = false

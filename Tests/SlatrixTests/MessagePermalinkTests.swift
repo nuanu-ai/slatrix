@@ -19,6 +19,7 @@ struct MessagePermalinkTests {
         return (f, root, reply)
     }
 
+    // capability: message.copy-link
     @Test("Copying a thread root's link asks the SDK for that exact event and returns its link unchanged")
     func threadRootLink() async throws {
         let (f, root, _) = fixture()
@@ -27,6 +28,7 @@ struct MessagePermalinkTests {
         #expect(f.room.linkRequests.all == [root.id])
     }
 
+    // capability: message.copy-link
     @Test("A thread reply shown in the main timeline links to itself, not to the open thread's root")
     func mainReplyLinksItself() async throws {
         let (f, _, reply) = fixture()
