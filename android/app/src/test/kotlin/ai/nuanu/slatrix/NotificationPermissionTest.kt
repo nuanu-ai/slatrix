@@ -23,6 +23,17 @@ import org.robolectric.annotation.GraphicsMode
 class NotificationPermissionTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun aBuildWithoutPushConfigurationDoesNotRequestNotificationPermission() {
+        compose.setContent { RequestNotificationPermission(signedIn = true, configured = false) }
+        compose.runOnIdle { assertNull(shadowOf(compose.activity).lastRequestedPermission) }
+    }
+
+    @Test @Config(sdk = [32])
+    fun olderAndroidDoesNotRequestTheNewRuntimePermission() {
+        compose.setContent { RequestNotificationPermission(signedIn = true, configured = true) }
+        compose.runOnIdle { assertNull(shadowOf(compose.activity).lastRequestedPermission) }
+    }
+
     @Test fun notificationPermissionWaitsUntilTheUserHasSignedIn() {
         val application = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(application).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)

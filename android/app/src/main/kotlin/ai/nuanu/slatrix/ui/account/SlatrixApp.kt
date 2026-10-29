@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.ui.account
 
 import android.content.ActivityNotFoundException
+import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountState
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
@@ -44,6 +45,7 @@ import kotlinx.coroutines.launch
 fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: MatrixRooms?, workspace: MatrixWorkspace?,
     notification: NotificationTarget? = null, onNotificationHandled: (NotificationTarget) -> Unit = {}) {
     val state by account.state.collectAsState()
+    RequestNotificationPermission(signedIn = state is AccountState.Connected, configured = BuildConfig.PUSH_GATEWAY.isNotEmpty())
     val context = LocalContext.current
     val appearance = remember(context) { AppearancePreferences(context) }
     var darkOverride by rememberSaveable { mutableStateOf(appearance.darkMode) }
