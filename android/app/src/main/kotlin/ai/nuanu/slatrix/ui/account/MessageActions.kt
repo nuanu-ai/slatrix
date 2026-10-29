@@ -80,6 +80,9 @@ data class MessageActions(
     val onPin: ((ConversationMessage, pin: Boolean) -> Unit)? = null,
     /** What the room is called in Pin to channel. */
     val place: String = "channel",
+    /** Event IDs saved for later here, which the sheet offers to remove; [onSave] saves (true) or removes one. */
+    val saved: Set<String> = emptySet(),
+    val onSave: ((ConversationMessage, Boolean) -> Unit)? = null,
 )
 
 /** Slack Android's sheet holds five, beside Add reaction. */
@@ -164,6 +167,12 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
             if (message.sendState == MessageSendState.Failed) {
                 if (message.canRetry) SheetAction(Icons.Outlined.Refresh, "Retry", colors.textPrimary) { onRetrySend(message); onDismiss() }
                 SheetAction(Icons.Outlined.Delete, "Delete message", colors.destructive) { onDeleteUnsent(message); onDismiss() }
+            }
+            val save = actions.onSave
+            if (eventId != null && save != null) {
+                val isSaved = eventId in actions.saved
+                SheetAction(if (isSaved) SlackIcons.BookmarkFilled else SlackIcons.Bookmark, if (isSaved) "Remove from Later" else "Save for later",
+                    colors.textPrimary) { save(message, !isSaved); onDismiss() }
             }
             val link = actions.link
             if (eventId != null && link != null) SheetAction(Icons.Outlined.Link, "Copy link to message", colors.textPrimary) {

@@ -68,6 +68,8 @@ fun LiveWorkspace(cover: (@Composable () -> Unit)?, home: @Composable () -> Unit
 fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Unit, onYou: () -> Unit, onRetry: () -> Unit,
     selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}, onStar: suspend (String, Boolean) -> Boolean = { _, _ -> true },
     onBrowseChannels: (() -> Unit)? = null, onCreateChannel: (() -> Unit)? = null,
+    /** How many messages wait in Later, for its card at the top of Home; null leaves the card out. */
+    laterCount: Int? = null, onLater: () -> Unit = {},
     search: @Composable () -> Unit = {}, activity: @Composable () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     var actions by remember { mutableStateOf<String?>(null) }
@@ -109,7 +111,8 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                     Box(Modifier.fillMaxSize()) {
                         when (tab) {
                             HomeTab.Home -> HomeList(homeList, shown, selectedSpaceId, onRoom, onBrowseChannels,
-                                (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } }) { actions = it.id }
+                                (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } },
+                                laterCount?.let { count -> { LaterCard(count, onLater) } }) { actions = it.id }
                             HomeTab.Dms -> DirectList(directList, shown, onRoom) { actions = it.id }
                             HomeTab.Activity -> activity()
                             HomeTab.Search -> search()
@@ -250,7 +253,7 @@ private enum class HomeSection(val label: String, val icon: ImageVector) {
 
 @Composable
 private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId: String?, onRoom: (String) -> Unit,
-    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, onActions: (RoomSummary) -> Unit) {
+    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, cards: (@Composable () -> Unit)?, onActions: (RoomSummary) -> Unit) {
     // A saved workspace's channels are known only with its spaces, so its list waits for them rather than filling in.
     val waiting = state.loading || (selectedSpaceId != null && !state.spacesKnown)
     val sections = remember(state.rooms, selectedSpaceId) {
@@ -264,6 +267,13 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
     }
     var collapsed by rememberSaveable { mutableStateOf(emptyList<String>()) }
     LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
+        // Slack's cards above the sections; they're kept on this device, so they show while the list loads.
+        if (cards != null) item(key = "cards") {
+            Column {
+                Row(Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall)) { cards() }
+                SectionDivider()
+            }
+        }
         if (waiting) {
             item { ConnectionIndicator(true, null) }
         } else {

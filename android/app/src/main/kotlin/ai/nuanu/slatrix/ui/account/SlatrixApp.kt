@@ -10,6 +10,9 @@ import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.MatrixChannel
 import ai.nuanu.slatrix.core.MatrixForward
 import org.matrix.rustcomponents.sdk.MessageType
+import ai.nuanu.slatrix.core.MatrixSaved
+import ai.nuanu.slatrix.core.SavedMessage
+import ai.nuanu.slatrix.core.SavedMessageStore
 import ai.nuanu.slatrix.core.MatrixConversation
 import org.matrix.rustcomponents.sdk.Client
 import ai.nuanu.slatrix.core.ConversationView
@@ -108,6 +111,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
             state is AccountState.Connected -> {
                 val userId = (state as AccountState.Connected).userId
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
+                // Later lives on this device, as on the Mac; Home's card, the message sheet and the Later page share it.
+                val savedStore = remember(userId, context) { SavedMessageStore(context, userId) }
+                var saved by remember(savedStore) { mutableStateOf(savedStore.saved) }
+                val toggleSaved: (String, String) -> Unit = { roomId, eventId -> saved = savedStore.toggle(roomId, eventId) }
+                var later by rememberSaveable(userId) { mutableStateOf(false) }
+                val laterScope = rememberCoroutineScope()
                 var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
@@ -173,14 +182,23 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     openChannel, { notice = it }) { channels = null }
                             } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
-                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms) } } }
+                            later -> { { LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
+                                { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
+                                    later = false
+                                    // A saved reply opens in its thread, so it is looked up first.
+                                    laterScope.launch { jump(room, item.eventId, workspace?.threadRootOf(room.id, item.eventId)) }
+                                } }, { item -> toggleSaved(item.roomId, item.eventId) }) { later = false } } }
+                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms, saved, toggleSaved) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace, jump, rooms) { root, row -> threads?.open(selected.room, root, root = row) }
+                                LiveConversation(selected, workspace, workspace, jump, rooms, saved, toggleSaved) { root, row ->
+                                    threads?.open(selected.room, root, root = row)
+                                }
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it }) {
+                            LiveHome(userId, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it },
+                                saved.size, { later = true }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
@@ -221,7 +239,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
 private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
-    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?,
+    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?, saved: List<SavedMessage>, onToggleSaved: (String, String) -> Unit,
     onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     // The room as the list follows it, so a change of name, topic or permissions shows while it's open; read only
@@ -251,9 +269,15 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
             { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
-            open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { remember(it) { it.copy(onForward = { m ->
-                scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { forwarded = "This message can’t be forwarded." } }
-            }) } },
+            open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { actions ->
+                val savedHere = remember(saved, open.room.id) { saved.filter { it.roomId == open.room.id }.map { it.eventId }.toSet() }
+                remember(actions, savedHere) {
+                    actions.copy(saved = savedHere, onSave = { message, _ -> message.eventId?.let { onToggleSaved(open.room.id, it) } },
+                        onForward = { m ->
+                            scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { forwarded = "This message can’t be forwarded." } }
+                        })
+                }
+            },
             ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
                 onNeedPeople = { composer?.loadPeople() },
                 onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
@@ -315,7 +339,7 @@ private fun rememberConversation(client: Client, roomId: String, view: Conversat
 @Composable
 private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit,
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, laterCount: Int, onLater: () -> Unit,
     activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
@@ -325,6 +349,7 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
         onBrowseChannels = { onChannels(ChannelPage.Browse) }, onCreateChannel = { onChannels(ChannelPage.Create) },
+        laterCount = laterCount, onLater = onLater,
         search = {
             val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()
             val inScope = remember(state.rooms, selectedSpaceId) {

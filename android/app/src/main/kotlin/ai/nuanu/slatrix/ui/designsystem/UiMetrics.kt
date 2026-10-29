@@ -25,6 +25,8 @@ object UiMetrics {
     val RootHeaderHeight = 60.dp
     val ComposerMinHeight = 64.dp
     val FormWidth = 480.dp
+    /** Slack's cards at the top of Home, such as Later. */
+    val HomeCard = 100.dp
     const val ProgressDelayMillis = 400L
     const val NoticeMillis = 4_000L
     /** How long a message jumped to stays highlighted, as on the Mac. */
