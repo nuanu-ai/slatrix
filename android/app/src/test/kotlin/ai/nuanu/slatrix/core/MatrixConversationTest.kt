@@ -454,6 +454,31 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.forward
+    @Test fun aMessageForwardsAsItsTextOrItsFileButNotAVideoOrWhileAnEditOrDeleteIsPending() = runTest {
+        fun media(type: MessageType) = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(type, "clip", false, null)), null, null, null))
+        val source = object : MediaSource(NoHandle) {}
+        val file = MessageType.File(FileMessageContent("plan.pdf", null, null, source, null))
+        val video = MessageType.Video(VideoMessageContent("clip.mp4", null, null, source, null))
+        val timeline = ConversationTimeline(listOf(
+            conversationItem("a", "\$text", "Ship it"),
+            conversationItem("b", "\$file", "plan.pdf", content = media(file)),
+            conversationItem("c", "\$video", "clip.mp4", content = media(video)),
+            conversationItem("d", "\$editing", "Being edited", editState = EventSendState.NotSentYet(null)),
+            conversationItem("e", "\$deleting", "Being deleted", deleting = true),
+        ))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val rows = conversation.state.first { it.rows.messages.size == 5 }.rows.messages
+
+        assertEquals(MessageType.Text(TextMessageContent("Ship it", null)), conversation.forwardable(rows[0]))
+        assertEquals(file, conversation.forwardable(rows[1]))
+        assertNull(conversation.forwardable(rows[2]))
+        assertNull("A pending edit could change what goes", conversation.forwardable(rows[3]))
+        assertNull(conversation.forwardable(rows[4]))
+        conversation.close()
+    }
+
     // capability: message.copy-link
     @Test fun aMessageLinksToItsEventInTheRoom() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
@@ -662,6 +687,9 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         pins.send(eventId to false)
         return true
     }
+    override suspend fun getEventTimelineItemByEventId(eventId: String): EventTimelineItem =
+        checkNotNull(cached.firstNotNullOfOrNull { item -> item.asEvent()?.takeIf {
+            (it.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId == eventId } })
     val fetched = Channel<String>(Channel.UNLIMITED)
     override suspend fun fetchDetailsForEvent(eventId: String) { fetched.send(eventId) }
     override suspend fun addListener(listener: TimelineListener): TaskHandle {
@@ -727,6 +755,8 @@ private fun conversationItem(
     sender: String = "@mira:example.org",
     timestamp: ULong = 1_700_000_000_000u,
     editable: Boolean = false,
+    editState: EventSendState? = null,
+    deleting: Boolean = false,
     onMap: () -> Unit = {},
 ): TimelineItem {
     val event = EventTimelineItem(
@@ -740,7 +770,8 @@ private fun conversationItem(
             null, null, null,
         )),
         reactions = reactions, eventTypeRaw = "m.room.message", timestamp = timestamp,
-        localSendState = sendState, editSendState = null, redactionSendState = null, localCreatedAt = null,
+        localSendState = sendState, editSendState = editState,
+        redactionSendState = if (deleting) EventSendState.NotSentYet(null) else null, localCreatedAt = null,
         readReceipts = emptyMap(), origin = null, canBeRepliedTo = true,
         lazyProvider = object : LazyTimelineItemProvider(NoHandle) {},
     )

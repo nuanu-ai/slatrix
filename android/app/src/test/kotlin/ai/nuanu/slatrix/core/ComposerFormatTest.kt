@@ -21,7 +21,7 @@ class ComposerFormatTest {
     }
 
     @Test fun `plain input preserves markup characters and line breaks without formatting`() {
-        val draft = ComposerFormat.plainTextDraft("<strong>**six** & \"seven\"</strong>\n> quote")
+        val draft = ComposerFormat.draft("<strong>**six** & \"seven\"</strong>\n> quote")
         assertEquals(
             ComposerMessage("<strong>**six** & \"seven\"</strong>\n> quote", null, emptyList(), false),
             ComposerFormat.message(draft),
@@ -29,7 +29,7 @@ class ComposerFormatTest {
     }
 
     @Test fun `plain input keeps leading and repeated spaces on each line`() {
-        val draft = ComposerFormat.plainTextDraft("  keep  spaces\n next")
+        val draft = ComposerFormat.draft("  keep  spaces\n next")
         assertEquals(
             ComposerMessage("  keep  spaces\n next", null, emptyList(), false),
             ComposerFormat.message(draft),

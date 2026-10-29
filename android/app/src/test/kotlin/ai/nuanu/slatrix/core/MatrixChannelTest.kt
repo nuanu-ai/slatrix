@@ -87,6 +87,25 @@ class MatrixChannelTest {
         assertFailure("Something went wrong. Try again.") { channel.leave() }
     }
 
+    // capability: channel.link-workspace
+    @Test fun linkingAddsTheChannelToAWorkspaceYouManageOrTakesItOut() = runTest {
+        val studio = ChannelRoom(roomInfo("!studio:example.org", "Studio", space = true))
+        val spaces = ChannelSpaces()
+        val linked = MatrixChannel(ChannelClient(room, settings, listOf(studio), spaces), "!design:example.org")
+        linked.setInWorkspace("!studio:example.org", true)
+        linked.setInWorkspace("!studio:example.org", true)
+        assertEquals(listOf("!studio:example.org"), spaces.parents["!design:example.org"])
+        linked.setInWorkspace("!studio:example.org", false)
+        assertEquals(emptyList<String>(), spaces.parents["!design:example.org"])
+        assertFailure("This channel isn’t in that workspace.") { linked.setInWorkspace("!studio:example.org", false) }
+
+        studio.powers = TestPowers(spaceChild = false)
+        assertFailure("You don’t have permission to manage channels in this workspace.") {
+            linked.setInWorkspace("!studio:example.org", true)
+        }
+        assertEquals(emptyList<String>(), spaces.parents["!design:example.org"])
+    }
+
     private suspend fun assertFailure(message: String, action: suspend () -> Unit) {
         assertEquals(message, runCatching { action() }.exceptionOrNull()?.message)
     }
@@ -95,9 +114,20 @@ class MatrixChannelTest {
         RoomMember(id, name, null, null, null, membership, false, PowerLevel.Value(0), false, RoomMemberRole.USER, null, false)
 }
 
-private class ChannelClient(private val room: Room, private val settings: NotificationSettings) : Client(NoHandle) {
-    override fun getRoom(roomId: String): Room? = room.takeIf { it.id() == roomId }
+private class ChannelClient(private val room: Room, private val settings: NotificationSettings,
+    private val others: List<Room> = emptyList(), private val spaces: SpaceService = ChannelSpaces()) : Client(NoHandle) {
+    override fun getRoom(roomId: String): Room? = (others + room).firstOrNull { it.id() == roomId }
     override suspend fun getNotificationSettings(): NotificationSettings = settings
+    override suspend fun spaceService(): SpaceService = spaces
+}
+
+/** The spaces graph as the SDK keeps it: each channel's direct parents. */
+private class ChannelSpaces : SpaceService(NoHandle) {
+    val parents = mutableMapOf<String, MutableList<String>>()
+    override suspend fun topLevelJoinedSpaces(): List<SpaceRoom> = emptyList()
+    override suspend fun joinedParentIdsOfChild(childId: String): List<String> = parents[childId].orEmpty().toList()
+    override suspend fun addChildToSpace(childId: String, spaceId: String) { parents.getOrPut(childId) { mutableListOf() } += spaceId }
+    override suspend fun removeChildFromSpace(childId: String, spaceId: String) { parents[childId]?.remove(spaceId) }
 }
 
 private class ChannelRoom(private val info: RoomInfo) : Room(NoHandle) {
@@ -112,6 +142,7 @@ private class ChannelRoom(private val info: RoomInfo) : Room(NoHandle) {
     val topics = mutableListOf<String>()
     val invited = mutableListOf<String>()
     override fun id(): String = info.id
+    override fun isSpace(): Boolean = info.isSpace
     override fun membership(): Membership = joined
     override suspend fun roomInfo(): RoomInfo = info
     override suspend fun getPowerLevels(): RoomPowerLevels = powers

@@ -71,6 +71,29 @@ class MatrixChannel(private val client: Client, private val roomId: String) {
 
     suspend fun leave() = joined { room -> room.leave() }
 
+    /** Adds the channel to the workspace [spaceId], or takes it out, where you may manage the workspace's channels. */
+    suspend fun setInWorkspace(spaceId: String, adding: Boolean) =
+        joined("Join the workspace and channel before changing their connection.") { child ->
+            (client.getRoom(spaceId) ?: throw ChannelActionFailure("Join the workspace and channel before changing their connection.")).use { space ->
+                if (!space.isSpace() || child.isSpace() || space.membership() != Membership.JOINED) {
+                    throw ChannelActionFailure("Join the workspace and channel before changing their connection.")
+                }
+                space.getPowerLevels().use { powers ->
+                    if (!powers.canOwnUserSendState(StateEventType.SpaceChild)) {
+                        throw ChannelActionFailure("You don’t have permission to manage channels in this workspace.")
+                    }
+                }
+            }
+            client.spaceService().use { spaces ->
+                // Parent lookups read the graph this builds.
+                spaces.topLevelJoinedSpaces()
+                val direct = spaceId in spaces.joinedParentIdsOfChild(roomId)
+                if (!adding && !direct) throw ChannelActionFailure("This channel isn’t in that workspace.")
+                if (adding && !direct) spaces.addChildToSpace(roomId, spaceId)
+                if (!adding) spaces.removeChildFromSpace(roomId, spaceId)
+            }
+        }
+
     suspend fun invite(userId: String) = joined("Join this conversation before inviting people.") { room ->
         val id = userId.trim()
         if (!ComposerFormat.userID.matches(id)) throw ChannelActionFailure("Enter a complete Matrix ID, such as @name:example.org.")

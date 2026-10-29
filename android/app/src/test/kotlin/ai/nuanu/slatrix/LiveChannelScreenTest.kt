@@ -273,6 +273,27 @@ class LiveChannelScreenTest {
         compose.waitUntil { newer > 0 }
     }
 
+    // capability: composer.typing
+    @Test fun whoIsTypingShowsOverTheConversationsEndWithoutMovingIt() {
+        val typing = mutableStateOf(emptyList<String>())
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message("Hello", minutes = 0)), loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, typing = typing.value)
+            }
+        }
+        val before = compose.onNodeWithText("Hello").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { typing.value = listOf("Sam") }
+        compose.onNodeWithText("Sam is typing…").assertIsDisplayed()
+        assertEquals(before, compose.onNodeWithText("Hello").fetchSemanticsNode().boundsInRoot)
+        compose.runOnIdle { typing.value = listOf("Sam", "Mira") }
+        compose.onNodeWithText("Sam and Mira are typing…").assertIsDisplayed()
+        compose.runOnIdle { typing.value = listOf("Sam", "Mira", "Quinn") }
+        compose.onNodeWithText("Several people are typing…").assertIsDisplayed()
+        compose.runOnIdle { typing.value = emptyList() }
+        compose.onNodeWithText("typing", substring = true).assertDoesNotExist()
+    }
+
     private fun message(body: String, minutes: Int, sender: String = "Mira", state: MessageSendState = MessageSendState.Sent) =
         ConversationMessage(body, "\$$body", "@${sender.lowercase()}:example.org", sender, body, null,
             1_700_000_000_000L + minutes * 600_000L, MessageKind.Text, state, sender == "Jordan", sender.take(1), 0)

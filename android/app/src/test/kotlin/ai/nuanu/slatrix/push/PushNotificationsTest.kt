@@ -6,12 +6,15 @@ import android.app.Notification
 import android.app.NotificationManager
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityStatus
+import ai.nuanu.slatrix.core.NotificationPreferences
+import ai.nuanu.slatrix.core.NotifyAbout
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -110,6 +113,41 @@ class PushNotificationsTest {
 
         notifications.deliver(client, "@alex:example.org", "!team:example.org", "\$missing", NotificationStatus.EventNotFound, null)
         assertEquals("New message", manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    }
+
+    // capability: notifications.previews
+    @Test fun withoutPreviewsAnAlertHidesSenderConversationAndTextButStillOpensItsMessage() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val verified = IdentityState(status = IdentityStatus.Verified)
+        PushNotifications(context).show("@alex:example.org", "!team:example.org", "\$shown", notificationMessage(), verified)
+
+        NotificationPreferences(context, "@alex:example.org").previews = false
+        assertTrue("Alerts already showing text come down", manager.activeNotifications.isEmpty())
+        PushNotifications(context).show("@alex:example.org", "!team:example.org", "\$hidden", notificationMessage(), verified)
+        val notification = manager.activeNotifications.single().notification
+        assertEquals("Slatrix", notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+        assertEquals("New message", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+        val shown = notification.extras.keySet().joinToString { notification.extras.get(it).toString() }
+        assertFalse(shown, "Review budget" in shown || "Sam" in shown || "Team" in shown)
+        assertEquals("!team:example.org", shadowOf(notification.contentIntent).savedIntent.getStringExtra(PushNotifications.ROOM_ID))
+    }
+
+    // capability: notifications.defaults
+    @Test fun choosingNothingRaisesNoAlertsOnThisPhone() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        NotificationPreferences(context, "@alex:example.org").setNotifyAbout(object : NotificationSettings(NoHandle) {}, NotifyAbout.None)
+
+        PushNotifications(context).show("@alex:example.org", "!team:example.org", "\$quiet", notificationMessage(),
+            IdentityState(status = IdentityStatus.Verified))
+        assertTrue(manager.activeNotifications.isEmpty())
+
+        PushNotifications(context).show("@sam:example.org", "!team:example.org", "\$for-sam", notificationMessage(),
+            IdentityState(status = IdentityStatus.Verified))
+        assertEquals("Sam: Review budget?", manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
 
     @Test fun aColdStartWaitsBrieflyForTheIdentityBeforeChoosingWhatToShow() = runTest {
