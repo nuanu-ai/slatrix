@@ -49,7 +49,7 @@ export const matrixPush = onRequest({
   const results = await Promise.allSettled(notification.devices.map((device) => getMessaging().send({
     token: device.pushkey,
     data: { event_id: notification.event_id, room_id: notification.room_id },
-    android: { priority: 'high', restrictedPackageName: device.app_id },
+    android: { priority: notification.prio === 'low' ? 'normal' : 'high', restrictedPackageName: device.app_id },
   })));
   if (results.some((result) => result.status === 'rejected' && !invalidTokenCodes.has(result.reason?.code))) {
     response.set('Retry-After', '60').status(503).json({ errcode: 'M_UNKNOWN', error: 'Push delivery unavailable' });
