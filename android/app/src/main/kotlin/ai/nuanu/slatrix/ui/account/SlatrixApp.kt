@@ -8,6 +8,8 @@ import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.MatrixChannel
+import ai.nuanu.slatrix.core.MatrixForward
+import org.matrix.rustcomponents.sdk.MessageType
 import ai.nuanu.slatrix.core.MatrixConversation
 import org.matrix.rustcomponents.sdk.Client
 import ai.nuanu.slatrix.core.ConversationView
@@ -66,6 +68,7 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -233,6 +236,10 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
     val scope = rememberCoroutineScope()
     var details by rememberSaveable(open.room.id) { mutableStateOf(false) }
+    // The message and the copy read when Forward was tapped, so the copy is the message the page shows.
+    var forwarding by remember { mutableStateOf<Pair<ConversationMessage, MessageType>?>(null) }
+    var forwarded by remember { mutableStateOf<String?>(null) }
+    forwarded?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); forwarded = null } }
     Box(Modifier.fillMaxSize()) {
         LiveChannelScreen(room, timeline, draft, { composer?.edit(it); if (draft.target !is ComposerTarget.Edit) open.typing?.changed(it) }, { composer?.send(); open.typing?.stopped() },
             { owner?.back() }, { conversation?.loadOlder() },
@@ -244,7 +251,9 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
             { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
-            open.threadRoot, rememberMessageActions(conversation, composer, main, room),
+            open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { remember(it) { it.copy(onForward = { m ->
+                scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { forwarded = "This message can’t be forwarded." } }
+            }) } },
             ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
                 onNeedPeople = { composer?.loadPeople() },
                 onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
@@ -283,6 +292,15 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 scope.launch { jump(open.room, id, main?.threadRootOf(open.room.id, id)) }
             }, spaces) { details = false }
         }
+        forwarding?.let { (message, content) ->
+            ForwardScreen(message, room, roomList?.value?.rooms.orEmpty().filter { it.canPost }, { destination ->
+                rooms?.client?.let { MatrixForward(it).forward(content, open.room.id, destination.id) } ?: "Couldn’t forward this message."
+            }, { destination ->
+                forwarding = null
+                forwarded = if (destination.direct) "Forwarded to ${destination.name}." else "Forwarded to #${destination.name}."
+            }) { forwarding = null }
+        }
+        forwarded?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
     }
 }
 
