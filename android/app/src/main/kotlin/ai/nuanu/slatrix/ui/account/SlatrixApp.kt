@@ -239,7 +239,10 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             rooms?.client?.let { client ->
                 val channel = MatrixChannel(client, open.room.id)
                 ChannelDetailsActions(channel::members, channel::save, channel::leave, channel::invite, channel::notifications,
-                    channel::setNotifications, pins = {
+                    channel::setNotifications, setInWorkspace = { id, adding ->
+                        channel.setInWorkspace(id, adding)
+                        rooms.reloadSpaces()
+                    }, pins = {
                     val pins = rememberConversation(client, open.room.id, ConversationView.Pins)
                     // Unpins through the conversation, which outlives the page, so going back doesn't cancel it.
                     PinnedMessages(pins?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load pins")) {
@@ -255,11 +258,12 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         }
         // Over the conversation, so Back finds it where it was.
         if (details && actions != null) {
-            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }, onOpenMessage = { id ->
+            val spaces by remember(roomList) { derivedStateOf { roomList?.value?.spaces.orEmpty() } }
+            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft ={ details = false; owner?.back() }, onOpenMessage = { id ->
                 details = false
                 // A pin doesn't know its thread, so it asks before jumping.
                 scope.launch { jump(open.room, id, main?.threadRootOf(open.room.id, id)) }
-            }) { details = false }
+            }, spaces) { details = false }
         }
     }
 }
