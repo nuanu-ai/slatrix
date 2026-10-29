@@ -46,7 +46,7 @@ struct SendToChannelTests {
         "The channel's copy of a thread reply, from spec/send-to-channel.json",
         arguments: try SharedSpec.decode("spec/send-to-channel.json", as: Spec.self).send)
     func copy(spec: Send) throws {
-        let content = ChannelCopy.content(ComposerFormat.message(draft: spec.draft), replyTo: spec.replyTo)
+        let content = try ChannelCopy.content(ComposerFormat.message(draft: spec.draft), replyTo: spec.replyTo)
         #expect(try JSONDecoder().decode(JSON.self, from: Data(content.utf8)) == spec.content)
     }
 }
