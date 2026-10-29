@@ -91,7 +91,8 @@ fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Bo
 
 private const val MAX_BLANK_PAGES = 5
 
-class MatrixConversation(scope: CoroutineScope, private val room: Room) {
+/** The room's main timeline, or with [threadRoot] the thread that message starts. */
+class MatrixConversation(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null) {
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
     private val mutableState = MutableStateFlow(ConversationState())
@@ -114,7 +115,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
         var listener: TaskHandle? = null
         try {
             timeline = room.timelineWithConfiguration(TimelineConfiguration(
-                focus = TimelineFocus.Live(hideThreadedEvents = true), filter = TimelineFilter.All,
+                focus = threadRoot?.let(TimelineFocus::Thread) ?: TimelineFocus.Live(hideThreadedEvents = true), filter = TimelineFilter.All,
                 internalIdPrefix = null, dateDividerMode = DateDividerMode.DAILY,
                 trackReadReceipts = TimelineReadReceiptTracking.MESSAGE_LIKE_EVENTS, reportUtds = false,
             ))
@@ -234,9 +235,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                     val timeline = ready.await()
                     if (!isLatestRemote(eventId)) return@withLock false
                     if (lastRead == eventId) return@withLock true
+                    // A thread's timeline sends this for the thread; the channel's marker and unread flag stay.
                     timeline.sendReadReceipt(ReceiptType.READ, eventId)
                     currentCoroutineContext().ensureActive()
                     if (!isLatestRemote(eventId)) return@withLock false
+                    if (threadRoot != null) { lastRead = eventId; return@withLock true }
                     timeline.sendReadReceipt(ReceiptType.FULLY_READ, eventId)
                     currentCoroutineContext().ensureActive()
                     if (!isLatestRemote(eventId)) return@withLock false
