@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.ui.account
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationRow
+import ai.nuanu.slatrix.core.caption
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageAttachment
@@ -32,13 +33,13 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -48,6 +49,7 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
@@ -82,12 +84,16 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     onOpenMessage: (eventId: String) -> Unit = {},
     loadPicture: PictureLoader = { _, _, _, _ -> null },
     onOpenFile: suspend (MessageAttachment) -> String? = { null },
+    loadFile: FileLoader = { null },
     /** Opens the conversation's details, as a tap on Slack's header pill does. */
     onOpenDetails: () -> Unit = {},
     /** Who else is typing, by name. */
-    typing: List<String> = emptyList()) {
+    typing: List<String> = emptyList(),
+    /** Opens someone's profile, from a sender's name or picture or a mention. */
+    onPerson: (userId: String) -> Unit = {}) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
+    val videos = rememberVideoPlayback(loadFile)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var resumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     DisposableEffect(lifecycle) {
@@ -268,14 +274,14 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val first = line != null && row.eventId == line
                             if (first) NewLine()
                             if (threadRoot != null && row.eventId == threadRoot) Column {
-                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
+                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }, onPerson) { menu = it }
                                 // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                                 RepliesBar(replies)
                             // The first reply starts under the replies bar, and the first unread under the New line, so
                             // each shows its sender again.
                             } else LiveMessageRow(if (row.id == firstReply || first) row.copy(grouped = false) else row, state.ownUserId,
                                 actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
-                                loadPicture, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
+                                loadPicture, videos, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }, onPerson) { menu = it }
                         }
                     }
                 }
@@ -351,12 +357,20 @@ private fun ConversationIntro(room: RoomSummary) {
         verticalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         Box(Modifier.size(UiMetrics.ProfileAvatar).background(colors.raised, MaterialTheme.shapes.extraLarge),
             contentAlignment = Alignment.Center) {
-            Icon(if (room.direct) Icons.Outlined.Person else Icons.Outlined.Tag, null, Modifier.size(UiMetrics.HeaderAvatar))
+            // A private channel shows its lock, as the header and the Mac do, and its name without a hash.
+            when {
+                room.direct -> Icon(Icons.Outlined.Person, null, Modifier.size(UiMetrics.HeaderAvatar))
+                room.isPrivate -> Icon(SlackIcons.Lock, "Private channel", Modifier.size(UiMetrics.HeaderAvatar))
+                else -> Icon(SlackIcons.Hash, null, Modifier.size(UiMetrics.HeaderAvatar))
+            }
         }
-        Text(if (room.direct) room.name else "# ${room.name}", style = MaterialTheme.typography.headlineSmall,
+        Text(if (room.direct || room.isPrivate) room.name else "# ${room.name}", style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold, color = colors.textPrimary)
-        Text(if (room.direct) "This conversation is just between ${room.name} and you."
-            else "This is the very beginning of the #${room.name} channel.",
+        Text(when {
+            room.direct -> "This conversation is just between ${room.name} and you."
+            room.isPrivate -> "This is the very beginning of the ${room.name} channel."
+            else -> "This is the very beginning of the #${room.name} channel."
+        },
             style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
     }
 }
@@ -401,7 +415,8 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
 @Composable
 private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
-    loadPicture: PictureLoader, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (MessageAttachment, ImageBitmap?) -> Unit,
+    loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (MessageAttachment, ImageBitmap?) -> Unit,
+    onPerson: (String) -> Unit,
     onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
@@ -417,10 +432,13 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
         if (message.grouped) Box(Modifier.width(UiMetrics.Avatar), contentAlignment = Alignment.Center) {
             if (failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.size(UiMetrics.Icon), tint = colors.destructive)
-        } else LiveAvatar(message.initials, message.colorIndex, url = message.avatarUrl)
+        } else Box(Modifier.clip(MaterialTheme.shapes.small).clickable(role = Role.Button) { onPerson(message.senderId) }
+            .semantics(mergeDescendants = true) { contentDescription = "${message.senderName}’s profile" }) {
+            LiveAvatar(message.initials, message.colorIndex, url = message.avatarUrl)
+        }
         Column(Modifier.weight(1f)) {
             if (!message.grouped) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
+                Text(message.senderName, Modifier.weight(1f, fill = false).clickable(role = Role.Button) { onPerson(message.senderId) }, style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(when (message.sendState) {
                     MessageSendState.Sent -> remember(message.timestamp) { timeLabel(message.timestamp) }
@@ -433,10 +451,10 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
                 Column {
                     val attachment = message.attachment
                     // An attachment's text is its caption; without one it is the file's name, which the attachment shows.
-                    if (attachment == null || message.body != attachment.name) {
-                        MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me)
+                    if (attachment == null || message.caption != null) {
+                        MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me, onPerson)
                     }
-                    attachment?.let { Attachment(it, loadPicture, opening, { onOpenFile(message) }) { shown -> onView(it, shown) } }
+                    attachment?.let { Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, { onMenu(message) }) { shown -> onView(it, shown) } }
                 }
                 // In the row's bottom padding, so the bar comes and goes without moving anything.
                 message.uploadProgress?.let {
