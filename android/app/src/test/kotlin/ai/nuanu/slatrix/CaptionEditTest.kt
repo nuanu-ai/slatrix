@@ -13,10 +13,8 @@ import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.ui.test.assertTextEquals
-import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -44,17 +42,18 @@ class CaptionEditTest {
     private val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office" }
     private val edits = mutableListOf<Pair<String?, String?>>()
 
-    private fun media(id: String, caption: String, own: Boolean, name: String = "office.jpg") = ConversationMessage(id, "\$$id",
+    private fun media(id: String, caption: String, own: Boolean, name: String = "office.jpg",
+        kind: MessageAttachment.Kind = MessageAttachment.Kind.Image) = ConversationMessage(id, "\$$id",
         if (own) "@me:example.org" else "@mira:example.org", if (own) "Me" else "Mira", caption, null, 1_700_000_000_000L,
         MessageKind.Attachment, MessageSendState.Sent, own, "M", 0,
-        attachment = MessageAttachment(MessageAttachment.Kind.Image, name, "image/jpeg", 2_000_000, 1600, 900, source))
+        attachment = MessageAttachment(kind, name, "image/jpeg", 2_000_000, 1600, 900, source))
 
     private fun show(vararg messages: ConversationMessage) {
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(messages.toList(), loading = false, hasMore = false),
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
-                    actions = MessageActions(onEditCaption = { message, caption -> edits += message.eventId to caption }))
+                    actions = MessageActions(onReact = { _, _ -> }, onEditCaption = { message, caption -> edits += message.eventId to caption }))
             }
         }
     }
@@ -74,12 +73,15 @@ class CaptionEditTest {
         compose.runOnIdle { assertEquals(listOf("\$p" to "Our new office, 3rd floor", "\$p" to null), edits) }
     }
 
-    @Test fun mediaWithoutACaptionStartsEmptyAndOthersMediaOffersNone() {
-        show(media("p", "office.jpg", own = true), media("q", "Their photo", own = false, name = "theirs.jpg"))
-        compose.onNodeWithContentDescription("theirs.jpg").performTouchInput { longClick() }
-        compose.onAllNodes(isRoot()).assertCountEquals(2)
-        compose.onNodeWithText("Edit caption").assertDoesNotExist()
-        androidx.test.espresso.Espresso.pressBack()
+    @Test fun mediaWithoutACaptionStartsEmptyAndOthersMediaOrYourVideoOffersNone() {
+        show(media("p", "office.jpg", own = true), media("q", "Their photo", own = false, name = "theirs.jpg"),
+            media("v", "Walkthrough", own = true, name = "walkthrough.mp4", kind = MessageAttachment.Kind.Video))
+        for (sheet in listOf("Their photo", "Walkthrough")) {
+            compose.onNodeWithText(sheet, useUnmergedTree = true).performTouchInput { longClick() }
+            compose.onNodeWithContentDescription("Add reaction").assertExists()
+            compose.onNodeWithText("Edit caption").assertDoesNotExist()
+            androidx.test.espresso.Espresso.pressBack()
+        }
 
         compose.onNodeWithContentDescription("office.jpg").performTouchInput { longClick() }
         compose.onNodeWithText("Edit caption").performClick()

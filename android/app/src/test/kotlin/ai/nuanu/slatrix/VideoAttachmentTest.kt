@@ -12,6 +12,10 @@ import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -41,7 +45,6 @@ class VideoAttachmentTest {
     private val file = CompletableDeferred<File?>()
 
     // capability: message.video
-    // capability: message.media-viewer
     @Test fun aVideoKeepsItsShapeAndLengthPlaysInPlaceAndOpensFullScreen() {
         compose.setContent {
             SlatrixTheme {
@@ -65,4 +68,25 @@ class VideoAttachmentTest {
         compose.onNodeWithContentDescription("Close").assertIsDisplayed().performClick()
         compose.onNodeWithContentDescription("Close").assertDoesNotExist()
     }
+
+    @Test fun playingAnotherVideoStopsTheFirst() {
+        val other = clip.copy(name = "other.mp4", source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/other" })
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(clip to "v", other to "w").map { (attachment, id) ->
+                    ConversationMessage(id, "\$$id", "@mira:example.org", "Mira", attachment.name, null, 1_700_000_000_000L,
+                        MessageKind.Attachment, MessageSendState.Sent, false, "M", 0, attachment = attachment, grouped = id == "w")
+                }, loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    loadFile = { File.createTempFile("clip", ".mp4") })
+            }
+        }
+        compose.onNodeWithContentDescription("clip.mp4").performClick()
+        compose.onNode(hasContentDescription("clip.mp4") and hasClickAction() and hasOnClickLabel("Full screen")).assertExists()
+        compose.onNodeWithContentDescription("other.mp4").performClick()
+        compose.onNode(hasContentDescription("other.mp4") and hasOnClickLabel("Full screen")).assertExists()
+        compose.onNode(hasContentDescription("clip.mp4") and hasOnClickLabel("Play video")).assertExists()
+    }
 }
+
+private fun hasOnClickLabel(label: String) =
+    SemanticsMatcher("OnClick labelled $label") { it.config.getOrElseNullable(SemanticsActions.OnClick) { null }?.label == label }
