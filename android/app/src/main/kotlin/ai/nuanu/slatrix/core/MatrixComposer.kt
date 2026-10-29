@@ -8,7 +8,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,8 +45,11 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     private val worker = operations.launch {
         try {
             restore()
-            // Typing saves after a pause rather than on every keystroke; leaving flushes the rest.
-            for (edit in edits) if (loaded) { delay(SAVE_DELAY_MILLIS); flush() } else restore()
+            // Typing saves once it pauses rather than on every keystroke; leaving flushes the rest.
+            for (edit in edits) if (loaded) {
+                while (withTimeoutOrNull(SAVE_DELAY_MILLIS) { edits.receive() } != null) Unit
+                flush()
+            } else restore()
         } finally {
             withContext(NonCancellable) { flush() }
             edits.close()
