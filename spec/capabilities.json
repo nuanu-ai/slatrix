@@ -23,7 +23,7 @@
     {"id": "home.private-channel-icon", "what": "Private channels show a lock where public ones show #.", "mac": "missing", "android": "done"},
     {"id": "home.browse-channels", "what": "Browse a workspace's or the server's channels and join one.", "mac": "done", "android": "done"},
     {"id": "home.create-channel", "what": "Create a channel in a workspace.", "mac": "done", "android": "done"},
-    {"id": "home.invitations", "what": "Accept or decline an invitation to a channel, direct message or workspace.", "mac": "done", "android": "missing"},
+    {"id": "home.invitations", "what": "Accept or decline an invitation to a channel, direct message or workspace.", "mac": "done", "android": "done"},
     {"id": "home.keyboard-navigation", "what": "Move to the previous, next or next unread conversation from the keyboard.", "mac": "done", "android": "n/a: phones switch conversations by touch"},
 
     {"id": "search.rooms", "what": "Find a conversation by name and open it.", "mac": "done", "android": "done"},
@@ -66,7 +66,7 @@
     {"id": "message.edited", "what": "An edited message shows its new text, marked (edited).", "mac": "done", "android": "done"},
     {"id": "message.deleted", "what": "A deleted message shows as deleted and keeps nothing it said.", "mac": "done", "android": "done"},
     {"id": "message.image", "what": "Images show inline, with their space kept while they load.", "mac": "done", "android": "done"},
-    {"id": "message.video", "what": "Videos show inline with a poster and their length.", "mac": "done", "android": "missing"},
+    {"id": "message.video", "what": "Videos show inline with a poster and their length.", "mac": "done", "android": "done"},
     {"id": "message.file", "what": "Files show as a tile you can open.", "mac": "done", "android": "done"},
     {"id": "message.media-viewer", "what": "Open an image or video full size and step through the conversation's media.", "mac": "done", "android": "done"},
     {"id": "message.reactions.show", "what": "Reactions show under a message with their counts, yours marked, and who reacted.", "mac": "done", "android": "done"},
@@ -85,7 +85,7 @@
     {"id": "message.forward", "what": "Forward a message to another conversation.", "mac": "done", "android": "done"},
     {"id": "message.pin", "what": "Pin or unpin a message.", "mac": "done", "android": "done"},
     {"id": "message.save", "what": "Save a message for later and find it again in Later.", "mac": "done", "android": "done"},
-    {"id": "message.edit-caption", "what": "Change the caption of an image or file you sent.", "mac": "done", "android": "missing"},
+    {"id": "message.edit-caption", "what": "Change the caption of an image or file you sent.", "mac": "done", "android": "done"},
 
     {"id": "thread.open", "what": "Open a message's thread.", "mac": "done", "android": "done"},
     {"id": "thread.reply", "what": "Reply in a thread.", "mac": "done", "android": "done"},
@@ -96,8 +96,8 @@
     {"id": "activity.feed", "what": "Activity lists your mentions, replies and invitations.", "mac": "done", "android": "done"},
     {"id": "activity.open-item", "what": "Opening an Activity item shows its message in its conversation or thread.", "mac": "done", "android": "done"},
 
-    {"id": "people.profile", "what": "Open someone's profile from their name.", "mac": "done", "android": "missing"},
-    {"id": "people.start-dm", "what": "Message someone from their profile, reusing your direct message with them.", "mac": "done", "android": "missing"},
+    {"id": "people.profile", "what": "Open someone's profile from their name.", "mac": "done", "android": "done"},
+    {"id": "people.start-dm", "what": "Message someone from their profile, reusing your direct message with them.", "mac": "done", "android": "done"},
     {"id": "people.avatars", "what": "People and conversations show a photo, or initials on a color.", "mac": "done", "android": "done"},
     {"id": "profile.own", "what": "See your own profile.", "mac": "done", "android": "done"},
     {"id": "profile.edit-name", "what": "Change your display name.", "mac": "done", "android": "missing"},
