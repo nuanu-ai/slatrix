@@ -249,7 +249,8 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Message 200").assertDoesNotExist()
         compose.runOnIdle { assertEquals("Newer messages wait until the reader reaches the newest", 0, newer) }
 
-        repeat(30) { compose.onRoot().performTouchInput { swipeUp() } }
+        // On the conversation itself: a swipe that starts on the composer doesn't scroll it.
+        repeat(30) { compose.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performTouchInput { swipeUp() } }
         compose.waitUntil { newer > 0 }
     }
 
