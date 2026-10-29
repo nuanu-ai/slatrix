@@ -122,8 +122,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                     override fun onUpdate(diff: List<TimelineDiff>) { updates.trySend(diff) }
                 })
                 currentCoroutineContext().ensureActive()
+                // Still loading until the listener's first batch, the cached items, is published.
                 ready.complete(timeline)
-                mutableState.update { it.copy(loading = false) }
                 var oldest: String? = null
                 for (batch in updates) {
                     // asEvent blocks on the SDK, so a batch is mapped off the main thread.
