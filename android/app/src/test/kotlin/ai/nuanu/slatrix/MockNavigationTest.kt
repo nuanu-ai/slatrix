@@ -4,9 +4,9 @@ import ai.nuanu.slatrix.ui.mockups.SlatrixMockups
 import android.app.Application
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
@@ -118,7 +118,7 @@ class MockNavigationTest {
         compose.setContent { SlatrixMockups() }
         compose.onNodeWithContentDescription("You").performClick()
         compose.onNodeWithText("Preferences").performClick()
-        compose.onNodeWithText("Dark mode").assertIsDisplayed()
+        compose.onNodeWithText("Color mode").assertIsDisplayed()
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Jordan Lee").assertIsDisplayed()
         compose.onNodeWithText("Preferences").assertIsDisplayed()
@@ -128,13 +128,14 @@ class MockNavigationTest {
         compose.onNodeWithContentDescription("You").performClick()
         compose.onNodeWithText("Jordan Lee").assertIsDisplayed()
         compose.onNodeWithText("Preferences").performClick()
-        compose.onNodeWithText("Dark mode").performScrollTo().performClick().assertIsOff()
+        compose.onNodeWithText("Color mode").performClick()
+        compose.onNode(hasText("Dark") and hasAnyAncestor(isDialog())).performClick()
         compose.onNodeWithText("Lagoon").performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithContentDescription("You").performClick()
         compose.onNodeWithText("Preferences").performClick()
-        compose.onNodeWithText("Dark mode").assertIsOff()
+        compose.onNodeWithText("Dark").assertIsDisplayed()
         compose.onNodeWithText("Lagoon").assertIsSelected()
     }
 }

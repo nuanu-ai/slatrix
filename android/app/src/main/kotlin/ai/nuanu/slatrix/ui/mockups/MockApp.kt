@@ -1,9 +1,11 @@
 package ai.nuanu.slatrix.ui.mockups
 
+import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -25,33 +27,37 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 
 enum class MockScreen { Home, Dms, Activity, Channel, Thread, You }
 
 @Composable
 fun SlatrixMockups(
-    dark: Boolean = true,
+    dark: Boolean = isSystemInDarkTheme(),
 ) {
+    val context = LocalContext.current
+    val appearance = remember(context) { AppearancePreferences(context) }
     var screen by rememberSaveable { mutableStateOf(MockScreen.Home) }
     var tab by rememberSaveable { mutableStateOf(MockScreen.Home) }
     val stateHolder = rememberSaveableStateHolder()
     var threadReturn by rememberSaveable { mutableStateOf(MockScreen.Channel) }
     var roomId by rememberSaveable { mutableStateOf("design") }
-    var palette by rememberSaveable { mutableStateOf(SidebarPalette.Aubergine) }
-    var darkOverride by rememberSaveable { mutableStateOf<Int?>(null) }
+    var palette by rememberSaveable { mutableStateOf(SidebarPalette.entries.firstOrNull { it.name == appearance.paletteName } ?: SidebarPalette.Aubergine) }
+    var darkOverride by rememberSaveable { mutableStateOf(appearance.darkMode) }
     var drafts by rememberSaveable { mutableStateOf(mapOf<String, String>()) }
     var sentByRoom by rememberSaveable { mutableStateOf(mapOf<String, List<MockMessage>>()) }
     var reactions by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val onReaction: (String) -> Unit = { id -> reactions = if (id in reactions) reactions - id else reactions + id }
     val withReaction: (MockMessage) -> MockMessage = { it.copy(reacted = it.id in reactions) }
     var sentReplies by rememberSaveable { mutableStateOf(emptyList<MockMessage>()) }
-    val effectiveDark = darkOverride?.let { it == 1 } ?: dark
+    val effectiveDark = darkOverride ?: dark
     val room = MockData.channels.firstOrNull { it.id == roomId } ?: MockData.conversations.first { it.id == roomId }.let {
         MockChannel(it.id, it.name, "Direct message", direct = true)
     }
@@ -123,9 +129,9 @@ fun SlatrixMockups(
                                             drafts = drafts - key
                                         }
                                     }, onBack = back)
-                                MockScreen.You -> YouScreen(effectiveDark, palette,
-                                    onDarkToggle = { darkOverride = if (effectiveDark) 0 else 1 },
-                                    onPalette = { palette = it }, onBack = back)
+                                MockScreen.You -> YouScreen(effectiveDark, darkOverride, palette,
+                                    onColorMode = { choice -> darkOverride = choice; appearance.darkMode = choice },
+                                    onPalette = { palette = it; appearance.paletteName = it.name }, onBack = back)
                             }
                             }
                         }

@@ -22,9 +22,9 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Brush
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SentimentSatisfied
 import androidx.compose.material3.AlertDialog
@@ -35,7 +35,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -50,12 +49,32 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 
 @Composable
-fun YouScreen(dark: Boolean, palette: SidebarPalette, onDarkToggle: () -> Unit, onPalette: (SidebarPalette) -> Unit, onBack: () -> Unit) {
+fun YouScreen(dark: Boolean, darkOverride: Boolean?, palette: SidebarPalette, onColorMode: (Boolean?) -> Unit, onPalette: (SidebarPalette) -> Unit, onBack: () -> Unit) {
     var preferences by rememberSaveable { mutableStateOf(false) }
+    var choosingMode by rememberSaveable { mutableStateOf(false) }
+    val colorMode = when (darkOverride) { null -> "System default"; false -> "Light"; true -> "Dark" }
     var status by rememberSaveable { mutableStateOf("") }
     var editingStatus by rememberSaveable { mutableStateOf(false) }
     var statusDraft by rememberSaveable { mutableStateOf("") }
     BackHandler(enabled = preferences) { preferences = false }
+    if (choosingMode) {
+        AlertDialog(
+            onDismissRequest = { choosingMode = false }, title = { Text("Color mode") },
+            text = {
+                Column {
+                    listOf("System default" to null, "Light" to false, "Dark" to true).forEach { (label, value) ->
+                        Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
+                            .selectable(selected = darkOverride == value, role = Role.RadioButton, onClick = { onColorMode(value); choosingMode = false }),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = darkOverride == value, onClick = null)
+                            Text(label, Modifier.padding(start = UiMetrics.GapSmall), style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosingMode = false }) { Text("Cancel") } },
+        )
+    }
     if (editingStatus) {
         AlertDialog(
             onDismissRequest = { editingStatus = false },
@@ -109,9 +128,14 @@ fun YouScreen(dark: Boolean, palette: SidebarPalette, onDarkToggle: () -> Unit, 
             } else {
                 item {
                     Text("Appearance", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Row(Modifier.fillMaxWidth().toggleable(value = dark, role = Role.Switch, onValueChange = { onDarkToggle() }).padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Dark mode", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                        Switch(checked = dark, onCheckedChange = null)
+                    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ComposerMinHeight).clickable(role = Role.Button) { choosingMode = true }
+                        .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+                        Icon(Icons.Outlined.Brush, null, Modifier.size(UiMetrics.GapSection))
+                        Column {
+                            Text("Color mode", style = MaterialTheme.typography.bodyLarge)
+                            Text(colorMode, style = MaterialTheme.typography.bodyMedium, color = SlatrixTheme.colors.textSecondary)
+                        }
                     }
                     Text("Color theme", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     listOf(SidebarPalette.Aubergine, SidebarPalette.Lagoon).forEach { choice ->
