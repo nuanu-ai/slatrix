@@ -13,6 +13,8 @@ import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
@@ -174,7 +176,9 @@ class LiveChannelScreenTest {
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, onRetrySend = { retried = it }, onDeleteUnsent = { deleted = it })
             }
         }
-        compose.onNodeWithText("Ship it").performTouchInput { longClick() }
+        compose.onNodeWithText("Ship it")
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick).and(SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick)))
+            .performTouchInput { longClick() }
         compose.onNodeWithText("Retry").assertDoesNotExist()
         compose.onNodeWithText("Copy message").performClick()
         compose.waitUntil { clipboard.primaryClip?.getItemAt(0)?.text?.toString() == "Ship it" }
