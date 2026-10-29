@@ -3,6 +3,10 @@ package ai.nuanu.slatrix
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
+import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.UnreadBadge
+import ai.nuanu.slatrix.ui.account.ChannelDetailsActions
+import ai.nuanu.slatrix.ui.account.ChannelDetailsScreen
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.account.MessageActionsHost
@@ -15,7 +19,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Rule
@@ -48,6 +56,21 @@ class MotionTest {
             SlatrixTheme { if (shown) MessageActionsHost(message, MessageActions(), null, {}, {}) {} }
         }
         settles("Copy message") { shown = true }
+    }
+
+    @Test fun goingBackToAPageIsInstant() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        compose.setContent { SlatrixTheme { ChannelDetailsScreen(room, null, ChannelDetailsActions(), {}, {}) {} } }
+        compose.onNodeWithText("Members").performClick()
+        compose.waitForIdle()
+        // Every pushed page's title sits in the same place in its bar.
+        val title = bounds("Members").left
+        compose.mainClock.autoAdvance = false
+        // As a semantics action, since a tap's own events need the clock this holds.
+        compose.onNodeWithContentDescription("Back").performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnUiThread { Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeByFrame()
+        assertEquals("The details are back in place at once", title, bounds("Channel details").left)
     }
 
     /** After [show], [text] is still on its way in two frames later, and in place, as it stays, 150 ms after that. */
