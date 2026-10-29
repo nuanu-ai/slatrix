@@ -40,12 +40,13 @@ class InvitationsTest {
 
     @Test fun anInvitationNoLongerPendingIsLeftAlone() = runTest {
         val joined = InvitedRoom("!design:example.org", Membership.JOINED)
-        val failing = InvitedRoom("!ops:example.org").apply { fails = true }
-        val client = InvitationsClient(joined, failing)
-
-        assertFalse(Invitations.respond(client, joined.id(), accept = true))
-        assertFalse("A refused join says so", Invitations.respond(client, failing.id(), accept = true))
+        assertFalse(Invitations.respond(InvitationsClient(joined), joined.id(), accept = true))
         assertEquals(emptyList<String>(), joined.writes)
+    }
+
+    @Test fun aRefusedJoinSaysSo() = runTest {
+        val failing = InvitedRoom("!ops:example.org").apply { fails = true }
+        assertFalse(Invitations.respond(InvitationsClient(failing), failing.id(), accept = true))
     }
 }
 

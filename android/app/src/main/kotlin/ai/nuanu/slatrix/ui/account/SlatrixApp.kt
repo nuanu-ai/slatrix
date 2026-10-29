@@ -165,7 +165,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
                             invitation != null -> { { invitation?.let { id ->
                                 LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
-                                    { space -> invitation = null; chooseSpace(space) }) { invitation = null }
+                                    { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
                             } } }
                             channels != null -> { {
                                 val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }

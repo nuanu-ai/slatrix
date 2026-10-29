@@ -7,6 +7,7 @@ import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,7 +102,8 @@ fun InvitationScreen(invitation: Invitation, responding: Boolean, error: String?
  * Decline goes back. One that goes away meanwhile, answered on another device, closes.
  */
 @Composable
-fun LiveInvitation(id: String, rooms: MatrixRooms?, onJoined: (RoomSummary) -> Unit, onWorkspace: (String) -> Unit, onBack: () -> Unit) {
+fun LiveInvitation(id: String, rooms: MatrixRooms?, onJoined: (RoomSummary) -> Unit, onWorkspace: (String) -> Unit,
+    onNotice: (String) -> Unit, onBack: () -> Unit) {
     if (rooms == null) {
         LaunchedEffect(Unit) { onBack() }
         return
@@ -116,13 +118,18 @@ fun LiveInvitation(id: String, rooms: MatrixRooms?, onJoined: (RoomSummary) -> U
     val gone = !state.loading && state.invitations.none { it.id == id } && !responding
     val invitation = seen[0]
     // Until the list loads, as after the app was away, the page waits blank rather than close.
-    if (invitation == null && state.loading) return
+    if (invitation == null && state.loading) {
+        BackHandler(onBack = onBack)
+        return
+    }
     if (invitation == null || gone) {
         LaunchedEffect(Unit) { onBack() }
         return
     }
     val client = rooms.client
     fun answer(accept: Boolean) {
+        // One answer at a time: a second tap before the buttons disable must not send another.
+        if (responding) return
         responding = true
         error = null
         scope.launch {
@@ -136,7 +143,7 @@ fun LiveInvitation(id: String, rooms: MatrixRooms?, onJoined: (RoomSummary) -> U
                 rooms.state.first { list -> list.spaces.any { it.id == id } || list.rooms.any { it.id == id } }
             }
             when {
-                arrived == null -> onBack()
+                arrived == null -> { onNotice("Joined. It’ll show up in a moment."); onBack() }
                 invitation.space -> onWorkspace(id)
                 else -> arrived.rooms.firstOrNull { it.id == id }?.let(onJoined) ?: onBack()
             }

@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.core
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.Membership
@@ -36,7 +37,8 @@ object Invitations {
         try {
             client.getRoom(roomId)?.use { room ->
                 if (room.membership() != Membership.INVITED) return@use false
-                if (accept) room.join() else room.leave()
+                // Left to finish if you leave the page, as on the Mac, so an answer never half-happens.
+                withContext(NonCancellable) { if (accept) room.join() else room.leave() }
                 true
             } == true
         } catch (cancelled: CancellationException) {

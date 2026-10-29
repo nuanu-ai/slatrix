@@ -163,7 +163,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
 
     private suspend fun handle(event: Event) {
         when (event) {
-            // A room that stops being joined is released; if it comes back, the list adds it again.
+            // A room you leave is released; if it comes back, the list adds it again. An invitation stays followed.
             is Event.Info -> if (followed[event.info.id] === event.room) {
                 val wasSpace = event.info.id in spaces
                 accept(event.info)
@@ -237,7 +237,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     }
 
     private suspend fun accept(info: RoomInfo) {
-        if (RoomPlacement.of(info.isSpace, info.membership) == RoomPlacement.Ignored) {
+        val placement = RoomPlacement.of(info.isSpace, info.membership)
+        if (placement == RoomPlacement.Ignored) {
             summaries.remove(info.id)
             spaces.remove(info.id)
             invitations.remove(info.id)
@@ -254,8 +255,9 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             if (invitations[info.id] != invitation) invitations[info.id] = invitation
             return
         }
-        invitations.remove(info.id)
-        if (info.isSpace) {
+        // A joined invitation's workspaces may have changed since it was looked up.
+        if (invitations.remove(info.id) != null) spaceRequests.trySend(SpaceRequest.Lookup(listOf(info.id)))
+        if (placement == RoomPlacement.Workspace) {
             summaries.remove(info.id)
             val space = SpaceSummary(id = info.id, name = name, isTopLevel = topLevel(info.id))
             if (spaces[info.id] != space) spaces[info.id] = space

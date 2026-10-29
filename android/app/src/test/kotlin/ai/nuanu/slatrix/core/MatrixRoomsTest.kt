@@ -100,6 +100,8 @@ class MatrixRoomsTest {
             uniffi.matrix_sdk.RoomMemberRole.USER, null, false)
         val invited = TestRoom(roomInfo("!design:example.org", "design", membership = Membership.INVITED, inviter = sam))
         val client = RoomsClient(listOf(invited, TestRoom(roomInfo("!harbor:example.org", "Harbor", space = true, membership = Membership.INVITED))))
+        val parents = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+        client.spaces = RoomsSpaces(parents)
         val sync = RoomsSync()
         client.services.trySend(sync)
         val rooms = MatrixRooms(backgroundScope, client)
@@ -111,9 +113,12 @@ class MatrixRoomsTest {
         assertEquals(emptyList<RoomSummary>(), listed.rooms)
         assertEquals(emptyList<SpaceSummary>(), listed.spaces)
 
+        // Added to a workspace while you were only invited, it lands there once joined.
+        parents["!design:example.org"] = listOf("!ops:example.org")
         invited.emit(invited.info.copy(membership = Membership.JOINED))
         val joined = rooms.state.first { state -> state.rooms.isNotEmpty() }
         assertEquals(listOf("design"), joined.rooms.map { it.name })
+        assertEquals(setOf("!ops:example.org"), rooms.state.first { state -> state.rooms.any { it.spaceIds.isNotEmpty() } }.rooms.single().spaceIds)
         assertEquals(listOf("Harbor"), joined.invitations.map { it.name })
         rooms.close()
     }
