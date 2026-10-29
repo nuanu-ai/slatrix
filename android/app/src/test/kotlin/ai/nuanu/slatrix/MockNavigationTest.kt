@@ -99,6 +99,15 @@ class MockNavigationTest {
         compose.onNodeWithText("Reviewing designs").assertIsDisplayed()
         compose.onNodeWithText("Unsaved change").assertDoesNotExist()
     }
+    @Test fun appearanceSettingsOpenFromYouAndBackReturnsToProfile() {
+        compose.setContent { SlatrixMockups() }
+        compose.onNodeWithContentDescription("You").performClick()
+        compose.onNodeWithText("Preferences").performClick()
+        compose.onNodeWithText("Dark mode").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Jordan Lee").assertIsDisplayed()
+        compose.onNodeWithText("Preferences").assertIsDisplayed()
+    }
     @Test fun youChangesAndRetainsTheAppearance() {
         compose.setContent { SlatrixMockups() }
         compose.onNodeWithContentDescription("You").performClick()
