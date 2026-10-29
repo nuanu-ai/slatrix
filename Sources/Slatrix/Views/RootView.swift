@@ -1271,7 +1271,8 @@ struct RootView: View {
             // Search results title themselves with the query.
             if route != .search {
                 HStack {
-                    Text(route.title).font(m.font(.title, .bold))
+                    // Slack's rail says "DMs" and its page "Direct messages".
+                    Text(route == .directMessages ? "Direct messages" : route.title).font(m.font(.title, .bold))
                     Spacer()
                     if route == .directMessages || route == .directory {
                         Button {
