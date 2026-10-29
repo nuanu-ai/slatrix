@@ -11,6 +11,10 @@ import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.test.performClick
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.test.assertIsDisplayed
@@ -143,6 +147,33 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Second").performTouchInput { longClick() }
         compose.onNodeWithText("Today at 9:41", substring = true).assertIsDisplayed()
     }
+
+    @Test fun theMessageSheetCopiesTextAndRetriesOrDeletesAFailedMessage() {
+        val failed = message("Lost on the way", minutes = 1, sender = "Jordan", state = MessageSendState.Failed)
+            .copy(transactionId = "txn", canRetry = true)
+        var retried: ConversationMessage? = null
+        var deleted: ConversationMessage? = null
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message("Ship it", minutes = 0), failed), loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, onRetrySend = { retried = it }, onDeleteUnsent = { deleted = it })
+            }
+        }
+        compose.onNodeWithText("Ship it").performTouchInput { longClick() }
+        compose.onNodeWithText("Retry").assertDoesNotExist()
+        compose.onNodeWithText("Copy message").performClick()
+        compose.waitUntil { clipboard.primaryClip?.getItemAt(0)?.text?.toString() == "Ship it" }
+        compose.onNodeWithText("Copy message").assertDoesNotExist()
+
+        compose.onNodeWithText("Lost on the way").performClick()
+        compose.onNodeWithText("Retry").performClick()
+        compose.runOnIdle { assertEquals(failed, retried) }
+        compose.onNodeWithText("Lost on the way").performTouchInput { longClick() }
+        compose.onNodeWithText("Delete message").performClick()
+        compose.runOnIdle { assertEquals(failed, deleted) }
+    }
+
+    private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
 
     private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)
 
