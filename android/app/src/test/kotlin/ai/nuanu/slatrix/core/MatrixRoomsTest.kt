@@ -88,10 +88,33 @@ class MatrixRoomsTest {
         sync.started.await()
         assertEquals(emptyList<RoomSummary>(), rooms.state.first { it.spacesKnown }.rooms)
 
-        invited.info = invited.info.copy(membership = Membership.JOINED)
-        sync.emitEntries(listOf(RoomListEntriesUpdate.Set(1u, invited)))
+        invited.emit(invited.info.copy(membership = Membership.JOINED))
         val joined = rooms.state.first { state -> state.rooms.any { it.spaceIds.isNotEmpty() } }
         assertEquals(setOf("!nuanu:example.org"), joined.rooms.single().spaceIds)
+        rooms.close()
+    }
+
+    // capability: home.invitations
+    @Test fun anInvitationIsListedApartWithWhoSentItUntilItIsJoined() = runTest {
+        val sam = RoomMember("@sam:example.org", "Sam Lee", null, null, null, MembershipState.Join, false, PowerLevel.Value(0), false,
+            uniffi.matrix_sdk.RoomMemberRole.USER, null, false)
+        val invited = TestRoom(roomInfo("!design:example.org", "design", membership = Membership.INVITED, inviter = sam))
+        val client = RoomsClient(listOf(invited, TestRoom(roomInfo("!harbor:example.org", "Harbor", space = true, membership = Membership.INVITED))))
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        sync.started.await()
+
+        val listed = rooms.state.first { it.invitations.size == 2 }
+        assertEquals(listOf(Invitation("!design:example.org", "design", inviter = "Sam Lee"),
+            Invitation("!harbor:example.org", "Harbor", space = true)), listed.invitations)
+        assertEquals(emptyList<RoomSummary>(), listed.rooms)
+        assertEquals(emptyList<SpaceSummary>(), listed.spaces)
+
+        invited.emit(invited.info.copy(membership = Membership.JOINED))
+        val joined = rooms.state.first { state -> state.rooms.isNotEmpty() }
+        assertEquals(listOf("design"), joined.rooms.map { it.name })
+        assertEquals(listOf("Harbor"), joined.invitations.map { it.name })
         rooms.close()
     }
 
@@ -520,13 +543,14 @@ internal fun roomInfo(
     messages: ULong = 0u,
     space: Boolean = false,
     membership: Membership = Membership.JOINED,
+    inviter: RoomMember? = null,
 ) = RoomInfo(
     id = id, encryptionState = EncryptionState.NOT_ENCRYPTED, creators = null,
     displayName = name, rawName = name, topic = null, avatarUrl = null,
     isDirect = direct, isDm = direct, isPublic = null, isSpace = space,
     successorRoom = null, isFavourite = false, isLowPriority = false,
     canonicalAlias = null, alternativeAliases = emptyList(), membership = membership,
-    inviter = null, heroes = emptyList(), activeMembersCount = 2u, invitedMembersCount = 0u,
+    inviter = inviter, heroes = emptyList(), activeMembersCount = 2u, invitedMembersCount = 0u,
     joinedMembersCount = 2u, activeServiceMembersCount = 0u, serviceMembers = emptyList(),
     highlightCount = 0u, notificationCount = 0u, cachedUserDefinedNotificationMode = null,
     hasRoomCall = false, activeRoomCallParticipants = emptyList(),

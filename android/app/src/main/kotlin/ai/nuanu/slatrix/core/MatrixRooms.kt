@@ -89,6 +89,8 @@ data class RoomListState(
     val spaces: List<SpaceSummary> = emptyList(),
     /** False until the first space lookup finishes; rooms show at once, with no [RoomSummary.spaceIds] yet. */
     val spacesKnown: Boolean = false,
+    /** Invitations waiting for you, to conversations and workspaces alike. */
+    val invitations: List<Invitation> = emptyList(),
 )
 
 class MatrixRooms(scope: CoroutineScope, internal val client: Client, private val foreground: StateFlow<Boolean> = MutableStateFlow(true)) {
