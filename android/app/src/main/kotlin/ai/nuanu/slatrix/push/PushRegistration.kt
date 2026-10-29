@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.push
 
 import android.content.Context
+import android.annotation.SuppressLint
 import java.security.MessageDigest
 import java.util.Locale
 import kotlinx.coroutines.currentCoroutineContext
@@ -13,6 +14,7 @@ import org.matrix.rustcomponents.sdk.PushFormat
 import org.matrix.rustcomponents.sdk.PusherIdentifiers
 import org.matrix.rustcomponents.sdk.PusherKind
 
+@SuppressLint("UseKtx") // KTX edit discards the commit result.
 class PushRegistration(context: Context) {
     private val preferences = context.getSharedPreferences("push-registration", Context.MODE_PRIVATE)
     private val appId = context.packageName

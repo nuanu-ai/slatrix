@@ -32,8 +32,7 @@ Use a dedicated test account and room for automated message checks.
 ## Push notifications
 
 Push builds need a Firebase Android client and the [push gateway](push-gateway/README.md).
-Keep the
-Firebase configuration outside the repository, then pass its absolute path:
+Keep the Firebase configuration outside the repository, then pass its absolute path:
 
 ```sh
 ./gradlew :app:assembleDebug \

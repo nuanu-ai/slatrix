@@ -11,6 +11,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 
 @Composable
 fun RequestNotificationPermission(signedIn: Boolean, configured: Boolean) {
@@ -22,6 +23,6 @@ fun RequestNotificationPermission(signedIn: Boolean, configured: Boolean) {
         if (!signedIn || preferences.getBoolean("requested", false) ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return@LaunchedEffect
         launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        preferences.edit().putBoolean("requested", true).apply()
+        preferences.edit { putBoolean("requested", true) }
     }
 }
