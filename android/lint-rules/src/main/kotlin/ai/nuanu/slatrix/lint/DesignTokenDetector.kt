@@ -11,6 +11,7 @@ import com.android.tools.lint.detector.api.SourceCodeScanner
 import com.android.tools.lint.client.api.UElementHandler
 import com.intellij.psi.PsiMember
 import com.intellij.psi.PsiMethod
+import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.uast.UCallExpression
 import org.jetbrains.uast.UElement
 import org.jetbrains.uast.ULiteralExpression
@@ -31,23 +32,30 @@ class DesignTokenDetector : Detector(), SourceCodeScanner {
                 val method = node.resolve() ?: return
                 val owner = method.containingClass?.qualifiedName ?: return
                 if ((method.isConstructor && owner == COLOR) ||
-                    (method.name == "Color" && owner.startsWith("androidx.compose.ui.graphics.") &&
-                        method.returnType?.canonicalText == COLOR)
+                    (method.name == "Color" && owner == "${COLOR}Kt")
                 ) {
                     context.report(ISSUE, node, context.getLocation(node), "Use a design system color role.")
                 }
             }
 
             override fun visitSimpleNameReferenceExpression(node: USimpleNameReferenceExpression) {
-                val member = node.resolve() as? PsiMember ?: return
-                val owner = member.containingClass?.qualifiedName ?: return
-                if (owner == "$COLOR.Companion" && member is PsiMethod && member.name.startsWith("get")) {
+                val resolved = node.resolve()
+                val member = resolved as? PsiMember
+                val owner = member?.containingClass?.qualifiedName
+                val property = resolved as? KtProperty
+                val propertyOwner = property?.fqName?.parent()?.asString()
+                if ((owner == "$COLOR.Companion" && member is PsiMethod && member.name.startsWith("get")) ||
+                    propertyOwner == "$COLOR.Companion"
+                ) {
                     context.report(ISSUE, node, context.getLocation(node), "Use a design system color role.")
                 }
                 val qualified = node.uastParent as? UQualifiedReferenceExpression ?: return
                 val receiver = qualified.receiver as? ULiteralExpression ?: return
-                if (receiver.value !is Number || member !is PsiMethod) return
-                if (owner.startsWith("androidx.compose.ui.unit.") && member.name in setOf("getDp", "getSp", "getEm")) {
+                if (receiver.value !is Number) return
+                if ((owner?.startsWith("androidx.compose.ui.unit.") == true &&
+                        member is PsiMethod && member.name in setOf("getDp", "getSp", "getEm")) ||
+                    (propertyOwner == "androidx.compose.ui.unit" && property.name in setOf("dp", "sp", "em"))
+                ) {
                     context.report(ISSUE, qualified, context.getLocation(qualified), "Use a design system size token.")
                 }
             }
