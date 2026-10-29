@@ -125,15 +125,38 @@ struct PeopleMappingTests {
         #expect(!PeopleMapping.profile(idle, statusSupported: true).inCall)
     }
 
-    @Test(
-        "A DM is reused only when its active members are exactly me (joined) and the person",
-        arguments: [
-            ([member(me), member(alice, .invite)], true),
-            ([member(me), member(alice), member("@bot:example.org", service: true)], false),
-            ([member(me, .invite), member(alice)], false),
-        ])
-    func exactParticipants(members: [RoomMember], exact: Bool) {
-        #expect(PeopleMapping.exactDirectParticipants(members, ownUserID: me, targetUserID: alice) == exact)
+}
+
+/// Which direct message Message reuses, from the shared cases in `spec/direct-message.json`.
+struct DirectMessageReuseTests {
+    struct Member: Decodable {
+        var user: String
+        var membership: String
+    }
+
+    struct Case: Decodable, CustomTestStringConvertible {
+        var name: String
+        var members: [Member]
+        var expected: Bool
+        var testDescription: String { name }
+    }
+
+    struct Spec: Decodable {
+        var me: String
+        var target: String
+        var reuse: [Case]
+    }
+
+    private static let spec = Result { try SharedSpec.decode("spec/direct-message.json", as: Spec.self) }
+
+    @Test("A DM is reused as in every shared case", arguments: try spec.get().reuse)
+    func reuse(spec: Case) throws {
+        let shared = try Self.spec.get()
+        let states: [String: MembershipState] = ["join": .join, "invite": .invite, "leave": .leave, "ban": .ban]
+        let members = try spec.members.map { member($0.user, try #require(states[$0.membership])) }
+        #expect(
+            PeopleMapping.exactDirectParticipants(members, ownUserID: shared.me, targetUserID: shared.target)
+                == spec.expected)
     }
 }
 
