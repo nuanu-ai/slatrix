@@ -115,10 +115,10 @@ test('badge-count updates are acknowledged without FCM while partial event IDs a
 });
 
 test('only expired or invalid registration tokens remove Matrix pushers; other failures retry', async (t) => {
-  let providerCode;
+  let providerFailure;
   t.mock.method(getMessaging(), 'send', async (message) => {
     if (message.token === 'failed-token') {
-      throw Object.assign(new Error('Provider detail must not be returned'), { code: providerCode });
+      throw Object.assign(new Error('Provider detail must not be returned'), providerFailure);
     }
     return 'projects/test/messages/delivered';
   });
@@ -131,13 +131,35 @@ test('only expired or invalid registration tokens remove Matrix pushers; other f
     'messaging/invalid-argument', 'messaging/invalid-credential', 'messaging/mismatched-credential',
     'messaging/server-unavailable', 'messaging/quota-exceeded', 'messaging/internal-error', undefined,
   ]) {
-    providerCode = code;
+    providerFailure = { code };
     const response = await post({ notification: notification({ devices }) });
     if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
       assert.equal(response.status, 200, code);
       assert.deepEqual(await response.json(), { rejected: ['failed-token'] });
     } else {
       assert.equal(response.status, 503, code);
+      assert.equal((await response.text()).includes('Provider detail'), false);
+    }
+  }
+  for (const [details, status] of [
+    [[{ '@type': 'type.googleapis.com/google.firebase.fcm.v1.FcmError', errorCode: 'INVALID_ARGUMENT' }], 200],
+    [[{ '@type': 'type.googleapis.com/google.rpc.BadRequest', fieldViolations: [
+      { field: 'message.data[0].value', description: 'Invalid value' },
+    ] }], 503],
+  ]) {
+    providerFailure = {
+      code: 'messaging/invalid-argument',
+      httpResponse: {
+        status: 400,
+        headers: {},
+        data: { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Provider detail', details } },
+      },
+    };
+    const response = await post({ notification: notification({ devices }) });
+    assert.equal(response.status, status);
+    if (status === 200) {
+      assert.deepEqual(await response.json(), { rejected: ['failed-token'] });
+    } else {
       assert.equal((await response.text()).includes('Provider detail'), false);
     }
   }
