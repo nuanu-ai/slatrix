@@ -110,6 +110,19 @@ fun LiveProfileScreen(
                             Text(colorMode, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
                         }
                     }
+                    Text("Color theme", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Column(Modifier.selectableGroup()) {
+                        listOf(SidebarPalette.Aubergine, SidebarPalette.Lagoon).forEach { choice ->
+                            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
+                                .selectable(selected = palette == choice, role = Role.RadioButton, onClick = { onPalette(choice) })
+                                .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(UiMetrics.GapSection).clip(MaterialTheme.shapes.small)
+                                    .background(DesignTokens.colors(dark, choice).getValue("selectionStrong")))
+                                Text(choice.name, Modifier.weight(1f).padding(horizontal = UiMetrics.GapMedium), style = MaterialTheme.typography.bodyLarge)
+                                RadioButton(selected = palette == choice, onClick = null)
+                            }
+                        }
+                    }
                 }
             }
         }
