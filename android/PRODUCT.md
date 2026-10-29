@@ -26,7 +26,8 @@ and controls that do nothing.
 Follow the system theme by default. Preferences offers System default, Light and Dark,
 plus a separate color palette. Remember these choices across launches.
 The owner chooses a direction before Matrix is connected. Live acceptance uses an
-owner-provided test account and room. Notifications use FCM and Sygnal.
+owner-provided test account and room. Notifications use FCM, with the push gateway
+as a Firebase function.
 
 ## Brand Commitments
 
