@@ -63,7 +63,8 @@ import java.util.Locale
 @Composable
 fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: ComposerState,
     onDraft: (String) -> Unit, onSend: () -> Unit, onBack: () -> Unit, onLoadOlder: () -> Unit, onRead: (String) -> Unit,
-    onRetry: () -> Unit, onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit) {
+    onRetry: () -> Unit, onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit,
+    actions: MessageActions = MessageActions()) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -111,7 +112,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     BackHandler(onBack = onBack)
     var menu by remember { mutableStateOf<ConversationMessage?>(null) }
-    menu?.let { MessageMenu(it, onRetrySend, onDeleteUnsent) { menu = null } }
+    menu?.let { MessageActionsHost(it, actions, onRetrySend, onDeleteUnsent) { menu = null } }
     Column(Modifier.fillMaxSize().background(colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(end = UiMetrics.GapLarge,
             top = UiMetrics.GapSmall, bottom = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
@@ -208,7 +209,7 @@ private fun DayDividerRow(timestamp: Long) {
 }
 
 /** Slack's day labels: Today, Yesterday, then "Oct 23rd", with the year once it isn't this one. */
-private fun dayLabel(timestamp: Long): String {
+internal fun dayLabel(timestamp: Long): String {
     val today = LocalDate.now()
     val day = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
     if (day == today) return "Today"
@@ -229,7 +230,7 @@ private fun HistoryProgress(loading: Boolean) {
     }
 }
 
-private fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(timestamp))
+internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(timestamp))
 
 @Composable
 private fun LiveMessageRow(message: ConversationMessage, onMenu: (ConversationMessage) -> Unit) {
@@ -261,47 +262,5 @@ private fun LiveMessageRow(message: ConversationMessage, onMenu: (ConversationMe
             Text(message.body, style = MaterialTheme.typography.bodyLarge,
                 color = if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody)
         }
-    }
-}
-
-/** Slack's long-press sheet: who sent the message and when, then what can be done with it. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun MessageMenu(message: ConversationMessage, onRetrySend: (ConversationMessage) -> Unit,
-    onDeleteUnsent: (ConversationMessage) -> Unit, onDismiss: () -> Unit) {
-    val colors = SlatrixTheme.colors
-    val clipboard = LocalClipboard.current
-    val scope = rememberCoroutineScope()
-    ModalBottomSheet(onDismissRequest = onDismiss, shape = SlatrixTheme.topPanelShape, containerColor = colors.overlay) {
-        Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
-            Row(Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-                horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
-                Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${dayLabel(message.timestamp)} at ${timeLabel(message.timestamp)}",
-                    style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1)
-            }
-            if (message.sendState == MessageSendState.Failed) {
-                if (message.canRetry) MenuAction(Icons.Outlined.Refresh, "Retry", colors.textPrimary) { onRetrySend(message); onDismiss() }
-                MenuAction(Icons.Outlined.Delete, "Delete message", colors.destructive) { onDeleteUnsent(message); onDismiss() }
-            }
-            if (message.kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)) {
-                MenuAction(Icons.Outlined.ContentCopy, "Copy message", colors.textPrimary) {
-                    scope.launch {
-                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(message.senderName, message.body)))
-                        onDismiss()
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MenuAction(icon: ImageVector, label: String, color: Color, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(onClick = onClick).padding(horizontal = UiMetrics.GapLarge),
-        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(UiMetrics.Icon), tint = color)
-        Text(label, style = MaterialTheme.typography.bodyLarge, color = color)
     }
 }

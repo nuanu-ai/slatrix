@@ -21,4 +21,7 @@ object UiMetrics {
     val FormWidth = 480.dp
     const val ProgressDelayMillis = 400L
     val ExpandedWidth = 600.dp
+    /** Slack's message sheet: its icons and its Reply tile. */
+    val SheetIcon = 24.dp
+    val ActionTile = 86.dp
 }

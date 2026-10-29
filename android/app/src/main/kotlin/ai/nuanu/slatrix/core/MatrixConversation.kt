@@ -218,6 +218,29 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
 
     fun deleteUnsent(message: ConversationMessage) = unsent(message) { timeline, id -> timeline.abortSend(id, SendTarget.Event) }
 
+    /** Adds the reaction, or takes back your own; true when it added one. */
+    suspend fun react(message: ConversationMessage, key: String): Boolean {
+        val id = EventOrTransactionId.EventId(message.eventId ?: return false)
+        return quietly { ready.await().toggleReaction(id, key) } ?: false
+    }
+
+    fun delete(message: ConversationMessage) {
+        val id = EventOrTransactionId.EventId(message.eventId ?: return)
+        operations.launch {
+            // A failed redaction leaves the message, so its sheet offers Delete again.
+            runCatching { ready.await().redactEvent(id, null) }.onFailure { if (it is CancellationException) throw it }
+        }
+    }
+
+    suspend fun link(message: ConversationMessage): String? {
+        val id = message.eventId ?: return null
+        return quietly { room.matrixToEventPermalink(id) }
+    }
+
+    private suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) { null }
+
     private fun unsent(message: ConversationMessage, action: suspend (Timeline, EventOrTransactionId) -> Unit) {
         val id = EventOrTransactionId.TransactionId(message.transactionId ?: return)
         operations.launch {

@@ -24,6 +24,7 @@ data class OpenChannel(
 )
 
 class MatrixWorkspace(scope: CoroutineScope, client: Client) {
+    val emojiHistory = EmojiHistory(scope, client)
     private val mutableSelected = MutableStateFlow<OpenChannel?>(null)
     val selected: StateFlow<OpenChannel?> = mutableSelected.asStateFlow()
     private val requests = Channel<Pair<Long, OpenChannel?>>(Channel.CONFLATED)
