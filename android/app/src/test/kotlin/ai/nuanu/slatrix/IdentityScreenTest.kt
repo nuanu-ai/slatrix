@@ -62,6 +62,16 @@ class IdentityScreenTest {
         compose.onNodeWithText("Confirm it’s you").assertDoesNotExist()
     }
 
+    @Test fun aDeviceWhoseIdentityCheckFailedShowsTheConfirmationScreenToRetry() {
+        compose.setContent {
+            SlatrixTheme {
+                ConnectedAccountScreen(IdentityState(phase = IdentityPhase.Failed, error = "Couldn’t check this device. Try again."),
+                    {}, {}, {}, {}, {}, {}, {}) {}
+            }
+        }
+        compose.onNodeWithText("Confirm it’s you").assertExists()
+    }
+
     @Test fun aRecoveryKeyScrollsHorizontallyWithoutWrapping() {
         compose.setContent {
             SlatrixTheme {
