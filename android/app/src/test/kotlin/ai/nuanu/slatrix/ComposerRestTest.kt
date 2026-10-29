@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import org.junit.Assert.assertEquals
@@ -41,7 +42,6 @@ class ComposerRestTest {
 
     private val toolbar = listOf("Send message", "Emoji", "Mention someone", "Formatting")
 
-    // capability: composer.send
     @Test fun atRestTheComposerIsOneRowOfPlusAndPlaceholderAndFocusingOpensTheToolbar() {
         show()
         compose.onNodeWithContentDescription("Attachments").assertExists()
@@ -55,10 +55,13 @@ class ComposerRestTest {
         compose.onNodeWithContentDescription("Message #general").assertIsFocused()
     }
 
-    @Test fun aDraftKeepsTheToolbarOutWhileReading() {
-        text.value = "Half a thought"
+    @Test fun aDraftArrivingWhileYouReadKeepsTheComposerOneRow() {
         show()
-        toolbar.forEach { compose.onNodeWithContentDescription(it).assertExists() }
+        val resting = compose.onNodeWithContentDescription("Message #general").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { text.value = "Half a thought" }
+        compose.onNodeWithText("Half a thought", useUnmergedTree = true).assertExists()
+        toolbar.forEach { compose.onNodeWithContentDescription(it).assertDoesNotExist() }
+        assertEquals(resting, compose.onNodeWithContentDescription("Message #general").fetchSemanticsNode().boundsInRoot)
     }
 
     @Test fun aPrivateChannelsPlaceholderHasNoHash() {
