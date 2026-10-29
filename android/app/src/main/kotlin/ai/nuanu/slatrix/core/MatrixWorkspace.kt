@@ -70,14 +70,18 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                     // Kept only while nothing is new: a conversation opened somewhere in particular, or unread, opens fresh,
                     // and one marked unread on its last visit holds its reads back.
                     val kept = recent.remove(requested.room.id)?.let { (conversation, room) ->
-                        if (requested.at == null && requested.threadRoot == null && requested.room.unread == UnreadBadge.None) conversation to room
+                        val state = conversation.state.value
+                        if (requested.at == null && requested.threadRoot == null && requested.room.unread == UnreadBadge.None &&
+                            !state.focused && state.error == null) conversation to room
                         else { closeKept(conversation, room); null }
                     }
+                    // Held at once, so a failure below closes a kept timeline along with the rest.
+                    conversation = kept?.first
                     conversationRoom = kept?.second ?: checkNotNull(client.getRoom(requested.room.id))
                     composerRoom = checkNotNull(client.getRoom(requested.room.id))
                     currentCoroutineContext().ensureActive()
-                    val timeline = kept?.first ?: MatrixConversation(scope, checkNotNull(conversationRoom), requested.threadRoot, requested.at,
-                        requested.root, requested.resume)
+                    val timeline = kept?.first?.also { it.revisit() } ?: MatrixConversation(scope, checkNotNull(conversationRoom),
+                        requested.threadRoot, requested.at, requested.root, requested.resume)
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
                     if (generation.get() == token) {
