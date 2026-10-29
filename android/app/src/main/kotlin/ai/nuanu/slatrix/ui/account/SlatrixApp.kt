@@ -253,10 +253,11 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
             open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { actions ->
                 remember(actions, open.threadRoot) {
+                    // Marking a channel unread leaves it, as in Slack, so it shows unread in the list; a thread has its own read state.
+                    val markUnread = fun() { scope.launch { if (conversation?.markUnread() == true) owner?.back() } }
                     actions.copy(onForward = { m ->
                         scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { forwarded = "This message can’t be forwarded." } }
-                    // Marking a channel unread leaves it, as in Slack, so it shows unread in the list; a thread has its own read state.
-                    }, onMarkUnread = { scope.launch { if (conversation?.markUnread() == true) owner?.back() } }.takeIf { open.threadRoot == null })
+                    }, onMarkUnread = markUnread.takeIf { open.threadRoot == null })
                 }
             },
             ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
