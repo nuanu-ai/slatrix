@@ -7,6 +7,8 @@ import ai.nuanu.slatrix.core.AttachmentImport
 import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
+import ai.nuanu.slatrix.core.MatrixMedia
+import java.io.File
 import ai.nuanu.slatrix.core.MatrixChannel
 import ai.nuanu.slatrix.core.MatrixForward
 import org.matrix.rustcomponents.sdk.MessageType
@@ -116,11 +118,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
         when {
             state is AccountState.Connected -> {
                 val userId = (state as AccountState.Connected).userId
+                val client = (state as AccountState.Connected).client
+                val media = remember(client) { MatrixMedia(client, File(context.cacheDir, "media")) }
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
                 var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
-                val client = (state as AccountState.Connected).client
                 val avatars = remember(client) { SessionAvatars(MatrixAvatars(client)) }
                 val userAvatarUrl by produceState<String?>(null, client) {
                     value = try { client.avatarUrl() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
@@ -199,11 +202,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut,
                                 onBack = { you = false }, avatarUrl = userAvatarUrl) } }
                             thread != null -> { { covered.SaveableStateProvider("${thread.room.id} ${thread.threadRoot}") { key(thread.room.id, thread.threadRoot) {
-                                LiveConversation(thread, threads, workspace, jump, rooms, people, { id, name -> person = id to name })
+                                LiveConversation(thread, threads, workspace, jump, rooms, media, people, { id, name -> person = id to name })
                             } } } }
                             // Kept while a thread or a profile covers it, so Back returns to the same place.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace, jump, rooms, people, { id, name -> person = id to name }) { root, row ->
+                                LiveConversation(selected, workspace, workspace, jump, rooms, media, people, { id, name -> person = id to name }) { root, row ->
                                     threads?.open(selected.room, root, root = row)
                                 }
                             } } } }
@@ -250,7 +253,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
 private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
-    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?, people: MatrixPeople?,
+    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?, media: MatrixMedia, people: MatrixPeople?,
     onPerson: (userId: String, name: String?) -> Unit,
     onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
@@ -296,7 +299,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
             // A quote doesn't know its parent's thread, so it asks before jumping.
             { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } },
-            { counterpart?.let { onPerson(it.id, it.name) } ?: run { details = true } },
+            { attachment, width, height, full -> media.picture(attachment, width, height, full) },
+            { openAttachment(context, media, it) }, { counterpart?.let { onPerson(it.id, it.name) } ?: run { details = true } },
             typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty(), onPerson = profile)
         val actions = remember(rooms, open.room.id, conversation) {
             rooms?.client?.let { client ->

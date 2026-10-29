@@ -435,7 +435,8 @@ class MatrixRoomsTest {
         val foreground = MutableStateFlow(false)
         val rooms = MatrixRooms(backgroundScope, client, foreground)
 
-        assertSame(NotificationStatus.EventNotFound, rooms.notification("!team:example.org", "\$event"))
+        // The lookup waits for the sync on the clock; on the test's virtual time its timeout would fire before the rooms publish it.
+        assertSame(NotificationStatus.EventNotFound, withContext(Dispatchers.Default) { rooms.notification("!team:example.org", "\$event") })
         assertSame(sync, (client.notificationSetup as NotificationProcessSetup.SingleProcess).syncService)
         sync.stopped.await()
         assertFalse("A hidden app keeps its sync stopped", sync.running.value)
