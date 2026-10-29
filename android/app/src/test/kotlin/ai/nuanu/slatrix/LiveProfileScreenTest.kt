@@ -7,8 +7,11 @@ import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -37,5 +40,27 @@ class LiveProfileScreenTest {
         compose.onNodeWithText("Dark").performClick()
         compose.runOnIdle { assertEquals(true, mode.value) }
         compose.onNodeWithText("Dark").assertExists()
+    }
+
+    @Test fun anAccountCanChooseItsPaletteAndReturnToItsIdentity() {
+        val palette = mutableStateOf(SidebarPalette.Aubergine)
+        var returned = false
+        compose.setContent {
+            SlatrixTheme(palette = palette.value) {
+                LiveProfileScreen("@alex:example.org", false, null, palette.value,
+                    {}, { palette.value = it }, { returned = true })
+            }
+        }
+        compose.onNodeWithText("@alex:example.org").assertExists()
+        compose.onNodeWithText("Preferences").performClick()
+        compose.onNodeWithText("Aubergine").assertIsSelected()
+        compose.onNodeWithText("Lagoon").performScrollTo().performClick().assertIsSelected()
+        compose.runOnIdle { assertEquals(SidebarPalette.Lagoon, palette.value) }
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("alex").assertExists()
+        compose.onNodeWithText("@alex:example.org").assertExists()
+        compose.runOnIdle { assertEquals(false, returned) }
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.runOnIdle { assertEquals(true, returned) }
     }
 }
