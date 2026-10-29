@@ -153,7 +153,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
             }
         }
-        MessageComposer(room, composer, onDraft, onSend, composerActions)
+        val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
+        MessageComposer(room, composer, onDraft, onSend, composerActions, senders)
     }
 }
 

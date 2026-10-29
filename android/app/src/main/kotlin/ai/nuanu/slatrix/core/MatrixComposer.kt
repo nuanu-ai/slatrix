@@ -19,6 +19,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.ComposerDraft
 import org.matrix.rustcomponents.sdk.ComposerDraftType
+import org.matrix.rustcomponents.sdk.MembershipState
 import org.matrix.rustcomponents.sdk.Room
 
 data class ComposerState(
@@ -27,6 +28,7 @@ data class ComposerState(
     val sending: Boolean = false,
     val error: String? = null,
     val target: ComposerTarget? = null,
+    val mentions: List<ComposerMention> = emptyList(),
 )
 
 private const val SAVE_DELAY_MILLIS = 500L
@@ -44,7 +46,11 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     private var revision = 0L
     private var savedRevision = 0L
     /** The draft set aside while you edit a sent message; the store keeps it, never the edit. */
-    private var setAside: String? = null
+    private var setAside: ComposerState? = null
+    private val mutablePeople = MutableStateFlow<MentionPeople?>(null)
+    /** Who an @ can name here, once [loadPeople] has read the room's members. */
+    val people: StateFlow<MentionPeople?> = mutablePeople.asStateFlow()
+    private var peopleLoading: Job? = null
     private val worker = operations.launch {
         try {
             restore()
@@ -60,8 +66,51 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     }
 
     fun edit(text: String) {
-        if (!loaded || !worker.isActive || text == mutableState.value.text) return
-        mutableState.value = mutableState.value.copy(text = text)
+        val current = mutableState.value
+        if (!loaded || !worker.isActive || text == current.text) return
+        change(current.copy(text = text, mentions = current.mentions.after(current.text, text)))
+    }
+
+    /** Replaces the @ query `start until end` with a pill for [candidate], and a space after it. */
+    fun mention(start: Int, end: Int, candidate: MentionCandidate) {
+        val current = mutableState.value
+        if (!loaded || !worker.isActive || start < 0 || end > current.text.length || start > end) return
+        val label = when (candidate) {
+            is MentionCandidate.Member -> "@${candidate.person.name}"
+            MentionCandidate.Room -> "@room"
+        }
+        val text = current.text.replaceRange(start, end, "$label ")
+        val pill = (candidate as? MentionCandidate.Member)?.let { ComposerMention(start, start + label.length, it.person.id) }
+        change(current.copy(text = text, mentions = (current.mentions.after(current.text, text) + listOfNotNull(pill)).sortedBy { it.start }))
+    }
+
+    fun loadPeople() {
+        if (peopleLoading != null || !lifetime.isActive) return
+        peopleLoading = operations.launch {
+            mutablePeople.value = quietly {
+                val members = mutableListOf<MentionPerson>()
+                room.members().use { iterator ->
+                    while (true) {
+                        val chunk = iterator.nextChunk(500u) ?: break
+                        chunk.mapTo(members) { member ->
+                            MentionPerson(member.userId, member.displayName?.takeIf { it.isNotBlank() }
+                                ?: member.userId.removePrefix("@").substringBefore(':'), when (member.membership) {
+                                MembershipState.Join -> "join"
+                                MembershipState.Invite -> "invite"
+                                else -> "other"
+                            })
+                        }
+                    }
+                }
+                MentionPeople(members, room.getPowerLevels().use { it.canUserTriggerRoomNotification(room.ownUserId()) })
+            }
+            // A failed load is asked for again by the next @.
+            if (mutablePeople.value == null) peopleLoading = null
+        }
+    }
+
+    private fun change(next: ComposerState) {
+        mutableState.value = next
         if (setAside != null) return
         revision++
         edits.trySend(Unit)
@@ -76,8 +125,8 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     fun editMessage(target: ComposerTarget.Edit) {
         if (!loaded || mutableState.value.sending) return
         cancelTarget()
-        setAside = mutableState.value.text
-        mutableState.value = mutableState.value.copy(text = target.body, target = target)
+        setAside = mutableState.value
+        mutableState.value = mutableState.value.copy(text = target.body, target = target, mentions = emptyList())
     }
 
     /** Closes the reply bar, or leaves editing with the draft back in the composer. */
@@ -85,13 +134,14 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
         if (mutableState.value.sending) return
         val draft = setAside
         setAside = null
-        mutableState.value = mutableState.value.copy(text = draft ?: mutableState.value.text, target = null)
+        mutableState.value = mutableState.value.copy(text = draft?.text ?: mutableState.value.text,
+            mentions = draft?.mentions ?: mutableState.value.mentions, target = null)
     }
 
     fun send() {
         val current = mutableState.value
         if (!loaded || !lifetime.isActive || current.sending) return
-        val message = ComposerFormat.message(ComposerFormat.plainTextDraft(current.text)).copy(target = current.target)
+        val message = ComposerFormat.message(ComposerFormat.plainTextDraft(current.text, current.mentions)).copy(target = current.target)
         if (message.body.isBlank()) return
         val sendingRevision = revision
         failure = null
@@ -101,13 +151,14 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
                 val accepted = sendMessage(message)
                 currentCoroutineContext().ensureActive()
                 if (accepted && message.target is ComposerTarget.Edit) {
-                    mutableState.value = mutableState.value.copy(text = setAside.orEmpty(), target = null)
+                    mutableState.value = mutableState.value.copy(text = setAside?.text.orEmpty(),
+                        mentions = setAside?.mentions.orEmpty(), target = null)
                     setAside = null
                 } else if (accepted) {
                     mutableState.value = mutableState.value.copy(target = null)
                     if (revision == sendingRevision) {
                         revision++
-                        mutableState.value = mutableState.value.copy(text = "")
+                        mutableState.value = mutableState.value.copy(text = "", mentions = emptyList())
                         // At once, so a sent message never comes back as a draft.
                         flush()
                     }
@@ -147,7 +198,8 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
             currentCoroutineContext().ensureActive()
             loaded = true
             failure = null
-            mutableState.value = mutableState.value.copy(text = draft?.plainText.orEmpty(), loading = false, error = null)
+            val (text, mentions) = draft?.htmlText?.let(ComposerFormat::editable) ?: (draft?.plainText.orEmpty() to emptyList())
+            mutableState.value = mutableState.value.copy(text = text, mentions = mentions, loading = false, error = null)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -161,10 +213,12 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
         if (!loaded) return false
         if (revision == savedRevision) return true
         val savingRevision = revision
-        val text = setAside ?: mutableState.value.text
+        val draft = setAside ?: mutableState.value
+        val text = draft.text
         try {
             if (text.isEmpty()) room.clearComposerDraft(null)
-            else room.saveComposerDraft(ComposerDraft(text, null, ComposerDraftType.NewMessage, emptyList()), null)
+            else room.saveComposerDraft(ComposerDraft(text, draft.mentions.takeIf { it.isNotEmpty() }
+                ?.let { ComposerFormat.plainTextDraft(text, it) }, ComposerDraftType.NewMessage, emptyList()), null)
             savedRevision = savingRevision
             if (failure == Failure.Save) {
                 failure = null

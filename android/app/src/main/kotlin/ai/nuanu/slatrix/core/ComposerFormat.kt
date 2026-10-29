@@ -14,10 +14,52 @@ object ComposerFormat {
     private val userID = Regex("^$userPattern$")
     private val mentioned = Regex("(?<![A-Za-z0-9_])(?:$userPattern|@room(?![A-Za-z0-9_:]))")
 
-    fun plainTextDraft(text: String): String = text.replace("\r\n", "\n").replace("\r", "\n").split('\n').joinToString("<br>") { line ->
-        line.mapIndexed { index, character ->
-            if (character == ' ' && (index == 0 || line[index - 1] == ' ')) "&nbsp;" else escape(character.toString())
-        }.joinToString("")
+    /** The composer's text as a draft, with each pill in [mentions] a link to its person. */
+    fun plainTextDraft(text: String, mentions: List<ComposerMention> = emptyList()): String {
+        val pills = mentions.associateBy { it.start }
+        val draft = StringBuilder()
+        var index = 0
+        var lineStart = true
+        while (index < text.length) {
+            val pill = pills[index]
+            if (pill != null) {
+                draft.append("<a href=\"${escape(permalink(pill.userId))}\">${escape(text.substring(pill.start + 1, pill.end))}</a>")
+                index = pill.end
+                lineStart = false
+                continue
+            }
+            val character = text[index]
+            when {
+                character == '\r' && text.getOrNull(index + 1) == '\n' -> Unit
+                character == '\r' || character == '\n' -> { draft.append("<br>"); lineStart = true; index++; continue }
+                character == ' ' && (lineStart || text[index - 1] == ' ') -> draft.append("&nbsp;")
+                else -> draft.append(escape(character.toString()))
+            }
+            lineStart = false
+            index++
+        }
+        return draft.toString()
+    }
+
+    /** A draft this composer wrote, back as text and the pills in it. */
+    fun editable(draftHtml: String): Pair<String, List<ComposerMention>> {
+        val text = StringBuilder()
+        val mentions = mutableListOf<ComposerMention>()
+        fun walk(element: Element) {
+            for (node in element.childNodes()) when {
+                node is TextNode -> text.append(node.wholeText.replace('\u00a0', ' '))
+                node !is Element -> Unit
+                node.normalName() == "br" -> text.append('\n')
+                node.normalName() == "a" && mentionedUser(node.attr("href")) != null -> {
+                    val start = text.length
+                    text.append('@').append(node.wholeText())
+                    mentions += ComposerMention(start, text.length, mentionedUser(node.attr("href"))!!)
+                }
+                else -> walk(node)
+            }
+        }
+        walk(Jsoup.parseBodyFragment(draftHtml).body())
+        return text.toString() to mentions
     }
 
     fun message(draftHtml: String): ComposerMessage {

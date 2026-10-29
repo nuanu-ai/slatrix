@@ -115,7 +115,10 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) workspace?.open(selected.room) },
                                     { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
                                     rememberMessageActions(conversation, composer, workspace),
-                                    composerActions = ComposerActions(onCancelTarget = { composer?.cancelTarget() }))
+                                    composerActions = ComposerActions(onCancelTarget = { composer?.cancelTarget() },
+                                        people = composer?.people?.collectAsState()?.value,
+                                        onNeedPeople = { composer?.loadPeople() },
+                                        onMention = { start, end, candidate -> composer?.mention(start, end, candidate) }))
                             } } }
                             else -> null
                         }) {

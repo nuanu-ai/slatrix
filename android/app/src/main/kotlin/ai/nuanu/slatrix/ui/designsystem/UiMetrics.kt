@@ -26,4 +26,6 @@ object UiMetrics {
     val ActionTile = 86.dp
     /** The accent rule beside a quoted message. */
     val QuoteBar = 3.dp
+    /** About five @ suggestions before the list scrolls. */
+    val MentionListHeight = 240.dp
 }
