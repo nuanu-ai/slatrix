@@ -210,6 +210,15 @@ class ChannelDetailsScreenTest {
         }
     }
 
+    @Test fun pinsThatDidNotLoadSaySoRatherThanNone() {
+        details(room.copy(pinned = listOf("\$Ship it")), ChannelDetailsActions(pins = {
+            PinnedMessages(ConversationState(loading = false)) {}
+        }))
+        compose.onNodeWithText("Pinned messages").performClick()
+        compose.onNodeWithText("Couldn’t load pins").assertIsDisplayed()
+        compose.onNodeWithText("No pinned messages").assertDoesNotExist()
+    }
+
     @Test fun withoutThePowerToPinPinsCantBeUnpinned() {
         details(room.copy(pinned = listOf("\$Ship it")), ChannelDetailsActions(pins = {
             PinnedMessages(ConversationState(listOf(pinned("Ship it")), loading = false)) {}
