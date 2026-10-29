@@ -102,7 +102,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             preferences -> { { LivePreferencesScreen(dark, darkOverride, palette,
                                 { darkOverride = it; appearance.darkMode = it },
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
-                            you -> { { LiveYouScreen(userId, { preferences = true }, account::signOut) { you = false } } }
+                            you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
                             selected != null -> { { key(selected.room.id) {
                                 val conversation = selected.conversation
                                 val composer = selected.composer
