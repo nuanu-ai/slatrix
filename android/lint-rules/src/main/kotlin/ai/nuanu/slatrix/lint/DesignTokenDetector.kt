@@ -37,6 +37,11 @@ class DesignTokenDetector : Detector(), SourceCodeScanner {
                 ) {
                     context.report(ISSUE, node, context.getLocation(node), "Use a design system color role.")
                 }
+                if (owner.startsWith("androidx.compose.animation.core.") &&
+                    (method.name in ANIMATION_SPECS || method.isConstructor && owner.substringAfterLast('.') in ANIMATION_SPEC_TYPES)
+                ) {
+                    context.report(ISSUE, node, context.getLocation(node), "Use a design system motion token.")
+                }
                 if (((method.isConstructor && owner == "androidx.compose.ui.unit.Dp") ||
                         (owner == "androidx.compose.ui.unit.TextUnitKt" &&
                             method.name.substringBefore('-') == "TextUnit")) &&
@@ -72,10 +77,13 @@ class DesignTokenDetector : Detector(), SourceCodeScanner {
     companion object {
         private const val COLOR = "androidx.compose.ui.graphics.Color"
         private const val DESIGN_SYSTEM = "ai.nuanu.slatrix.ui.designsystem"
+        /** Animation specs carry their own timing, which only the design system's motion tokens may set. */
+        private val ANIMATION_SPECS = setOf("tween", "spring", "keyframes", "repeatable", "infiniteRepeatable")
+        private val ANIMATION_SPEC_TYPES = setOf("TweenSpec", "SpringSpec", "KeyframesSpec", "RepeatableSpec", "InfiniteRepeatableSpec")
         val ISSUE = Issue.create(
             "SlatrixDesignTokens",
             "Use design system tokens",
-            "Screens use design system color and size roles instead of raw Compose values.",
+            "Screens use design system color, size and motion roles instead of raw Compose values.",
             Category.CORRECTNESS,
             6,
             Severity.ERROR,

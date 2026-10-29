@@ -97,6 +97,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
     var preferences by rememberSaveable { mutableStateOf(false) }
+    var returning by remember { mutableStateOf(false) }
     // An invitation opened from Home, pushed over it.
     var invitation by rememberSaveable { mutableStateOf<String?>(null) }
     // Someone's profile, pushed over whatever is open, and the name to show until theirs loads.
@@ -194,7 +195,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         LiveWorkspace(when {
                             preferences -> { val client = (state as AccountState.Connected).client; { LivePreferencesScreen(dark, darkOverride, palette,
                                 { darkOverride = it; appearance.darkMode = it },
-                                { palette = it; appearance.paletteName = it.name }, { preferences = false }) {
+                                { palette = it; appearance.paletteName = it.name }, { preferences = false; returning = true }) {
                                     LiveNotificationSettings(userId) { client.getNotificationSettings() }
                                 } } }
                             invitation != null -> { { invitation?.let { id ->
@@ -216,8 +217,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
                                     openChannel, { notice = it }) { channels = null }
                             } }
-                            you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut,
-                                onBack = { you = false }, avatarUrl = userAvatarUrl) } }
+                            // Back from Preferences shows You at once.
+                            you -> { { CompositionLocalProvider(LocalReturning provides returning) {
+                                LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() },
+                                    { preferences = true; returning = false }, account::signOut, onBack = { you = false }, avatarUrl = userAvatarUrl)
+                            } } }
                             later -> { { LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
                                 { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
                                     // A saved reply opens in its thread, so it is looked up first, with Later still up.
