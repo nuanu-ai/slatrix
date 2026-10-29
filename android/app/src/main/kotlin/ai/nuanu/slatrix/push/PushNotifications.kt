@@ -55,7 +55,7 @@ class PushNotifications(private val context: Context) {
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val tap = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         fun builder() = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification)
-            .setContentIntent(tap).setAutoCancel(true)
+            .setContentIntent(tap).setAutoCancel(true).setDefaults(NotificationCompat.DEFAULT_SOUND)
         val publicNotification = builder().setContentTitle("Slatrix").setContentText("New message").build()
         val notification = builder().setContentTitle(title).setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
