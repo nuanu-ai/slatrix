@@ -78,8 +78,7 @@ object MockData {
     )
     val activity = listOf(
         MockActivity("mention-1", "Ava Patel", "AP", "mentioned you", "design", "@Jordan Lee would love your thoughts on the new channel header.", "10:42", 1),
-        MockActivity("thread-1", "Sam Taylor", "ST", "replied to a thread", "design", "Good call. I'll add that to the next version.", "10:36", 2),
-        MockActivity("mention-2", "Mia Chen", "MC", "mentioned you", "product", "@Jordan Lee the updated brief is ready when you are.", "09:54", 4),
-        MockActivity("thread-2", "Ava Patel", "AP", "replied to a thread", "design", "These are looking great. Thanks for pulling it all together!", "Yesterday", 1),
+        MockActivity("thread-1", "Ava Patel", "AP", "replied to a thread", "design", "On it! I'll share an update here this afternoon.", "10:39", 1),
+        MockActivity("thread-2", "Sam Taylor", "ST", "replied to a thread", "design", "Good call. I'll add that to the next version.", "10:36", 2),
     )
 }

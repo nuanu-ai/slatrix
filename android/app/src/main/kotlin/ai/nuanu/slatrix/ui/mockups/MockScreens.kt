@@ -6,6 +6,8 @@ import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -133,7 +135,38 @@ fun DmsScreen(conversations: List<MockConversation>, onOpen: (String) -> Unit, o
 }
 
 @Composable
-fun ActivityScreen(items: List<MockActivity>, onThread: () -> Unit, onYou: () -> Unit) {}
+fun ActivityScreen(items: List<MockActivity>, onThread: () -> Unit, onYou: () -> Unit) {
+    var filter by rememberSaveable { mutableStateOf("All notifications") }
+    val visible = items.filter { filter == "All notifications" || (filter == "Mentions" && it.action == "mentioned you") || (filter == "Threads" && it.action == "replied to a thread") }
+    Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas)) {
+        ScreenHeader("Activity", onYou = onYou)
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+            listOf("All notifications", "Mentions", "Threads").forEach { label ->
+                FilterChip(selected = filter == label, onClick = { filter = label }, label = { Text(label) })
+            }
+        }
+        LazyColumn {
+            item { SectionLabel("Today") }
+            items(visible, key = { it.id }) { activity ->
+                Row(
+                    Modifier.fillMaxWidth().clickable(onClick = onThread).padding(UiMetrics.GapLarge),
+                    horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium),
+                ) {
+                    Avatar(activity.initials, activity.colorIndex)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                            Text(activity.author, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text(activity.time, style = MaterialTheme.typography.labelSmall, color = SlatrixTheme.colors.textSecondary)
+                        }
+                        Text("${activity.action} in #${activity.channel}", style = MaterialTheme.typography.bodySmall, color = SlatrixTheme.colors.textSecondary)
+                        Text(activity.body, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                HorizontalDivider(color = SlatrixTheme.colors.border)
+            }
+        }
+    }
+}
 
 @Composable
 fun ChannelScreen(channel: MockChannel, messages: List<MockMessage>, draft: String, onDraft: (String) -> Unit, onSend: () -> Unit, onThread: () -> Unit, onBack: () -> Unit) {

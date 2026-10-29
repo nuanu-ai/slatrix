@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -41,6 +42,8 @@ fun SlatrixMockups(
 ) {
     var screen by rememberSaveable { mutableStateOf(initialScreen) }
     var tab by rememberSaveable { mutableStateOf(initialScreen.takeIf { it in rootScreens } ?: MockScreen.Home) }
+    val stateHolder = rememberSaveableStateHolder()
+    var threadReturn by rememberSaveable { mutableStateOf(MockScreen.Channel) }
     var roomId by rememberSaveable { mutableStateOf("design") }
     var palette by rememberSaveable { mutableStateOf(initialPalette) }
     var darkOverride by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -58,7 +61,7 @@ fun SlatrixMockups(
         if (message.id == MockData.threadParent.id) message.copy(replyCount = MockData.replies.size + sentReplies.size) else message
     }
     val visibleMessages = messages + sentByRoom[roomId].orEmpty()
-    val back: () -> Unit = { screen = if (screen == MockScreen.Thread) MockScreen.Channel else tab }
+    val back: () -> Unit = { screen = if (screen == MockScreen.Thread) threadReturn else tab }
     BackHandler(enabled = screen !in rootScreens, onBack = back)
 
     SlatrixTheme(dark = effectiveDark, palette = palette) {
@@ -82,16 +85,17 @@ fun SlatrixMockups(
                     }
                     Column(Modifier.weight(1f)) {
                         Box(Modifier.weight(1f)) {
+                            stateHolder.SaveableStateProvider(if (screen == MockScreen.Channel) "channel:$roomId" else screen.name) {
                             when (screen) {
                                 MockScreen.Home -> HomeScreen(MockData.channels,
                                     onChannel = { roomId = it; screen = MockScreen.Channel },
-                                    onThread = { roomId = "design"; screen = MockScreen.Thread },
+                                    onThread = { threadReturn = screen; roomId = "design"; screen = MockScreen.Thread },
                                     onYou = { screen = MockScreen.You })
                                 MockScreen.Dms -> DmsScreen(MockData.conversations,
                                     onOpen = { roomId = it; screen = MockScreen.Channel },
                                     onYou = { screen = MockScreen.You })
                                 MockScreen.Activity -> ActivityScreen(MockData.activity,
-                                    onThread = { roomId = "design"; screen = MockScreen.Thread },
+                                    onThread = { threadReturn = screen; roomId = "design"; screen = MockScreen.Thread },
                                     onYou = { screen = MockScreen.You })
                                 MockScreen.Channel -> ChannelScreen(room, visibleMessages,
                                     draft = drafts["channel:$roomId"].orEmpty(),
@@ -104,7 +108,7 @@ fun SlatrixMockups(
                                             sentByRoom = sentByRoom + (roomId to (sent + ownMessage("sent-$roomId-${sent.size}", text)))
                                             drafts = drafts - key
                                         }
-                                    }, onThread = { screen = MockScreen.Thread }, onBack = back)
+                                    }, onThread = { threadReturn = screen; screen = MockScreen.Thread }, onBack = back)
                                 MockScreen.Thread -> ThreadScreen(MockData.threadParent, MockData.replies + sentReplies,
                                     draft = drafts["thread:${MockData.threadParent.id}"].orEmpty(),
                                     onDraft = { drafts = drafts + ("thread:${MockData.threadParent.id}" to it) },
@@ -119,6 +123,7 @@ fun SlatrixMockups(
                                 MockScreen.You -> YouScreen(effectiveDark, palette,
                                     onDarkToggle = { darkOverride = if (effectiveDark) 0 else 1 },
                                     onPalette = { palette = it }, onBack = back)
+                            }
                             }
                         }
                         if (root && !expanded) {
