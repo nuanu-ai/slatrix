@@ -111,9 +111,9 @@ Use the four shared radii in the frontmatter. The top content panel rounds its t
 
 Account actions are full-width green buttons with white labels. Browser alternatives can use an outlined button. Cancel and Retry use text buttons. Let Material provide interaction and disabled states.
 
-Search uses an outlined field with a leading search icon. The composer has a thin border, body text, an accent cursor and a send icon; it expands to five text lines. Keep its keyboard semantics and accessible label.
+Search uses an outlined field with a leading search icon. The composer is a rounded raised field on a bar under a hairline, with an accent cursor and the send icon inside the field; it expands to five text lines. Keep its keyboard semantics and accessible label.
 
-Conversation rows pair a channel icon or initials tile with a single-line title and optional unread count. Rows in the DMs tab add the time and up to two lines of the latest message. Unread titles are bold, and unread state is announced as a state description. Initials tiles have a fixed size; the initials shrink to fit. Message rows align an initials tile with sender, timestamp and selectable body text. Preserve stable message keys.
+Conversation rows pair a channel icon or initials tile with a single-line title and optional unread count. Rows in the DMs tab add the time and up to two lines of the latest message. Unread titles are bold, and unread state is announced as a state description. Initials tiles have a fixed size; the initials shrink to fit. Message rows align an initials tile with sender, timestamp and body text; a sender's run within five minutes drops the tile and name. Day dividers read Today, Yesterday or the date. A long press opens the message sheet with Copy message, and Retry and Delete message for a failed send. Preserve stable message keys.
 
 Preferences uses full-row selection with radio semantics for color mode and palette. Errors appear as snackbars over the content. Connection progress waits (400ms); its reserved space prevents the account form from moving.
 

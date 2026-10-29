@@ -1,0 +1,35 @@
+{
+  "about": "When a message joins the one above it under a single avatar and name, as in Slack: the same person sent it less than five minutes after the message above. A new day always starts a new group, which each app's own tests cover. Each message gives its sender and the seconds since the first message; grouped lists, per message, whether it joins the one above.",
+  "cases": [
+    {
+      "name": "A message right after the same person's joins it",
+      "messages": [{ "sender": "@alice", "second": 0 }, { "sender": "@alice", "second": 60 }],
+      "grouped": [false, true]
+    },
+    {
+      "name": "Just under five minutes still joins",
+      "messages": [{ "sender": "@alice", "second": 0 }, { "sender": "@alice", "second": 299 }],
+      "grouped": [false, true]
+    },
+    {
+      "name": "Five minutes apart starts a new group",
+      "messages": [{ "sender": "@alice", "second": 0 }, { "sender": "@alice", "second": 300 }],
+      "grouped": [false, false]
+    },
+    {
+      "name": "Another person's message starts a new group",
+      "messages": [{ "sender": "@alice", "second": 0 }, { "sender": "@bob", "second": 30 }],
+      "grouped": [false, false]
+    },
+    {
+      "name": "Coming back after someone else starts a new group",
+      "messages": [{ "sender": "@alice", "second": 0 }, { "sender": "@bob", "second": 30 }, { "sender": "@alice", "second": 60 }],
+      "grouped": [false, false, false]
+    },
+    {
+      "name": "The window runs from the message above, not from the group's first",
+      "messages": [{ "sender": "@alice", "second": 0 }, { "sender": "@alice", "second": 240 }, { "sender": "@alice", "second": 480 }],
+      "grouped": [false, true, true]
+    }
+  ]
+}

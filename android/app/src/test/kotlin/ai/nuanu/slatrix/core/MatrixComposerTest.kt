@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.core
 
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -25,6 +26,25 @@ class MatrixComposerTest {
         val reopened = MatrixComposer(backgroundScope, room) { true }
         assertEquals("Finish tomorrow\nwith <details>", reopened.state.first { !it.loading }.text)
         reopened.close()
+    }
+
+    @Test fun typingIsSavedAfterAPauseAndSendingClearsTheStoredDraftAtOnce() = runTest {
+        val room = ComposerRoom()
+        val composer = MatrixComposer(backgroundScope, room) { true }
+        composer.state.first { !it.loading }
+        for (typed in listOf("H", "He", "Hel", "Hell")) {
+            composer.edit(typed)
+            advanceTimeBy(300)
+            assertNull("Typing without a pause must not write the encrypted store", room.draft)
+        }
+        composer.edit("Hello")
+        advanceTimeBy(1_000)
+        assertEquals("Hello", room.draft?.plainText)
+
+        composer.send()
+        runCurrent()
+        assertNull("A sent message must not come back as a draft", room.draft)
+        composer.close()
     }
 
     @Test fun sendFailureKeepsTheDraftAndLaterSuccessPreservesAReeditedDraft() = runTest {
@@ -82,12 +102,12 @@ class MatrixComposerTest {
 
         room.saveFailure = IllegalStateException("Disk unavailable")
         composer.edit("Keep the pending edit")
-        runCurrent()
+        advanceTimeBy(1_000)
         assertNotNull(composer.state.value.error)
         assertEquals("Keep the pending edit", composer.state.value.text)
         room.saveFailure = null
         composer.retry()
-        runCurrent()
+        advanceTimeBy(1_000)
         assertNull(composer.state.value.error)
         composer.close()
         val reopened = MatrixComposer(backgroundScope, room) { true }

@@ -65,7 +65,7 @@ class ComposerInputTest {
                         val state by composer.state.collectAsState()
                         LiveChannelScreen(RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0),
                             ConversationState(loading = false, hasMore = false), state, composer::edit, composer::send,
-                            {}, {}, {}, composer::retry)
+                            {}, {}, {}, composer::retry, {}, {})
                     }
                 }
             }

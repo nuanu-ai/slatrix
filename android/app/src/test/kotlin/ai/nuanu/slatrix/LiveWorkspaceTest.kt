@@ -74,7 +74,7 @@ class LiveWorkspaceTest {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(loading = false), draft.value,
                     { draft.value = draft.value.copy(text = it) },
-                    { submitted = draft.value.text; draft.value = draft.value.copy(sending = true) }, {}, {}, {}, {})
+                    { submitted = draft.value.text; draft.value = draft.value.copy(sending = true) }, {}, {}, {}, {}, {}, {})
             }
         }
         compose.onNodeWithContentDescription("Send message").performClick()
@@ -93,14 +93,14 @@ class LiveWorkspaceTest {
         var read: String? = null
         compose.setContent {
             SlatrixTheme { CompositionLocalProvider(LocalLifecycleOwner provides owner) {
-                LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, {}, {}, { read = it }, {})
+                LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, {}, {}, { read = it }, {}, {}, {})
             } }
         }
         compose.onNodeWithText("First").assertExists()
         compose.waitUntil { read == "\$First" }
         compose.runOnIdle {
             owner.lifecycle.currentState = Lifecycle.State.STARTED
-            timeline.value = timeline.value.copy(messages = timeline.value.messages + message("Next"))
+            timeline.value = timeline.value.copy(rows = timeline.value.rows + message("Next"))
         }
         compose.onNodeWithText("Next").assertIsDisplayed()
         compose.runOnIdle { assertEquals("\$First", read) }
