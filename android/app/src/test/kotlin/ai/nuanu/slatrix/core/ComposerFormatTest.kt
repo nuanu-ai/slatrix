@@ -27,4 +27,12 @@ class ComposerFormatTest {
             ComposerFormat.message(draft),
         )
     }
+
+    @Test fun `plain input keeps leading and repeated spaces on each line`() {
+        val draft = ComposerFormat.plainTextDraft("  keep  spaces\n next")
+        assertEquals(
+            ComposerMessage("  keep  spaces\n next", null, emptyList(), false),
+            ComposerFormat.message(draft),
+        )
+    }
 }
