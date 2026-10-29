@@ -1,5 +1,8 @@
 package ai.nuanu.slatrix.core
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -10,6 +13,42 @@ import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 
 class MatrixWorkspaceTest {
+    @Test fun cancellingTheOwnerFlushesTheDraftBeforeClosingItsRoomAndRejectsQueuedChannels() = runTest {
+        val saveStarted = CompletableDeferred<Unit>()
+        val allowSave = CompletableDeferred<Unit>()
+        val client = WorkspaceClient {
+            saveStarted.complete(Unit)
+            allowSave.await()
+        }
+        val owner = Job(backgroundScope.coroutineContext[Job])
+        val workspace = MatrixWorkspace(CoroutineScope(backgroundScope.coroutineContext + owner), client)
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+        workspace.open(alpha)
+        runCurrent()
+        val composer = requireNotNull(workspace.selected.value?.composer)
+        composer.state.first { !it.loading }
+        composer.edit("Finish after reopening")
+        saveStarted.await()
+        workspace.open(workspaceRoom("!beta:example.org", "Beta"))
+        runCurrent()
+        workspace.open(workspaceRoom("!gamma:example.org", "Gamma"))
+        owner.cancel()
+        runCurrent()
+        allowSave.complete(Unit)
+        owner.join()
+
+        assertNull(workspace.selected.value)
+        assertEquals(true, client.handles.all { it.uniffiIsDestroyed })
+        assertEquals(setOf(alpha.id), client.handles.map { it.id() }.toSet())
+
+        val reopened = MatrixWorkspace(backgroundScope, client)
+        reopened.open(alpha)
+        runCurrent()
+        val restored = requireNotNull(reopened.selected.value?.composer)
+        assertEquals("Finish after reopening", restored.state.first { !it.loading }.text)
+        reopened.close()
+    }
+
     @Test fun failedDraftSaveKeepsTheChannelOpenUntilTheDraftCanBeSaved() = runTest {
         val client = WorkspaceClient().also { it.failSaves = true }
         val workspace = MatrixWorkspace(backgroundScope, client)
@@ -96,11 +135,12 @@ class MatrixWorkspaceTest {
     }
 }
 
-private class WorkspaceClient : Client(NoHandle) {
+private class WorkspaceClient(private val beforeSave: suspend () -> Unit = {}) : Client(NoHandle) {
     private val drafts = mutableMapOf<String, ComposerDraft>()
     val handles = mutableListOf<Room>()
     var failSaves = false
     override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
+        override fun id(): String = roomId
         override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
             object : Timeline(NoHandle) {
                 override suspend fun addListener(listener: TimelineListener): TaskHandle = object : TaskHandle(NoHandle) {
@@ -111,6 +151,8 @@ private class WorkspaceClient : Client(NoHandle) {
         override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = drafts[roomId]
         override suspend fun saveComposerDraft(draft: ComposerDraft, threadRoot: String?) {
             check(!failSaves) { "Storage is unavailable" }
+            beforeSave()
+            check(!uniffiIsDestroyed) { "The room was closed before its draft was saved" }
             drafts[roomId] = draft
         }
         override suspend fun clearComposerDraft(threadRoot: String?) { drafts.remove(roomId) }
