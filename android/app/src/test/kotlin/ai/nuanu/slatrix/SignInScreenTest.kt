@@ -41,6 +41,7 @@ import org.robolectric.annotation.GraphicsMode
 class SignInScreenTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    // capability: auth.sign-in
     @Test fun sendsEnteredCredentialsOnlyWhenTheFormIsComplete() {
         var submitted: List<String>? = null
         compose.setContent {

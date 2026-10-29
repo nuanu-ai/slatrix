@@ -74,6 +74,7 @@ struct LogoutRecoveryControllerTests {
         #expect(controller.request == nil && log.local == 0)
     }
 
+    // capability: auth.sign-out
     @Test("Retry saves drafts again and clears the recovery offer when the server succeeds")
     func retrySucceeds() async throws {
         await signOut()
@@ -84,6 +85,7 @@ struct LogoutRecoveryControllerTests {
         #expect(controller.request == nil && log.flushes == 2)
     }
 
+    // capability: auth.sign-out
     @Test("Signing out locally saves drafts again, cleans up once and does not retry the server")
     func localSignOut() async throws {
         await signOut()

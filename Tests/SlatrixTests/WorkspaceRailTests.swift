@@ -21,6 +21,7 @@ struct WorkspaceRailTests {
     private static let test = Workspace(id: "!test", name: "Test space")
     private static let nested = Workspace(id: "!nested", name: "Design", isTopLevel: false)
 
+    // capability: home.workspace-switcher
     @Test("The rail lists top-level workspaces, then All only while a channel belongs to no workspace")
     func entries() {
         let workspaces = [Self.nested, Self.lab, Self.test]

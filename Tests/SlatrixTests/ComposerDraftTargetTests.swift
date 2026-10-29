@@ -52,6 +52,7 @@ struct ComposerDraftTargetTests {
         #expect(editText == "New edit buffer" && draft == "Unsent A")
     }
 
+    // capability: composer.drafts
     @Test("A regular send stays attached to its draft after an edit opens, and clears only that draft")
     func regularSendClearsOwnDraft() {
         let target = ComposerDraftTarget(roomID: Self.roomA, editing: nil)

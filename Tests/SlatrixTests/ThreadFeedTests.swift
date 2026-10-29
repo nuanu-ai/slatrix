@@ -15,6 +15,7 @@ private func thread(latest: UInt64? = 5_000, replies: UInt32 = 9) -> ThreadListI
 }
 
 struct ThreadFeedMappingTests {
+    // capability: threads.feed
     @Test("A thread appears once, with the SDK's reply count, ordered by its latest reply")
     func projectsThread() throws {
         let projected = ThreadFeedMapping.project([thread(), thread()], room: room)
@@ -108,6 +109,7 @@ struct ActivityTests {
         #expect(ActivityService.previewBody(String(repeating: "x", count: 5_000), formatted: nil).count < 5_000)
     }
 
+    // capability: activity.feed
     @Test("A mention notification shows its sender and thread with spoilers hidden, once")
     func mentionNotification() {
         let event = NotificationEvent(noHandle: .init())
@@ -153,6 +155,7 @@ struct ActivityTests {
         #expect(activity.items.first?.timestamp == Date(timeIntervalSince1970: 2))
     }
 
+    // capability: activity.feed
     @Test("Activity keeps the latest items first up to its limit, and clearing empties it")
     func boundedAndCleared() {
         for index in 0...ActivityService.maximumItems {
@@ -199,6 +202,7 @@ struct ThreadFeedDiscoveryTests {
     private let sdkRoom = FakeThreadRoom()
     private let rooms = (0..<18).map { ChatRoom(id: "!room\($0):example.org", name: "Room \($0)") }
 
+    // capability: threads.feed
     @Test("Opening Threads checks the first page of every room in scope by itself")
     func discoversAllRooms() async {
         await feed.open(client: FakeThreadClient(sdkRoom), rooms: rooms, workspaceID: nil) { _ in }

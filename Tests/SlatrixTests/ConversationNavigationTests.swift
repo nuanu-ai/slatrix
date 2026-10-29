@@ -36,6 +36,8 @@ struct ConversationNavigationTests {
             rooms: rooms, currentID: id, workspaceID: workspace, unreadOnly: unread, direction: direction)
     }
 
+    // capability: home.starred
+    // capability: home.keyboard-navigation
     @Test("Stepping down visits starred, then channels in natural order, then DMs, joined rooms only")
     func traversalOrder() {
         var visited: [String] = []

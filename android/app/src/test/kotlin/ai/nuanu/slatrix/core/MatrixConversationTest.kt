@@ -16,6 +16,7 @@ import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 
 class MatrixConversationTest {
+    // capability: conversation.history
     @Test fun cachedMessagesAppearWhileOlderHistoryIsStillLoading() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
@@ -164,6 +165,7 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.retry-failed
     @Test fun failedMessagesResumeTheQueueResendOrDelete() = runTest {
         val offline = EventSendState.SendingFailed(QueueWedgeError.GenericApiError("Offline"), true)
         val rejected = EventSendState.SendingFailed(QueueWedgeError.GenericApiError("Rejected"), false)
@@ -188,6 +190,7 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: composer.send
     @Test fun sendPreservesComposerFieldsAndAcceptsOnlyTheSdkQueueResult() = runTest {
         val timeline = ConversationTimeline(emptyList())
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
@@ -317,6 +320,7 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.read
     @Test fun onlyVisibleLatestMessagesAreReadAndClosedTimelinesRejectLateUpdates() = runTest {
         val divider = object : TimelineItem(NoHandle) {
             override fun asEvent(): EventTimelineItem? = null

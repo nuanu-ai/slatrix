@@ -74,7 +74,11 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: ./android/gradlew -p android :app:connectedDebugAndroidTest --console=plain
+          # A cold emulator often shows "System UI isn't responding", which takes the window the device tests drive.
+          script: |
+            adb shell settings put global hide_error_dialogs 1
+            adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS
+            ./android/gradlew -p android :app:connectedDebugAndroidTest --console=plain
       - name: Upload Android results
         if: always()
         uses: actions/upload-artifact@v4

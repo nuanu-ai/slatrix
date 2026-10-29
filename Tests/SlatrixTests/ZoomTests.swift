@@ -4,6 +4,7 @@ import Testing
 
 @MainActor
 struct ZoomTests {
+    // capability: app.zoom
     @Test("Zoom in and out are inverse between the ends and stop at 80% and 200%")
     func stepsRoundTripAndClamp() {
         let steps = AppearanceStore.zoomSteps

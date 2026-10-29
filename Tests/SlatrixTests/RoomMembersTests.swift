@@ -38,6 +38,7 @@ struct RoomMembersTests {
         #expect(service.members.map(\.name) == ["Alice"])
     }
 
+    // capability: conversation.members
     @Test("Members keep whether they joined, were invited, left or were banned")
     func membership() async {
         let room = FakeOpenRoom("!team:example.org", cached: [])

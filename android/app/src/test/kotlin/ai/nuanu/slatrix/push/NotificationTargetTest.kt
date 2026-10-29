@@ -7,6 +7,7 @@ import org.junit.Assert.assertSame
 import org.junit.Test
 
 class NotificationTargetTest {
+    // capability: notifications.open
     @Test fun aNotificationWaitsForItsOwnAccountsRealRoom() {
         val team = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
         val other = team.copy(id = "!other:example.org", name = "Other")

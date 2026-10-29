@@ -17,6 +17,7 @@ struct IdentityGatePolicyTests {
                 hasDevice: true, isUnverified: true, identity: identity, skipped: false) == expected)
     }
 
+    // capability: verify.gate
     @Test("A missing device ID makes an unverified session unavailable instead of silently skipping the gate")
     func missingDeviceID() {
         #expect(
@@ -24,6 +25,7 @@ struct IdentityGatePolicyTests {
                 hasDevice: false, isUnverified: true, identity: .unavailable, skipped: false))
     }
 
+    // capability: verify.gate
     @Test("Verified, device-less, and skipped sessions do not prompt")
     func doesNotPrompt() {
         #expect(
