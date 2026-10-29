@@ -246,7 +246,7 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
                     state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
                         scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
-                }, open)
+                }, onRoom = open)
         }, activity = activity)
 }
 
