@@ -2,8 +2,33 @@ package ai.nuanu.slatrix.ui.mockups
 
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.NotificationsNone
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 
 enum class MockScreen { Home, Dms, Activity, Channel, Thread, You }
 
@@ -13,5 +38,98 @@ fun SlatrixMockups(
     dark: Boolean = false,
     initialPalette: SidebarPalette = SidebarPalette.Aubergine,
 ) {
-    SlatrixTheme(dark = dark, palette = initialPalette) { Text("Slatrix") }
+    var screen by rememberSaveable { mutableStateOf(initialScreen) }
+    var tab by rememberSaveable { mutableStateOf(initialScreen.takeIf { it in rootScreens } ?: MockScreen.Home) }
+    var roomId by rememberSaveable { mutableStateOf("design") }
+    var palette by rememberSaveable { mutableStateOf(initialPalette) }
+    var darkOverride by rememberSaveable { mutableStateOf<Int?>(null) }
+    var drafts by rememberSaveable { mutableStateOf(mapOf<String, String>()) }
+    val effectiveDark = darkOverride?.let { it == 1 } ?: dark
+    val room = MockData.channels.firstOrNull { it.id == roomId } ?: MockData.conversations.first { it.id == roomId }.let {
+        MockChannel(it.id, it.name, "Direct message", direct = true)
+    }
+    val back: () -> Unit = { screen = if (screen == MockScreen.Thread) MockScreen.Channel else tab }
+    BackHandler(enabled = screen !in rootScreens, onBack = back)
+
+    SlatrixTheme(dark = effectiveDark, palette = palette) {
+        val colors = SlatrixTheme.colors
+        Surface(Modifier.fillMaxSize(), color = colors.canvas) {
+            BoxWithConstraints(Modifier.navigationBarsPadding()) {
+                val expanded = maxWidth >= UiMetrics.ExpandedWidth
+                val root = screen in rootScreens
+                Row(Modifier.fillMaxSize()) {
+                    if (root && expanded) {
+                        NavigationRail(containerColor = colors.frame) {
+                            rootScreens.forEach { destination ->
+                                NavigationRailItem(
+                                    selected = screen == destination,
+                                    onClick = { tab = destination; screen = destination },
+                                    icon = { Icon(destination.icon(), contentDescription = null) },
+                                    label = { Text(destination.label()) },
+                                )
+                            }
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Box(Modifier.weight(1f)) {
+                            when (screen) {
+                                MockScreen.Home -> HomeScreen(MockData.channels,
+                                    onChannel = { roomId = it; screen = MockScreen.Channel },
+                                    onThread = { screen = MockScreen.Thread },
+                                    onYou = { screen = MockScreen.You })
+                                MockScreen.Dms -> DmsScreen(MockData.conversations,
+                                    onOpen = { roomId = it; screen = MockScreen.Channel },
+                                    onYou = { screen = MockScreen.You })
+                                MockScreen.Activity -> ActivityScreen(MockData.activity,
+                                    onThread = { screen = MockScreen.Thread },
+                                    onYou = { screen = MockScreen.You })
+                                MockScreen.Channel -> ChannelScreen(room, MockData.messages,
+                                    draft = drafts["channel:$roomId"].orEmpty(),
+                                    onDraft = { drafts = drafts + ("channel:$roomId" to it) },
+                                    onSend = {}, onThread = { screen = MockScreen.Thread }, onBack = back)
+                                MockScreen.Thread -> ThreadScreen(MockData.threadParent, MockData.replies,
+                                    draft = drafts["thread:${MockData.threadParent.id}"].orEmpty(),
+                                    onDraft = { drafts = drafts + ("thread:${MockData.threadParent.id}" to it) },
+                                    onSend = {}, onBack = back)
+                                MockScreen.You -> YouScreen(effectiveDark, palette,
+                                    onDarkToggle = { darkOverride = if (effectiveDark) 0 else 1 },
+                                    onPalette = { palette = it }, onBack = back)
+                            }
+                        }
+                        if (root && !expanded) {
+                            NavigationBar(containerColor = colors.frame) {
+                                rootScreens.forEach { destination ->
+                                    NavigationBarItem(
+                                        selected = screen == destination,
+                                        onClick = { tab = destination; screen = destination },
+                                        icon = { Icon(destination.icon(), contentDescription = null) },
+                                        label = { Text(destination.label()) },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = colors.textPrimary,
+                                            selectedTextColor = colors.textPrimary,
+                                            indicatorColor = colors.selection,
+                                            unselectedIconColor = colors.textSecondary,
+                                            unselectedTextColor = colors.textSecondary,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val rootScreens = listOf(MockScreen.Home, MockScreen.Dms, MockScreen.Activity)
+private fun MockScreen.label() = when (this) {
+    MockScreen.Home -> "Home"
+    MockScreen.Dms -> "DMs"
+    else -> "Activity"
+}
+private fun MockScreen.icon(): ImageVector = when (this) {
+    MockScreen.Home -> Icons.Outlined.Home
+    MockScreen.Dms -> Icons.Outlined.ChatBubbleOutline
+    else -> Icons.Outlined.NotificationsNone
 }
