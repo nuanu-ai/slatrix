@@ -617,6 +617,15 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      * Marks the conversation unread, as Slack's Mark unread on a message does. Matrix can't move the fully-read marker
      * back, so it sets the room's unread flag; while the conversation stays open, its newest message doesn't read it again.
      */
+    /**
+     * Coming back to this conversation kept open: last visit's jump, its start at the New line and any Mark unread hold
+     * stay behind, so it opens where the reader left it and reads as usual.
+     */
+    fun revisit() {
+        mutableState.update { it.copy(highlight = null, startsAtUnread = false) }
+        operations.launch { readLock.withLock { heldUnread = false } }
+    }
+
     suspend fun markUnread(): Boolean {
         if (!lifetime.isActive) return false
         val task = operations.async {

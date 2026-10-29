@@ -25,6 +25,7 @@ import ai.nuanu.slatrix.core.MatrixAvatars
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.MatrixSearch
 import ai.nuanu.slatrix.core.MatrixPeople
+import ai.nuanu.slatrix.core.PeopleSearchState
 import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.core.MessageSearchState
 import ai.nuanu.slatrix.core.RecentSearchStore
@@ -103,6 +104,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var invitation by rememberSaveable { mutableStateOf<String?>(null) }
     // Someone's profile, pushed over whatever is open, and the name to show until theirs loads.
     var person by rememberSaveable { mutableStateOf<Pair<String, String?>?>(null) }
+    var editingProfile by rememberSaveable { mutableStateOf(false) }
+    var newMessage by rememberSaveable { mutableStateOf(false) }
     // Browse channels or Create a channel, pushed over Home; null while neither is open.
     var channels by rememberSaveable { mutableStateOf<ChannelPage?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -184,12 +187,14 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         channels = null
                         person = null
                         later = false
+                        editingProfile = false
+                        newMessage = false
                         jump(room, target.eventId, target.threadRoot)
                         onNotificationHandled(target)
                     }
                 }
                 CompositionLocalProvider(LocalAvatarLoader provides avatars) { Box(Modifier.fillMaxSize()) {
-                    ConnectedAccountScreen(identityState,
+                    ProvideOffline(rooms?.offline) { ConnectedAccountScreen(identityState,
                         { identity?.requestVerification() }, { identity?.acceptVerification() },
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {
@@ -203,6 +208,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
                                     { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
                             } } }
+                            editingProfile -> { { LiveEditProfile((state as? AccountState.Connected)?.client, userId) { editingProfile = false } } }
+                            newMessage -> { { LiveNewMessage(userId, people, rooms, { room -> newMessage = false; workspace?.open(room) }) { newMessage = false } } }
                             person != null -> { { person?.let { (id, name) ->
                                 LivePersonProfile(id, name, userId, people, rooms?.state, { room ->
                                     person = null
@@ -210,7 +217,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     threads?.back()
                                     // Message from the conversation already open just goes back to it, where you were.
                                     if (selected?.room?.id != room.id) workspace?.open(room)
-                                }) { person = null }
+                                }, onEdit = { editingProfile = true }) { person = null }
                             } } }
                             channels != null -> { {
                                 val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
@@ -221,7 +228,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             // Back from Preferences shows You at once.
                             you -> { { CompositionLocalProvider(LocalReturning provides returning) {
                                 LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() },
-                                    { preferences = true; returning = false }, account::signOut, onBack = { you = false }, avatarUrl = userAvatarUrl)
+                                    { preferences = true; returning = false }, account::signOut, onViewProfile = { person = userId to null },
+                                    onBack = { you = false }, avatarUrl = userAvatarUrl)
                             } } }
                             later -> { { LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
                                 { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
@@ -243,14 +251,14 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, userAvatarUrl, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it },
-                                saved.size, { later = true }, { invitation = it }) {
+                            LiveHome(userId, userAvatarUrl, rooms, workspace, search, people, jump, { you = true }, selectedSpaceId, chooseSpace,
+                                { channels = it }, saved.size, { later = true }, { invitation = it }, { newMessage = true }, { id, name -> person = id to name }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
                             }
                         }
-                    }
+                    } }
                     notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
                     // One place for both, so a notice never sits on top of the account's warning.
                     (notice ?: (state as AccountState.Connected).warning)?.let { text ->
@@ -367,7 +375,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                     val files = rememberConversation(client, open.room.id, ConversationView.Files)
                     val state = files?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load files")
                     // Asks for the next page, which after a failed one is that page again.
-                    SharedFiles(state) { files?.loadOlder() }
+                    SharedFiles(state, { attachment, width, height, full -> media.picture(attachment, width, height, full) },
+                        { openAttachment(context, media, it) }) { files?.loadOlder() }
                 })
             }
         }
@@ -402,8 +411,10 @@ private fun rememberConversation(client: Client, roomId: String, view: Conversat
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
 @Composable
 private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
+    people: MatrixPeople?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, laterCount: Int, onLater: () -> Unit, onInvitation: (String) -> Unit,
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, laterCount: Int, onLater: () -> Unit, onInvitation: (String) -> Unit, onNewMessage: () -> Unit,
+    onPerson: (userId: String, name: String?) -> Unit,
     activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
@@ -414,6 +425,7 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
         onInvitation = onInvitation,
+        onNewMessage = onNewMessage,
         onBrowseChannels = { onChannels(ChannelPage.Browse) }, onCreateChannel = { onChannels(ChannelPage.Create) },
         onMarkUnread = { id, unread ->
             (rooms?.setUnread(id, unread) ?: false).also { if (it && !unread) PushNotifications(context).clear(id) }
@@ -436,7 +448,8 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
                     state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
                         scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
-                }, recents, { recents = recentStore.add(it) }, open)
+                }, recents, { recents = recentStore.add(it) }, people?.results?.collectAsState()?.value ?: PeopleSearchState(),
+                { people?.search(it) }, { onPerson(it.id, it.name) }, open)
         }, userAvatarUrl = userAvatarUrl, activity = activity)
 }
 

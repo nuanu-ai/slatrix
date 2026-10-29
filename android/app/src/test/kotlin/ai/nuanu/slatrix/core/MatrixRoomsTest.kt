@@ -482,6 +482,23 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: app.offline-banner
+    @Test fun aDroppedConnectionSaysOfflineUntilSyncRunsAgainWithoutAnError() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        // The sync running has been handled, so it can't land after the drop.
+        client.sendQueuesEnabled.first { it }
+
+        sync.emitState(SyncServiceState.OFFLINE)
+        rooms.offline.first { it }
+        assertNull("The banner says it, so Home's notice doesn't", rooms.state.value.error)
+        sync.emitState(SyncServiceState.RUNNING)
+        rooms.offline.first { !it }
+        rooms.close()
+    }
+
     @Test fun syncRunsOnlyInTheForegroundWhileAPushStillResolvesItsEvent() = runTest {
         val client = RoomsClient(emptyList())
         val sync = RoomsSync()
@@ -590,9 +607,10 @@ private class RoomsSync : SyncService(NoHandle) {
     }
     val running = MutableStateFlow(false)
     override suspend fun start() {
-        started.complete(Unit)
         running.value = true
         emitState(SyncServiceState.RUNNING)
+        // Only once its RUNNING is queued, so a state the test emits next lands after it rather than being cleared by it.
+        started.complete(Unit)
     }
     override suspend fun stop() {
         running.value = false

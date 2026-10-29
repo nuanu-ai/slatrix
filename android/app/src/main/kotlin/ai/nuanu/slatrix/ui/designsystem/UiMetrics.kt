@@ -10,6 +10,8 @@ object UiMetrics {
     val GapSection = 24.dp
     val Avatar = 40.dp
     val ProfileAvatar = 56.dp
+    /** Slack's floating + button. */
+    val Fab = 56.dp
     /** A profile page's picture. */
     val ProfilePhoto = 120.dp
     val Touch = 48.dp
@@ -38,6 +40,8 @@ object UiMetrics {
     val HomeCard = 100.dp
     const val ProgressDelayMillis = 400L
     const val NoticeMillis = 4_000L
+    /** How long the connection must be down before the offline banner shows, as on the Mac. */
+    const val ConnectionNoticeMillis = 2_000L
     /** How long a message jumped to stays highlighted, as on the Mac. */
     const val HighlightMillis = 1_500L
     val ExpandedWidth = 600.dp

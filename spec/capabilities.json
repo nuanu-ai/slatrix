@@ -5,7 +5,7 @@
     {"id": "app.appearance", "what": "Choose light, dark or the system's appearance, and a sidebar theme.", "mac": "done", "android": "done"},
     {"id": "app.zoom", "what": "Zoom the whole interface from 80% to 200% with ⌘= and ⌘-.", "mac": "done", "android": "n/a: Android scales with the system font size instead"},
     {"id": "app.updates", "what": "The app updates itself to new releases.", "mac": "done", "android": "n/a: an Android app updates through the store or installer it came from"},
-    {"id": "app.offline-banner", "what": "A banner says when you're offline and leaves when the connection returns.", "mac": "done", "android": "missing"},
+    {"id": "app.offline-banner", "what": "A banner says when you're offline and leaves when the connection returns.", "mac": "done", "android": "done"},
     {"id": "app.narrow-window", "what": "In a narrow window the sidebar becomes a drawer and side panes cover the conversation.", "mac": "done", "android": "n/a: a phone shows one screen at a time"},
     {"id": "app.resize-panes", "what": "Drag the edges of the sidebar and the thread pane to resize them.", "mac": "done", "android": "n/a: Android screens fill the window"},
 
@@ -27,7 +27,7 @@
     {"id": "home.keyboard-navigation", "what": "Move to the previous, next or next unread conversation from the keyboard.", "mac": "done", "android": "n/a: phones switch conversations by touch"},
 
     {"id": "search.rooms", "what": "Find a conversation by name and open it.", "mac": "done", "android": "done"},
-    {"id": "search.people", "what": "Find people by name or Matrix ID.", "mac": "done", "android": "missing"},
+    {"id": "search.people", "what": "Find people by name or Matrix ID.", "mac": "done", "android": "done"},
     {"id": "search.messages", "what": "Search messages, encrypted ones included, with in: and from: filters.", "mac": "done", "android": "done"},
     {"id": "search.recent", "what": "Search offers your recent searches.", "mac": "done", "android": "done"},
 
@@ -39,7 +39,7 @@
     {"id": "conversation.read", "what": "Reading a conversation's newest messages marks it read.", "mac": "done", "android": "done"},
     {"id": "conversation.mark-read", "what": "Mark a conversation, or every conversation, read.", "mac": "done", "android": "done"},
     {"id": "conversation.mark-unread", "what": "Mark a conversation unread.", "mac": "done", "android": "done"},
-    {"id": "conversation.keep-position", "what": "Coming back to a conversation returns to where you were reading.", "mac": "done", "android": "missing"},
+    {"id": "conversation.keep-position", "what": "Coming back to a conversation returns to where you were reading.", "mac": "done", "android": "done"},
     {"id": "conversation.jump-to-message", "what": "A message opened from search or a link shows highlighted in its conversation.", "mac": "done", "android": "done"},
     {"id": "conversation.members", "what": "See a conversation's members from its header.", "mac": "done", "android": "done"},
     {"id": "conversation.files", "what": "See the files and links shared in a conversation.", "mac": "done", "android": "done"},
@@ -101,8 +101,8 @@
     {"id": "people.start-dm", "what": "Message someone from their profile, reusing your direct message with them.", "mac": "done", "android": "done"},
     {"id": "people.avatars", "what": "People and conversations show a photo, or initials on a color.", "mac": "done", "android": "done"},
     {"id": "profile.own", "what": "See your own profile.", "mac": "done", "android": "done"},
-    {"id": "profile.edit-name", "what": "Change your display name.", "mac": "done", "android": "missing"},
-    {"id": "profile.edit-photo", "what": "Change or remove your profile photo, cropped to a square.", "mac": "done", "android": "missing"},
+    {"id": "profile.edit-name", "what": "Change your display name.", "mac": "done", "android": "done"},
+    {"id": "profile.edit-photo", "what": "Change or remove your profile photo, cropped to a square.", "mac": "done", "android": "done"},
 
     {"id": "notifications.alert", "what": "A new message that should notify you raises a notification.", "mac": "done", "android": "done"},
     {"id": "notifications.open", "what": "Opening a notification opens its conversation.", "mac": "done", "android": "done"},
