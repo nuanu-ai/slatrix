@@ -141,7 +141,7 @@ class LiveChannelScreenTest {
         compose.onAllNodesWithText("Mira", useUnmergedTree = true).assertCountEquals(1)
         compose.onAllNodesWithText("M", useUnmergedTree = true).assertCountEquals(1)
         compose.onNodeWithText("Second").performTouchInput { longClick() }
-        compose.onNodeWithText("9:41", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Today at 9:41", substring = true).assertIsDisplayed()
     }
 
     private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)

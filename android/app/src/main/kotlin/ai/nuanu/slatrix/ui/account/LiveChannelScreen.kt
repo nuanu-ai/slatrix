@@ -6,26 +6,30 @@ import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
+import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -92,6 +96,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         loadOlder()
     }
     BackHandler(onBack = onBack)
+    var menu by remember { mutableStateOf<ConversationMessage?>(null) }
+    menu?.let { MessageMenu(it) { menu = null } }
     Column(Modifier.fillMaxSize().background(colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(end = UiMetrics.GapLarge,
             top = UiMetrics.GapSmall, bottom = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
@@ -116,7 +122,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 items(state.rows.asReversed(), key = { it.id }) { row ->
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
-                        is ConversationMessage -> LiveMessageRow(row)
+                        is ConversationMessage -> LiveMessageRow(row) { menu = it }
                     }
                 }
                 // The top of the conversation, which also lets an empty one ask for history.
@@ -206,22 +212,59 @@ private fun HistoryProgress() {
     }
 }
 
+private fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(timestamp))
+
 @Composable
-private fun LiveMessageRow(message: ConversationMessage) {
+private fun LiveMessageRow(message: ConversationMessage, onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
-    val time = remember(message.timestamp) { DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(message.timestamp)) }
-    Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
+    val failed = message.sendState == MessageSendState.Failed
+    // A grouped row keeps the gutter, so its body lines up and its height doesn't depend on its send state.
+    Row(Modifier.fillMaxWidth()
+        .combinedClickable(onLongClickLabel = "Message actions", onLongClick = { onMenu(message) }) { if (failed) onMenu(message) }
+        .then(if (message.grouped) Modifier else Modifier.padding(top = UiMetrics.GapSmall))
+        .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, bottom = UiMetrics.GapTiny),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        LiveAvatar(message.initials, message.colorIndex)
+        if (message.grouped) Box(Modifier.width(UiMetrics.Avatar), contentAlignment = Alignment.Center) {
+            if (failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.size(UiMetrics.Icon), tint = colors.destructive)
+        } else MessageAvatar(message.initials, message.colorIndex)
         Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+            if (!message.grouped) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(when (message.sendState) { MessageSendState.Sent -> time; MessageSendState.Sending -> "Sending…"; MessageSendState.Failed -> "Not sent" },
-                    style = MaterialTheme.typography.bodySmall, maxLines = 1,
-                    color = if (message.sendState == MessageSendState.Failed) colors.destructive else colors.textSecondary)
+                    fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(when (message.sendState) {
+                    MessageSendState.Sent -> remember(message.timestamp) { timeLabel(message.timestamp) }
+                    MessageSendState.Sending -> "Sending…"
+                    MessageSendState.Failed -> "Not sent"
+                }, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = if (failed) colors.destructive else colors.textSecondary)
             }
-            SelectionContainer { Text(message.body, style = MaterialTheme.typography.bodyLarge, color = colors.textBody) }
+            Text(message.body, style = MaterialTheme.typography.bodyLarge,
+                color = if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody)
+        }
+    }
+}
+
+@Composable
+private fun MessageAvatar(initials: String, colorIndex: Int) {
+    Box(Modifier.sizeIn(minWidth = UiMetrics.Avatar, minHeight = UiMetrics.Avatar).clip(MaterialTheme.shapes.large)
+        .background(DesignTokens.avatarColors[colorIndex]).padding(UiMetrics.GapTiny), contentAlignment = Alignment.Center) {
+        Text(initials, style = AvatarStyle.label, color = SlatrixTheme.colors.onAccent, maxLines = 1, softWrap = false)
+    }
+}
+
+/** Slack's long-press sheet: who sent the message and when, then what can be done with it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MessageMenu(message: ConversationMessage, onDismiss: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    ModalBottomSheet(onDismissRequest = onDismiss, shape = SlatrixTheme.topPanelShape, containerColor = colors.overlay) {
+        Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
+            Row(Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
+                horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
+                Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${dayLabel(message.timestamp)} at ${timeLabel(message.timestamp)}",
+                    style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1)
+            }
         }
     }
 }
