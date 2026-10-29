@@ -36,6 +36,20 @@ class MatrixActivityTest {
     }
 }
 
+class ActivityWorkspaceTest {
+    // capability: activity.feed
+    @Test fun aWorkspaceShowsItsChannelsAndEveryDmButNotOtherWorkspacesOrUnknownRooms() {
+        fun item(roomId: String) = ActivityItem("$roomId \$e", roomId, "\$e", "", false, "Sam", "S", 0, "Hi", 0, ActivityKind.Message, null)
+        fun room(id: String, direct: Boolean, space: String?) =
+            RoomSummary(id, id, direct, "", UnreadBadge.None, "R", 0, setOfNotNull(space))
+        val rooms = listOf(room("!ours", false, "!studio"), room("!theirs", false, "!other"), room("!dm", true, null))
+        val items = listOf(item("!ours"), item("!theirs"), item("!dm"), item("!left"))
+
+        assertEquals(listOf("!ours", "!dm"), items.inWorkspace(rooms, "!studio").map { it.roomId })
+        assertEquals(listOf("!ours", "!theirs", "!dm"), items.inWorkspace(rooms, null).map { it.roomId })
+    }
+}
+
 private fun notification(eventId: String, body: String, at: ULong, mention: Boolean = false, thread: String? = null,
     direct: Boolean = false, sender: String = "@sam:example.org") =
     item(eventId, at, sender, TimelineEventContent.MessageLike(MessageLikeEventContent.RoomMessage(
