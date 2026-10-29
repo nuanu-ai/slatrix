@@ -1,5 +1,5 @@
 diff --git a/bindings/matrix-sdk-ffi/src/client.rs b/bindings/matrix-sdk-ffi/src/client.rs
-index f0d2e76..4d42c38 100644
+index f0d2e76..6ed9820 100644
 --- a/bindings/matrix-sdk-ffi/src/client.rs
 +++ b/bindings/matrix-sdk-ffi/src/client.rs
 @@ -95,7 +95,8 @@ use ruma::{
@@ -70,3 +70,23 @@ index f0d2e76..4d42c38 100644
      /// Subscribe to updates of room account data events.
      ///
      /// Be careful that only the most recent value can be observed. Subscribers
+@@ -1473,6 +1518,19 @@ impl Client {
+         Ok(event.map(|e| e.json().get().to_owned()))
+     }
+ 
++    /// Fetch the content of the event of the given type from the account data
++    /// on the server, or `None` when there is none.
++    ///
++    /// Unlike `account_data`, it doesn't read the store, which lags behind the
++    /// server until the next sync. It will be returned as a JSON string.
++    pub async fn fetch_account_data(
++        &self,
++        event_type: String,
++    ) -> Result<Option<String>, ClientError> {
++        let content = self.inner.account().fetch_account_data(event_type.into()).await?;
++        Ok(content.map(|c| c.json().get().to_owned()))
++    }
++
+     /// Set the given account data content for the given event type.
+     ///
+     /// It should be supplied as a JSON string.

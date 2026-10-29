@@ -347,7 +347,7 @@ struct WindowHostedTests {
         // Where the preview reads a saved message from.
         harness.matrix.threadMessages = [older, newer]
         let entry = { (id: String, ts: Int) in #"{"room_id":"!later:example.org","event_id":"\#(id)","ts":\#(ts)}"# }
-        let client = LaterClient(stored: #"{"saved":[\#(entry("$older", 1_761_955_200_000))],"removed":[]}"#)
+        let client = LaterClient(server: #"{"saved":[\#(entry("$older", 1_761_955_200_000))],"removed":[]}"#)
         harness.matrix.savedMessages.attach(client, accountID: "preview.you")
         harness.menu("later")
         func card(_ message: ChatMessage) -> NSView? {
