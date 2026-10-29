@@ -279,7 +279,7 @@ class MatrixRoomsTest {
         }
         val rooms = MatrixRooms(backgroundScope, client)
         entered.await()
-        val beforeClose = rooms.state.first { !it.loading }
+        val beforeClose = rooms.state.first { !it.loading && it.spacesKnown }
         val closing = async { rooms.close() }
         runCurrent()
         val lateSync = RoomsSync()
