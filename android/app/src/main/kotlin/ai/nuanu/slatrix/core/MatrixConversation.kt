@@ -68,7 +68,7 @@ data class ConversationState(
     val sendError: String? = null,
 )
 
-class MatrixConversation(scope: CoroutineScope, room: Room) {
+class MatrixConversation(scope: CoroutineScope, private val room: Room) {
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
     private val mutableState = MutableStateFlow(ConversationState())
@@ -184,6 +184,9 @@ class MatrixConversation(scope: CoroutineScope, room: Room) {
                     currentCoroutineContext().ensureActive()
                     if (!isLatestRemote(eventId)) return@withLock false
                     timeline.sendReadReceipt(ReceiptType.FULLY_READ, eventId)
+                    currentCoroutineContext().ensureActive()
+                    if (!isLatestRemote(eventId)) return@withLock false
+                    room.setUnreadFlag(false)
                     currentCoroutineContext().ensureActive()
                     if (!isLatestRemote(eventId)) return@withLock false
                     lastRead = eventId
