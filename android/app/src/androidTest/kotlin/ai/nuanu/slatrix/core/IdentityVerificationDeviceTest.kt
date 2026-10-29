@@ -11,6 +11,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -75,6 +76,31 @@ class IdentityVerificationDeviceTest {
             verification.close()
         }
     }
+    @Test fun recoveryFailureKeepsTheSessionLockedAndCanRetryWithAnOwnerKey() = runBlocking {
+        val encryption = IdentityEncryption(VerificationState.UNVERIFIED)
+        val verification = IdentityVerification(scope, IdentityClient(encryption))
+        try {
+            withTimeout(5_000) { verification.state.first { it.phase == IdentityPhase.ChooseMethod } }
+            val invalidKey = "fictional-invalid-owner-recovery-key"
+            encryption.recoverAction = { throw IllegalArgumentException("Invalid key: $it") }
+            verification.recover(invalidKey)
+            val failure = withTimeout(5_000) { verification.state.first { it.phase == IdentityPhase.Failed } }
+            assertEquals(IdentityStatus.Unverified, failure.status)
+            assertNotNull(failure.error)
+            assertFalse(failure.toString().contains(invalidKey))
+
+            verification.retry()
+            withTimeout(5_000) { verification.state.first { it.phase == IdentityPhase.ChooseMethod } }
+            encryption.recoverAction = { key ->
+                if (key == "fictional-valid-owner-recovery-key") encryption.sdkState = VerificationState.VERIFIED
+            }
+            verification.recover("fictional-valid-owner-recovery-key")
+            withTimeout(5_000) { verification.state.first { it.verified } }
+        } finally {
+            verification.close()
+        }
+    }
+
 }
 
 private class IdentityClient(
@@ -85,8 +111,9 @@ private class IdentityClient(
     override suspend fun getSessionVerificationController(): SessionVerificationController = controller
 }
 
-private class IdentityEncryption(private var sdkState: VerificationState = VerificationState.UNKNOWN) : Encryption(NoHandle) {
+private class IdentityEncryption(var sdkState: VerificationState = VerificationState.UNKNOWN) : Encryption(NoHandle) {
     var observer: VerificationStateListener? = null
+    var recoverAction: suspend (String) -> Unit = {}
     override suspend fun waitForE2eeInitializationTasks() = Unit
     override fun verificationState(): VerificationState = sdkState
     override fun verificationStateListener(listener: VerificationStateListener): TaskHandle {
@@ -96,6 +123,7 @@ private class IdentityEncryption(private var sdkState: VerificationState = Verif
     override fun recoveryState(): RecoveryState = RecoveryState.ENABLED
     override fun recoveryStateListener(listener: RecoveryStateListener): TaskHandle = IdentityTask()
     override suspend fun hasDevicesToVerifyAgainst(): Boolean = true
+    override suspend fun recover(recoveryKey: String) { recoverAction(recoveryKey) }
 }
 
 private class IdentityController : SessionVerificationController(NoHandle) {
