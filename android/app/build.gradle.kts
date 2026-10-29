@@ -3,6 +3,7 @@ import com.android.build.api.dsl.ApplicationExtension
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("io.github.takahirom.roborazzi")
 }
 
 extensions.configure<ApplicationExtension> {
@@ -53,11 +54,18 @@ dependencies {
     implementation(project(":matrix-sdk"))
     implementation(platform("androidx.compose:compose-bom:2025.10.01"))
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.11.0")
     lintChecks(project(":lint-rules"))
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:core:1.7.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation(platform("androidx.compose:compose-bom:2025.10.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.76.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.76.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.google.code.gson:gson:2.13.2")
 }
