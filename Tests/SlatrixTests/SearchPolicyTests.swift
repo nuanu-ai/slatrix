@@ -28,6 +28,7 @@ struct ConversationSwitcherTests {
 
     struct Spec: Decodable { var cases: [Case] }
 
+    // capability: search.rooms
     @Test(
         "Conversation ranking matches the shared cases",
         arguments: try SharedSpec.decode("spec/conversation-search.json", as: Spec.self).cases)
