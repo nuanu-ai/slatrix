@@ -68,6 +68,7 @@ class MessageContentTest {
         compose.onNodeWithText("Fixed the typo (edited)", useUnmergedTree = true).assertExists()
     }
 
+    // capability: message.deleted
     @Test fun aDeletedMessageReadsAsSlacksInItalics() {
         show(message("This message was deleted").copy(kind = MessageKind.Deleted))
         val text = compose.onNodeWithText("This message was deleted.", useUnmergedTree = true).text()
