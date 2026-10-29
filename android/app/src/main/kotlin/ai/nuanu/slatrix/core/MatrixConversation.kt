@@ -124,18 +124,15 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                 currentCoroutineContext().ensureActive()
                 ready.complete(timeline)
                 mutableState.update { it.copy(loading = false) }
-                // asEvent blocks on the SDK, so updates are mapped off the main thread.
-                withContext(Dispatchers.Default) {
-                    var oldest: String? = null
-                    for (batch in updates) {
-                        batch.forEach(::apply)
-                        // A cleared or reset timeline starts over from the live end.
-                        val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
-                        val rows = rows()
-                        val first = rows.firstOrNull { it is ConversationMessage }?.id
-                        if (first != oldest) { oldest = first; blankPages = 0 }
-                        mutableState.update { it.copy(rows = rows, loading = false, hasMore = it.hasMore || reset) }
-                    }
+                var oldest: String? = null
+                for (batch in updates) {
+                    // asEvent blocks on the SDK, so a batch is mapped off the main thread.
+                    val rows = withContext(Dispatchers.Default) { batch.forEach(::apply); rows() }
+                    // A cleared or reset timeline starts over from the live end.
+                    val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
+                    val first = rows.firstOrNull { it is ConversationMessage }?.id
+                    if (first != oldest) { oldest = first; blankPages = 0 }
+                    mutableState.update { it.copy(rows = rows, loading = false, hasMore = it.hasMore || reset) }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
