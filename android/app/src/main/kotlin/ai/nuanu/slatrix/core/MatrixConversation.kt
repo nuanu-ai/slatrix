@@ -28,7 +28,9 @@ import org.matrix.rustcomponents.sdk.MessageFormat
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.ProfileDetails
+import org.matrix.rustcomponents.sdk.QueueWedgeError
 import org.matrix.rustcomponents.sdk.ReceiptType
+import org.matrix.rustcomponents.sdk.SendTarget
 import org.matrix.rustcomponents.sdk.Room
 import org.matrix.rustcomponents.sdk.TaskHandle
 import org.matrix.rustcomponents.sdk.TextMessageContent
@@ -65,6 +67,12 @@ data class ConversationMessage(
     val colorIndex: Int,
     /** Follows a message from the same sender, so it shows without avatar and name. */
     val grouped: Boolean = false,
+    /** A local echo's, for retrying or deleting it. */
+    val transactionId: String? = null,
+    /** A failed send someone can retry; a signed-out session can only delete it. */
+    val canRetry: Boolean = false,
+    /** The failure paused the room's send queue, so retrying resumes the queue, as on the Mac. */
+    val queuePaused: Boolean = false,
 ) : ConversationRow
 
 data class ConversationState(
@@ -205,6 +213,21 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
         return try { task.await() } finally { task.cancel() }
     }
 
+    /** Resumes the original send rather than sending again, so a message never goes out twice. */
+    fun retrySend(message: ConversationMessage) = unsent(message) { timeline, id ->
+        if (message.queuePaused) room.enableSendQueue(true) else timeline.retrySend(id, SendTarget.Event)
+    }
+
+    fun deleteUnsent(message: ConversationMessage) = unsent(message) { timeline, id -> timeline.abortSend(id, SendTarget.Event) }
+
+    private fun unsent(message: ConversationMessage, action: suspend (Timeline, EventOrTransactionId) -> Unit) {
+        val id = EventOrTransactionId.TransactionId(message.transactionId ?: return)
+        operations.launch {
+            // A failed attempt leaves the row failed, so its menu offers the action again.
+            runCatching { action(ready.await(), id) }.onFailure { if (it is CancellationException) throw it }
+        }
+    }
+
     suspend fun markRead(eventId: String): Boolean {
         if (!lifetime.isActive) return false
         val task = operations.async {
@@ -304,6 +327,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
             is MsgLikeKind.Poll -> { body = value.question; kind = MessageKind.Unsupported }
             else -> { body = "Unsupported message"; kind = MessageKind.Unsupported }
         }
+        val failure = event.localSendState as? EventSendState.SendingFailed
         return ConversationMessage(
             id = item.uniqueId().id,
             eventId = if (event.isRemote) (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId else null,
@@ -317,6 +341,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
             },
             own = event.isOwn, initials = AvatarPlaceholder.initials(senderName),
             colorIndex = AvatarPlaceholder.colorIndex(senderName),
+            transactionId = (event.eventOrTransactionId as? EventOrTransactionId.TransactionId)?.transactionId,
+            canRetry = failure != null && failure.error !is QueueWedgeError.ExpiredAccessToken &&
+                failure.error !is QueueWedgeError.MissingMediaContent && failure.error !is QueueWedgeError.InvalidMimeType,
+            queuePaused = failure?.isRecoverable == true,
         )
     }
 }
