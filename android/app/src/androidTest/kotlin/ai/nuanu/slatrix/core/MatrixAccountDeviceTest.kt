@@ -28,6 +28,10 @@ import org.junit.runner.RunWith
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.ClientSessionDelegate
 import org.matrix.rustcomponents.sdk.HomeserverLoginDetails
+import org.matrix.rustcomponents.sdk.OAuthPrompt
+import org.matrix.rustcomponents.sdk.SsoHandler
+import uniffi.matrix_sdk.OAuthAuthorizationData
+import uniffi.matrix_sdk.NoHandle as OAuthNoHandle
 import org.matrix.rustcomponents.sdk.OAuthConfiguration
 import org.matrix.rustcomponents.sdk.NoHandle
 import org.matrix.rustcomponents.sdk.Session
@@ -74,7 +78,7 @@ class MatrixAccountDeviceTest {
             assertEquals("https://matrix.example.org", homeserver)
             client
         }
-        choosePassword(account, "  https://matrix.example.org/  ")
+        discoverServer(account, "  https://matrix.example.org/  ")
         account.signIn("  alice  ", " password ")
         val connected = withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
         assertEquals("@alice:example.org", (connected as AccountState.Connected).userId)
@@ -93,7 +97,7 @@ class MatrixAccountDeviceTest {
         }
         val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> client }
         try {
-            choosePassword(account)
+            discoverServer(account)
             account.signIn("alice", "password")
             withTimeout(5_000) { enteredLogin.await() }
             val pendingAuthentication = scope.coroutineContext[Job]!!.children.toList()
@@ -115,7 +119,7 @@ class MatrixAccountDeviceTest {
             delegate = persistence
             client
         }
-        choosePassword(account)
+        discoverServer(account)
         account.signIn("alice", "password")
         withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
         val saved = store.load()
@@ -159,7 +163,7 @@ class MatrixAccountDeviceTest {
             delegate = persistence
             client
         }
-        choosePassword(account)
+        discoverServer(account)
         account.signIn("alice", "password")
         withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
         val saved = store.load()
@@ -172,7 +176,7 @@ class MatrixAccountDeviceTest {
 
             val connected = account.state.value as AccountState.Connected
             assertEquals("Couldn’t save your session. Keep Slatrix open.", connected.warning)
-            assertEquals(refreshed, delegate!!.retrieveSessionFromKeychain(refreshed.userId))
+            assertEquals(refreshed, delegate.retrieveSessionFromKeychain(refreshed.userId))
         } finally {
             directory.delete()
             check(retainedDirectory.renameTo(directory))
@@ -217,7 +221,7 @@ class MatrixAccountDeviceTest {
     @Test fun sdkLoginErrorsDoNotExposeCredentials() = runBlocking {
         val client = AuthClient { error("password=fictional-secret; access_token=fictional-token") }
         val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> client }
-        choosePassword(account)
+        discoverServer(account)
         account.signIn("alice", "fictional-secret")
         val failed = withTimeout(5_000) { account.state.first { it is AccountState.Failed } } as AccountState.Failed
 
@@ -226,31 +230,186 @@ class MatrixAccountDeviceTest {
         assertNull(SessionStore(context).load())
     }
 
-    private suspend fun choosePassword(account: MatrixAccount, homeserver: String = "https://matrix.example.org") {
+    @Test fun oauthCallbackUsesTheClientThatDiscoveredTheServer() = runBlocking {
+        val client = AuthClient(LoginDetails(password = true, oauth = true))
+        val clients = ArrayDeque(listOf(client, AuthClient(LoginDetails(oauth = true))))
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> clients.removeFirst() }
+        discoverServer(account)
+        account.signInWithBrowser()
+        val browser = withTimeout(5_000) { account.state.first { it is AccountState.BrowserSignIn } } as AccountState.BrowserSignIn
+        assertEquals("https://identity.example.org/authorize?state=issued-by-sdk", browser.url)
+        assertEquals(oauthConfiguration.redirectUri, client.oauthConfig?.redirectUri)
+        val callback = "${oauthConfiguration.redirectUri}?code=fictional-code&state=issued-by-sdk"
+        account.handleCallback(callback)
+        val connected = withTimeout(5_000) { account.state.first { it is AccountState.Connected } } as AccountState.Connected
+
+        assertEquals(client, connected.client)
+        assertEquals(callback, client.oauthCallback)
+        assertNull(client.credentials)
+        assertEquals(client.authenticatedSession, store.load()?.session)
+    }
+
+    @Test fun oauthRejectsAChangedCallbackRouteBeforeHandingTokensToTheSdk() = runBlocking {
+        val client = AuthClient(LoginDetails(oauth = true))
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> client }
+        discoverServer(account)
+        account.signInWithBrowser()
+        withTimeout(5_000) { account.state.first { it is AccountState.BrowserSignIn } }
+        account.handleCallback("com.github.nuanu-ai.slatrix.dev://other/oauth/callback?code=fictional-code&state=issued-by-sdk")
+        withTimeout(5_000) { account.state.first { it is AccountState.Failed } }
+        withTimeout(5_000) { client.abortedOauth.await() }
+
+        assertNull(client.oauthCallback)
+        assertNull(store.load())
+    }
+
+    @Test fun unsolicitedCallbackBeforeBrowserDoesNotPreventRestartingServerSelection() = runBlocking {
+        val first = AuthClient()
+        val clients = ArrayDeque(listOf(first, AuthClient()))
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> clients.removeFirst() }
+        discoverServer(account)
+        account.handleCallback("${oauthConfiguration.redirectUri}?code=unsolicited-code&state=unsolicited-state")
+        val failure = account.state.value as AccountState.Failed
+        assertNull(failure.options)
+
+        account.selectHomeserver("https://matrix.example.org")
+        withTimeout(5_000) { account.state.first { it is AccountState.ChooseMethod } }
+        withTimeout(5_000) { first.closed.await() }
+        assertNull(first.credentials)
+        assertNull(store.load())
+    }
+
+    @Test fun legacySsoCompletesOnlyWithTheNonceIssuedForItsRedirect() = runBlocking {
+        val client = AuthClient(LoginDetails(password = false, sso = true))
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> client }
+        discoverServer(account)
+        account.signInWithBrowser()
+        withTimeout(5_000) { account.state.first { it is AccountState.BrowserSignIn } }
+        val redirect = client.ssoRedirect!!
+        assertTrue(redirect.startsWith("${oauthConfiguration.redirectUri}?state="))
+        assertTrue(redirect.substringAfter("?state=").isNotEmpty())
+        val callback = "$redirect&loginToken=fictional-sso-token"
+        account.handleCallback(callback)
+        withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
+
+        assertEquals(callback, client.ssoCallback)
+        assertNull(client.credentials)
+        assertEquals(client.authenticatedSession, store.load()?.session)
+    }
+
+    @Test fun legacySsoRejectsWrongAndDuplicatedStateBeforeFinishing() = runBlocking {
+        for (duplicate in listOf(false, true)) {
+            val client = AuthClient(LoginDetails(password = false, sso = true))
+            val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> client }
+            discoverServer(account)
+            account.signInWithBrowser()
+            withTimeout(5_000) { account.state.first { it is AccountState.BrowserSignIn } }
+            val callback = if (duplicate) "${client.ssoRedirect}&state=wrong&loginToken=fictional-token"
+                else "${oauthConfiguration.redirectUri}?state=wrong&loginToken=fictional-token"
+            account.handleCallback(callback)
+            withTimeout(5_000) { account.state.first { it is AccountState.Failed } }
+            withTimeout(5_000) { client.closed.await() }
+
+            assertNull(client.ssoCallback)
+            assertNull(store.load())
+        }
+    }
+
+    @Test fun cancellingOAuthAbortsAuthorizationAndRemovesItsUnreferencedStore() = runBlocking {
+        val client = AuthClient(LoginDetails(oauth = true))
+        var clientDirectory: File? = null
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, storeId, _, _, _ ->
+            clientDirectory = File(directory, "matrix/$storeId").apply { mkdirs(); File(this, "keys").writeText("encrypted-fixture") }
+            client
+        }
+        discoverServer(account)
+        account.signInWithBrowser()
+        withTimeout(5_000) { account.state.first { it is AccountState.BrowserSignIn } }
+        account.cancel()
+        withTimeout(5_000) { client.abortedOauth.await(); scope.coroutineContext[Job]!!.children.toList().joinAll() }
+
+        assertEquals(AccountState.SignedOut, account.state.value)
+        assertFalse(clientDirectory!!.exists())
+        assertNull(store.load())
+    }
+
+    @Test fun cancellingKeepsAFreshStoreWhenSavedSessionOwnershipIsUncertain() = runBlocking {
+        val client = AuthClient(LoginDetails(oauth = true))
+        var clientDirectory: File? = null
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, storeId, _, _, _ ->
+            clientDirectory = File(directory, "matrix/$storeId").apply { mkdirs(); File(this, "keys").writeText("encrypted-fixture") }
+            client
+        }
+        discoverServer(account)
+        val unreadable = "uncertain-saved-session".toByteArray()
+        File(directory, "session.enc").writeBytes(unreadable)
+        account.cancel()
+        withTimeout(5_000) { scope.coroutineContext[Job]!!.children.toList().joinAll() }
+
+        assertTrue(clientDirectory!!.exists())
+        assertTrue(unreadable.contentEquals(File(directory, "session.enc").readBytes()))
+    }
+
+    private suspend fun discoverServer(account: MatrixAccount, homeserver: String = "https://matrix.example.org") {
         account.selectHomeserver(homeserver)
         withTimeout(5_000) { account.state.first { it is AccountState.ChooseMethod } }
     }
 
-    private class LoginDetails : HomeserverLoginDetails(NoHandle) {
+    private class LoginDetails(
+        private val password: Boolean = true,
+        private val sso: Boolean = false,
+        private val oauth: Boolean = false,
+    ) : HomeserverLoginDetails(NoHandle) {
         override fun url() = "https://matrix.example.org"
-        override fun supportsPasswordLogin() = true
-        override fun supportsSsoLogin() = false
-        override fun supportsOauthLogin() = false
+        override fun supportsPasswordLogin() = password
+        override fun supportsSsoLogin() = sso
+        override fun supportsOauthLogin() = oauth
     }
 
-    private class AuthClient(private val beforeLogin: suspend () -> Unit = {}) : Client(NoHandle) {
+    private class AuthClient(
+        private val details: LoginDetails = LoginDetails(),
+        private val beforeLogin: suspend () -> Unit = {},
+    ) : Client(NoHandle) {
         val authenticatedSession = Session(
             "test-access-token", "test-refresh-token", "@alice:example.org", "ANDROID",
             "https://matrix.example.org", null, SlidingSyncVersion.NATIVE,
         )
         var credentials: Pair<String, String>? = null
         var restoredSession: Session? = null
+        var oauthConfig: OAuthConfiguration? = null
+        var oauthCallback: String? = null
+        var ssoRedirect: String? = null
+        var ssoCallback: String? = null
+        val abortedOauth = CompletableDeferred<Unit>()
+        val closed = CompletableDeferred<Unit>()
+        private val authorization = object : OAuthAuthorizationData(OAuthNoHandle) {
+            override fun loginUrl() = "https://identity.example.org/authorize?state=issued-by-sdk"
+        }
+        private val handler = object : SsoHandler(NoHandle) {
+            override fun url() = "https://matrix.example.org/_matrix/client/v3/login/sso/redirect"
+            override suspend fun finish(callbackUrl: String) { ssoCallback = callbackUrl }
+        }
+
+        override suspend fun urlForOauth(
+            oauthConfiguration: OAuthConfiguration, prompt: OAuthPrompt?, loginHint: String?,
+            deviceId: String?, additionalScopes: List<String>?,
+        ): OAuthAuthorizationData {
+            oauthConfig = oauthConfiguration
+            return authorization
+        }
+        override suspend fun loginWithOauthCallback(callbackUrl: String) { oauthCallback = callbackUrl }
+        override suspend fun abortOauthAuth(authorizationData: OAuthAuthorizationData) { abortedOauth.complete(Unit) }
+        override suspend fun startSsoLogin(redirectUrl: String, idpId: String?): SsoHandler {
+            ssoRedirect = redirectUrl
+            return handler
+        }
+        override fun close() { super.close(); closed.complete(Unit) }
 
         override suspend fun login(username: String, password: String, initialDeviceName: String?, deviceId: String?) {
             beforeLogin()
             credentials = username to password
         }
-        override suspend fun homeserverLoginDetails(): HomeserverLoginDetails = LoginDetails()
+        override suspend fun homeserverLoginDetails(): HomeserverLoginDetails = details
         override suspend fun restoreSession(session: Session) { restoredSession = session }
         override fun session() = authenticatedSession
     }
