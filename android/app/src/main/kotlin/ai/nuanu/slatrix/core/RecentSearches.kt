@@ -6,7 +6,7 @@ import org.json.JSONArray
 
 /** Your recent searches, newest first, as `spec/recent-searches.json` keeps them. */
 object RecentSearches {
-    private const val Limit = 10
+    const val Limit = 10
 
     fun adding(query: String, recents: List<String>): List<String> {
         val trimmed = query.trim()
@@ -22,13 +22,19 @@ object RecentSearches {
     }
 }
 
-/** An account's recent searches on this device, kept out of backups with the rest of the app's data. */
+/**
+ * An account's recent searches on this device, kept out of backups with the rest of the app's data. A stored list that
+ * breaks the rules, longer than the limit or with an oversized search, is dropped whole, as on the Mac.
+ */
 class RecentSearchStore(context: Context, private val userId: String) {
     private val values = context.getSharedPreferences("recent-searches", Context.MODE_PRIVATE)
 
-    var recents: List<String>
+    val recents: List<String>
         get() = values.getString(userId, null)?.let { stored ->
             runCatching { JSONArray(stored).let { array -> List(array.length()) { array.getString(it) } } }.getOrNull()
-        }.orEmpty()
-        set(value) { values.edit { if (value.isEmpty()) remove(userId) else putString(userId, JSONArray(value).toString()) } }
+        }?.takeIf { list -> list.size <= RecentSearches.Limit && list.all { it.toByteArray().size <= 1_024 } }.orEmpty()
+
+    /** Puts [query] first and returns the list it makes. */
+    fun add(query: String): List<String> =
+        RecentSearches.adding(query, recents).also { values.edit { putString(userId, JSONArray(it).toString()) } }
 }

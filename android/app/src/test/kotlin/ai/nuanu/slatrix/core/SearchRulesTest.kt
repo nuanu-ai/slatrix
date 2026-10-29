@@ -60,6 +60,23 @@ class SearchRulesTest {
         }
     }
 
+    @Test fun aSearchJoinsTheRecentListAsInEverySharedCase() {
+        for (item in spec("recent-searches.json")["adding"].asJsonArray) {
+            val case = item.asJsonObject
+            assertEquals(case["name"].asString, case.strings("expected"), RecentSearches.adding(case["query"].asString, case.strings("recents")))
+        }
+    }
+
+    // capability: search.recent
+    @Test fun theFieldOffersRecentSearchesAsInEverySharedCase() {
+        for (item in spec("recent-searches.json")["offered"].asJsonArray) {
+            val case = item.asJsonObject
+            assertEquals(case["name"].asString, case.strings("expected"), RecentSearches.offered(case["query"].asString, case.strings("recents")))
+        }
+    }
+
+    private fun JsonObject.strings(key: String) = this[key].asJsonArray.map { it.asString }
+
     private val dates = mapOf("today" to SearchDate.Today, "week" to SearchDate.Week, "month" to SearchDate.Month, "year" to SearchDate.Year)
 
     private fun mode(case: JsonObject) = when (case["mode"].asString) {

@@ -31,7 +31,6 @@ class AccountRuntime private constructor(application: Application) {
             staticRegistrations = emptyMap()),
         onSignOut = { client ->
             application.getSystemService(NotificationManager::class.java).cancelAll()
-            RecentSearchStore(application, client.userId()).recents = emptyList()
             PushRegistration(application).unregister(client, client.userId())
         })
     private val mutableIdentity = MutableStateFlow<IdentityVerification?>(null)

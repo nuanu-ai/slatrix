@@ -12,7 +12,6 @@ import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.MatrixSearch
 import ai.nuanu.slatrix.core.MessageSearchState
 import ai.nuanu.slatrix.core.RecentSearchStore
-import ai.nuanu.slatrix.core.RecentSearches
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.ConversationState
@@ -251,7 +250,7 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
                     state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
                         scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
-                }, recents, { recents = RecentSearches.adding(it, recents).also { next -> recentStore.recents = next } }, open)
+                }, recents, { recents = recentStore.add(it) }, open)
         }, activity = activity)
 }
 

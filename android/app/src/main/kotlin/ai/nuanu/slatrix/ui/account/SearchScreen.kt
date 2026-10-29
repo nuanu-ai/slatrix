@@ -86,7 +86,7 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
             focusManager.clearFocus()
         }
     }
-    val again = { recent: String -> text = recent; submit() }
+    val searchRecent = { recent: String -> text = recent; submit() }
     Column(Modifier.fillMaxSize()) {
         SearchField(text, { value ->
             text = value
@@ -94,11 +94,11 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
         }, submit, Modifier.focusRequester(focus))
         when {
             submitted -> MessageResults(text.trim(), rooms, messages, onMore, onMessage)
-            text.isNotBlank() -> Suggestions(text, rooms, RecentSearches.offered(text, recents), submit, again, onRoom)
+            text.isNotBlank() -> Suggestions(text, rooms, RecentSearches.offered(text, recents), submit, searchRecent, onRoom)
             else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = UiMetrics.GapSmall)) {
                 val offered = RecentSearches.offered(text, recents)
                 if (offered.isNotEmpty()) item { SearchSection("Recent searches") }
-                items(offered, key = { it }) { RecentRow(it, again) }
+                items(offered, key = { it }) { RecentRow(it, searchRecent) }
             }
         }
     }
