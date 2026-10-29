@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -156,7 +157,7 @@ private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, 
                 }
                 DetailsRow(Icons.Outlined.Description, "Files") { onPage(DetailsPage.Files) }
                 if (hasWorkspaces && !room.direct) DetailsRow(Icons.Outlined.Workspaces, "Workspaces",
-                    room.parentIds.size.takeIf { it > 0 }?.toString()) { onPage(DetailsPage.Workspaces) }
+                    room.spaceIds.size.takeIf { it > 0 }?.toString()) { onPage(DetailsPage.Workspaces) }
                 HorizontalDivider(color = colors.border)
                 DetailsRow(Icons.AutoMirrored.Outlined.Logout, "Leave ${noun(room)}", color = colors.destructive, chevron = false,
                     enabled = !leaving) { confirmLeave = true }
@@ -392,10 +393,15 @@ private fun WorkspacesPage(room: RoomSummary, spaces: List<SpaceSummary>, action
     val colors = SlatrixTheme.colors
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // A change shows at once and holds until the workspaces read again agree, which can take a sync, as a star does on Home.
+    var changed by remember { mutableStateOf(emptyMap<String, Boolean>()) }
+    LaunchedEffect(room.parentIds) { changed = changed.filter { (id, direct) -> (id in room.parentIds) != direct } }
     PushedPage("Workspaces", onBack) {
         items(spaces, key = { it.id }) { space ->
-            val direct = space.id in room.parentIds
-            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow).padding(start = UiMetrics.GapLarge, end = UiMetrics.GapSmall),
+            val direct = changed[space.id] ?: (space.id in room.parentIds)
+            // A group, so each row's button is read with its workspace.
+            Row(Modifier.fillMaxWidth().semantics { isTraversalGroup = true }.heightIn(min = UiMetrics.WorkspaceRow)
+                .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapSmall),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
                 LiveAvatar(space.initials, space.colorIndex, UiMetrics.ListAvatar)
                 Column(Modifier.weight(1f)) {
@@ -405,10 +411,13 @@ private fun WorkspacesPage(room: RoomSummary, spaces: List<SpaceSummary>, action
                         color = colors.textSecondary)
                 }
                 TextButton(enabled = space.canManageRooms && !busy, onClick = {
+                    // A second tap before the button disables finds it busy.
+                    if (busy) return@TextButton
                     busy = true
                     error = null
                     scope.launch {
-                        attempt { actions.setInWorkspace(space.id, !direct) }.onFailure { error = it.message }
+                        attempt { actions.setInWorkspace(space.id, !direct) }
+                            .onSuccess { changed = changed + (space.id to !direct) }.onFailure { error = it.message }
                         busy = false
                     }
                 }) { Text(if (direct) "Remove" else "Add") }

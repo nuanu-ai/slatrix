@@ -259,7 +259,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         // Over the conversation, so Back finds it where it was.
         if (details && actions != null) {
             val spaces by remember(roomList) { derivedStateOf { roomList?.value?.spaces.orEmpty() } }
-            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft ={ details = false; owner?.back() }, onOpenMessage = { id ->
+            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }, onOpenMessage = { id ->
                 details = false
                 // A pin doesn't know its thread, so it asks before jumping.
                 scope.launch { jump(open.room, id, main?.threadRootOf(open.room.id, id)) }
