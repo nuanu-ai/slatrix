@@ -37,6 +37,22 @@ export const matrixPush = onRequest({
   memory: '256MiB',
   timeoutSeconds: 30,
 }, async (request, response) => {
+  if (request.path !== '/_matrix/push/v1/notify') {
+    response.status(404).json({ errcode: 'M_UNRECOGNIZED', error: 'Unknown endpoint' });
+    return;
+  }
+  if (request.method !== 'POST') {
+    response.set('Allow', 'POST').status(405).json({ errcode: 'M_UNRECOGNIZED', error: 'Unsupported method' });
+    return;
+  }
+  if (!request.is('application/json')) {
+    response.status(415).json({ errcode: 'M_NOT_JSON', error: 'Expected application/json' });
+    return;
+  }
+  if (request.rawBody.length > 1024 * 1024) {
+    response.status(413).json({ errcode: 'M_TOO_LARGE', error: 'Request too large' });
+    return;
+  }
   if (!isObject(request.body) || !validNotification(request.body.notification)) {
     response.status(400).json({ errcode: 'M_BAD_JSON', error: 'Invalid notification' });
     return;
