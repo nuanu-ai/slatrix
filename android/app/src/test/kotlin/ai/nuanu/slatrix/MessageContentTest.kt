@@ -50,13 +50,15 @@ class MessageContentTest {
 
     private var toggled: Pair<ConversationMessage, String>? = null
     private var thread: String? = null
+    private var jumped: String? = null
 
     private fun show(vararg messages: ConversationMessage) {
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(messages.toList(), loading = false, hasMore = false, ownUserId = "@me:example.org"),
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
-                    onOpenThread = { thread = it }, actions = MessageActions(onReact = { message, key -> toggled = message to key }))
+                    onOpenThread = { thread = it }, actions = MessageActions(onReact = { message, key -> toggled = message to key }),
+                    onOpenMessage = { jumped = it })
             }
         }
     }
@@ -129,14 +131,11 @@ class MessageContentTest {
     }
 
     // capability: message.reply-preview
-    @Test fun aReplyQuotesItsParentAndATapJumpsToIt() {
-        val parent = message("The parent message")
-        val between = (1..40).map { message("Message $it") }
-        val reply = message("Agreed").copy(replyTo = ReplyPreview(parent.eventId!!, ReplyPreview.State.Ready, "Mira", "Parent summary"))
-        show(parent, *between.toTypedArray(), reply)
-        compose.onNodeWithText("The parent message", useUnmergedTree = true).assertDoesNotExist()
+    @Test fun aReplyQuotesItsParentAndATapOpensTheParentWhereItIs() {
+        show(message("Agreed").copy(replyTo = ReplyPreview("\$parent", ReplyPreview.State.Ready, "Sam", "Parent summary")))
+        compose.onNodeWithText("Sam", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("Parent summary", useUnmergedTree = true).performClick()
-        compose.onNodeWithText("The parent message", useUnmergedTree = true).assertIsDisplayed()
+        compose.runOnIdle { assertEquals("\$parent", jumped) }
     }
 
     // capability: message.reply-preview
