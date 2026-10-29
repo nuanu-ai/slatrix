@@ -41,7 +41,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -235,7 +238,11 @@ private fun LiveMessageRow(message: ConversationMessage, onMenu: (ConversationMe
     val failed = message.sendState == MessageSendState.Failed
     // A grouped row keeps the gutter, so its body lines up and its height doesn't depend on its send state.
     Row(Modifier.fillMaxWidth()
-        .combinedClickable(onLongClickLabel = "Message actions", onLongClick = { onMenu(message) }) { if (failed) onMenu(message) }
+        // Only a failed message answers a tap, as in Slack; any message opens its sheet on a long press.
+        .then(if (failed) Modifier.combinedClickable(onClickLabel = "Message actions", onLongClickLabel = "Message actions",
+            onLongClick = { onMenu(message) }) { onMenu(message) }
+        else Modifier.pointerInput(message) { detectTapGestures(onLongPress = { onMenu(message) }) }
+            .semantics(mergeDescendants = true) { onLongClick("Message actions") { onMenu(message); true } })
         .then(if (message.grouped) Modifier else Modifier.padding(top = UiMetrics.GapSmall))
         .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, bottom = UiMetrics.GapTiny),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
