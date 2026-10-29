@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The splash shows the launcher icon on the canvas the app opens on. -->
+    <style name="Theme.Slatrix" parent="Base.Theme.Slatrix">
+        <item name="android:windowSplashScreenBackground">@color/canvas</item>
+    </style>
+</resources>

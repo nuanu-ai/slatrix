@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Config/AppIcon/Slatrix-small.svg: its 824-unit body fills the 72 dp that launchers show of the 108 dp layer. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="1236" android:viewportHeight="1236">
+    <group android:translateX="106" android:translateY="106">
+        <path android:pathData="M733,342L384.5,342A85,85 0 0,0 384.5,512L639.5,512A85,85 0 0,1 639.5,682L291,682" android:strokeWidth="104"
+            android:strokeLineCap="round" android:strokeLineJoin="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="760" android:startY="320" android:endX="260" android:endY="700">
+                    <item android:offset="0" android:color="#FF43E8DA" />
+                    <item android:offset="0.5" android:color="#FF4C8DFF" />
+                    <item android:offset="1" android:color="#FF8D5CFF" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:fillColor="#FFFFFFFF" android:pathData="M660.20,342.00a72.80,72.80 0 1,0 145.60,0a72.80,72.80 0 1,0 -145.60,0ZM218.20,682.00a72.80,72.80 0 1,0 145.60,0a72.80,72.80 0 1,0 -145.60,0Z" />
+        <path android:fillColor="#FF43E8DA" android:pathData="M700.97,342.00a32.03,32.03 0 1,0 64.06,0a32.03,32.03 0 1,0 -64.06,0Z" />
+        <path android:fillColor="#FF8D5CFF" android:pathData="M258.97,682.00a32.03,32.03 0 1,0 64.06,0a32.03,32.03 0 1,0 -64.06,0Z" />
+    </group>
+</vector>

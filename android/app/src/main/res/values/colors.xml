@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The canvas color from design/tokens.json, so a launch never flashes another color. -->
+    <color name="canvas">#ffffff</color>
+</resources>
