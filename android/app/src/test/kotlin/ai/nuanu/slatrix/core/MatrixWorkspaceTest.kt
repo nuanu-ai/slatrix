@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -232,6 +233,28 @@ class MatrixWorkspaceTest {
         assertNotNull(workspace.selected.first { it?.conversation != null }?.typing)
         workspace.open(alpha, threadRoot = "\$root")
         assertNull(workspace.selected.first { it?.threadRoot != null && it.conversation != null }?.typing)
+        workspace.close()
+    }
+
+    // capability: conversation.keep-position
+    @Test fun aConversationLeftStaysOpenForComingBackToUntilFourOthersAreNewerOrItHasUnreadMessages() = runTest {
+        val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
+        val rooms = (1..6).map { workspaceRoom("!r$it:example.org", "R$it") }
+        suspend fun visit(room: RoomSummary): MatrixConversation? {
+            workspace.open(room)
+            return workspace.selected.first { it?.room?.id == room.id && it.conversation != null }?.conversation
+        }
+
+        val first = visit(rooms[0])
+        workspace.back()
+        runCurrent()
+        assertSame("Back to Home and in again finds the same timeline", first, visit(rooms[0]))
+        val kept = (1..5).map { visit(rooms[it]) }
+        assertNotSame("Four newer ones pushed it out", first, visit(rooms[0]))
+        assertSame(kept[4], visit(rooms[5]))
+        workspace.back()
+        runCurrent()
+        assertNotSame("Unread messages open fresh, at the New line", kept[4], visit(rooms[5].copy(resumeAt = "\$read")))
         workspace.close()
     }
 }
