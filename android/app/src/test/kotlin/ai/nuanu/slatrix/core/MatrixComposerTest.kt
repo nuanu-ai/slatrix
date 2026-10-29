@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.core
 
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -25,6 +26,24 @@ class MatrixComposerTest {
         val reopened = MatrixComposer(backgroundScope, room) { true }
         assertEquals("Finish tomorrow\nwith <details>", reopened.state.first { !it.loading }.text)
         reopened.close()
+    }
+
+    @Test fun typingIsSavedAfterAPauseAndSendingClearsTheStoredDraftAtOnce() = runTest {
+        val room = ComposerRoom()
+        val composer = MatrixComposer(backgroundScope, room) { true }
+        composer.state.first { !it.loading }
+        composer.edit("H")
+        composer.edit("He")
+        runCurrent()
+        assertNull("Each keystroke must not write the encrypted store", room.draft)
+        composer.edit("Hello")
+        advanceUntilIdle()
+        assertEquals("Hello", room.draft?.plainText)
+
+        composer.send()
+        runCurrent()
+        assertNull("A sent message must not come back as a draft", room.draft)
+        composer.close()
     }
 
     @Test fun sendFailureKeepsTheDraftAndLaterSuccessPreservesAReeditedDraft() = runTest {
