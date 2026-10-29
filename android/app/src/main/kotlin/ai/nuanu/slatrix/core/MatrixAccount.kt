@@ -193,7 +193,7 @@ class MatrixAccount(
                     persist(session)
                     warning = null
                 } catch (_: Exception) {
-                    warning = "Couldn’t save your session. Keep Slatrix open and try again."
+                    warning = "Couldn’t save your session. Keep Slatrix open."
                 }
                 val current = mutableState.value
                 if (current is AccountState.Connected) mutableState.value = current.copy(warning = warning)
