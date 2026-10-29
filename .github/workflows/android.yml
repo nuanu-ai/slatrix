@@ -1,0 +1,65 @@
+name: Android
+
+on:
+  pull_request:
+    paths: [android/**, design/**, spec/**, scripts/build-sdk.sh, Support/MatrixSDK/**, .github/workflows/android.yml]
+  push:
+    branches: [main]
+    paths: [android/**, design/**, spec/**, scripts/build-sdk.sh, Support/MatrixSDK/**, .github/workflows/android.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Restore Matrix SDK
+        uses: actions/cache@v4
+        with:
+          path: .build/native-sdk-android
+          key: matrix-sdk-android-${{ hashFiles('scripts/build-sdk.sh', 'Support/MatrixSDK/patches/**') }}
+      - name: Prepare SDKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+          scripts/build-sdk.sh --android
+      - name: Test, lint and build
+        working-directory: android
+        run: ./gradlew :lint-rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease --console=plain
+      - name: Enable hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Check native startup
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: ./android/gradlew -p android :app:connectedDebugAndroidTest --console=plain
+      - name: Upload Android results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-results
+          path: |
+            android/app/build/outputs/apk/
+            android/app/build/reports/
+            android/lint-rules/build/reports/

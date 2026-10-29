@@ -13,3 +13,11 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 - Product rules pass every case in `spec/`, with a unit test per file that reads it.
 - Notifications arrive through Firebase Cloud Messaging and a Sygnal push gateway.
 - Element X Android is AGPL: read it to see how the SDK is used, never copy from it. Slatrix is Apache 2.0.
+
+## Tests
+
+- **Shared design tokens**: resolve every light/dark palette and compare all colors, file/avatar colors and radii with `design/tokens.json`. Catches cross-platform drift; misses rendering.
+- **Device startup**: launch the real application and call the native SDK through its generated bindings. Catches missing entry points, startup failures and JNI packaging; misses authenticated server behavior.
+- **Android lint**: run the real detector on Kotlin fixtures. Catches off-system Compose colors and sizes; misses rendered layout and contrast.
+
+Run `./gradlew :lint-rules:test :app:testDebugUnitTest :app:lintDebug` from this folder after preparing the SDK package.

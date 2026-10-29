@@ -11,6 +11,7 @@ extensions.configure<ApplicationExtension> {
     defaultConfig {
         applicationId = "ai.nuanu.slatrix"
         minSdk = 24
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
@@ -32,13 +33,18 @@ extensions.configure<ApplicationExtension> {
         }
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
-    lint { warningsAsErrors = true }
+    lint {
+        warningsAsErrors = true
+        // Toolchain updates are reviewed separately, so pinned builds stay reproducible.
+        disable += setOf("OldTargetApi", "GradleDependency", "AndroidGradlePluginVersion", "NewerVersionAvailable")
+    }
 }
 
 kotlin { compilerOptions { jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17 } }
