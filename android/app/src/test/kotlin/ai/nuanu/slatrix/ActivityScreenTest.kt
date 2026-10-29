@@ -6,6 +6,9 @@ import ai.nuanu.slatrix.ui.account.ActivityScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -59,6 +62,8 @@ class ActivityScreenTest {
     @Test fun theUnreadsPillShowsOnlyWhatYouHaventOpenedYet() {
         val items = listOf(item("\$m", ActivityKind.Mention, "Can you review?"), item("\$d", ActivityKind.Message, "Lunch?", direct = true).copy(unread = false))
         compose.setContent { SlatrixTheme { ActivityScreen(items, {}, { _, _ -> }) } }
+        compose.onNodeWithText("Can you review?").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Unread"))
+        compose.onNodeWithText("Lunch?").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
         compose.onNodeWithText("Unreads").performClick()
         compose.onNodeWithText("Can you review?").assertExists()
         compose.onNodeWithText("Lunch?").assertDoesNotExist()
