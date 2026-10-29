@@ -179,6 +179,7 @@ class MatrixConversationTest {
         ))
         val room = ConversationRoom(timeline)
         val conversation = MatrixConversation(backgroundScope, room)
+        conversation.loadOlder()
         timeline.pageStarted.await()
         assertEquals(MessageSendState.Sending, conversation.state.first { it.rows.messages.size == 2 }.rows.messages.last().sendState)
 

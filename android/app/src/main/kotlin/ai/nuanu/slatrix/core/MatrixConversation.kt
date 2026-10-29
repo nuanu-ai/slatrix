@@ -79,6 +79,7 @@ data class ConversationState(
 
 /** A sender's messages group within this window, as on the Mac and in Slack. */
 private const val GROUPING_MILLIS = 5 * 60_000L
+private const val MAX_BLANK_PAGES = 5
 
 class MatrixConversation(scope: CoroutineScope, private val room: Room) {
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
@@ -92,6 +93,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
     private val readLock = Mutex()
     private var lastRead: String? = null
     private val items = mutableListOf<ConversationRow?>()
+    /**
+     * Pages asked for since an older message last showed. Joins, topic changes and other hidden events can fill page
+     * after page, so history stops loading on its own after a few of those, as on the Mac.
+     */
+    @Volatile private var blankPages = 0
 
     init {
         operations.launch {
@@ -110,14 +116,16 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                 currentCoroutineContext().ensureActive()
                 ready.complete(timeline)
                 mutableState.update { it.copy(loading = false) }
-                loadOlder()
                 // asEvent blocks on the SDK, so updates are mapped off the main thread.
                 withContext(Dispatchers.Default) {
+                    var oldest: String? = null
                     for (batch in updates) {
                         batch.forEach(::apply)
                         // A cleared or reset timeline starts over from the live end.
                         val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
                         val rows = rows()
+                        val first = rows.firstOrNull { it is ConversationMessage }?.id
+                        if (first != oldest) { oldest = first; blankPages = 0 }
                         mutableState.update { it.copy(rows = rows, loading = false, hasMore = it.hasMore || reset) }
                     }
                 }
@@ -141,9 +149,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
         operations.launch {
             if (!pageLock.tryLock()) return@launch
             try {
-                if (!mutableState.value.hasMore) return@launch
+                if (!mutableState.value.hasMore || blankPages >= MAX_BLANK_PAGES) return@launch
                 mutableState.update { it.copy(loadingHistory = true, error = null) }
                 val timeline = ready.await()
+                blankPages++
                 val endReached = timeline.paginateBackwards(50u)
                 currentCoroutineContext().ensureActive()
                 mutableState.update { it.copy(hasMore = !endReached) }
