@@ -100,7 +100,7 @@ private fun PersonRow(initials: String, colorIndex: Int, url: String?, name: Str
             id?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis) }
         }
         // Its place is kept, so the name never moves when the spinner shows.
-        Box(Modifier.widthIn(min = UiMetrics.Icon), contentAlignment = Alignment.Center) { if (opening) DelayedSpinner() }
+        Box(Modifier.widthIn(min = UiMetrics.Icon), contentAlignment = Alignment.Center) { if (opening) WaitingSpinner() }
     }
 }
 
