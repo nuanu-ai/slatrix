@@ -1,0 +1,49 @@
+{
+  "about": "Finding a conversation by name, as Slack's switcher and search rank them. A leading # or @ is ignored, and so are case and accents. Names that start with the query come first, then names with a word that starts with it, then names that contain it; within each, the conversation visited last comes first, then the room list's own order. With no query, every conversation, the visited ones first. Left rooms and workspaces never show. Each case lists rooms in the room list's order and, in visited, room names from least to most recently visited.",
+  "cases": [
+    {
+      "name": "A name that starts with the query ranks above one that only contains it, however recent",
+      "rooms": [{ "name": "Product design" }, { "name": "Design" }],
+      "query": "des",
+      "expected": ["Design", "Product design"]
+    },
+    {
+      "name": "A word that starts with the query ranks above a match inside a word",
+      "rooms": [{ "name": "Undesigned" }, { "name": "Product design" }],
+      "query": "des",
+      "expected": ["Product design", "Undesigned"]
+    },
+    {
+      "name": "Among equal matches, the conversation visited last comes first, then the room list's order",
+      "rooms": [{ "name": "Design crit" }, { "name": "Design ops" }, { "name": "Design system" }],
+      "query": "design",
+      "visited": ["Design crit", "Design system"],
+      "expected": ["Design system", "Design crit", "Design ops"]
+    },
+    {
+      "name": "A direct message matches the person's last name, ignoring case and accents",
+      "rooms": [{ "name": "Planning" }, { "name": "Zoë Liddell", "direct": true }],
+      "query": "lid",
+      "expected": ["Zoë Liddell"]
+    },
+    {
+      "name": "A leading @ is ignored and accents match their plain letters",
+      "rooms": [{ "name": "Planning" }, { "name": "Zoë Liddell", "direct": true }],
+      "query": "@ZOE",
+      "expected": ["Zoë Liddell"]
+    },
+    {
+      "name": "A leading # is ignored, and left rooms and workspaces never show",
+      "rooms": [{ "name": "Design", "membership": "leave" }, { "name": "Design team", "space": true }, { "name": "Design" }],
+      "query": "#design",
+      "expected": ["Design"]
+    },
+    {
+      "name": "With no query, recent conversations come first",
+      "rooms": [{ "name": "Alpha" }, { "name": "Beta" }, { "name": "Gamma" }],
+      "query": " ",
+      "visited": ["Gamma"],
+      "expected": ["Gamma", "Alpha", "Beta"]
+    }
+  ]
+}
