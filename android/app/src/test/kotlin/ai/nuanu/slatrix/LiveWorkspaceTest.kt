@@ -6,6 +6,9 @@ import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.ConversationMessage
+import ai.nuanu.slatrix.core.MessageKind
+import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -16,6 +19,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.Lifecycle
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -54,5 +58,26 @@ class LiveWorkspaceTest {
         compose.runOnIdle { assertEquals("First message", submitted) }
         compose.onNodeWithContentDescription("Message #Team").performTextReplacement("Another thought")
         compose.runOnIdle { assertEquals("Another thought", draft.value.text) }
+    }
+
+    @Test fun onlyTheLatestVisibleMessageIsReadWhileTheActivityIsResumed() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        fun message(id: String) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", id, null,
+            0, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val timeline = mutableStateOf(ConversationState(listOf(message("First")), loading = false, hasMore = false))
+        var read: String? = null
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, {}, {}, { read = it })
+            }
+        }
+        compose.onNodeWithText("First").assertExists()
+        compose.waitUntil { read == "\$First" }
+        compose.activityRule.scenario.moveToState(Lifecycle.State.STARTED)
+        compose.runOnIdle { timeline.value = timeline.value.copy(messages = timeline.value.messages + message("Next")) }
+        compose.onNodeWithText("Next").assertExists()
+        compose.runOnIdle { assertEquals("\$First", read) }
+        compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+        compose.waitUntil { read == "\$Next" }
     }
 }
