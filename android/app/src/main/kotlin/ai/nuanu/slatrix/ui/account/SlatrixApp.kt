@@ -42,7 +42,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: MatrixRooms?, workspace: MatrixWorkspace?,
-    notification: NotificationTarget? = null, onNotificationOpened: (NotificationTarget) -> Unit = {}) {
+    notification: NotificationTarget? = null, onNotificationHandled: (NotificationTarget) -> Unit = {}) {
     val state by account.state.collectAsState()
     val context = LocalContext.current
     val appearance = remember(context) { AppearancePreferences(context) }
@@ -72,12 +72,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 LaunchedEffect(notification, userId, roomState.rooms, workspace) {
                     val target = notification ?: return@LaunchedEffect
                     if (target.userId != userId) {
-                        onNotificationOpened(target)
+                        onNotificationHandled(target)
                     } else if (workspace != null) {
                         target.roomFor(userId, roomState.rooms)?.let { room ->
                             you = false
                             workspace.open(room)
-                            onNotificationOpened(target)
+                            onNotificationHandled(target)
                         }
                     }
                 }

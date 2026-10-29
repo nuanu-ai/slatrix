@@ -27,7 +27,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
 
     fun openNotification(target: NotificationTarget) { mutableNotificationTarget.value = target }
 
-    fun notificationOpened(target: NotificationTarget) {
+    fun notificationHandled(target: NotificationTarget) {
         if (mutableNotificationTarget.value == target) mutableNotificationTarget.value = null
     }
 
