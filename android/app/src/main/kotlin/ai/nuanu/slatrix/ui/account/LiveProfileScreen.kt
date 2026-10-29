@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
@@ -30,13 +31,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 
+/** You, pushed from Home's avatar as Slack does: who is signed in, Preferences, and signing out. */
 @Composable
-fun LiveYouScreen(userId: String, onPreferences: () -> Unit, onSignOut: () -> Unit, @Suppress("UNUSED_PARAMETER") onBack: () -> Unit) =
-    LiveYouTab(userId, onPreferences, onSignOut)
-
-/** The You tab's content: who is signed in, Preferences, and signing out. */
-@Composable
-internal fun LiveYouTab(userId: String, onPreferences: () -> Unit, onSignOut: () -> Unit) {
+fun LiveYouScreen(userId: String, onPreferences: () -> Unit, onSignOut: () -> Unit, onBack: () -> Unit) {
     val colors = SlatrixTheme.colors
     val localpart = userId.removePrefix("@").substringBefore(':')
     var confirming by rememberSaveable { mutableStateOf(false) }
@@ -49,7 +46,7 @@ internal fun LiveYouTab(userId: String, onPreferences: () -> Unit, onSignOut: ()
             dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } },
         )
     }
-    LazyColumn(Modifier.fillMaxSize()) {
+    PushedPage("You", onBack) {
         item {
             Row(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
@@ -75,6 +72,23 @@ internal fun LiveYouTab(userId: String, onPreferences: () -> Unit, onSignOut: ()
     }
 }
 
+/** A page pushed over Home: a plain bar with Back and its title, then its rows. */
+@Composable
+private fun PushedPage(title: String, onBack: () -> Unit, content: LazyListScope.() -> Unit) {
+    BackHandler(onBack = onBack)
+    Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas).navigationBarsPadding()) {
+        Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.size(UiMetrics.Touch)) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
+            }
+            Text(title, Modifier.padding(start = UiMetrics.GapSmall),
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+        HorizontalDivider(color = SlatrixTheme.colors.border)
+        LazyColumn(Modifier.fillMaxSize(), content = content)
+    }
+}
+
 @Composable
 fun LivePreferencesScreen(
     dark: Boolean,
@@ -87,7 +101,6 @@ fun LivePreferencesScreen(
     var choosingMode by rememberSaveable { mutableStateOf(false) }
     val colors = SlatrixTheme.colors
     val colorMode = when (darkOverride) { null -> "System default"; false -> "Light"; true -> "Dark" }
-    BackHandler(onBack = onBack)
 
     if (choosingMode) {
         AlertDialog(
@@ -109,16 +122,7 @@ fun LivePreferencesScreen(
             confirmButton = { TextButton(onClick = { choosingMode = false }) { Text("Cancel") } },
         )
     }
-    Column(Modifier.fillMaxSize().background(colors.canvas).navigationBarsPadding()) {
-        Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack, modifier = Modifier.size(UiMetrics.Touch)) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
-            }
-            Text("Preferences", Modifier.padding(start = UiMetrics.GapSmall),
-                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        }
-        HorizontalDivider(color = colors.border)
-        LazyColumn {
+    PushedPage("Preferences", onBack) {
             item {
                 Text("Appearance", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ComposerMinHeight).clickable(role = Role.Button) { choosingMode = true }
@@ -145,5 +149,4 @@ fun LivePreferencesScreen(
                 }
             }
         }
-    }
 }

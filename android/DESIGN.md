@@ -97,7 +97,7 @@ Use the native Material 3 type ramp supplied by `SlatrixTheme`. Account headings
 
 Use `UiMetrics`: the spacing steps are in the frontmatter. Lists use large horizontal gutters and small vertical row padding. Interactive rows have a minimum touch height (48dp), with content allowed to grow for larger text. Root headers have a minimum height (72dp) and sit on the palette's dark frame color with white text in both modes, as Slack's do. Account forms are centered with a maximum width (480dp).
 
-Below the expanded threshold (600dp), Home and DMs use bottom navigation with You. At the threshold, navigation moves into a rail. Honor status bars, navigation bars and the keyboard. Keep conversation identity stable as content changes.
+Below the expanded threshold (600dp), Home and DMs use bottom navigation. At the threshold, navigation moves into a rail. You opens from the header avatar as a page with Back, as Slack's does. Honor status bars, navigation bars and the keyboard. Keep conversation identity stable as content changes.
 
 ## Elevation & Depth
 
