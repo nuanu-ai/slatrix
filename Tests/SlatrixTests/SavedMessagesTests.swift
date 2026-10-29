@@ -273,4 +273,15 @@ struct SavedMessagesServiceTests {
         later.attach(LaterClient(stored: #"{"saved":[\#(three)],"removed":[]}"#), accountID: "@other:example.org")
         #expect(await eventually { later.list.saved.map(\.eventID) == ["$three"] })
     }
+
+    @Test("The preview starts with an empty Later, never the last account's")
+    func preview() async {
+        let matrix = MatrixService()
+        matrix.savedMessages.attach(LaterClient(stored: #"{"saved":[\#(one)],"removed":[]}"#), accountID: owner)
+        #expect(await eventually { matrix.savedMessages.list.saved.map(\.eventID) == ["$one"] })
+        matrix.savedMessages.attach(nil, accountID: nil)
+
+        matrix.enterPreview()
+        #expect(matrix.savedMessages.list.saved.isEmpty)
+    }
 }
