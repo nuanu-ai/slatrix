@@ -11,7 +11,7 @@ class NotificationTargetTest {
     @Test fun aNotificationWaitsForItsOwnAccountsRealRoom() {
         val team = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
         val other = team.copy(id = "!other:example.org", name = "Other")
-        val target = NotificationTarget("@alex:example.org", team.id)
+        val target = NotificationTarget("@alex:example.org", team.id, "\$event")
 
         assertNull(target.roomFor("@alex:example.org", emptyList()))
         assertNull(target.roomFor("@sam:example.org", listOf(team)))

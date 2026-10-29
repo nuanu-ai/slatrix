@@ -46,14 +46,13 @@ class ActivityScreenTest {
     }
 
     // capability: activity.open-item
-    @Test fun aThreadReplyOpensItsThreadAndAnyOtherItemItsConversation() {
+    @Test fun anItemOpensAtItsOwnMessageAndAThreadReplyNamesItsThread() {
         val items = listOf(item("\$m", ActivityKind.Mention, "Can you review?"), item("\$t", ActivityKind.ThreadReply, "Agreed", thread = "\$root"))
-        var room: String? = null
-        var thread: Pair<String, String>? = null
-        compose.setContent { SlatrixTheme { ActivityScreen(items, { room = it }, { id, root -> thread = id to root }) } }
+        var opened: ActivityItem? = null
+        compose.setContent { SlatrixTheme { ActivityScreen(items, { opened = it }, { _, _ -> }) } }
         compose.onNodeWithText("Agreed").performClick()
-        compose.runOnIdle { assertEquals("!team:example.org" to "\$root", thread) }
+        compose.runOnIdle { assertEquals("\$t" to "\$root", opened?.eventId to opened?.threadRoot) }
         compose.onNodeWithText("Can you review?").performClick()
-        compose.runOnIdle { assertEquals("!team:example.org", room) }
+        compose.runOnIdle { assertEquals("\$m" to null, opened?.eventId to opened?.threadRoot) }
     }
 }

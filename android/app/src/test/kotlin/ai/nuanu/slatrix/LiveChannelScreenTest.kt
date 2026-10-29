@@ -36,6 +36,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
@@ -230,6 +231,25 @@ class LiveChannelScreenTest {
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
 
     private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)
+
+    // capability: conversation.jump-to-message
+    @Test fun aJumpShowsItsMessageAndAsksForNewerOnceTheNewestShows() {
+        val many = (1..200).map { message("Message $it", minutes = it) }
+        val state = mutableStateOf(ConversationState(many, loading = false, highlight = "\$Message 20", focused = true))
+        var newer = 0
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    onLoadNewer = { newer++ })
+            }
+        }
+        compose.onNodeWithText("Message 20").assertIsDisplayed()
+        compose.onNodeWithText("Message 200").assertDoesNotExist()
+        compose.runOnIdle { assertEquals("Newer messages wait until the reader reaches the newest", 0, newer) }
+
+        repeat(30) { compose.onRoot().performTouchInput { swipeUp() } }
+        compose.waitUntil { newer > 0 }
+    }
 
     private fun message(body: String, minutes: Int, sender: String = "Mira", state: MessageSendState = MessageSendState.Sent) =
         ConversationMessage(body, "\$$body", "@${sender.lowercase()}:example.org", sender, body, null,
