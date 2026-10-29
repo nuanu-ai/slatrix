@@ -257,6 +257,35 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.reply-preview
+    @Test fun aReplyQuotesItsParentAndAsksForOneTheTimelineHasNotLoaded() = runTest {
+        fun text(body: String) = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)), null, null, null))
+        fun reply(parent: String, details: EmbeddedEventDetails) = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Yes", null)), "Yes", false, null)),
+            object : InReplyToDetails(NoHandle) {
+                override fun eventId(): String = parent
+                override fun event(): EmbeddedEventDetails = details
+            }, null, null))
+        val ready = EmbeddedEventDetails.Ready(text("Ship it?"), "@sam:example.org",
+            ProfileDetails.Ready("Sam Okafor", false, null, null, null), 1_700_000_000_000u, EventOrTransactionId.EventId("\$p"))
+        val timeline = ConversationTimeline(listOf(
+            conversationItem("a", "\$a", "Yes", content = reply("\$p", ready)),
+            conversationItem("b", "\$b", "Yes", content = reply("\$old", EmbeddedEventDetails.Unavailable)),
+            conversationItem("c", "\$c", "Yes", content = reply("\$old", EmbeddedEventDetails.Unavailable)),
+        ))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val messages = conversation.state.first { it.rows.isNotEmpty() }.rows.messages
+        assertEquals(listOf(
+            ReplyPreview("\$p", ReplyPreview.State.Ready, "Sam Okafor", "Ship it?"),
+            ReplyPreview("\$old", ReplyPreview.State.Loading),
+            ReplyPreview("\$old", ReplyPreview.State.Loading),
+        ), messages.map { it.replyTo })
+        assertEquals("\$old", timeline.fetched.receive())
+        conversation.close()
+        assertTrue("Asked once for a parent two replies quote", timeline.fetched.tryReceive().isFailure)
+    }
+
     // capability: message.edited
     @Test fun anEditedMessageSaysSo() = runTest {
         val edited = TimelineItemContent.MsgLike(MsgLikeContent(
@@ -523,6 +552,8 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         redactFailure?.let { throw it }
         redacted.send(eventOrTransactionId)
     }
+    val fetched = Channel<String>(Channel.UNLIMITED)
+    override suspend fun fetchDetailsForEvent(eventId: String) { fetched.send(eventId) }
     override suspend fun addListener(listener: TimelineListener): TaskHandle {
         this.listener = listener
         listener.onUpdate(listOf(TimelineDiff.Reset(cached)))

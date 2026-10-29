@@ -70,7 +70,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Shows the thread this message starts, as Slack's thread page, instead of the channel. */
     threadRoot: String? = null, actions: MessageActions = MessageActions(), composerActions: ComposerActions = ComposerActions(),
     /** Asked, with the oldest message on screen, once the reader reaches the newest of a conversation opened at an older one. */
-    onLoadNewer: (anchor: String?) -> Unit = {}) {
+    onLoadNewer: (anchor: String?) -> Unit = {},
+    /** Opens a message where it is, highlighted, as a tap on a reply's quote does. */
+    onOpenMessage: (eventId: String) -> Unit = {}) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -196,12 +198,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Box(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
                             if (threadRoot != null && row.eventId == threadRoot) Column {
-                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null) { menu = it }
+                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage) { menu = it }
                                 // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                                 RepliesBar(replies)
                             // The first reply starts under the replies bar, so it shows its sender again.
                             } else LiveMessageRow(if (row.id == firstReply) row.copy(grouped = false) else row, state.ownUserId,
-                                actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }) { menu = it }
+                                actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage) { menu = it }
                         }
                     }
                 }
@@ -301,7 +303,8 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
 
 @Composable
 private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
-    onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onMenu: (ConversationMessage) -> Unit) {
+    onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
+    onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
     // A grouped row keeps the gutter, so its body lines up and its height doesn't depend on its send state.
@@ -327,6 +330,7 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
                     MessageSendState.Failed -> "Not sent"
                 }, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = if (failed) colors.destructive else colors.textSecondary)
             }
+            message.replyTo?.let { reply -> ReplyQuote(reply) { onOpenReply(reply.eventId) } }
             MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me)
             if (message.reactions.isNotEmpty()) {
                 Reactions(message.reactions, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
