@@ -47,9 +47,9 @@ import androidx.compose.ui.text.style.TextOverflow
 
 private enum class ActivityFilter(val label: String) { All("All"), Dms("DMs"), Mentions("Mentions"), Threads("Threads") }
 
-/** Slack's Activity tab: filter chips over what notified you, newest first. A thread reply opens its thread. */
+/** Slack's Activity tab: filter chips over what notified you, newest first. An item opens at its message. */
 @Composable
-fun ActivityScreen(items: List<ActivityItem>, onOpenRoom: (String) -> Unit, onOpenThread: (roomId: String, root: String) -> Unit,
+fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit, onOpenThread: (roomId: String, root: String) -> Unit,
     threads: @Composable (onOpenThread: (roomId: String, root: String) -> Unit) -> Unit = {}) {
     var filter by rememberSaveable { mutableStateOf(ActivityFilter.All) }
     val shown = remember(items, filter) {
@@ -75,7 +75,7 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenRoom: (String) -> Unit, onOp
             }
             items(shown, key = { it.id }) { item ->
                 HorizontalDivider(color = SlatrixTheme.colors.border)
-                ActivityRow(item) { item.threadRoot?.let { onOpenThread(item.roomId, it) } ?: onOpenRoom(item.roomId) }
+                ActivityRow(item) { onOpenItem(item) }
             }
         }
     }

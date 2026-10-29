@@ -26,6 +26,8 @@ object UiMetrics {
     val FormWidth = 480.dp
     const val ProgressDelayMillis = 400L
     const val NoticeMillis = 4_000L
+    /** How long a message jumped to stays highlighted, as on the Mac. */
+    const val HighlightMillis = 1_500L
     val ExpandedWidth = 600.dp
     /** Slack's message sheet: its icons and its Reply tile. */
     val SheetIcon = 24.dp

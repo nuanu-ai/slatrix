@@ -185,21 +185,21 @@ class MatrixWorkspaceTest {
 
     // capability: conversation.jump-to-message
     // capability: activity.open-item
-    @Test fun aJumpOpensTheChannelAtTheMessageAndAThreadReplyAtItsRootForTheThreadToOpen() = runTest {
+    @Test fun aJumpOpensTheChannelAtTheMessageAndAThreadReplyAtItsRoot() = runTest {
         val client = WorkspaceClient(threadRoots = mapOf("\$reply" to "\$root"))
         val workspace = MatrixWorkspace(backgroundScope, client)
         val alpha = workspaceRoom("!alpha:example.org", "Alpha")
 
-        assertNull(workspace.jumpTo(alpha, "\$plain"))
+        workspace.jumpTo(alpha, "\$plain", threadRoot = null)
         runCurrent()
         assertEquals("\$plain", workspace.selected.value?.at)
-        assertEquals("\$root", workspace.jumpTo(alpha, "\$reply"))
+        // A caller that doesn't know, such as a search result, asks first.
+        val root = workspace.threadRootOf(alpha.id, "\$reply")
+        assertEquals("\$root", root)
+        assertNull(workspace.threadRootOf(alpha.id, "\$plain"))
+        workspace.jumpTo(alpha, "\$reply", root)
         runCurrent()
         assertEquals("\$root", workspace.selected.value?.at)
-        assertEquals("A root the caller already knows needs no lookup", "\$known",
-            workspace.jumpTo(alpha, "\$unknown-reply", threadRoot = "\$known"))
-        runCurrent()
-        assertEquals("\$known", workspace.selected.value?.at)
         workspace.close()
     }
 }

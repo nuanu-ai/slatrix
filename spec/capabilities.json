@@ -40,7 +40,7 @@
     {"id": "conversation.mark-read", "what": "Mark a conversation, or every conversation, read.", "mac": "done", "android": "missing"},
     {"id": "conversation.mark-unread", "what": "Mark a conversation unread.", "mac": "done", "android": "missing"},
     {"id": "conversation.keep-position", "what": "Coming back to a conversation returns to where you were reading.", "mac": "done", "android": "missing"},
-    {"id": "conversation.jump-to-message", "what": "A message opened from search or a link shows highlighted in its conversation.", "mac": "done", "android": "missing"},
+    {"id": "conversation.jump-to-message", "what": "A message opened from search or a link shows highlighted in its conversation.", "mac": "done", "android": "done"},
     {"id": "conversation.members", "what": "See a conversation's members from its header.", "mac": "done", "android": "missing"},
     {"id": "conversation.files", "what": "See the files and links shared in a conversation.", "mac": "done", "android": "missing"},
     {"id": "conversation.pins", "what": "See a conversation's pinned messages.", "mac": "done", "android": "missing"},
@@ -94,7 +94,7 @@
     {"id": "thread.from-notification", "what": "A notification for a thread reply opens it in its thread.", "mac": "done", "android": "done"},
     {"id": "threads.feed", "what": "Threads lists the threads you're in, newest reply first.", "mac": "done", "android": "done"},
     {"id": "activity.feed", "what": "Activity lists your mentions, replies and invitations.", "mac": "done", "android": "done"},
-    {"id": "activity.open-item", "what": "Opening an Activity item shows its message in its conversation or thread.", "mac": "done", "android": "missing"},
+    {"id": "activity.open-item", "what": "Opening an Activity item shows its message in its conversation or thread.", "mac": "done", "android": "done"},
 
     {"id": "people.profile", "what": "Open someone's profile from their name.", "mac": "done", "android": "missing"},
     {"id": "people.start-dm", "what": "Message someone from their profile, reusing your direct message with them.", "mac": "done", "android": "missing"},

@@ -380,7 +380,7 @@ class MatrixConversationTest {
         assertEquals(TimelineFocus.Event("\$old", 30u, TimelineEventFocusThreadMode.Automatic(true)), room.focuses.last())
         assertFalse("Opening at an old message doesn't mean the newest was read", conversation.markRead("\$old"))
 
-        conversation.loadNewer()
+        conversation.loadNewer("\$old")
         live.pageStarted.await()
         live.emit(listOf(TimelineDiff.PushFront(conversationItem("old-live", "\$old", "Earlier"))))
         live.page.complete(false)
@@ -389,13 +389,28 @@ class MatrixConversationTest {
         assertTrue(conversation.markRead("\$new"))
         conversation.close()
     }
+
+    // capability: conversation.jump-to-message
+    @Test fun aMessageWhoseSurroundingsCantLoadStillOpensTheConversationLive() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
+        val room = JumpRoom(live, ConversationTimeline(emptyList())).apply { aroundFailure = IllegalStateException("Offline") }
+        val conversation = MatrixConversation(backgroundScope, room, at = "\$old")
+
+        val opened = conversation.state.first { !it.loading }
+        assertEquals(listOf("Latest"), opened.rows.messages.map { it.body })
+        assertNull(opened.error)
+        assertFalse(opened.focused)
+        conversation.close()
+    }
 }
 
 private class JumpRoom(private val live: Timeline, private val around: Timeline) : Room(NoHandle) {
     val focuses = mutableListOf<TimelineFocus>()
+    var aroundFailure: Exception? = null
     override suspend fun setUnreadFlag(newValue: Boolean) = Unit
     override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline {
         focuses += configuration.focus
+        if (configuration.focus is TimelineFocus.Event) aroundFailure?.let { throw it }
         return if (configuration.focus is TimelineFocus.Event) around else live
     }
 }

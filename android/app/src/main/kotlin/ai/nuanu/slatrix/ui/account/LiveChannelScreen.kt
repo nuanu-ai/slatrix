@@ -33,12 +33,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
@@ -66,7 +68,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     onRetry: () -> Unit, onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit,
     onOpenThread: (rootEventId: String) -> Unit = {},
     /** Shows the thread this message starts, as Slack's thread page, instead of the channel. */
-    threadRoot: String? = null, actions: MessageActions = MessageActions(), composerActions: ComposerActions = ComposerActions()) {
+    threadRoot: String? = null, actions: MessageActions = MessageActions(), composerActions: ComposerActions = ComposerActions(),
+    /** Asked, with the oldest message on screen, once the reader reaches the newest of a conversation opened at an older one. */
+    onLoadNewer: (anchor: String?) -> Unit = {}) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -76,11 +80,14 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
+    // A jump waits to show until it has scrolled to its message, so the newest rows never flash or count as read.
+    val rows by rememberUpdatedState(state.rows)
+    var jumped by remember(state.highlight) { mutableStateOf(state.highlight == null) }
     val latest = state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?
     val read by rememberUpdatedState(onRead)
-    LaunchedEffect(latest?.id, latest?.eventId, resumed) {
+    LaunchedEffect(latest?.id, latest?.eventId, resumed, jumped) {
         val event = latest?.eventId ?: return@LaunchedEffect
-        if (!resumed) return@LaunchedEffect
+        if (!resumed || !jumped) return@LaunchedEffect
         snapshotFlow {
             list.layoutInfo.visibleItemsInfo.any { item ->
                 item.key == latest.id && item.offset + item.size <= list.layoutInfo.viewportEndOffset &&
@@ -96,7 +103,36 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
     }
     LaunchedEffect(newest?.id) {
-        if (following || newest?.own == true && newest.sendState == MessageSendState.Sending) list.scrollToItem(0)
+        if (following && !state.focused || newest?.own == true && newest.sendState == MessageSendState.Sending) list.scrollToItem(0)
+    }
+    // A jump shows its message a third of the way up and highlights it briefly, as on the Mac, once.
+    var lit by remember(state.highlight) { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.highlight) {
+        val target = state.highlight ?: return@LaunchedEffect
+        val index = snapshotFlow { rows.indexOfLast { (it as? ConversationMessage)?.eventId == target } }.first { it >= 0 }
+        following = false
+        try {
+            list.scrollToItem(rows.size - 1 - index)
+            // The list is reversed, so the message sits at the bottom; newer ones below lift it a third of the way up.
+            list.scrollBy(-list.layoutInfo.viewportSize.height / 3f)
+            jumped = true
+            lit = target
+            delay(UiMetrics.HighlightMillis)
+        } finally {
+            jumped = true
+            lit = null
+        }
+    }
+    val loadNewer by rememberUpdatedState(onLoadNewer)
+    // Asks each time the newest row comes into view, and again after a page while it stays there.
+    LaunchedEffect(list, state.focused && jumped, newest?.id) {
+        if (!state.focused || !jumped) return@LaunchedEffect
+        snapshotFlow { list.layoutInfo.visibleItemsInfo.any { it.index == 0 } }.distinctUntilChanged().collect { visible ->
+            if (!visible) return@collect
+            // The oldest message on screen; the list is reversed, so it has the highest index.
+            val top = list.layoutInfo.visibleItemsInfo.maxOf { it.index }
+            loadNewer((top downTo 0).firstNotNullOfOrNull { (rows.asReversed().getOrNull(it) as? ConversationMessage)?.eventId })
+        }
     }
     val loadOlder by rememberUpdatedState(onLoadOlder)
     // Asks again after every page while the top stays near, so pages of hidden events don't stall it.
@@ -144,18 +180,21 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 rows.getOrNull(rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot } + 1)?.id.takeIf { threadRoot != null }
             }
             // A thread reads down from its root, as in Slack, so a short one sits at the top.
-            LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true,
+            LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none { (it as? ConversationMessage)?.eventId == state.highlight }) 1f else 0f),
+                state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
                 contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
                 items(rows.asReversed(), key = { it.id }) { row ->
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
-                        is ConversationMessage -> if (threadRoot != null && row.eventId == threadRoot) Column {
-                            LiveMessageRow(row) { menu = it }
-                            // The root shows once the whole thread has loaded, so its sent replies are all here.
-                            RepliesBar(rows.count { it is ConversationMessage && it.eventId != null && it.eventId != threadRoot })
-                        // The first reply starts under the replies bar, so it shows its sender again.
-                        } else LiveMessageRow(if (row.id == firstReply) row.copy(grouped = false) else row) { menu = it }
+                        is ConversationMessage -> Box(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
+                            if (threadRoot != null && row.eventId == threadRoot) Column {
+                                LiveMessageRow(row) { menu = it }
+                                // The root shows once the whole thread has loaded, so its sent replies are all here.
+                                RepliesBar(rows.count { it is ConversationMessage && it.eventId != null && it.eventId != threadRoot })
+                            // The first reply starts under the replies bar, so it shows its sender again.
+                            } else LiveMessageRow(if (row.id == firstReply) row.copy(grouped = false) else row) { menu = it }
+                        }
                     }
                 }
                 // The top of the conversation, which also lets an empty one ask for history; a thread tops out at its root.
