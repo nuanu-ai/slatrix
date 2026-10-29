@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.ui.account
 import android.content.ActivityNotFoundException
 import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountState
+import ai.nuanu.slatrix.core.AttachmentImport
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.IdentityState
@@ -214,7 +215,10 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
         { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
         open.threadRoot, rememberMessageActions(conversation, composer, main),
-        ComposerActions(onCancelTarget = { composer?.cancelTarget() }), { conversation?.loadNewer(it) },
+        ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
+            onNeedPeople = { composer?.loadPeople() },
+            onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
+            onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
         // A quote doesn't know its parent's thread, so it asks before jumping.
         { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } })
 }

@@ -35,6 +35,8 @@ object UiMetrics {
     val ActionTile = 86.dp
     /** The accent rule beside a quoted message. */
     val QuoteBar = 3.dp
+    /** About five @ suggestions before the list scrolls. */
+    val MentionListHeight = 240.dp
     /** Reaction chips and the thread replies line, as tall as Slack Android's. */
     val ChipHeight = 32.dp
     /** A list's indent, in multiples of the text size, as on the Mac. */

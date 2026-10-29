@@ -228,7 +228,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             room.direct -> "Message ${room.name}"
             else -> "Message #${room.name}"
         }
-        MessageComposer(placeholder, composer, onDraft, onSend, composerActions)
+        val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
+        MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders)
     }
 }
 
@@ -331,7 +332,14 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
                 }, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = if (failed) colors.destructive else colors.textSecondary)
             }
             message.replyTo?.let { reply -> ReplyQuote(reply) { onOpenReply(reply.eventId) } }
-            MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me)
+            Box {
+                MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me)
+                // In the row's bottom padding, so the bar comes and goes without moving anything.
+                message.uploadProgress?.let {
+                    LinearProgressIndicator({ it }, Modifier.align(Alignment.BottomStart).fillMaxWidth().height(UiMetrics.GapTiny)
+                        .offset(y = UiMetrics.GapTiny))
+                }
+            }
             if (message.reactions.isNotEmpty()) {
                 Reactions(message.reactions, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
             }

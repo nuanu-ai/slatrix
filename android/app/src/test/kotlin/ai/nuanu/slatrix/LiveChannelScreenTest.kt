@@ -211,7 +211,7 @@ class LiveChannelScreenTest {
         compose.runOnIdle { assertEquals(failed, deleted) }
     }
 
-    @Test fun theHeaderNamesTheChannelInPrimaryTextAndSendSitsInTheComposerField() {
+    @Test fun theHeaderNamesTheChannelInPrimaryTextAndSendEndsTheComposerToolbar() {
         compose.setContent {
             SlatrixTheme(dark = false) {
                 LiveChannelScreen(room.copy(topic = "Launch reviews"), ConversationState(loading = false, hasMore = false),
@@ -225,7 +225,9 @@ class LiveChannelScreenTest {
         }
         val field = compose.onNodeWithContentDescription("Message #design").fetchSemanticsNode().boundsInRoot
         val send = compose.onNodeWithContentDescription("Send message").fetchSemanticsNode().boundsInRoot
-        assertTrue("Send sits beside the text, inside the field", send.center.y in field.top..field.bottom && send.left >= field.right)
+        val mention = compose.onNodeWithContentDescription("Mention someone").fetchSemanticsNode().boundsInRoot
+        assertTrue("Send ends the toolbar row under the field, as in Slack",
+            send.top >= field.bottom && send.center.y in mention.top..mention.bottom && send.left > mention.right)
     }
 
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
@@ -247,7 +249,8 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Message 200").assertDoesNotExist()
         compose.runOnIdle { assertEquals("Newer messages wait until the reader reaches the newest", 0, newer) }
 
-        repeat(30) { compose.onRoot().performTouchInput { swipeUp() } }
+        // On the conversation itself: a swipe that starts on the composer doesn't scroll it.
+        repeat(30) { compose.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performTouchInput { swipeUp() } }
         compose.waitUntil { newer > 0 }
     }
 
