@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
 import androidx.work.WorkManager
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -17,6 +19,43 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35])
 class PushRegistrationTest {
+    @Test fun aStaleFirebaseTokenLookupCannotOverwriteANewerTokenCallback() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val registration = PushRegistration(context)
+        val server = PusherClient()
+        val lookupVersion = registration.tokenVersion
+
+        registration.updateToken("new-callback-token")
+        registration.updateToken("stale-lookup-token", expectedVersion = lookupVersion)
+        registration.register(server, "@stale-response:example.org", "https://push.example.org/_matrix/push/v1/notify")
+
+        assertEquals(setOf("new-callback-token"), server.pushers.keys)
+    }
+
+    @Test fun rotationDuringRegistrationLeavesOnlyTheNewestTokenRegistered() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val registration = PushRegistration(context)
+        val server = PusherClient()
+        val registering = CompletableDeferred<Unit>()
+        val response = CompletableDeferred<Unit>()
+        server.registering = { token ->
+            if (token == "in-flight-token") {
+                registering.complete(Unit)
+                response.await()
+            }
+        }
+        registration.updateToken("in-flight-token")
+        val pending = async {
+            registration.register(server, "@during-rotation:example.org", "https://push.example.org/_matrix/push/v1/notify")
+        }
+        registering.await()
+        registration.updateToken("latest-callback-token")
+        response.complete(Unit)
+        pending.await()
+
+        assertEquals(setOf("latest-callback-token"), server.pushers.keys)
+    }
+
     @Test fun firebaseTokenRotationReplacesTheRegisteredPusher() = runTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val server = PusherClient()
@@ -68,11 +107,13 @@ class PushRegistrationTest {
 
 private class PusherClient : Client(NoHandle) {
     val pushers = mutableMapOf<String, Pair<PusherIdentifiers, PusherKind>>()
+    var registering: suspend (String) -> Unit = {}
     var rejectRegistration = false
     var rejectDeletion = false
     override suspend fun setPusher(identifiers: PusherIdentifiers, kind: PusherKind, appDisplayName: String,
         deviceDisplayName: String, profileTag: String?, lang: String, append: Boolean) {
         check(!rejectRegistration)
+        registering(identifiers.pushkey)
         pushers[identifiers.pushkey] = identifiers to kind
     }
     override suspend fun deletePusher(identifiers: PusherIdentifiers) {
