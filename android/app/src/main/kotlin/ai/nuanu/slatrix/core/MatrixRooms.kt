@@ -27,6 +27,7 @@ import org.matrix.rustcomponents.sdk.RoomListEntriesListener
 import org.matrix.rustcomponents.sdk.RoomListEntriesUpdate
 import org.matrix.rustcomponents.sdk.RoomListEntriesWithDynamicAdaptersResult
 import org.matrix.rustcomponents.sdk.RoomNotificationMode
+import org.matrix.rustcomponents.sdk.SpaceService
 import org.matrix.rustcomponents.sdk.SyncService
 import org.matrix.rustcomponents.sdk.SyncServiceState
 import org.matrix.rustcomponents.sdk.SyncServiceStateObserver
@@ -64,6 +65,10 @@ class MatrixRooms(scope: CoroutineScope, private val client: Client) {
     private val events = Channel<Event>(Channel.UNLIMITED)
     private val retries = Channel<Unit>(Channel.CONFLATED)
     private val summaries = mutableMapOf<String, RoomSummary>()
+    private val spaces = mutableMapOf<String, SpaceSummary>()
+    private var parents: Map<String, List<String>> = emptyMap()
+    private val spaceRequests = Channel<Long>(Channel.CONFLATED)
+    private val spaceGeneration = AtomicLong()
     private val roomHandles = mutableMapOf<String, TaskHandle>()
     private val roomTokens = mutableMapOf<String, Any>()
     private val syncGeneration = AtomicLong()
@@ -72,9 +77,20 @@ class MatrixRooms(scope: CoroutineScope, private val client: Client) {
             coroutineScope {
                 launch { sync() }
                 refresh(client.rooms(), replace = true)
+                launch { refreshSpaces() }
                 for (event in events) {
                     when (event) {
-                        is Event.Info -> if (roomTokens[event.info.id] === event.token) { accept(event.info); publish() }
+                        is Event.Info -> if (roomTokens[event.info.id] === event.token) {
+                            val wasSpace = event.info.id in spaces
+                            val wasJoined = wasSpace || event.info.id in summaries
+                            accept(event.info)
+                            publish()
+                            if (event.info.isSpace || wasSpace || wasJoined != (event.info.membership == Membership.JOINED)) requestSpaces()
+                        }
+                        is Event.Spaces -> if (event.generation == spaceGeneration.get()) {
+                            if (event.parents != null) parents = event.parents
+                            publish(event.error)
+                        }
                         is Event.Entries -> {
                             if (event.generation != syncGeneration.get()) continue
                             val changed = event.updates.flatMap {
@@ -106,10 +122,11 @@ class MatrixRooms(scope: CoroutineScope, private val client: Client) {
             roomHandles.clear()
             events.close()
             retries.close()
+            spaceRequests.close()
         }
     }
 
-    fun retry() { retries.trySend(Unit) }
+    fun retry() { retries.trySend(Unit); requestSpaces() }
 
     suspend fun close() { worker.cancelAndJoin() }
 
@@ -117,6 +134,7 @@ class MatrixRooms(scope: CoroutineScope, private val client: Client) {
         if (replace) {
             val ids = rooms.mapTo(mutableSetOf()) { it.id() }
             summaries.keys.retainAll(ids)
+            spaces.keys.retainAll(ids)
             roomHandles.keys.filter { it !in ids }.forEach {
                 roomHandles.remove(it)?.release()
                 roomTokens.remove(it)
@@ -142,14 +160,22 @@ class MatrixRooms(scope: CoroutineScope, private val client: Client) {
             }
         }
         publish(error)
+        requestSpaces()
     }
 
     private fun accept(info: RoomInfo) {
-        if (info.membership != Membership.JOINED || info.isSpace) {
+        if (info.membership != Membership.JOINED) {
             summaries.remove(info.id)
+            spaces.remove(info.id)
             return
         }
         val name = info.displayName?.takeIf { it.isNotBlank() } ?: info.id
+        if (info.isSpace) {
+            summaries.remove(info.id)
+            spaces[info.id] = SpaceSummary(id = info.id, name = name)
+            return
+        }
+        spaces.remove(info.id)
         summaries[info.id] = RoomSummary(
             id = info.id, name = name, direct = info.isDirect, topic = info.topic.orEmpty(),
             unread = UnreadBadge.forRoom(RoomUnread(
@@ -163,10 +189,48 @@ class MatrixRooms(scope: CoroutineScope, private val client: Client) {
 
     private fun publish(error: String? = null) {
         mutableState.value = mutableState.value.copy(
-            rooms = summaries.values.sortedWith(compareBy<RoomSummary, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.id }),
+            rooms = summaries.values.map { it.copy(spaceIds = ancestors(it.id)) }
+                .sortedWith(compareBy<RoomSummary, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.id }),
+            spaces = spaces.values.map { it.copy(isTopLevel = parents[it.id].isNullOrEmpty()) }
+                .sortedWith(compareBy<SpaceSummary, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.id }),
             loading = false,
             error = error ?: mutableState.value.error,
         )
+    }
+
+    private fun ancestors(id: String): Set<String> {
+        val result = mutableSetOf<String>()
+        val pending = ArrayDeque(parents[id].orEmpty())
+        while (pending.isNotEmpty()) {
+            val parent = pending.removeLast()
+            if (result.add(parent)) pending.addAll(parents[parent].orEmpty())
+        }
+        return result
+    }
+
+    private fun requestSpaces() { spaceRequests.trySend(spaceGeneration.incrementAndGet()) }
+
+    private suspend fun refreshSpaces() {
+        var service: SpaceService? = null
+        try {
+            for (generation in spaceRequests) {
+                try {
+                    val current = service ?: client.spaceService().also { service = it }
+                    currentCoroutineContext().ensureActive()
+                    // Parent lookups read the graph; only this call rebuilds it from cached state.
+                    current.topLevelJoinedSpaces()
+                    val updated = client.rooms().associate { it.id() to current.joinedParentIdsOfChild(it.id()) }
+                    currentCoroutineContext().ensureActive()
+                    events.trySend(Event.Spaces(updated, generation))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    events.trySend(Event.Spaces(null, generation, "Couldn’t load workspaces."))
+                }
+            }
+        } finally {
+            service?.close()
+        }
     }
 
     private suspend fun sync() {
@@ -228,6 +292,7 @@ class MatrixRooms(scope: CoroutineScope, private val client: Client) {
     private fun ULong.clampedLong(): Long = coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
 
     private sealed interface Event {
+        data class Spaces(val parents: Map<String, List<String>>?, val generation: Long, val error: String? = null) : Event
         data class Info(val info: RoomInfo, val token: Any) : Event
         data class Entries(val updates: List<RoomListEntriesUpdate>, val generation: Long) : Event
         data class Connection(val error: String?, val generation: Long) : Event
