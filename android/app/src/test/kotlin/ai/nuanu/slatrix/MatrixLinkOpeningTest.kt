@@ -5,6 +5,7 @@ import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.ProvideMatrixLinks
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.CompositionLocalProvider
@@ -39,7 +40,7 @@ class MatrixLinkOpeningTest {
                     ProvideMatrixLinks(listOf(design), { alias -> "!design:example.org".takeIf { alias == "#design:example.org" } },
                         { room, event -> opened += room.id to event }, { notices += it }) {
                         val handler = LocalUriHandler.current
-                        links.forEach { link -> TextButton({ handler.openUri(link) }) { Text(link) } }
+                        Column { links.forEach { link -> TextButton({ handler.openUri(link) }) { Text(link) } } }
                     }
                 }
             }
