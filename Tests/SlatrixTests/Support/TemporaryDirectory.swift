@@ -1,6 +1,8 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
 import ImageIO
+import Testing
 
 /// A private scratch folder per test, removed when the test releases it.
 final class TemporaryDirectory {
@@ -34,6 +36,48 @@ final class TemporaryDirectory {
         CGImageDestinationAddImage(
             destination, context.makeImage()!, [kCGImagePropertyOrientation: orientation] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
+        return file
+    }
+
+    /// A Motion JPEG movie of `seconds`, its frames red on the left half and blue on the right, as its track stores them,
+    /// and turned `rotation` degrees by its track's transform, as a phone records an upright video.
+    func video(_ name: String, width: Int, height: Int, rotation: Double, seconds: Int) async throws -> URL {
+        let file = path(name)
+        let writer = try AVAssetWriter(outputURL: file, fileType: .mov)
+        let input = AVAssetWriterInput(
+            mediaType: .video,
+            outputSettings: [AVVideoCodecKey: AVVideoCodecType.jpeg, AVVideoWidthKey: width, AVVideoHeightKey: height])
+        input.transform = CGAffineTransform(rotationAngle: rotation * .pi / 180)
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: width,
+                kCVPixelBufferHeightKey as String: height,
+            ])
+        writer.add(input)
+        guard writer.startWriting() else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
+        writer.startSession(atSourceTime: .zero)
+        let fps = 10
+        for index in 0..<(seconds * fps) {
+            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            var buffer: CVPixelBuffer?
+            CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, nil, &buffer)
+            let frame = try #require(buffer)
+            CVPixelBufferLockBaseAddress(frame, [])
+            let context = CGContext(
+                data: CVPixelBufferGetBaseAddress(frame), width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: CVPixelBufferGetBytesPerRow(frame), space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)!
+            context.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
+            context.fill(CGRect(x: 0, y: 0, width: width / 2, height: height))
+            context.setFillColor(red: 0, green: 0, blue: 1, alpha: 1)
+            context.fill(CGRect(x: width / 2, y: 0, width: width - width / 2, height: height))
+            CVPixelBufferUnlockBaseAddress(frame, [])
+            adaptor.append(frame, withPresentationTime: CMTime(value: CMTimeValue(index), timescale: CMTimeScale(fps)))
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        guard writer.status == .completed else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
         return file
     }
 
