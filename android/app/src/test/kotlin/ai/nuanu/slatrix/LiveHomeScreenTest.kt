@@ -127,7 +127,7 @@ class LiveHomeScreenTest {
         var signedOut = false
         var back = false
         compose.setContent {
-            SlatrixTheme { LiveYouScreen("@alex:example.org", { preferences = true }, { signedOut = true }, { back = true }) }
+            SlatrixTheme { LiveYouScreen("@alex:example.org", { null }, { preferences = true }, { signedOut = true }, { back = true }) }
         }
         compose.onNodeWithText("@alex:example.org").assertIsDisplayed()
         compose.onNodeWithText("Preferences").performClick()
@@ -140,6 +140,12 @@ class LiveHomeScreenTest {
 
         compose.onNodeWithContentDescription("Back").performClick()
         compose.runOnIdle { assertTrue(back) }
+    }
+
+    @Test fun youShowsTheNameOnTheAccountsProfile() {
+        compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, {}) } }
+        compose.onNodeWithText("Alex Doe").assertIsDisplayed()
+        compose.onNodeWithText("@alex:example.org").assertIsDisplayed()
     }
 
     @Test fun aSavedWorkspaceShowsItsChannelsAndDirectMessagesTogether() {
