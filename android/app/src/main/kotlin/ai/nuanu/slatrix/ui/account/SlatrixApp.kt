@@ -101,6 +101,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var invitation by rememberSaveable { mutableStateOf<String?>(null) }
     // Someone's profile, pushed over whatever is open, and the name to show until theirs loads.
     var person by rememberSaveable { mutableStateOf<Pair<String, String?>?>(null) }
+    var editingProfile by rememberSaveable { mutableStateOf(false) }
     // Browse channels or Create a channel, pushed over Home; null while neither is open.
     var channels by rememberSaveable { mutableStateOf<ChannelPage?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -182,6 +183,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         channels = null
                         person = null
                         later = false
+                        editingProfile = false
                         jump(room, target.eventId, target.threadRoot)
                         onNotificationHandled(target)
                     }
@@ -201,6 +203,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
                                     { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
                             } } }
+                            editingProfile -> { { LiveEditProfile((state as? AccountState.Connected)?.client, userId) { editingProfile = false } } }
                             person != null -> { { person?.let { (id, name) ->
                                 LivePersonProfile(id, name, userId, people, rooms?.state, { room ->
                                     person = null
@@ -208,7 +211,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     threads?.back()
                                     // Message from the conversation already open just goes back to it, where you were.
                                     if (selected?.room?.id != room.id) workspace?.open(room)
-                                }) { person = null }
+                                }, onEdit = { editingProfile = true }) { person = null }
                             } } }
                             channels != null -> { {
                                 val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
@@ -217,7 +220,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     openChannel, { notice = it }) { channels = null }
                             } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut,
-                                onBack = { you = false }, avatarUrl = userAvatarUrl) } }
+                                onViewProfile = { person = userId to null }, onBack = { you = false }, avatarUrl = userAvatarUrl) } }
                             later -> { { LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
                                 { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
                                     // A saved reply opens in its thread, so it is looked up first, with Later still up.

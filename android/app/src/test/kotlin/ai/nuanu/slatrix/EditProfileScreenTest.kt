@@ -1,6 +1,9 @@
 package ai.nuanu.slatrix
 
 import ai.nuanu.slatrix.core.CropSquare
+import ai.nuanu.slatrix.core.Person
+import ai.nuanu.slatrix.ui.account.LiveYouScreen
+import ai.nuanu.slatrix.ui.account.PersonProfileScreen
 import ai.nuanu.slatrix.ui.account.EditProfileScreen
 import ai.nuanu.slatrix.ui.account.PhotoCropScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -45,6 +48,27 @@ class EditProfileScreenTest {
         compose.onNode(hasSetTextAction()).performTextInput("  Alex Doe ")
         compose.onNodeWithText("Save").assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals(listOf("Alex Doe"), saved) }
+    }
+
+    // capability: profile.edit-name
+    @Test fun youLeadsToYourProfile() {
+        val asked = mutableListOf<String>()
+        compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, onViewProfile = { asked += "view" }, onBack = {}) } }
+        compose.onNodeWithText("View profile").performClick()
+        compose.runOnIdle { assertEquals(listOf("view"), asked) }
+    }
+
+    // capability: profile.edit-name
+    @Test fun yourProfileLeadsToEditProfile() {
+        val asked = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                PersonProfileScreen(Person("@alex:example.org", "Alex Doe"), own = true, opening = false, error = null, onMessage = {},
+                    onEdit = { asked += "edit" }, onBack = {})
+            }
+        }
+        compose.onNodeWithText("Edit profile").performClick()
+        compose.runOnIdle { assertEquals(listOf("edit"), asked) }
     }
 
     // capability: profile.edit-photo

@@ -100,8 +100,8 @@
     {"id": "people.start-dm", "what": "Message someone from their profile, reusing your direct message with them.", "mac": "done", "android": "done"},
     {"id": "people.avatars", "what": "People and conversations show a photo, or initials on a color.", "mac": "done", "android": "done"},
     {"id": "profile.own", "what": "See your own profile.", "mac": "done", "android": "done"},
-    {"id": "profile.edit-name", "what": "Change your display name.", "mac": "done", "android": "missing"},
-    {"id": "profile.edit-photo", "what": "Change or remove your profile photo, cropped to a square.", "mac": "done", "android": "missing"},
+    {"id": "profile.edit-name", "what": "Change your display name.", "mac": "done", "android": "done"},
+    {"id": "profile.edit-photo", "what": "Change or remove your profile photo, cropped to a square.", "mac": "done", "android": "done"},
 
     {"id": "notifications.alert", "what": "A new message that should notify you raises a notification.", "mac": "done", "android": "done"},
     {"id": "notifications.open", "what": "Opening a notification opens its conversation.", "mac": "done", "android": "done"},
