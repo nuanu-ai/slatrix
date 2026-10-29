@@ -1,0 +1,125 @@
+package ai.nuanu.slatrix.ui.designsystem
+
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+
+class AppColors internal constructor(roles: Map<String, Color>) {
+    val textPrimary = roles.getValue("textPrimary")
+    val textBody = roles.getValue("textBody")
+    val textSecondary = roles.getValue("textSecondary")
+    val textTertiary = roles.getValue("textTertiary")
+    val canvas = roles.getValue("canvas")
+    val raised = roles.getValue("raised")
+    val sunken = roles.getValue("sunken")
+    val overlay = roles.getValue("overlay")
+    val tooltip = roles.getValue("tooltip")
+    val onTooltip = roles.getValue("onTooltip")
+    val scrim = roles.getValue("scrim")
+    val sidebar = roles.getValue("sidebar")
+    val frame = roles.getValue("frame")
+    val border = roles.getValue("border")
+    val borderStrong = roles.getValue("borderStrong")
+    val hover = roles.getValue("hover")
+    val pressed = roles.getValue("pressed")
+    val selection = roles.getValue("selection")
+    val selectionStrong = roles.getValue("selectionStrong")
+    val selectionText = roles.getValue("selectionText")
+    val highlight = roles.getValue("highlight")
+    val focusRing = roles.getValue("focusRing")
+    val accent = roles.getValue("accent")
+    val accentTint = roles.getValue("accentTint")
+    val onAccent = roles.getValue("onAccent")
+    val buttonPrimary = roles.getValue("buttonPrimary")
+    val success = roles.getValue("success")
+    val destructive = roles.getValue("destructive")
+    val warning = roles.getValue("warning")
+    val mention = roles.getValue("mention")
+    val mentionText = roles.getValue("mentionText")
+    val mentionFill = roles.getValue("mentionFill")
+    val mentionYouText = roles.getValue("mentionYouText")
+    val mentionYouFill = roles.getValue("mentionYouFill")
+    val presenceActive = roles.getValue("presenceActive")
+    val presenceAway = roles.getValue("presenceAway")
+    val mediaBackdrop = roles.getValue("mediaBackdrop")
+    val mediaControl = roles.getValue("mediaControl")
+    val mediaShade = roles.getValue("mediaShade")
+    val onMedia = roles.getValue("onMedia")
+    val onMediaEdge = roles.getValue("onMediaEdge")
+}
+
+private val LocalColors = staticCompositionLocalOf { AppColors(DesignTokens.colors(false, SidebarPalette.Aubergine)) }
+
+object SlatrixTheme {
+    val colors: AppColors @Composable get() = LocalColors.current
+}
+
+@Composable
+fun SlatrixTheme(
+    dark: Boolean = isSystemInDarkTheme(),
+    palette: SidebarPalette = SidebarPalette.Aubergine,
+    content: @Composable () -> Unit,
+) {
+    val colors = remember(dark, palette) { AppColors(DesignTokens.colors(dark, palette)) }
+    val scheme = remember(colors) {
+        lightColorScheme(
+            primary = colors.accent,
+            onPrimary = colors.onAccent,
+            primaryContainer = colors.accentTint,
+            onPrimaryContainer = colors.textPrimary,
+            inversePrimary = colors.accent,
+            secondary = colors.buttonPrimary,
+            onSecondary = colors.onAccent,
+            secondaryContainer = colors.selection,
+            onSecondaryContainer = colors.textPrimary,
+            tertiary = colors.mentionText,
+            onTertiary = colors.onAccent,
+            tertiaryContainer = colors.mentionFill,
+            onTertiaryContainer = colors.mentionText,
+            background = colors.canvas,
+            onBackground = colors.textBody,
+            surface = colors.canvas,
+            onSurface = colors.textPrimary,
+            surfaceVariant = colors.raised,
+            onSurfaceVariant = colors.textSecondary,
+            surfaceTint = colors.accent,
+            inverseSurface = colors.tooltip,
+            inverseOnSurface = colors.onTooltip,
+            error = colors.destructive,
+            onError = colors.selectionText,
+            errorContainer = colors.mentionYouFill,
+            onErrorContainer = colors.textPrimary,
+            outline = colors.borderStrong,
+            outlineVariant = colors.border,
+            scrim = colors.scrim,
+            surfaceBright = colors.raised,
+            surfaceContainer = colors.raised,
+            surfaceContainerHigh = colors.overlay,
+            surfaceContainerHighest = colors.sunken,
+            surfaceContainerLow = colors.raised,
+            surfaceContainerLowest = colors.canvas,
+            surfaceDim = colors.sunken,
+        )
+    }
+    val shapes = remember {
+        Shapes(
+            extraSmall = RoundedCornerShape(DesignTokens.radii.getValue("small").dp),
+            small = RoundedCornerShape(DesignTokens.radii.getValue("small").dp),
+            medium = RoundedCornerShape(DesignTokens.radii.getValue("default").dp),
+            large = RoundedCornerShape(DesignTokens.radii.getValue("large").dp),
+            extraLarge = RoundedCornerShape(DesignTokens.radii.getValue("panel").dp),
+        )
+    }
+    CompositionLocalProvider(LocalColors provides colors) {
+        MaterialTheme(colorScheme = scheme, typography = Typography(), shapes = shapes, content = content)
+    }
+}

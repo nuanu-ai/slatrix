@@ -1,0 +1,67 @@
+import com.android.build.api.dsl.ApplicationExtension
+
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
+
+extensions.configure<ApplicationExtension> {
+    namespace = "ai.nuanu.slatrix"
+    compileSdk = 36
+    defaultConfig {
+        applicationId = "ai.nuanu.slatrix"
+        minSdk = 24
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        targetSdk = 36
+        versionCode = 1
+        versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    buildFeatures {
+        compose = true
+        resValues = true
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    buildTypes {
+        debug {
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            resValue("string", "app_name", "Slatrix Dev")
+        }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+    lint {
+        warningsAsErrors = true
+        // Toolchain updates are reviewed separately, so pinned builds stay reproducible.
+        disable += setOf("OldTargetApi", "GradleDependency", "AndroidGradlePluginVersion", "NewerVersionAvailable")
+    }
+}
+
+kotlin { compilerOptions { jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17 } }
+
+dependencies {
+    implementation(project(":matrix-sdk"))
+    implementation(platform("androidx.compose:compose-bom:2025.10.01"))
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.11.0")
+    lintChecks(project(":lint-rules"))
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:core:1.7.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("com.google.code.gson:gson:2.13.2")
+}
+
+tasks.withType<Test>().configureEach {
+    systemProperty("slatrix.root", rootDir.parentFile.absolutePath)
+}
