@@ -42,7 +42,7 @@
     {"id": "conversation.keep-position", "what": "Coming back to a conversation returns to where you were reading.", "mac": "done", "android": "missing"},
     {"id": "conversation.jump-to-message", "what": "A message opened from search or a link shows highlighted in its conversation.", "mac": "done", "android": "done"},
     {"id": "conversation.members", "what": "See a conversation's members from its header.", "mac": "done", "android": "done"},
-    {"id": "conversation.files", "what": "See the files and links shared in a conversation.", "mac": "done", "android": "missing"},
+    {"id": "conversation.files", "what": "See the files and links shared in a conversation.", "mac": "done", "android": "done"},
     {"id": "conversation.pins", "what": "See a conversation's pinned messages.", "mac": "done", "android": "done"},
     {"id": "conversation.notifications", "what": "Choose when a conversation notifies you.", "mac": "done", "android": "done"},
     {"id": "channel.details", "what": "Edit a channel's name and topic.", "mac": "done", "android": "done"},

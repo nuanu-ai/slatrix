@@ -58,6 +58,10 @@ import org.matrix.rustcomponents.sdk.VirtualTimelineItem
 import uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode
 import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
 
+/**
+ * What a conversation shows: its timeline, its pinned messages, which the SDK fetches itself, or every message threads
+ * included, for the files and links shared in it.
+ */
 enum class ConversationView { Timeline, Pins, Files }
 
 enum class MessageKind { Text, Notice, Emote, Attachment, Encrypted, Deleted, Unsupported }
@@ -207,8 +211,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     private val updating = operations.launch {
         try {
-            open(if (view == ConversationView.Pins) TimelineFocus.PinnedEvents
-                else threadRoot?.let(TimelineFocus::Thread) ?: TimelineFocus.Live(hideThreadedEvents = true)) { shown = it }
+            open(when {
+                view == ConversationView.Pins -> TimelineFocus.PinnedEvents
+                threadRoot != null -> TimelineFocus.Thread(threadRoot)
+                else -> TimelineFocus.Live(hideThreadedEvents = view != ConversationView.Files)
+            }) { shown = it }
             currentCoroutineContext().ensureActive()
             ready.complete(Unit)
             // A thread shows its reply wherever it is; a channel first checks whether its live timeline holds it.
