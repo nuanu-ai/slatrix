@@ -7,7 +7,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Shapes
-import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -158,6 +157,6 @@ fun SlatrixTheme(
         )
     }
     CompositionLocalProvider(LocalColors provides colors, LocalDark provides dark, LocalContentColor provides colors.textPrimary) {
-        MaterialTheme(colorScheme = scheme, typography = Typography().let { it.copy(titleSmall = it.titleMedium) }, shapes = shapes, content = content)
+        MaterialTheme(colorScheme = scheme, typography = SlatrixTypography, shapes = shapes, content = content)
     }
 }
