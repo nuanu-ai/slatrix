@@ -19,6 +19,9 @@ import androidx.compose.runtime.mutableStateOf
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.runtime.CompositionLocalProvider
+import ai.nuanu.slatrix.ui.account.LocalAvatarLoader
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -305,6 +308,30 @@ class LiveHomeScreenTest {
         }
         compose.onNodeWithContentDescription("Switch workspace").assertExists()
         compose.onNodeWithText("All conversations").assertDoesNotExist()
+    }
+
+    // capability: home.workspace-switcher
+    @Test fun theWorkspaceIconShowsItsPictureOnceLoaded() {
+        val picture = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.RED) }.asImageBitmap()
+        val space = SpaceSummary("!harbor:example.org", "Harbor", avatarUrl = "mxc://example.org/harbor")
+        compose.setContent {
+            CompositionLocalProvider(LocalAvatarLoader provides { url, _ -> picture.takeIf { url == "mxc://example.org/harbor" } }) {
+                SlatrixTheme {
+                    LiveHomeScreen("@alex:example.org", RoomListState(loading = false, spaces = listOf(space), spacesKnown = true), {}, {}, {},
+                        "!harbor:example.org")
+                }
+            }
+        }
+        compose.waitForIdle()
+        val header = compose.onNodeWithContentDescription("Switch workspace").fetchSemanticsNode().boundsInWindow
+        compose.runOnIdle {
+            val window = compose.activity.window.decorView
+            val bitmap = Bitmap.createBitmap(window.width, window.height, Bitmap.Config.ARGB_8888)
+            window.draw(Canvas(bitmap))
+            // The icon is the header's first square, as tall as the header's avatar.
+            val pixel = bitmap.getPixel(header.left.toInt() + 4, header.center.y.toInt())
+            assertEquals(android.graphics.Color.RED, pixel)
+        }
     }
 
     @Test fun allConversationsJoinsTheSwitcherWhileAChannelHasNoWorkspace() {

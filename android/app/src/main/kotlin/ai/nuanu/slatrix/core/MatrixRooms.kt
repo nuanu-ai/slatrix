@@ -57,6 +57,7 @@ data class RoomSummary(
     val latest: LatestMessage? = null,
     val starred: Boolean = false,
     val isPrivate: Boolean = false,
+    val avatarUrl: String? = null,
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
@@ -68,6 +69,7 @@ data class SpaceSummary(
     val isTopLevel: Boolean = true,
     val initials: String = AvatarPlaceholder.initials(name),
     val colorIndex: Int = AvatarPlaceholder.colorIndex(name),
+    val avatarUrl: String? = null,
 )
 
 data class RoomListState(
