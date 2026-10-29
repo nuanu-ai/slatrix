@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
@@ -43,6 +44,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -135,9 +137,15 @@ fun ActivityScreen(items: List<MockActivity>, onThread: () -> Unit, onYou: () ->
 
 @Composable
 fun ChannelScreen(channel: MockChannel, messages: List<MockMessage>, draft: String, onDraft: (String) -> Unit, onSend: () -> Unit, onThread: () -> Unit, onBack: () -> Unit) {
+    val listState = rememberLazyListState()
+    var previousCount by remember(channel.id) { mutableStateOf(messages.size) }
+    LaunchedEffect(channel.id, messages.size) {
+        if (messages.size > previousCount) listState.scrollToItem(messages.size)
+        previousCount = messages.size
+    }
     Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas).imePadding()) {
         ScreenHeader(if (channel.direct) channel.name else "# ${channel.name}", onBack = onBack, subtitle = channel.topic)
-        LazyColumn(Modifier.weight(1f)) {
+        LazyColumn(Modifier.weight(1f), state = listState) {
             item {
                 Column(Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSection), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                     Text(if (channel.direct) channel.name else "# ${channel.name}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -152,7 +160,23 @@ fun ChannelScreen(channel: MockChannel, messages: List<MockMessage>, draft: Stri
 }
 
 @Composable
-fun ThreadScreen(parent: MockMessage, replies: List<MockMessage>, draft: String, onDraft: (String) -> Unit, onSend: () -> Unit, onBack: () -> Unit) {}
+fun ThreadScreen(parent: MockMessage, replies: List<MockMessage>, draft: String, onDraft: (String) -> Unit, onSend: () -> Unit, onBack: () -> Unit) {
+    val listState = rememberLazyListState()
+    var previousCount by remember(parent.id) { mutableStateOf(replies.size) }
+    LaunchedEffect(parent.id, replies.size) {
+        if (replies.size > previousCount) listState.scrollToItem(replies.size + 1)
+        previousCount = replies.size
+    }
+    Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas).imePadding()) {
+        ScreenHeader("Thread", onBack = onBack, subtitle = "# design")
+        LazyColumn(Modifier.weight(1f), state = listState) {
+            item { MessageRow(parent.copy(replyCount = 0), {}) }
+            item { DateDivider("${replies.size} replies") }
+            items(replies, key = { it.id }) { MessageRow(it, {}) }
+        }
+        Composer(draft, onDraft, onSend, "Reply…", "Send reply")
+    }
+}
 
 @Composable
 fun YouScreen(dark: Boolean, palette: SidebarPalette, onDarkToggle: () -> Unit, onPalette: (SidebarPalette) -> Unit, onBack: () -> Unit) {}
@@ -218,7 +242,7 @@ private fun MessageRow(message: MockMessage, onThread: () -> Unit) {
         Avatar(message.initials, message.colorIndex)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                Text(message.author, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(message.author, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(message.time, style = MaterialTheme.typography.labelSmall, color = SlatrixTheme.colors.textSecondary)
             }
             Text(message.body, style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textBody)

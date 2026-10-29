@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -44,6 +45,8 @@ fun SlatrixMockups(
     var palette by rememberSaveable { mutableStateOf(initialPalette) }
     var darkOverride by rememberSaveable { mutableStateOf<Int?>(null) }
     var drafts by rememberSaveable { mutableStateOf(mapOf<String, String>()) }
+    var sentByRoom by remember { mutableStateOf(mapOf<String, List<MockMessage>>()) }
+    var sentReplies by remember { mutableStateOf(emptyList<MockMessage>()) }
     val effectiveDark = darkOverride?.let { it == 1 } ?: dark
     val room = MockData.channels.firstOrNull { it.id == roomId } ?: MockData.conversations.first { it.id == roomId }.let {
         MockChannel(it.id, it.name, "Direct message", direct = true)
@@ -51,7 +54,10 @@ fun SlatrixMockups(
     val messages = if (room.direct) {
         val conversation = MockData.conversations.first { it.id == roomId }
         listOf(MockMessage("dm-${conversation.id}", conversation.name, conversation.initials, conversation.time, conversation.preview, conversation.colorIndex))
-    } else MockData.messages
+    } else MockData.messages.map { message ->
+        if (message.id == MockData.threadParent.id) message.copy(replyCount = MockData.replies.size + sentReplies.size) else message
+    }
+    val visibleMessages = messages + sentByRoom[roomId].orEmpty()
     val back: () -> Unit = { screen = if (screen == MockScreen.Thread) MockScreen.Channel else tab }
     BackHandler(enabled = screen !in rootScreens, onBack = back)
 
@@ -87,14 +93,29 @@ fun SlatrixMockups(
                                 MockScreen.Activity -> ActivityScreen(MockData.activity,
                                     onThread = { roomId = "design"; screen = MockScreen.Thread },
                                     onYou = { screen = MockScreen.You })
-                                MockScreen.Channel -> ChannelScreen(room, messages,
+                                MockScreen.Channel -> ChannelScreen(room, visibleMessages,
                                     draft = drafts["channel:$roomId"].orEmpty(),
                                     onDraft = { drafts = drafts + ("channel:$roomId" to it) },
-                                    onSend = {}, onThread = { screen = MockScreen.Thread }, onBack = back)
-                                MockScreen.Thread -> ThreadScreen(MockData.threadParent, MockData.replies,
+                                    onSend = {
+                                        val key = "channel:$roomId"
+                                        val text = drafts[key].orEmpty()
+                                        if (text.isNotBlank()) {
+                                            val sent = sentByRoom[roomId].orEmpty()
+                                            sentByRoom = sentByRoom + (roomId to (sent + ownMessage("sent-$roomId-${sent.size}", text)))
+                                            drafts = drafts - key
+                                        }
+                                    }, onThread = { screen = MockScreen.Thread }, onBack = back)
+                                MockScreen.Thread -> ThreadScreen(MockData.threadParent, MockData.replies + sentReplies,
                                     draft = drafts["thread:${MockData.threadParent.id}"].orEmpty(),
                                     onDraft = { drafts = drafts + ("thread:${MockData.threadParent.id}" to it) },
-                                    onSend = {}, onBack = back)
+                                    onSend = {
+                                        val key = "thread:${MockData.threadParent.id}"
+                                        val text = drafts[key].orEmpty()
+                                        if (text.isNotBlank()) {
+                                            sentReplies = sentReplies + ownMessage("local-reply-${sentReplies.size}", text)
+                                            drafts = drafts - key
+                                        }
+                                    }, onBack = back)
                                 MockScreen.You -> YouScreen(effectiveDark, palette,
                                     onDarkToggle = { darkOverride = if (effectiveDark) 0 else 1 },
                                     onPalette = { palette = it }, onBack = back)
@@ -137,3 +158,7 @@ private fun MockScreen.icon(): ImageVector = when (this) {
     MockScreen.Dms -> Icons.Outlined.ChatBubbleOutline
     else -> Icons.Outlined.NotificationsNone
 }
+
+private fun ownMessage(id: String, body: String) = MockMessage(
+    id, MockData.profile.name, MockData.profile.initials, "Just now", body,
+)
