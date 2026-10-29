@@ -75,6 +75,9 @@ struct ComposerSendTests {
             threadID: UUID())
     }
 
+    // capability: composer.send
+    // capability: message.reply
+    // capability: thread.reply
     @Test(
         "A sent message goes to its pane as one plain send or quoted reply, with no typing request",
         arguments: [false, true], [false, true])
@@ -87,6 +90,7 @@ struct ComposerSendTests {
         #expect(room.notices.all.isEmpty && service.errorMessage == nil)
     }
 
+    // capability: composer.attachments
     @Test(
         "An uploaded image carries its size as it displays, so every client reserves its shape before it loads",
         arguments: [(1, 160, 90), (6, 90, 160)])
@@ -112,6 +116,7 @@ struct ComposerSendTests {
         #expect(room.notices.all.isEmpty)
     }
 
+    // capability: composer.typing
     @Test("Typing is announced in the selected room")
     func typingInSelectedRoom() async {
         await service.setTyping(true, roomID: roomID, sessionID: session)

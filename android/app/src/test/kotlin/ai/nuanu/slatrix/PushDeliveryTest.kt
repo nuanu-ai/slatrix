@@ -28,6 +28,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35])
 class PushDeliveryTest {
+    // capability: notifications.alert
     @Test fun firebaseEventDeliveryOutlivesTheMessagingServiceCallback() {
         val application = ApplicationProvider.getApplicationContext<Application>()
         val workManager = try {
@@ -46,6 +47,7 @@ class PushDeliveryTest {
         assertTrue("FCM delivery must remain scheduled after the service callback ends", durableDelivery.isNotEmpty())
     }
 
+    // capability: notifications.open
     @Test fun onlyANotificationThisAppDeliveredCanOpenItsRoom() {
         val application = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)

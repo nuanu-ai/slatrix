@@ -129,6 +129,7 @@ struct RoomNotificationSettingsTests {
         }
     }
 
+    // capability: conversation.notifications
     @Test("An inherited setting shows the account default and what it resolves to, and opening it changes nothing")
     func inheritedSetting() async throws {
         let snapshot = try await load()
@@ -139,6 +140,7 @@ struct RoomNotificationSettingsTests {
         #expect(rules.writes.all.isEmpty)
     }
 
+    // capability: conversation.notifications
     @Test("An explicit rule stays explicit even when it matches the default, and a group asks for group rules")
     func explicitGroupSetting() async throws {
         rules.room = RoomNotificationSettings(mode: .allMessages, isDefault: false)
@@ -252,6 +254,7 @@ struct AccountNotificationDefaultsTests {
         }
     }
 
+    // capability: notifications.defaults
     @Test("Loading shows each category's default from the SDK rule for its encryption and size, and changes nothing")
     func loadsEachCategory() async throws {
         let snapshot = try await AccountNotificationDefaultsService.load(client: client, validate: {})

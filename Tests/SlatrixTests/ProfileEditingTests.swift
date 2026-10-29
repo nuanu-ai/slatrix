@@ -106,6 +106,7 @@ struct ProfileEditingTests {
         #expect(smallest.minY == square.minY)
     }
 
+    // capability: profile.edit-photo
     @Test("A new photo becomes yours once the server has it")
     func uploadPhoto() async throws {
         let folder = try TemporaryDirectory()
@@ -122,6 +123,7 @@ struct ProfileEditingTests {
         #expect(matrix.user?.avatarURL != nil)
     }
 
+    // capability: profile.edit-photo
     @Test("Removing your photo leaves your initials")
     func removePhoto() async throws {
         let client = ProfileClient()
@@ -164,6 +166,7 @@ struct ProfileEditingTests {
         #expect(matrix.user?.avatarURL == nil)
     }
 
+    // capability: profile.own
     @Test("Your own profile shows your latest name and photo, not a room's older copy")
     func ownProfileIsCurrent() {
         let me = ChatUser(id: "@ana:example.org", name: "Ana Lima")

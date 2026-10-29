@@ -19,6 +19,7 @@ struct ReleaseVersionTests {
         return (process.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 
+    // capability: app.updates
     @Test("A release tag becomes the bundle version", arguments: [("v1.2.3", "1.2.3\n"), ("v0.10.0", "0.10.0\n")])
     func releaseTag(tag: String, version: String) throws {
         let result = try run(tag)

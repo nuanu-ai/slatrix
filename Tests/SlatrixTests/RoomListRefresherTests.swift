@@ -186,6 +186,7 @@ private final class PostingPowers: RoomPowerLevels, @unchecked Sendable {
 }
 
 extension RoomListRefresherTests {
+    // capability: channel.read-only
     @Test("Whether you may post follows the room's power levels, and stays unknown without them")
     func postingPermission() async {
         let room = FakeRoom(roomInfo(id: "!news:example.org"))

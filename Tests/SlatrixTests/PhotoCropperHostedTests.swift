@@ -9,6 +9,7 @@ import Testing
 @Suite(
     .serialized, .tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
 struct PhotoCropperHostedTests {
+    // capability: profile.edit-photo
     @Test("Dragging the frame and a corner changes the crop, and Return saves it")
     func dragThenSave() async throws {
         _ = NSApplication.shared

@@ -92,6 +92,7 @@ class PushNotificationsTest {
         assertEquals("New message", fallback.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
 
+    // capability: notifications.alert
     @Test fun aPushForAnEventNobodyCanFindAlertsOnlyInAJoinedRoom() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)

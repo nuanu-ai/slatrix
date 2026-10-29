@@ -12,6 +12,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35])
 class WorkspacePreferencesTest {
+    // capability: home.workspace-switcher
     @Test fun aWorkspaceSelectionSurvivesReopeningAndBelongsToItsAccount() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val preferences = WorkspacePreferences(context, "@alex:example.org")

@@ -14,6 +14,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35])
 class AppearancePreferencesTest {
+    // capability: app.appearance
     @Test fun chosenAppearanceSurvivesOpeningSettingsAgain() {
         val context = RuntimeEnvironment.getApplication()
         val settings = AppearancePreferences(context)

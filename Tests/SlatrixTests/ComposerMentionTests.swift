@@ -7,6 +7,7 @@ import Testing
 /// The composer's editor without a window, so these run on every test pass.
 @MainActor
 struct ComposerMentionTests {
+    // capability: composer.mentions
     @Test("A mention chosen from the @ list sends as one link with the person's whole name")
     func chosenMentionSendsWhole() throws {
         var draft = ""

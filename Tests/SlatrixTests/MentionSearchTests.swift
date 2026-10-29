@@ -24,6 +24,7 @@ struct MentionSearchTests {
 
     struct Spec: Decodable { var cases: [Case] }
 
+    // capability: composer.mentions
     @Test("Shared case", arguments: try SharedSpec.decode("spec/mention-search.json", as: Spec.self).cases)
     func shared(spec: Case) {
         let found = MentionSearch.suggestions(

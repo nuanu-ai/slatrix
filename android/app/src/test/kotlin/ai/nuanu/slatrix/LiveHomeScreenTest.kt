@@ -76,6 +76,7 @@ class LiveHomeScreenTest {
         compose.onNode(hasSetTextAction()).assertTextContains("Person")
     }
 
+    // capability: home.dms
     @Test fun theDmsTabListsTheNewestConversationFirstWithItsLatestMessage() {
         val rooms = listOf(
             direct("!blake:example.org", "Blake", latest = LatestMessage("Shipped it", 2_000, own = true)),
@@ -100,6 +101,7 @@ class LiveHomeScreenTest {
         assertEquals(oneLetter, twoLetters, 0.5f)
     }
 
+    // capability: home.unread-badges
     @Test fun unreadRoomsAnnounceWhatTheirBadgeCounts() {
         val rooms = listOf(
             RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.Count("3"), "T", 0),
@@ -122,6 +124,7 @@ class LiveHomeScreenTest {
         compose.runOnIdle { assertTrue(openedYou) }
     }
 
+    // capability: auth.sign-out
     @Test fun youIsAPageWithPreferencesSignOutAndBack() {
         var preferences = false
         var signedOut = false
@@ -142,12 +145,14 @@ class LiveHomeScreenTest {
         compose.runOnIdle { assertTrue(back) }
     }
 
+    // capability: profile.own
     @Test fun youShowsTheNameOnTheAccountsProfile() {
         compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, {}) } }
         compose.onNodeWithText("Alex Doe").assertIsDisplayed()
         compose.onNodeWithText("@alex:example.org").assertIsDisplayed()
     }
 
+    // capability: home.conversations
     @Test fun aSavedWorkspaceShowsItsChannelsAndDirectMessagesTogether() {
         val channel = RoomSummary("!work:example.org", "Work channel", false, "", UnreadBadge.None, "W", 0)
         val sam = direct("!sam:example.org", "Sam")

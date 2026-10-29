@@ -45,6 +45,7 @@ class SessionStoreTest {
         assertThrows(IOException::class.java) { SessionStore(context).load() }
     }
 
+    // capability: auth.restore
     @Test fun encryptedSessionSurvivesReopening() {
         val session = storedSession()
         SessionStore(context).save(session)

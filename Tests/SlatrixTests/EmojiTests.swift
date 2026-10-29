@@ -6,6 +6,7 @@ import Testing
 struct EmojiTests {
     private func top(_ query: String) -> String? { EmojiCatalog.search(query).first?.value }
 
+    // capability: message.react.picker
     @Test("Search finds an emoji by any of Slack's shortcodes, with or without colons")
     func shortcodeSearch() {
         #expect(top(":+1:") == "👍")
@@ -77,6 +78,7 @@ struct EmojiTests {
         #expect(EmojiRecents.adding("🚀", to: ["👍"]) == ["🚀", "👍"])
     }
 
+    // capability: message.react.quick
     @Test("The toolbar offers the three most recent emoji, filled from Slack's defaults")
     func quickReactions() {
         #expect(EmojiRecents.quick(["🎉", "👍", "🔥", "🚀"]) == ["🎉", "👍", "🔥"])
@@ -86,6 +88,7 @@ struct EmojiTests {
         #expect(EmojiRecents.quick([]).count == 3)
     }
 
+    // capability: message.reactions.show
     @Test("A reaction's tooltip names who reacted, you first, and counts the rest")
     func reactionTooltip() {
         let names = ["@a:x": "Alice", "@b:x": "Bob", "@c:x": "Carol", "@d:x": "Dan", "@e:x": "Erin"]
@@ -101,6 +104,7 @@ struct EmojiTests {
         #expect(tooltip(["@zoe:example.org"]) == "zoe reacted with :+1:")
     }
 
+    // capability: message.thread-summary
     @Test("The replies bar says how long ago the last reply came")
     func lastReply() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)

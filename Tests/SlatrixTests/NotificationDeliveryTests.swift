@@ -81,6 +81,7 @@ private func invalidPayload(_ index: Int) -> [AnyHashable: Any] {
 
 @MainActor
 struct NotificationPayloadTests {
+    // capability: notifications.previews
     @Test("Without previews, a notification hides sender, conversation and text but keeps its route and sound")
     func hiddenPreview() throws {
         let original = try message()
@@ -91,6 +92,8 @@ struct NotificationPayloadTests {
         #expect(shown.title == original.title && shown.body == original.body)
     }
 
+    // capability: thread.from-notification
+    // capability: notifications.open
     @Test("A notification's route survives the round trip through the OS payload; an invite carries no event")
     func targetRoundTrip() throws {
         let event = try message().target
@@ -137,6 +140,7 @@ struct NotificationDeliveryTests {
         #expect(await eventually { transport.attempts.count == count })
     }
 
+    // capability: notifications.alert
     @Test("A permitted notification is shown with its exact route, text and sound, even if the account is re-selected")
     func delivers() async throws {
         let original = try message()
@@ -196,6 +200,7 @@ struct NotificationDeliveryTests {
         #expect(transport.attempts.isEmpty)
     }
 
+    // capability: notifications.permission
     @Test("Denied permission is reported for the current account and never submits")
     func deniedCurrent() async throws {
         let task = deliver(try message())

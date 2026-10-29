@@ -151,6 +151,7 @@ struct ComposerHostedTests {
         #expect(draft.text == html)
     }
 
+    // capability: composer.formatting
     @Test("Bold goes on a selection and off again, and at the caret applies to what is typed next")
     func toggles() throws {
         let draft = Draft()

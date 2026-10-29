@@ -35,6 +35,7 @@ struct AttachmentPreviewTests {
         #expect(service.cachedMediaImage(try #require(service.messages.first)) === image)
     }
 
+    // capability: message.file
     @Test("Previewing an attachment again reuses the downloaded file")
     func reusesDownload() async throws {
         show(fileEvent("$file", source: try encryptedSource()))

@@ -146,6 +146,7 @@ struct DesignSystemHostedTests {
             size: CGSize(width: 800, height: 600))
     }
 
+    // capability: message.react.picker
     @Test("The emoji picker opens ready to search; arrows move, Return picks and Esc closes")
     func emojiPickerKeyboard() async throws {
         let popovers = Popovers()

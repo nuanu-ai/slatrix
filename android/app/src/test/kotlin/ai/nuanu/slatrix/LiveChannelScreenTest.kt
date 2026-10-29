@@ -55,6 +55,7 @@ class LiveChannelScreenTest {
     @get:Rule val compose = createComposeRule()
     private val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
 
+    // capability: conversation.history
     @Test fun olderHistoryLoadsAsTheReaderNearsTheTop() {
         val many = (1..200).map { message("Message $it", minutes = it) }
         val state = mutableStateOf(ConversationState())
@@ -127,6 +128,7 @@ class LiveChannelScreenTest {
         compose.onNode(progress).assertExists()
     }
 
+    // capability: conversation.intro
     @Test fun theStartOfAChannelOrDirectMessageShowsItsIntro() {
         val state = mutableStateOf(ConversationState(listOf(message("Hello", minutes = 0)), loading = false))
         val current = mutableStateOf(room)
@@ -142,6 +144,7 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("This conversation is just between Mira Chen and you.").assertIsDisplayed()
     }
 
+    // capability: conversation.day-dividers
     @Test fun dayDividersReadTodayYesterdayOrTheDate() {
         fun noon(day: LocalDate) = day.atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val today = LocalDate.now()
@@ -161,6 +164,7 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Oct 23rd, 2023").assertIsDisplayed()
     }
 
+    // capability: conversation.grouping
     @Test fun aGroupedMessageDropsAvatarAndNameAndKeepsItsTimeInItsMenu() {
         val at = LocalDate.now().atTime(9, 41).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val rows = listOf(message("First", minutes = 0).copy(timestamp = at), message("Second", minutes = 0).copy(timestamp = at, grouped = true))
@@ -177,6 +181,8 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Today at 9:41", substring = true).assertIsDisplayed()
     }
 
+    // capability: message.retry-failed
+    // capability: message.copy-text
     @Test fun theMessageSheetCopiesTextAndRetriesOrDeletesAFailedMessage() {
         val failed = message("Lost on the way", minutes = 1, sender = "Jordan", state = MessageSendState.Failed)
             .copy(transactionId = "txn", canRetry = true)

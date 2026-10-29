@@ -49,6 +49,7 @@ class IdentityVerificationDeviceTest {
             verification.close()
         }
     }
+    // capability: verify.device
     @Test fun sasRequiresAnOwnerMatchAndSdkTrustBeforeUnlockingTheAccount() = runBlocking {
         val encryption = IdentityEncryption(VerificationState.UNVERIFIED)
         val controller = IdentityController()
@@ -79,6 +80,7 @@ class IdentityVerificationDeviceTest {
             verification.close()
         }
     }
+    // capability: verify.recovery-key
     @Test fun recoveryFailureKeepsTheSessionLockedAndCanRetryWithAnOwnerKey() = runBlocking<Unit> {
         val encryption = IdentityEncryption(VerificationState.UNVERIFIED)
         val verification = IdentityVerification(scope, IdentityClient(encryption))
