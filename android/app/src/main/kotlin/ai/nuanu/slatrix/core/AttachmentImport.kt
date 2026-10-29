@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
 
 /** A picked file, copied where the SDK can read it, with what its event says about it. */
 data class OutgoingAttachment(val path: String, val name: String, val mimeType: String, val size: Long,
-    val width: Int?, val height: Int?, val durationMillis: Long? = null)
+    val width: Int?, val height: Int?, val durationMillis: Long? = null, val poster: VideoPoster? = null)
 
 /** Copies what the system picker hands over into the app's cache, since its permission ends with the picker. */
 // The platform's ExifInterface reads a file's orientation correctly from API 24, the app's minimum.

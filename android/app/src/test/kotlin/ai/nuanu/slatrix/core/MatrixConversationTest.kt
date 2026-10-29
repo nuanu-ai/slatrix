@@ -378,7 +378,8 @@ class MatrixConversationTest {
         conversation.sendAttachments(listOf(
             { OutgoingAttachment("/cache/photo.png", "photo.png", "image/png", 2_048, 1200, 800) },
             { OutgoingAttachment("/cache/notes.pdf", "notes.pdf", "application/pdf", 4_096, null, null) },
-            { OutgoingAttachment("/cache/clip.mp4", "clip.mp4", "video/mp4", 8_192, 640, 360, durationMillis = 3_000) },
+            { OutgoingAttachment("/cache/clip.mp4", "clip.mp4", "video/mp4", 8_192, 640, 360, durationMillis = 3_000,
+                poster = VideoPoster("/cache/poster.jpg", 640, 360, 1_024)) },
         ))
         val (photo, image) = timeline.attachments.receive()
         assertEquals(UploadSource.File("/cache/photo.png"), photo.source)
@@ -387,8 +388,10 @@ class MatrixConversationTest {
         assertEquals(UploadSource.File("/cache/notes.pdf"), notes.source)
         assertEquals(FileInfo("application/pdf", 4_096u, null, null), (file as AttachmentKind.File).fileInfo)
         val (_, video) = timeline.attachments.receive()
-        assertEquals(VideoInfo(java.time.Duration.ofMillis(3_000), 360u, 640u, "video/mp4", 8_192u, null, null, null),
-            (video as AttachmentKind.Video).videoInfo)
+        // capability: composer.video
+        assertEquals(VideoInfo(java.time.Duration.ofMillis(3_000), 360u, 640u, "video/mp4", 8_192u,
+            ThumbnailInfo(360u, 640u, "image/jpeg", 1_024u), null, null), (video as AttachmentKind.Video).videoInfo)
+        assertEquals("The poster goes up with the video", UploadSource.File("/cache/poster.jpg"), video.thumbnailSource)
         conversation.close()
     }
 

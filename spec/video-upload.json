@@ -1,0 +1,68 @@
+{
+  "about": "What sending a video puts in its event, as Slack's videos carry: m.video, with the video's size as it is shown, its length, its type and bytes, and a poster: a JPEG of a frame near the start, a second in or halfway through a shorter clip, at most 800 pixels on its longer side and never enlarged. video is the file as read, its pixels before the rotation its track asks for; posterBytes is the encoded poster's size, which the encoder decides, or null when no frame could be read. posterFrame is when the poster is taken from and the size it is drawn at; sent is the event's msgtype, body and info.",
+  "cases": [
+    {
+      "name": "A landscape video sends its size, length, type and a poster",
+      "video": { "name": "clip.mp4", "mimetype": "video/mp4", "size": 8192000, "width": 1920, "height": 1080, "rotation": 0, "durationMillis": 12500 },
+      "posterBytes": 40960,
+      "posterFrame": { "atMillis": 1000, "width": 800, "height": 450 },
+      "sent": { "msgtype": "m.video", "body": "clip.mp4", "info": { "w": 1920, "h": 1080, "duration": 12500, "mimetype": "video/mp4", "size": 8192000,
+        "thumbnail_info": { "w": 800, "h": 450, "mimetype": "image/jpeg", "size": 40960 } } }
+    },
+    {
+      "name": "A phone video its track turns a quarter sends its upright size",
+      "video": { "name": "IMG_0042.MOV", "mimetype": "video/quicktime", "size": 30000000, "width": 1920, "height": 1080, "rotation": 90, "durationMillis": 4000 },
+      "posterBytes": 52000,
+      "posterFrame": { "atMillis": 1000, "width": 450, "height": 800 },
+      "sent": { "msgtype": "m.video", "body": "IMG_0042.MOV", "info": { "w": 1080, "h": 1920, "duration": 4000, "mimetype": "video/quicktime", "size": 30000000,
+        "thumbnail_info": { "w": 450, "h": 800, "mimetype": "image/jpeg", "size": 52000 } } }
+    },
+    {
+      "name": "Turned upside down, it keeps its shape",
+      "video": { "name": "flip.mp4", "mimetype": "video/mp4", "size": 900000, "width": 1280, "height": 720, "rotation": 180, "durationMillis": 3000 },
+      "posterBytes": 30000,
+      "posterFrame": { "atMillis": 1000, "width": 800, "height": 450 },
+      "sent": { "msgtype": "m.video", "body": "flip.mp4", "info": { "w": 1280, "h": 720, "duration": 3000, "mimetype": "video/mp4", "size": 900000,
+        "thumbnail_info": { "w": 800, "h": 450, "mimetype": "image/jpeg", "size": 30000 } } }
+    },
+    {
+      "name": "A short clip takes its poster from halfway",
+      "video": { "name": "blink.mp4", "mimetype": "video/mp4", "size": 120000, "width": 1280, "height": 720, "rotation": 0, "durationMillis": 1200 },
+      "posterBytes": 25000,
+      "posterFrame": { "atMillis": 600, "width": 800, "height": 450 },
+      "sent": { "msgtype": "m.video", "body": "blink.mp4", "info": { "w": 1280, "h": 720, "duration": 1200, "mimetype": "video/mp4", "size": 120000,
+        "thumbnail_info": { "w": 800, "h": 450, "mimetype": "image/jpeg", "size": 25000 } } }
+    },
+    {
+      "name": "A small video's poster keeps its size",
+      "video": { "name": "small.mp4", "mimetype": "video/mp4", "size": 300000, "width": 640, "height": 360, "rotation": 0, "durationMillis": 8000 },
+      "posterBytes": 18000,
+      "posterFrame": { "atMillis": 1000, "width": 640, "height": 360 },
+      "sent": { "msgtype": "m.video", "body": "small.mp4", "info": { "w": 640, "h": 360, "duration": 8000, "mimetype": "video/mp4", "size": 300000,
+        "thumbnail_info": { "w": 640, "h": 360, "mimetype": "image/jpeg", "size": 18000 } } }
+    },
+    {
+      "name": "An odd shape rounds its poster to whole pixels",
+      "video": { "name": "wide.mp4", "mimetype": "video/mp4", "size": 500000, "width": 1000, "height": 333, "rotation": 0, "durationMillis": 5000 },
+      "posterBytes": 21000,
+      "posterFrame": { "atMillis": 1000, "width": 800, "height": 266 },
+      "sent": { "msgtype": "m.video", "body": "wide.mp4", "info": { "w": 1000, "h": 333, "duration": 5000, "mimetype": "video/mp4", "size": 500000,
+        "thumbnail_info": { "w": 800, "h": 266, "mimetype": "image/jpeg", "size": 21000 } } }
+    },
+    {
+      "name": "A video whose length isn't known leaves duration out and takes its poster from the start",
+      "video": { "name": "stream.webm", "mimetype": "video/webm", "size": 700000, "width": 800, "height": 800, "rotation": 0, "durationMillis": null },
+      "posterBytes": 33000,
+      "posterFrame": { "atMillis": 0, "width": 800, "height": 800 },
+      "sent": { "msgtype": "m.video", "body": "stream.webm", "info": { "w": 800, "h": 800, "mimetype": "video/webm", "size": 700000,
+        "thumbnail_info": { "w": 800, "h": 800, "mimetype": "image/jpeg", "size": 33000 } } }
+    },
+    {
+      "name": "A video no frame could be read from goes without a poster",
+      "video": { "name": "odd.mp4", "mimetype": "video/mp4", "size": 400000, "width": 1920, "height": 1080, "rotation": 0, "durationMillis": 2000 },
+      "posterBytes": null,
+      "posterFrame": { "atMillis": 1000, "width": 800, "height": 450 },
+      "sent": { "msgtype": "m.video", "body": "odd.mp4", "info": { "w": 1920, "h": 1080, "duration": 2000, "mimetype": "video/mp4", "size": 400000 } }
+    }
+  ]
+}
