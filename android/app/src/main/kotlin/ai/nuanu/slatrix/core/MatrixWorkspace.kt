@@ -67,9 +67,10 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                 currentCoroutineContext().ensureActive()
                 if (requested == null || generation.get() != token) continue
                 try {
-                    // Kept only while it shows the newest; a conversation opened somewhere in particular opens fresh there.
+                    // Kept only while nothing is new: a conversation opened somewhere in particular, or unread, opens fresh,
+                    // and one marked unread on its last visit holds its reads back.
                     val kept = recent.remove(requested.room.id)?.let { (conversation, room) ->
-                        if (requested.at == null && requested.threadRoot == null) conversation to room
+                        if (requested.at == null && requested.threadRoot == null && requested.room.unread == UnreadBadge.None) conversation to room
                         else { closeKept(conversation, room); null }
                     }
                     conversationRoom = kept?.second ?: checkNotNull(client.getRoom(requested.room.id))
