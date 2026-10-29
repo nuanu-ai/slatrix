@@ -80,6 +80,7 @@ data class ConversationMessage(
     val queuePaused: Boolean = false,
     /** Your own text message, which you can edit. */
     val editable: Boolean = false,
+    val edited: Boolean = false,
 ) : ConversationRow
 
 data class ConversationState(
