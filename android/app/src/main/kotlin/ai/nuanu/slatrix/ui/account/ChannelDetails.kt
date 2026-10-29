@@ -74,7 +74,7 @@ private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeopl
  */
 @Composable
 fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetailsActions, onLeft: () -> Unit,
-    onOpenMessage: (eventId: String) -> Unit, onBack: () -> Unit) {
+    onOpenMessage: (eventId: String) -> Unit, onPerson: (userId: String) -> Unit = {}, onBack: () -> Unit) {
     var page by rememberSaveable { mutableStateOf(DetailsPage.Details) }
     // Where Add people goes back to: the page it was opened from.
     var opener by rememberSaveable { mutableStateOf(DetailsPage.Details) }

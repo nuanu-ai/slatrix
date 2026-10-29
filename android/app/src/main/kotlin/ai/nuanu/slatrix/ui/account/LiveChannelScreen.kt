@@ -78,7 +78,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Opens the conversation's details, as a tap on Slack's header pill does. */
     onOpenDetails: () -> Unit = {},
     /** Who else is typing, by name. */
-    typing: List<String> = emptyList()) {
+    typing: List<String> = emptyList(),
+    /** Opens someone's profile, from a sender's name or picture or a mention. */
+    onPerson: (userId: String) -> Unit = {}) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
