@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -114,7 +115,7 @@ class MatrixWorkspaceTest {
     }
 
     // capability: composer.drafts
-    @Test fun navigationRestoresEachRoomsDraftAndBackReleasesItsSdkResources() = runTest {
+    @Test fun navigationRestoresEachRoomsDraftAndReleasesAllButTheKeptTimelines() = runTest {
         val client = WorkspaceClient()
         val workspace = MatrixWorkspace(backgroundScope, client)
         val alpha = workspaceRoom("!alpha:example.org", "Alpha")
@@ -148,7 +149,8 @@ class MatrixWorkspaceTest {
         assertSame("Keep the channel mounted until its draft is saved", beforeBack, workspace.selected.value)
         runCurrent()
         assertNull(workspace.selected.value)
-        assertEquals(true, client.handles.all { it.uniffiIsDestroyed })
+        assertEquals("Only Alpha's and Beta's timelines stay open, kept for coming back", 2,
+            client.handles.count { !it.uniffiIsDestroyed })
 
         workspace.open(alpha)
         runCurrent()
@@ -232,6 +234,32 @@ class MatrixWorkspaceTest {
         assertNotNull(workspace.selected.first { it?.conversation != null }?.typing)
         workspace.open(alpha, threadRoot = "\$root")
         assertNull(workspace.selected.first { it?.threadRoot != null && it.conversation != null }?.typing)
+        workspace.close()
+    }
+
+    // capability: conversation.keep-position
+    @Test fun aConversationLeftStaysOpenForComingBackToUntilNewerOnesPushItOutOrItHasSomethingNew() = runTest {
+        val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
+        val rooms = (1..6).map { workspaceRoom("!r$it:example.org", "R$it") }
+        suspend fun visit(room: RoomSummary): MatrixConversation? {
+            workspace.open(room)
+            return workspace.selected.first { it?.room?.id == room.id && it.conversation != null }?.conversation
+        }
+
+        val first = visit(rooms[0])
+        workspace.back()
+        runCurrent()
+        assertSame("Back to Home and in again finds the same timeline", first, visit(rooms[0]))
+        val kept = (1..5).map { visit(rooms[it]) }
+        assertNotSame("Four newer ones pushed it out", first, visit(rooms[0]))
+        assertSame(kept[4], visit(rooms[5]))
+        workspace.back()
+        runCurrent()
+        val reopened = visit(rooms[5].copy(resumeAt = "\$read"))
+        assertNotSame("Unread messages open fresh, at the New line", kept[4], reopened)
+        workspace.back()
+        runCurrent()
+        assertNotSame("So does one marked unread", reopened, visit(rooms[5].copy(unread = UnreadBadge.Bold)))
         workspace.close()
     }
 }

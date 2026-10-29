@@ -328,7 +328,7 @@ class LiveHomeScreenTest {
         var signedOut = false
         var back = false
         compose.setContent {
-            SlatrixTheme { LiveYouScreen("@alex:example.org", { null }, { preferences = true }, { signedOut = true }, { back = true }) }
+            SlatrixTheme { LiveYouScreen("@alex:example.org", { null }, { preferences = true }, { signedOut = true }, onBack = { back = true }) }
         }
         compose.onNodeWithText("@alex:example.org").assertIsDisplayed()
         compose.onNodeWithText("Preferences").performClick()
@@ -345,7 +345,7 @@ class LiveHomeScreenTest {
 
     // capability: profile.own
     @Test fun youShowsTheNameOnTheAccountsProfile() {
-        compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, {}) } }
+        compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, onBack = {}) } }
         compose.onNodeWithText("Alex Doe").assertIsDisplayed()
         compose.onNodeWithText("@alex:example.org").assertIsDisplayed()
     }

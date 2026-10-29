@@ -1,0 +1,52 @@
+package ai.nuanu.slatrix
+
+import ai.nuanu.slatrix.core.RoomListState
+import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.UnreadBadge
+import ai.nuanu.slatrix.ui.account.LiveHomeScreen
+import ai.nuanu.slatrix.ui.account.LocalOffline
+import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import android.app.Application
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onRoot
+import com.github.takahirom.roborazzi.captureRoboImage
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.ParameterizedRobolectricTestRunner
+import org.robolectric.ParameterizedRobolectricTestRunner.Parameters
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+
+/** Home while offline, at the size of the Slack reference captures. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(application = Application::class, sdk = [35], qualifiers = "w411dp-h914dp-420dpi")
+class OfflineBannerScreenshots(private val dark: Boolean) {
+    @get:Rule val compose = createComposeRule()
+
+    @Test fun render() {
+        val rooms = listOf(
+            RoomSummary("!design:example.org", "design", false, "", UnreadBadge.Count("1"), "D", 0),
+            RoomSummary("!general:example.org", "general", false, "", UnreadBadge.None, "G", 2),
+            RoomSummary("!wm:example.org", "Wanda Moss", true, "", UnreadBadge.None, "WM", 1),
+        )
+        compose.setContent {
+            SlatrixTheme(dark = dark) {
+                CompositionLocalProvider(LocalOffline provides true) {
+                    LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {})
+                }
+            }
+        }
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("You’re offline", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitForIdle()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/Offline-${if (dark) "dark" else "light"}.png")
+    }
+
+    companion object {
+        @JvmStatic @Parameters(name = "dark={0}")
+        fun cases(): List<Array<Any>> = listOf(arrayOf(false), arrayOf(true))
+    }
+}

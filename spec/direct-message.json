@@ -1,0 +1,40 @@
+{
+  "about": "Which existing direct message Message reuses for a person. A direct message is reused only while its active members, joined or invited, are exactly you, joined, and that person; anyone else in it, or you only invited, means a new one. me is you and target the person; each case lists the room's members and whether it is reused.",
+  "me": "@me:example.org",
+  "target": "@alice:example.org",
+  "reuse": [
+    {
+      "name": "You and the person, still invited",
+      "members": [{ "user": "@me:example.org", "membership": "join" }, { "user": "@alice:example.org", "membership": "invite" }],
+      "expected": true
+    },
+    {
+      "name": "Someone who left doesn't count",
+      "members": [
+        { "user": "@me:example.org", "membership": "join" },
+        { "user": "@alice:example.org", "membership": "join" },
+        { "user": "@sam:example.org", "membership": "leave" }
+      ],
+      "expected": true
+    },
+    {
+      "name": "A third member, even a bot, makes it a group",
+      "members": [
+        { "user": "@me:example.org", "membership": "join" },
+        { "user": "@alice:example.org", "membership": "join" },
+        { "user": "@bot:example.org", "membership": "join" }
+      ],
+      "expected": false
+    },
+    {
+      "name": "You only invited isn't yours yet",
+      "members": [{ "user": "@me:example.org", "membership": "invite" }, { "user": "@alice:example.org", "membership": "join" }],
+      "expected": false
+    },
+    {
+      "name": "The person left",
+      "members": [{ "user": "@me:example.org", "membership": "join" }, { "user": "@alice:example.org", "membership": "leave" }],
+      "expected": false
+    }
+  ]
+}

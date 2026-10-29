@@ -2,10 +2,10 @@ name: Android
 
 on:
   pull_request:
-    paths: [android/**, design/**, spec/**, scripts/build-sdk.sh, Support/MatrixSDK/**, .github/workflows/android.yml]
+    paths: [android/**, design/**, spec/**, scripts/build-sdk.sh, scripts/settle-android-emulator.sh, Support/MatrixSDK/**, .github/workflows/android.yml]
   push:
     branches: [main]
-    paths: [android/**, design/**, spec/**, scripts/build-sdk.sh, Support/MatrixSDK/**, .github/workflows/android.yml]
+    paths: [android/**, design/**, spec/**, scripts/build-sdk.sh, scripts/settle-android-emulator.sh, Support/MatrixSDK/**, .github/workflows/android.yml]
   workflow_dispatch:
 
 permissions:
@@ -74,10 +74,8 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          # A cold emulator often shows "System UI isn't responding", which takes the window the device tests drive.
           script: |
-            adb shell settings put global hide_error_dialogs 1
-            adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS
+            scripts/settle-android-emulator.sh
             ./android/gradlew -p android :app:connectedDebugAndroidTest --console=plain
       - name: Upload Android results
         if: always()

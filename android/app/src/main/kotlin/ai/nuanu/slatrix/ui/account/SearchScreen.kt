@@ -4,6 +4,8 @@ import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.ConversationSearch
 import ai.nuanu.slatrix.core.MessageSearchQuery
 import ai.nuanu.slatrix.core.MessageSearchState
+import ai.nuanu.slatrix.core.PeopleSearchState
+import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.core.RecentSearches
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SearchHit
@@ -67,6 +69,7 @@ import androidx.compose.ui.text.withStyle
 @Composable
 fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchState, onSearch: (MessageSearchQuery?) -> Unit,
     onMore: () -> Unit, onMessage: (SearchHit) -> Unit, recents: List<String> = emptyList(), onSearched: (String) -> Unit = {},
+    people: PeopleSearchState = PeopleSearchState(), onPeopleQuery: (String) -> Unit = {}, onPerson: (Person) -> Unit = {},
     onRoom: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     var submitted by rememberSaveable { mutableStateOf(false) }
@@ -75,7 +78,11 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
     val focusManager = LocalFocusManager.current
     // Coming back to results leaves the keyboard down, so it doesn't cover them; after the process was gone, it asks again.
     LaunchedEffect(Unit) {
-        if (!submitted) { focus.requestFocus(); keyboard?.show() }
+        if (!submitted) {
+            focus.requestFocus()
+            keyboard?.show()
+            if (text.isNotBlank()) onPeopleQuery(text)
+        }
         else if (messages.query == null) onSearch(MessageSearchQuery.parse(text, rooms, me))
     }
     val submit = {
@@ -91,10 +98,11 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
         SearchField(text, { value ->
             text = value
             if (submitted) { submitted = false; onSearch(null) }
+            onPeopleQuery(value)
         }, submit, Modifier.focusRequester(focus))
         when {
             submitted -> MessageResults(text.trim(), rooms, messages, onMore, onMessage)
-            text.isNotBlank() -> Suggestions(text, rooms, RecentSearches.offered(text, recents), submit, searchRecent, onRoom)
+            text.isNotBlank() -> Suggestions(text, rooms, RecentSearches.offered(text, recents), people.people, submit, searchRecent, onPerson, onRoom)
             else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = UiMetrics.GapSmall)) {
                 val offered = RecentSearches.offered(text, recents)
                 if (offered.isNotEmpty()) item { SearchSection("Recent searches") }
@@ -133,10 +141,12 @@ internal fun SearchField(text: String, onText: (String) -> Unit, onSubmit: () ->
 }
 
 @Composable
-private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<String>, onSubmit: () -> Unit, onRecent: (String) -> Unit,
-    onRoom: (String) -> Unit) {
+private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<String>, directory: List<Person>, onSubmit: () -> Unit,
+    onRecent: (String) -> Unit, onPerson: (Person) -> Unit, onRoom: (String) -> Unit) {
     val channels = remember(text, rooms) { ConversationSearch.results(rooms.filterNot { it.direct }, text).take(SuggestionCount) }
     val people = remember(text, rooms) { ConversationSearch.results(rooms.filter { it.direct }, text).take(SuggestionCount) }
+    // Then the server's directory.
+    val others = remember(directory) { directory.take(SuggestionCount) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = UiMetrics.GapSmall)) {
         item {
             SearchRow(onSubmit) {
@@ -158,14 +168,24 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<St
                 }
             }
         }
-        if (people.isNotEmpty()) {
-            item { SearchSection("People") }
-            items(people, key = { it.id }) { room ->
-                SearchRow({ onRoom(room.id) }) {
-                    LiveAvatar(room.initials, room.colorIndex, UiMetrics.CompactAvatar, room.avatarUrl)
-                    Spacer(Modifier.width(UiMetrics.GapMedium))
-                    RowTitle(room.name)
-                }
+        if (people.isNotEmpty() || others.isNotEmpty()) item { SearchSection("People") }
+        items(people, key = { it.id }) { room ->
+            SearchRow({ onRoom(room.id) }) {
+                LiveAvatar(room.initials, room.colorIndex, UiMetrics.CompactAvatar, room.avatarUrl)
+                Spacer(Modifier.width(UiMetrics.GapMedium))
+                RowTitle(room.name)
+            }
+        }
+        items(others, key = { "person ${it.id}" }) { person ->
+            SearchRow({ onPerson(person) }) {
+                LiveAvatar(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), UiMetrics.CompactAvatar, person.avatarUrl)
+                Spacer(Modifier.width(UiMetrics.GapMedium))
+                // The Matrix ID tells namesakes apart, and someone you have a conversation with from their profile.
+                Text(buildAnnotatedString {
+                    append(person.name)
+                    withStyle(SpanStyle(color = SlatrixTheme.colors.textSecondary)) { append("  ${person.id}") }
+                }, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textBody, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
             }
         }
     }

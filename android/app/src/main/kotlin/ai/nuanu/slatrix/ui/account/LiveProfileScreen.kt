@@ -2,6 +2,12 @@ package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
+import ai.nuanu.slatrix.ui.designsystem.Motion
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.graphicsLayer
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -38,7 +44,7 @@ import kotlinx.coroutines.CancellationException
  */
 @Composable
 fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
-    onBack: () -> Unit, avatarUrl: String? = null) {
+    onViewProfile: (() -> Unit)? = null, onBack: () -> Unit, avatarUrl: String? = null) {
     val colors = SlatrixTheme.colors
     val localpart = userId.removePrefix("@").substringBefore(':')
     val name by produceState<String?>(null, userId) {
@@ -65,6 +71,13 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
                     Text(userId, style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
                 }
             }
+            onViewProfile?.let { view ->
+                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button, onClick = view)
+                    .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(SlackIcons.Person, null, Modifier.size(UiMetrics.Icon))
+                    Text("View profile", style = MaterialTheme.typography.bodyLarge)
+                }
+            }
             Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button, onClick = onPreferences)
                 .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
                 Icon(SlackIcons.Preferences, null, Modifier.size(UiMetrics.Icon))
@@ -79,11 +92,27 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
     }
 }
 
-/** A pushed page: a plain bar with Back, its title and maybe an action such as Save, then its rows. */
+/** True where a page shows again because the one over it went back, which is instant. */
+internal val LocalReturning = compositionLocalOf { false }
+
+/**
+ * A pushed page: a plain bar with Back, its title and maybe an action such as Save, then its rows. It eases in from the
+ * side, as Slack's pages do, once; going back to it, or turning the phone, shows it at once.
+ */
 @Composable
 internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable () -> Unit = {}, content: LazyListScope.() -> Unit) {
     BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas).navigationBarsPadding().imePadding()) {
+    val returning = LocalReturning.current
+    var entered by rememberSaveable { mutableStateOf(returning) }
+    val shown = remember { Animatable(if (entered) 1f else 0f) }
+    LaunchedEffect(shown) {
+        shown.animateTo(1f, Motion.pane())
+        entered = true
+    }
+    Column(Modifier.fillMaxSize().graphicsLayer {
+        alpha = shown.value
+        translationX = (1 - shown.value) * Motion.PushDistance * size.width
+    }.background(SlatrixTheme.colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack, modifier = Modifier.size(UiMetrics.Touch)) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")

@@ -1,0 +1,19 @@
+{
+  "about": "The square you crop a profile photo to, in the photo's pixels from its top-left; rectangles are [x, y, width, height] and sizes [width, height]. centered: the frame a photo opens with, the largest square in the middle. moved: the frame dragged by an offset, stopping at the photo's edges. resized: one corner dragged by an offset while the opposite corner stays put; the frame stays square and inside the photo, and never shrinks below a quarter of the photo's short side.",
+  "centered": [
+    { "name": "A wide photo crops its middle", "photo": [300, 200], "expected": [50, 0, 200, 200] },
+    { "name": "A tall photo crops its middle", "photo": [200, 300], "expected": [0, 50, 200, 200] }
+  ],
+  "moved": [
+    { "name": "A drag inside the photo moves the frame as far", "photo": [400, 300], "square": [100, 100, 100, 100], "by": [20, -30], "expected": [120, 70, 100, 100] },
+    { "name": "A drag past the top-right stops at its edges", "photo": [400, 300], "square": [100, 100, 100, 100], "by": [900, -900], "expected": [300, 0, 100, 100] },
+    { "name": "A drag past the bottom-left stops at its edges", "photo": [400, 300], "square": [100, 100, 100, 100], "by": [-900, 900], "expected": [0, 200, 100, 100] }
+  ],
+  "resized": [
+    { "name": "The top-left corner grows the frame around the bottom-right", "photo": [400, 300], "square": [100, 100, 100, 100], "corner": "topLeft", "by": [-30, -30], "expected": [70, 70, 130, 130] },
+    { "name": "Growing stops where the photo ends", "photo": [400, 300], "square": [100, 100, 100, 100], "corner": "bottomRight", "by": [500, 20], "expected": [100, 100, 200, 200] },
+    { "name": "The top-right corner grows the frame around the bottom-left", "photo": [400, 300], "square": [100, 100, 100, 100], "corner": "topRight", "by": [20, -20], "expected": [100, 80, 120, 120] },
+    { "name": "Shrinking stops at a quarter of the short side", "photo": [400, 300], "square": [100, 100, 100, 100], "corner": "bottomLeft", "by": [900, -900], "expected": [125, 100, 75, 75] },
+    { "name": "The smallest frame shrinks no further", "photo": [400, 300], "square": [125, 100, 75, 75], "corner": "bottomLeft", "by": [50, -50], "expected": [125, 100, 75, 75] }
+  ]
+}
