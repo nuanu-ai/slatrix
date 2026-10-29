@@ -32,10 +32,11 @@ class MatrixComposerTest {
         val room = ComposerRoom()
         val composer = MatrixComposer(backgroundScope, room) { true }
         composer.state.first { !it.loading }
-        composer.edit("H")
-        composer.edit("He")
-        runCurrent()
-        assertNull("Each keystroke must not write the encrypted store", room.draft)
+        for (typed in listOf("H", "He", "Hel", "Hell")) {
+            composer.edit(typed)
+            advanceTimeBy(300)
+            assertNull("Typing without a pause must not write the encrypted store", room.draft)
+        }
         composer.edit("Hello")
         advanceTimeBy(1_000)
         assertEquals("Hello", room.draft?.plainText)
