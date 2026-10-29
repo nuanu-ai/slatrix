@@ -81,7 +81,10 @@ data class ConversationMessage(
     /** Your own text message, which you can edit. */
     val editable: Boolean = false,
     val edited: Boolean = false,
-) : ConversationRow
+) : ConversationRow {
+    /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
+    val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
+}
 
 data class ConversationState(
     val rows: List<ConversationRow> = emptyList(),
@@ -576,6 +579,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             queuePaused = failure?.isRecoverable == true,
             // An edit goes out as text, so only a text message keeps its kind.
             editable = event.isEditable && kind == MessageKind.Text,
-        )
+            edited = (content.kind as? MsgLikeKind.Message)?.content?.isEdited == true,
+        ).also { it.runs }
     }
 }

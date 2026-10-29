@@ -6,7 +6,7 @@ import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class MessageFormatTest {
+class MessageBodyRendererTest {
     // capability: message.rich-text
     @Test fun `a message's text shows as every shared case says`() {
         val spec = JsonParser.parseString(File(System.getProperty("slatrix.root"), "spec/message-format.json").readText()).asJsonObject
@@ -14,7 +14,7 @@ class MessageFormatTest {
             val case = item.asJsonObject
             val expected = case["runs"].asJsonArray.map { expectedRun(it.asJsonObject) }
             val html = case["html"].takeUnless { it.isJsonNull }?.asString
-            assertEquals(case["name"].asString, expected, MessageFormat.render(case["body"].asString, html))
+            assertEquals(case["name"].asString, expected, MessageBodyRenderer.render(case["body"].asString, html))
         }
     }
 
