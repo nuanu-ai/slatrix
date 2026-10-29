@@ -280,7 +280,9 @@ final class RoomListRefresher {
                 isMarkedUnread: info.isMarkedUnread, mentions: Int(info.numUnreadMentions),
                 favorite: info.isFavourite, muted: info.cachedUserDefinedNotificationMode == .mute,
                 memberCount: Int(info.activeMembersCount), spaceIDs: ancestors.sorted(),
-                membership: info.membership == .invited ? "invite" : "join", avatarURL: info.avatarUrl,
+                membership: info.membership == .invited ? "invite" : "join",
+                // A direct message without a picture of its own shows the other person's.
+                avatarURL: info.avatarUrl ?? (info.isDirect && info.heroes.count == 1 ? info.heroes[0].avatarUrl : nil),
                 pinnedEventIDs: info.pinnedEventIds, canPinMessages: info.powerLevels?.canOwnUserPinUnpin(),
                 fullyReadEventID: info.fullyReadEventId, isSpace: info.isSpace,
                 directParentSpaceIDs: directParents.sorted(), canInvite: info.powerLevels?.canOwnUserInvite(),
