@@ -75,6 +75,16 @@ class MessageActionSheetTest {
         compose.runOnIdle { assertEquals(listOf("Ship it" to "👍"), reactions) }
     }
 
+    // capability: conversation.mark-unread
+    @Test fun markUnreadMarksTheConversationUnreadFromAMessage() {
+        var marked = false
+        show(MessageActions(onMarkUnread = { marked = true }))
+        open("Ship it")
+        compose.onNodeWithText("Mark unread").performClick()
+        compose.runOnIdle { assertTrue(marked) }
+        compose.onNodeWithText("Mark unread").assertDoesNotExist()
+    }
+
     // capability: message.forward
     @Test fun forwardSendsTheMessageOnToChooseWhere() {
         val forwarded = mutableListOf<String>()
