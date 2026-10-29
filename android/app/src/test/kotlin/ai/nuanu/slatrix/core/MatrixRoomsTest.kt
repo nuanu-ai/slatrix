@@ -297,14 +297,12 @@ class MatrixRoomsTest {
         val sync = RoomsSync()
         client.services.trySend(sync)
         val rooms = MatrixRooms(backgroundScope, client)
-        sync.started.await()
-        runCurrent()
-        client.sendQueuesEnabled = false
+        client.sendQueuesEnabled.first { it }
+        client.sendQueuesEnabled.value = false
 
         sync.emitState(SyncServiceState.OFFLINE)
         sync.emitState(SyncServiceState.RUNNING)
-        runCurrent()
-        assertTrue(client.sendQueuesEnabled)
+        client.sendQueuesEnabled.first { it }
         rooms.close()
     }
 
@@ -317,11 +315,12 @@ class MatrixRoomsTest {
 
         assertSame(NotificationStatus.EventNotFound, rooms.notification("!team:example.org", "\$event"))
         assertSame(sync, (client.notificationSetup as NotificationProcessSetup.SingleProcess).syncService)
-        assertFalse(sync.started.isCompleted)
-        foreground.value = true
-        sync.started.await()
-        foreground.value = false
         sync.stopped.await()
+        assertFalse("A hidden app keeps its sync stopped", sync.running.value)
+        foreground.value = true
+        sync.running.first { it }
+        foreground.value = false
+        sync.running.first { !it }
         rooms.close()
     }
 }
@@ -338,8 +337,8 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
             override suspend fun getNotification(roomId: String, eventId: String): NotificationStatus = lookup(roomId, eventId)
         }
     }
-    var sendQueuesEnabled = false
-    override suspend fun enableAllSendQueues(enable: Boolean) { sendQueuesEnabled = enable }
+    val sendQueuesEnabled = MutableStateFlow(false)
+    override suspend fun enableAllSendQueues(enable: Boolean) { sendQueuesEnabled.value = enable }
     var spaces: SpaceService = RoomsSpaces()
     override suspend fun spaceService(): SpaceService = spaces
     val services = Channel<SyncService>(Channel.UNLIMITED)
@@ -395,11 +394,16 @@ private class RoomsSync : SyncService(NoHandle) {
         stateListener = listener
         return RoomsHandle()
     }
+    val running = MutableStateFlow(false)
     override suspend fun start() {
         started.complete(Unit)
+        running.value = true
         emitState(SyncServiceState.RUNNING)
     }
-    override suspend fun stop() { stopped.complete(Unit) }
+    override suspend fun stop() {
+        running.value = false
+        stopped.complete(Unit)
+    }
     fun emitState(state: SyncServiceState) { stateListener?.onUpdate(state) }
     fun emitEntries(updates: List<RoomListEntriesUpdate>) {
         if (activeFilter) entriesListener?.onUpdate(updates)
