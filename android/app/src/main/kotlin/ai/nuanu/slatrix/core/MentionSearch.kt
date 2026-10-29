@@ -64,8 +64,16 @@ data class ComposerMention(val start: Int, val end: Int, val userId: String)
 /** The pills after the text went from [old] to [new]; a pill the change touches turns back into plain text. */
 internal fun List<ComposerMention>.after(old: String, new: String): List<ComposerMention> {
     if (isEmpty()) return this
-    val prefix = old.commonPrefixWith(new).length
-    val changedEnd = old.length - old.substring(prefix).commonSuffixWith(new.substring(prefix)).length
+    var prefix = old.commonPrefixWith(new).length
+    var changedEnd = old.length - old.substring(prefix).commonSuffixWith(new.substring(prefix)).length
+    // Typing a character a pill starts with, right before it, reads as typed inside it; slide the insertion out.
+    var inserted = if (changedEnd == prefix) new.substring(prefix, prefix + new.length - old.length) else ""
+    while (changedEnd == prefix && inserted.isNotEmpty() && prefix > 0 && old[prefix - 1] == inserted.last() &&
+        any { it.start < prefix && prefix < it.end }) {
+        inserted = old[prefix - 1] + inserted.dropLast(1)
+        prefix--
+        changedEnd--
+    }
     val shift = new.length - old.length
     return mapNotNull {
         when {

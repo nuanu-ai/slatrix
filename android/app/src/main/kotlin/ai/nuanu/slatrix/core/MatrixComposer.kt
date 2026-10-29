@@ -127,7 +127,9 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
         if (!loaded || mutableState.value.sending) return
         cancelTarget()
         setAside = mutableState.value
-        mutableState.value = mutableState.value.copy(text = target.body, target = target, mentions = emptyList())
+        // The formatted body only when it holds pills: the composer keeps no other formatting.
+        val (text, mentions) = target.html?.let(ComposerFormat::editable)?.takeIf { it.second.isNotEmpty() } ?: (target.body to emptyList())
+        mutableState.value = mutableState.value.copy(text = text, target = target, mentions = mentions)
     }
 
     /** Closes the reply bar, or leaves editing with the draft back in the composer. */

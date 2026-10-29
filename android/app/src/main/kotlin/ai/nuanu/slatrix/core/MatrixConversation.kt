@@ -439,7 +439,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             queuePaused = failure?.isRecoverable == true,
             uploadProgress = (event.localSendState as? EventSendState.NotSentYet)?.progress?.progress
                 ?.takeIf { it.total > 0u }?.let { it.current.toFloat() / it.total.toFloat() },
-            editable = event.isEditable && kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote),
+            // An edit goes out as text, so only a text message keeps its kind.
+            editable = event.isEditable && kind == MessageKind.Text,
         )
     }
 }

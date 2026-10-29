@@ -245,9 +245,14 @@ class MatrixConversationTest {
 
     // capability: message.reply
     @Test fun aReplyQuotesItsMessageAndAnEditReplacesYourOwn() = runTest {
-        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello", editable = true)))
+        val emote = TimelineItemContent.MsgLike(MsgLikeContent(MsgLikeKind.Message(MessageContent(
+            MessageType.Emote(EmoteMessageContent("waves", null)), "waves", false, null)), null, null, null))
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello", editable = true),
+            conversationItem("stable-2", "\$two", "", editable = true, content = emote)))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        assertTrue(conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single().editable)
+        val (text, waving) = conversation.state.first { it.rows.isNotEmpty() }.rows.messages
+        assertTrue(text.editable)
+        assertFalse("An edit goes out as text, so a /me stays as it is", waving.editable)
 
         val reply = async { conversation.send(ComposerMessage("Agreed", null, emptyList(), false, ComposerTarget.Reply("\$one", "Mira Chen", "Hello"))) }
         assertEquals("\$one", timeline.replies.receive())

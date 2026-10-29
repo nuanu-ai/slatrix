@@ -52,10 +52,13 @@ object ComposerFormat {
                 node.normalName() == "br" -> text.append('\n')
                 node.normalName() == "a" && mentionedUser(node.attr("href")) != null -> {
                     val start = text.length
-                    text.append('@').append(node.wholeText())
+                    text.append('@').append(node.wholeText().removePrefix("@"))
                     mentions += ComposerMention(start, text.length, mentionedUser(node.attr("href"))!!)
                 }
-                else -> walk(node)
+                else -> {
+                    if (node.isBlock && text.isNotEmpty() && !text.endsWith('\n')) text.append('\n')
+                    walk(node)
+                }
             }
         }
         walk(Jsoup.parseBodyFragment(draftHtml).body())

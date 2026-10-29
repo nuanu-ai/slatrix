@@ -170,6 +170,31 @@ class MatrixComposerTest {
         reopened.close()
     }
 
+    @Test fun typingAnAtRightBeforeAPillKeepsIt() = runTest {
+        val sent = Channel<ComposerMessage>(Channel.UNLIMITED)
+        val composer = MatrixComposer(backgroundScope, ComposerRoom()) { sent.send(it); true }
+        composer.state.first { !it.loading }
+        composer.edit("@")
+        composer.mention(0, 1, MentionCandidate.Member(MentionPerson("@bob:example.org", "Bob")))
+        composer.edit("@@Bob ")
+        composer.send()
+        assertEquals(listOf("@bob:example.org"), sent.receive().mentions)
+        composer.close()
+    }
+
+    @Test fun editingAMessageKeepsItsMentions() = runTest {
+        val sent = Channel<ComposerMessage>(Channel.UNLIMITED)
+        val composer = MatrixComposer(backgroundScope, ComposerRoom()) { sent.send(it); true }
+        composer.state.first { !it.loading }
+        composer.editMessage(ComposerTarget.Edit("\$one", "Thanks @Mira Chen",
+            "Thanks <a href=\"https://matrix.to/#/@mira:example.org\">Mira Chen</a>"))
+        assertEquals("Thanks @Mira Chen", composer.state.value.text)
+        composer.edit("Thanks a lot @Mira Chen")
+        composer.send()
+        assertEquals(listOf("@mira:example.org"), sent.receive().mentions)
+        composer.close()
+    }
+
     @Test fun peopleToMentionLoadWithWhetherYouMayNotifyTheRoom() = runTest {
         val room = ComposerRoom()
         val composer = MatrixComposer(backgroundScope, room) { true }
