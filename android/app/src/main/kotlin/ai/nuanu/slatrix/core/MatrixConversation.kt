@@ -400,7 +400,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             canRetry = failure != null && failure.error !is QueueWedgeError.ExpiredAccessToken &&
                 failure.error !is QueueWedgeError.MissingMediaContent && failure.error !is QueueWedgeError.InvalidMimeType,
             queuePaused = failure?.isRecoverable == true,
-            editable = event.isEditable && kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote),
+            // An edit goes out as text, so only a text message keeps its kind.
+            editable = event.isEditable && kind == MessageKind.Text,
         )
     }
 }
