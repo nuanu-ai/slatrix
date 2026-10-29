@@ -109,7 +109,9 @@ struct ComposerAttachmentTests {
         }
     }
 
-    /// Stages `promise` the way a composer does, in a task of its own, recording how that ends.
+    /// Stages `promise` the way a composer does, in a task of its own, recording how that ends. A drop hops on and off
+    /// the main actor several times, and in a parallel run each hop can queue behind other tests' main-actor work for
+    /// seconds, so waits on a drop allow far more than `eventually`'s 5 s.
     @MainActor private final class Drop {
         var outcome: Result<[URL], any Error>?
         var task: Task<Void, Never>?
@@ -131,7 +133,7 @@ struct ComposerAttachmentTests {
         let promise = FakePromise("IMG_0001.HEIC", arrives: false)
         let drop = Drop(promise, deadline: .milliseconds(50))
         defer { drop.task?.cancel() }
-        #expect(await eventually { drop.outcome != nil })
+        #expect(await eventually(timeout: .seconds(60)) { drop.outcome != nil })
         #expect(throws: Importer.Failure.self) { try drop.outcome?.get() }
         let folder = try #require(promise.written).deletingLastPathComponent()
         #expect(!FileManager.default.fileExists(atPath: folder.path))
@@ -141,9 +143,9 @@ struct ComposerAttachmentTests {
     @MainActor func promiseCancelled() async throws {
         let promise = FakePromise("IMG_0001.HEIC", arrives: false)
         let drop = Drop(promise)
-        #expect(await eventually { promise.written != nil })
+        #expect(await eventually(timeout: .seconds(60)) { promise.written != nil })
         drop.task?.cancel()
-        #expect(await eventually { drop.outcome != nil })
+        #expect(await eventually(timeout: .seconds(60)) { drop.outcome != nil })
         #expect(throws: CancellationError.self) { try drop.outcome?.get() }
         let folder = try #require(promise.written).deletingLastPathComponent()
         #expect(!FileManager.default.fileExists(atPath: folder.path))
