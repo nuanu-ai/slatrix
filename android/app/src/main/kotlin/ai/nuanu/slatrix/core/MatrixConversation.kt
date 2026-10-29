@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.matrix.rustcomponents.sdk.DateDividerMode
 import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.EventSendState
 import org.matrix.rustcomponents.sdk.FormattedBody
@@ -24,14 +26,19 @@ import org.matrix.rustcomponents.sdk.MessageFormat
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.ProfileDetails
+import org.matrix.rustcomponents.sdk.ReceiptType
 import org.matrix.rustcomponents.sdk.Room
 import org.matrix.rustcomponents.sdk.TaskHandle
 import org.matrix.rustcomponents.sdk.TextMessageContent
 import org.matrix.rustcomponents.sdk.Timeline
+import org.matrix.rustcomponents.sdk.TimelineConfiguration
 import org.matrix.rustcomponents.sdk.TimelineDiff
+import org.matrix.rustcomponents.sdk.TimelineFilter
+import org.matrix.rustcomponents.sdk.TimelineFocus
 import org.matrix.rustcomponents.sdk.TimelineItem
 import org.matrix.rustcomponents.sdk.TimelineItemContent
 import org.matrix.rustcomponents.sdk.TimelineListener
+import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
 
 enum class MessageKind { Text, Notice, Emote, Attachment, Encrypted, Deleted, Unsupported }
 enum class MessageSendState { Sent, Sending, Failed }
@@ -70,6 +77,8 @@ class MatrixConversation(scope: CoroutineScope, room: Room) {
     private val updates = Channel<List<TimelineDiff>>(Channel.UNLIMITED)
     private val pageLock = Mutex()
     private val sendLock = Mutex()
+    private val readLock = Mutex()
+    private var lastRead: String? = null
     private val items = mutableListOf<ConversationMessage?>()
 
     init {
@@ -77,7 +86,11 @@ class MatrixConversation(scope: CoroutineScope, room: Room) {
             var timeline: Timeline? = null
             var listener: TaskHandle? = null
             try {
-                timeline = room.timeline()
+                timeline = room.timelineWithConfiguration(TimelineConfiguration(
+                    focus = TimelineFocus.Live(hideThreadedEvents = true), filter = TimelineFilter.All,
+                    internalIdPrefix = null, dateDividerMode = DateDividerMode.DAILY,
+                    trackReadReceipts = TimelineReadReceiptTracking.ALL_EVENTS, reportUtds = false,
+                ))
                 currentCoroutineContext().ensureActive()
                 listener = timeline.addListener(object : TimelineListener {
                     override fun onUpdate(diff: List<TimelineDiff>) { updates.trySend(diff) }
@@ -158,7 +171,37 @@ class MatrixConversation(scope: CoroutineScope, room: Room) {
         return try { task.await() } finally { task.cancel() }
     }
 
-    suspend fun markRead(eventId: String): Boolean = false
+    suspend fun markRead(eventId: String): Boolean {
+        if (!lifetime.isActive) return false
+        val task = operations.async {
+            readLock.withLock {
+                try {
+                    val timeline = ready.await()
+                    if (!isLatestRemote(eventId)) return@withLock false
+                    if (lastRead == eventId) return@withLock true
+                    mutableState.update { it.copy(error = null) }
+                    timeline.sendReadReceipt(ReceiptType.READ, eventId)
+                    currentCoroutineContext().ensureActive()
+                    if (!isLatestRemote(eventId)) return@withLock false
+                    timeline.sendReadReceipt(ReceiptType.FULLY_READ, eventId)
+                    currentCoroutineContext().ensureActive()
+                    if (!isLatestRemote(eventId)) return@withLock false
+                    lastRead = eventId
+                    true
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    currentCoroutineContext().ensureActive()
+                    mutableState.update { it.copy(error = "Couldn’t mark this conversation as read.") }
+                    false
+                }
+            }
+        }
+        return try { task.await() } finally { task.cancel() }
+    }
+
+    private fun isLatestRemote(eventId: String): Boolean =
+        lifetime.isActive && mutableState.value.messages.lastOrNull { it.eventId != null }?.eventId == eventId
 
     suspend fun close() { lifetime.cancelAndJoin() }
 
