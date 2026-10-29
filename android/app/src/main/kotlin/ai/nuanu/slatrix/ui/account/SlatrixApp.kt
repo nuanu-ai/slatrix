@@ -258,7 +258,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                     if (conversation?.markRead(event) == true && open.threadRoot == null) PushNotifications(context).clear(open.room.id)
                 }
             },
-            { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
+            { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at.takeUnless { open.resume }) },
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
             { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
             open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { remember(it) { it.copy(onForward = { m ->

@@ -90,7 +90,19 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     // A jump waits to show until it has scrolled to its message, so the newest rows never flash or count as read.
     val rows by rememberUpdatedState(state.rows)
-    var jumped by remember(state.highlight) { mutableStateOf(state.highlight == null) }
+    // The New line stays where it first showed, as on the Mac, though reading moves the SDK's marker past the newest. A
+    // resumed conversation opens with it at the top, decided when its first rows show, unless a jump says where.
+    val newLine = remember { object { var at: String? = null; var start: String? = null; var decided = false } }
+    if (newLine.at == null && state.rows.any { it is ConversationMessage && it.eventId != null && it.eventId == state.firstUnread }) {
+        newLine.at = state.firstUnread
+    }
+    if (!newLine.decided && !state.loading && state.rows.isNotEmpty()) {
+        newLine.decided = true
+        newLine.start = newLine.at.takeIf { state.startsAtUnread && state.highlight == null }
+    }
+    val line = newLine.at
+    val opensAt = state.highlight ?: newLine.start
+    var jumped by remember(opensAt) { mutableStateOf(opensAt == null) }
     val latest = state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?
     val read by rememberUpdatedState(onRead)
     LaunchedEffect(latest?.id, latest?.eventId, resumed, jumped) {
@@ -111,16 +123,23 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
     }
     LaunchedEffect(newest?.id) {
-        if (following && !state.focused || newest?.own == true && newest.sendState == MessageSendState.Sending) list.scrollToItem(0)
+        // Not while it opens somewhere else, which scrolls there instead.
+        if (following && jumped && !state.focused || newest?.own == true && newest.sendState == MessageSendState.Sending) list.scrollToItem(0)
     }
     // A jump shows its message a third of the way up and highlights it briefly, as on the Mac, once.
-    var lit by remember(state.highlight) { mutableStateOf<String?>(null) }
-    LaunchedEffect(state.highlight) {
-        val target = state.highlight ?: return@LaunchedEffect
+    var lit by remember(opensAt) { mutableStateOf<String?>(null) }
+    LaunchedEffect(opensAt) {
+        val target = opensAt ?: return@LaunchedEffect
         val index = snapshotFlow { rows.indexOfLast { (it as? ConversationMessage)?.eventId == target } }.first { it >= 0 }
         following = false
         try {
             list.scrollToItem(rows.size - 1 - index)
+            if (target == newLine.start) {
+                // The line tops the screen with the unread messages under it; fewer than a screenful sit at the bottom.
+                val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == rows.size - 1 - index }
+                list.scrollBy(-(list.layoutInfo.viewportSize.height - (item?.size ?: 0)).coerceAtLeast(0).toFloat())
+                return@LaunchedEffect
+            }
             // The list is reversed, so the message sits at the bottom; newer ones below lift it a third of the way up.
             list.scrollBy(-list.layoutInfo.viewportSize.height / 3f)
             jumped = true
@@ -195,20 +214,23 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 rows.getOrNull(rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot } + 1)?.id.takeIf { threadRoot != null }
             }
             // A thread reads down from its root, as in Slack, so a short one sits at the top.
-            LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none { (it as? ConversationMessage)?.eventId == state.highlight }) 1f else 0f),
+            LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none { (it as? ConversationMessage)?.eventId == opensAt }) 1f else 0f),
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
                 contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
                 items(rows.asReversed(), key = { it.id }) { row ->
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
-                        is ConversationMessage -> Box(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
+                        is ConversationMessage -> Column(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
+                            val first = line != null && row.eventId == line
+                            if (first) NewLine()
                             if (threadRoot != null && row.eventId == threadRoot) Column {
                                 LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage) { menu = it }
                                 // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                                 RepliesBar(replies)
-                            // The first reply starts under the replies bar, so it shows its sender again.
-                            } else LiveMessageRow(if (row.id == firstReply) row.copy(grouped = false) else row, state.ownUserId,
+                            // The first reply starts under the replies bar, and the first unread under the New line, so
+                            // each shows its sender again.
+                            } else LiveMessageRow(if (row.id == firstReply || first) row.copy(grouped = false) else row, state.ownUserId,
                                 actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage) { menu = it }
                         }
                     }
@@ -237,6 +259,17 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
         TypingLine(typing)
         if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders) else CannotPost()
+    }
+}
+
+/** Slack's red rule above the first unread message, with New at its end. */
+@Composable
+private fun NewLine() {
+    val colors = SlatrixTheme.colors
+    Row(Modifier.fillMaxWidth().padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, top = UiMetrics.GapSmall),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+        HorizontalDivider(Modifier.weight(1f), color = colors.destructive)
+        Text("New", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = colors.destructive)
     }
 }
 

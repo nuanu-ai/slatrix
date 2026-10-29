@@ -1,0 +1,20 @@
+{
+  "about": "Where Slack's New line goes and where an unread conversation opens. A timeline is a list of items: \"marker\" is the SDK's read marker, \"hidden\" an item the conversation doesn't show (a day divider, a message still sending, a membership change), and anything else the event ID of a message it shows. The line goes above the first shown message after the marker. An unread conversation opens at its fully-read event, the room's m.fully_read; one only marked unread by hand has nothing to resume. Room fields are as in unread-badge.json, plus fullyRead.",
+  "line": [
+    { "name": "The line goes above the first shown message after the read marker", "items": ["$read", "marker", "hidden", "hidden", "$first", "$second"], "line": "$first" },
+    { "name": "Without a read marker there is no line", "items": ["$message"], "line": null },
+    { "name": "With nothing after the marker there is no line", "items": ["$message", "marker"], "line": null },
+    { "name": "With only hidden items after the marker there is no line", "items": ["$message", "marker", "hidden"], "line": null }
+  ],
+  "resume": [
+    { "name": "An unread conversation opens at its fully-read event", "room": { "messages": 4, "fullyRead": "$anchor" }, "anchor": "$anchor" },
+    { "name": "Notifications alone resume too", "room": { "notifications": 2, "fullyRead": "$anchor" }, "anchor": "$anchor" },
+    { "name": "A conversation only marked unread has nothing to resume", "room": { "markedUnread": true, "fullyRead": "$anchor" }, "anchor": null },
+    { "name": "A read conversation opens at its newest message", "room": { "fullyRead": "$anchor" }, "anchor": null },
+    { "name": "An invitation has nothing to resume", "room": { "messages": 4, "membership": "invite", "fullyRead": "$anchor" }, "anchor": null },
+    { "name": "Without a fully-read event it opens at its newest message", "room": { "messages": 4 }, "anchor": null },
+    { "name": "A transaction ID is never an anchor", "room": { "messages": 4, "fullyRead": "transaction" }, "anchor": null },
+    { "name": "A bare sigil is never an anchor", "room": { "messages": 4, "fullyRead": "$" }, "anchor": null },
+    { "name": "An ID with a control character is never an anchor", "room": { "messages": 4, "fullyRead": "$bad\nvalue" }, "anchor": null }
+  ]
+}

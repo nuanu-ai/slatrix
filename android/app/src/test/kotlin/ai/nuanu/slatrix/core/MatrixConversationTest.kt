@@ -579,6 +579,51 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.unread-line
+    @Test fun theNewLineGoesAboveTheFirstMessageAfterTheReadMarkerAndNeverInAThread() = runTest {
+        val items = listOf(conversationItem("a", "\$a", "Read"), readMarker(), conversationItem("b", "\$b", "Unread"))
+        val timeline = ConversationTimeline(items)
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        assertEquals("\$b", conversation.state.first { !it.loading }.firstUnread)
+        // Reading moves the marker after the newest message.
+        timeline.emit(listOf(TimelineDiff.Remove(1u), TimelineDiff.PushBack(readMarker())))
+        conversation.state.first { it.firstUnread == null }
+        conversation.close()
+
+        val thread = MatrixConversation(backgroundScope, ConversationRoom(ConversationTimeline(items)), threadRoot = "\$a")
+        assertNull(thread.state.first { !it.loading }.firstUnread)
+        thread.close()
+    }
+
+    // capability: conversation.unread-line
+    @Test fun anUnreadConversationOpensAroundWhereItsUnreadMessagesStartWithoutAHighlight() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
+        val around = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier"), readMarker(),
+            conversationItem("next", "\$next", "Unread")))
+        val room = JumpRoom(live, around)
+        val conversation = MatrixConversation(backgroundScope, room, at = "\$old", resume = true)
+
+        val opened = conversation.state.first { !it.loading }
+        assertEquals(listOf("Earlier", "Unread"), opened.rows.messages.map { it.body })
+        assertEquals("\$next", opened.firstUnread)
+        assertTrue(opened.startsAtUnread)
+        assertNull(opened.highlight)
+        assertTrue(opened.focused)
+        conversation.close()
+    }
+
+    @Test fun anUnreadConversationWhoseReadMarkerIsOnAThreadReplyOpensLive() = runTest {
+        // Around a thread reply the SDK shows only its thread, so the channel stays live, as on the Mac.
+        val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
+        val room = JumpRoom(live, ConversationTimeline(listOf(conversationItem("reply", "\$reply", "In a thread"))),
+            threadRoots = mapOf("\$reply" to "\$root"))
+        val conversation = MatrixConversation(backgroundScope, room, at = "\$reply", resume = true)
+
+        assertEquals(listOf("Latest"), conversation.state.first { !it.loading }.rows.messages.map { it.body })
+        assertEquals(listOf<TimelineFocus>(TimelineFocus.Live(true)), room.focuses)
+        conversation.close()
+    }
+
     // capability: thread.open
     @Test fun aThreadShowsTheRootTheChannelHadAtOnceAndKeepsItsRowWhenTheThreadLoadsIt() = runTest {
         val root = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", "Plan?", null,
@@ -601,8 +646,12 @@ class MatrixConversationTest {
     }
 }
 
-private class JumpRoom(private val live: Timeline, private val around: Timeline) : Room(NoHandle) {
+private class JumpRoom(private val live: Timeline, private val around: Timeline,
+    private val threadRoots: Map<String, String> = emptyMap()) : Room(NoHandle) {
     val focuses = mutableListOf<TimelineFocus>()
+    override suspend fun loadOrFetchEvent(eventId: String): TimelineEvent = object : TimelineEvent(NoHandle) {
+        override fun threadRootEventId(): String? = threadRoots[eventId]
+    }
     var aroundFailure: Exception? = null
     override suspend fun setUnreadFlag(newValue: Boolean) = Unit
     override fun ownUserId(): String = "@me:example.org"
@@ -756,6 +805,12 @@ private fun conversationItem(
         override fun uniqueId(): TimelineUniqueId = TimelineUniqueId(stableId)
         override fun asEvent(): EventTimelineItem = event.also { onMap() }
     }
+}
+
+private fun readMarker() = object : TimelineItem(NoHandle) {
+    override fun uniqueId(): TimelineUniqueId = TimelineUniqueId("read-marker")
+    override fun asEvent(): EventTimelineItem? = null
+    override fun asVirtual(): VirtualTimelineItem = VirtualTimelineItem.ReadMarker
 }
 
 private fun dateDivider(stableId: String, timestamp: ULong) = object : TimelineItem(NoHandle) {

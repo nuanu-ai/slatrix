@@ -323,6 +323,16 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: conversation.unread-line
+    @Test fun anUnreadRoomKnowsWhereItsUnreadMessagesStart() = runTest {
+        val room = TestRoom(roomInfo("!a:example.org", "Alpha", messages = 2u).copy(fullyReadEventId = "\$read"))
+        val client = RoomsClient(listOf(room))
+        client.services.trySend(RoomsSync())
+        val rooms = MatrixRooms(backgroundScope, client)
+        assertEquals("\$read", rooms.state.first { !it.loading }.rooms.single().resumeAt)
+        rooms.close()
+    }
+
     @Test fun retryReplacesFailedSyncAndIgnoresItsLateErrorsAndRooms() = runTest {
         val room = TestRoom(roomInfo("!a:example.org", "Alpha"))
         val client = RoomsClient(listOf(room))
