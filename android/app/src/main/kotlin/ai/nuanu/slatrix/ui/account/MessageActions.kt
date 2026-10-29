@@ -62,20 +62,22 @@ data class MessageActions(
     val quick: List<String> = emptyList(),
     val recent: List<String> = emptyList(),
     val onReact: ((ConversationMessage, String) -> Unit)? = null,
-    val onOpenThread: ((String) -> Unit)? = null,
     val link: (suspend (ConversationMessage) -> String?)? = null,
     val onDelete: ((ConversationMessage) -> Unit)? = null,
 )
+
+/** Slack Android's sheet holds five, beside Add reaction. */
+private const val QUICK_REACTIONS = 5
 
 private val textKinds = setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)
 
 /** Slack's long-press sheet, the emoji picker it opens and the delete confirmation, one after another. */
 @Composable
-internal fun MessageActionsHost(message: ConversationMessage, actions: MessageActions, onRetrySend: (ConversationMessage) -> Unit,
-    onDeleteUnsent: (ConversationMessage) -> Unit, onDismiss: () -> Unit) {
+internal fun MessageActionsHost(message: ConversationMessage, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
+    onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit, onDismiss: () -> Unit) {
     var step by remember(message.id) { mutableStateOf(Step.Sheet) }
     when (step) {
-        Step.Sheet -> MessageActionSheet(message, actions, onRetrySend, onDeleteUnsent, { step = it }, onDismiss)
+        Step.Sheet -> MessageActionSheet(message, actions, onOpenThread, onRetrySend, onDeleteUnsent, { step = it }, onDismiss)
         Step.Picker -> EmojiPickerSheet(actions.recent, { emoji -> actions.onReact?.invoke(message, emoji); onDismiss() }, onDismiss)
         Step.ConfirmDelete -> AlertDialog(onDismissRequest = onDismiss,
             title = { Text("Delete message") },
@@ -94,7 +96,8 @@ private enum class Step { Sheet, Picker, ConfirmDelete }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MessageActionSheet(message: ConversationMessage, actions: MessageActions, onRetrySend: (ConversationMessage) -> Unit,
+private fun MessageActionSheet(message: ConversationMessage, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
+    onRetrySend: (ConversationMessage) -> Unit,
     onDeleteUnsent: (ConversationMessage) -> Unit, onStep: (Step) -> Unit, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
     val clipboard = LocalClipboard.current
@@ -127,11 +130,10 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
                     }
                 }
             }
-            val thread = actions.onOpenThread
-            if (eventId != null && thread != null) {
+            if (eventId != null && onOpenThread != null) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge).padding(bottom = UiMetrics.GapSmall),
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                    ActionTile(Icons.Outlined.ChatBubbleOutline, "Reply", Modifier.weight(1f)) { thread(eventId); onDismiss() }
+                    ActionTile(Icons.Outlined.ChatBubbleOutline, "Reply", Modifier.weight(1f)) { onOpenThread(eventId); onDismiss() }
                 }
             }
             if (message.sendState == MessageSendState.Failed) {
@@ -183,14 +185,11 @@ private fun SheetAction(icon: ImageVector, label: String, color: Color, onClick:
 @Composable
 internal fun rememberMessageActions(conversation: MatrixConversation?, workspace: MatrixWorkspace?): MessageActions {
     val recent = workspace?.emojiHistory?.state?.collectAsState()?.value.orEmpty()
-    val scope = rememberCoroutineScope()
     return remember(conversation, workspace, recent) {
         if (conversation == null) return@remember MessageActions()
         MessageActions(
-            quick = EmojiRecents.quick(recent, 5), recent = recent,
-            onReact = { message, emoji ->
-                scope.launch { if (conversation.react(message, emoji)) workspace?.emojiHistory?.use(emoji) }
-            },
+            quick = EmojiRecents.quick(recent, QUICK_REACTIONS), recent = recent,
+            onReact = { message, emoji -> conversation.react(message, emoji) { workspace?.emojiHistory?.use(emoji) } },
             link = conversation::link,
             onDelete = conversation::delete,
         )

@@ -64,7 +64,7 @@ import java.util.Locale
 fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: ComposerState,
     onDraft: (String) -> Unit, onSend: () -> Unit, onBack: () -> Unit, onLoadOlder: () -> Unit, onRead: (String) -> Unit,
     onRetry: () -> Unit, onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit,
-    actions: MessageActions = MessageActions()) {
+    actions: MessageActions = MessageActions(), onOpenThread: ((String) -> Unit)? = null) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -112,7 +112,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     BackHandler(onBack = onBack)
     var menu by remember { mutableStateOf<ConversationMessage?>(null) }
-    menu?.let { MessageActionsHost(it, actions, onRetrySend, onDeleteUnsent) { menu = null } }
+    menu?.let { MessageActionsHost(it, actions, onOpenThread, onRetrySend, onDeleteUnsent) { menu = null } }
     Column(Modifier.fillMaxSize().background(colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(end = UiMetrics.GapLarge,
             top = UiMetrics.GapSmall, bottom = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
@@ -146,6 +146,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     else if (state.rows.isNotEmpty()) HistoryProgress(state.loadingHistory)
                 }
             }
+            state.notice?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
                 Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
                     action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }

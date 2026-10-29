@@ -50,6 +50,8 @@ class EmojiCatalog private constructor(val all: List<Emoji>) {
 
     companion object {
         private val TONES = 0x1F3FB..0x1F3FF
+        /** A Swift string's line continuation, which joins a long name to its next line. */
+        private val continuation = Regex("""\\\n\s*""")
         @Volatile private var loaded: EmojiCatalog? = null
 
         /** Reads the asset once, without the emoji this device can't draw; call it off the main thread. */
@@ -61,7 +63,7 @@ class EmojiCatalog private constructor(val all: List<Emoji>) {
         }
 
         /** One emoji per line, `emoji;category;shortcodes;name[;toned]`; the Swift around the lines is skipped. */
-        fun parse(source: String) = EmojiCatalog(source.lineSequence().mapNotNull { line ->
+        fun parse(source: String) = EmojiCatalog(source.replace(continuation, "").lineSequence().mapNotNull { line ->
             val fields = line.trim().split(';')
             val category = fields.getOrNull(1)?.toIntOrNull()?.let(EmojiCategory.entries::getOrNull)
             if (fields.size < 4 || category == null) null

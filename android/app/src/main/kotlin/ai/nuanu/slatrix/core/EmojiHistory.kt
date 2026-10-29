@@ -1,6 +1,5 @@
 package ai.nuanu.slatrix.core
 
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,8 +26,4 @@ class EmojiHistory(private val scope: CoroutineScope, private val client: Client
         mutableState.update { EmojiRecents.adding(emoji, it) }
         scope.launch { quietly { client.addRecentEmoji(emoji) } }
     }
-
-    private suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (_: Exception) { null }
 }

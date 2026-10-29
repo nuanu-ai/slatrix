@@ -10,6 +10,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -83,6 +84,8 @@ data class ConversationState(
     val error: String? = null,
     val sending: Boolean = false,
     val sendError: String? = null,
+    /** Says for a moment that an action on a message failed. */
+    val notice: String? = null,
 )
 
 /** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
@@ -90,6 +93,12 @@ fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Bo
     previous.senderId == message.senderId && message.timestamp - previous.timestamp < 5 * 60_000L
 
 private const val MAX_BLANK_PAGES = 5
+private const val NOTICE_MILLIS = 4_000L
+
+/** The value, or null when [block] failed; cancellation still cancels. */
+internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (_: Exception) { null }
 
 class MatrixConversation(scope: CoroutineScope, private val room: Room) {
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
@@ -218,17 +227,23 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
 
     fun deleteUnsent(message: ConversationMessage) = unsent(message) { timeline, id -> timeline.abortSend(id, SendTarget.Event) }
 
-    /** Adds the reaction, or takes back your own; true when it added one. */
-    suspend fun react(message: ConversationMessage, key: String): Boolean {
-        val id = EventOrTransactionId.EventId(message.eventId ?: return false)
-        return quietly { ready.await().toggleReaction(id, key) } ?: false
+    /** Adds the reaction, or takes back your own, then calls [onAdded] if it added one. */
+    fun react(message: ConversationMessage, key: String, onAdded: () -> Unit) {
+        val id = EventOrTransactionId.EventId(message.eventId ?: return)
+        operations.launch {
+            when (quietly { ready.await().toggleReaction(id, key) }) {
+                true -> onAdded()
+                false -> Unit
+                null -> announce("Couldn’t update your reaction.")
+            }
+        }
     }
 
     fun delete(message: ConversationMessage) {
         val id = EventOrTransactionId.EventId(message.eventId ?: return)
         operations.launch {
             // A failed redaction leaves the message, so its sheet offers Delete again.
-            runCatching { ready.await().redactEvent(id, null) }.onFailure { if (it is CancellationException) throw it }
+            if (quietly { ready.await().redactEvent(id, null) } == null) announce("Couldn’t delete this message.")
         }
     }
 
@@ -237,9 +252,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
         return quietly { room.matrixToEventPermalink(id) }
     }
 
-    private suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (_: Exception) { null }
+    private suspend fun announce(notice: String) {
+        mutableState.update { it.copy(notice = notice) }
+        delay(NOTICE_MILLIS)
+        mutableState.update { if (it.notice == notice) it.copy(notice = null) else it }
+    }
 
     private fun unsent(message: ConversationMessage, action: suspend (Timeline, EventOrTransactionId) -> Unit) {
         val id = EventOrTransactionId.TransactionId(message.transactionId ?: return)
