@@ -123,6 +123,8 @@ class MatrixConversation(scope: CoroutineScope, room: Room) {
         }
     }
 
+    suspend fun send(message: ComposerMessage): Boolean = false
+
     suspend fun markRead(eventId: String): Boolean = false
 
     suspend fun close() { lifetime.cancelAndJoin() }
