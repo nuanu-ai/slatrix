@@ -376,9 +376,7 @@ struct TimelineHostedTests {
         // The last rows go, taller together than the reader is scrolled up: the view has to move to stay on content.
         harness.service.messages = Self.messages(0..<36)
         await settle(harness) { harness.rowCount < 40 }
-        let jump = await Task.detached {
-            await firstPerformanceMessage(since: since) { $0.hasPrefix("event=timeline.jump ") }
-        }.value
+        let jump = await firstPerformanceMessage(since: since) { $0.hasPrefix("event=timeline.jump ") }
         #expect(jump != nil)
     }
 
