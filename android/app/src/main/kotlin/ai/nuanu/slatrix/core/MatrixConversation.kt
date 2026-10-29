@@ -26,6 +26,7 @@ import org.matrix.rustcomponents.sdk.FileInfo
 import org.matrix.rustcomponents.sdk.ImageInfo
 import org.matrix.rustcomponents.sdk.UploadParameters
 import org.matrix.rustcomponents.sdk.UploadSource
+import org.matrix.rustcomponents.sdk.VideoInfo
 import org.matrix.rustcomponents.sdk.EditedContent
 import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.EventSendState
@@ -279,7 +280,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                         val params = UploadParameters(UploadSource.File(attachment.path), null, null, null, null,
                             threadRoot?.let(::threadRelation))
                         val size = attachment.size.toULong()
-                        val kind = if (attachment.width != null && attachment.height != null) AttachmentKind.Image(
+                        val kind = if (attachment.mimeType.startsWith("video/")) AttachmentKind.Video(VideoInfo(
+                            attachment.durationMillis?.let(java.time.Duration::ofMillis), attachment.height?.toULong(),
+                            attachment.width?.toULong(), attachment.mimeType, size, null, null, null), null)
+                        else if (attachment.width != null && attachment.height != null) AttachmentKind.Image(
                             ImageInfo(attachment.height.toULong(), attachment.width.toULong(), attachment.mimeType, size, null, null, null, null),
                             null)
                         else AttachmentKind.File(FileInfo(attachment.mimeType, size, null, null))

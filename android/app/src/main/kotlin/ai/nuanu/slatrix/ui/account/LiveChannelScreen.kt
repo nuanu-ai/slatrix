@@ -280,9 +280,15 @@ private fun LiveMessageRow(message: ConversationMessage, onMenu: (ConversationMe
                     MessageSendState.Failed -> "Not sent"
                 }, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = if (failed) colors.destructive else colors.textSecondary)
             }
-            Text(message.body, style = MaterialTheme.typography.bodyLarge,
-                color = if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody)
-            message.uploadProgress?.let { LinearProgressIndicator({ it }, Modifier.fillMaxWidth().padding(top = UiMetrics.GapTiny)) }
+            Box {
+                Text(message.body, style = MaterialTheme.typography.bodyLarge,
+                    color = if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody)
+                // In the row's bottom padding, so the bar comes and goes without moving anything.
+                message.uploadProgress?.let {
+                    LinearProgressIndicator({ it }, Modifier.align(Alignment.BottomStart).fillMaxWidth().height(UiMetrics.GapTiny)
+                        .offset(y = UiMetrics.GapTiny))
+                }
+            }
         }
     }
 }
