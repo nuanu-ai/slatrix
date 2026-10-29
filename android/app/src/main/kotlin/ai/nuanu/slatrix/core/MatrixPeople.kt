@@ -9,6 +9,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.plus
@@ -28,6 +30,10 @@ import org.matrix.rustcomponents.sdk.RoomVisibility
 /** Someone on the server: their Matrix ID, the name to show and their picture. */
 data class Person(val id: String, val name: String, val avatarUrl: String? = null)
 
+/** People the directory found for [query], or why it couldn't search. */
+data class PeopleSearchState(val query: String = "", val people: List<Person> = emptyList(), val loading: Boolean = false,
+    val error: String? = null)
+
 /** Which direct message Message reuses, as `spec/direct-message.json` has it. */
 object DirectMessages {
     /** Reused only while its active members are exactly you, joined, and [target]. */
@@ -45,6 +51,8 @@ class MatrixPeople(scope: CoroutineScope, private val client: Client) {
     private val opening = mutableMapOf<String, Deferred<String>>()
     /** A room just made for someone, until sync knows it and the next Message finds it like any other. */
     private val made = mutableMapOf<String, String>()
+    val results: StateFlow<PeopleSearchState> = MutableStateFlow(PeopleSearchState())
+    fun search(query: String) {}
 
     /** [userId]'s profile from the server, or null when it can't be loaded. */
     suspend fun profile(userId: String): Person? = quietly {

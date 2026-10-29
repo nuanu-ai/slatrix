@@ -424,7 +424,7 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
                     state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
                         scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
-                }, recents, { recents = recentStore.add(it) }, open)
+                }, recents, { recents = recentStore.add(it) }, onRoom = open)
         }, userAvatarUrl = userAvatarUrl, activity = activity)
 }
 

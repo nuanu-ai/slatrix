@@ -77,6 +77,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     onMarkAllRead: suspend (List<String>) -> List<String> = { emptyList() },
     /** How many messages wait in Later, for its card at the top of Home; null leaves the card out. */
     laterCount: Int? = null, onLater: () -> Unit = {},
+    onNewMessage: (() -> Unit)? = null,
     search: @Composable () -> Unit = {}, userAvatarUrl: String? = null, activity: @Composable () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     var actions by remember { mutableStateOf<String?>(null) }

@@ -4,6 +4,8 @@ import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.ConversationSearch
 import ai.nuanu.slatrix.core.MessageSearchQuery
 import ai.nuanu.slatrix.core.MessageSearchState
+import ai.nuanu.slatrix.core.PeopleSearchState
+import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.core.RecentSearches
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SearchHit
@@ -67,6 +69,7 @@ import androidx.compose.ui.text.withStyle
 @Composable
 fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchState, onSearch: (MessageSearchQuery?) -> Unit,
     onMore: () -> Unit, onMessage: (SearchHit) -> Unit, recents: List<String> = emptyList(), onSearched: (String) -> Unit = {},
+    people: PeopleSearchState = PeopleSearchState(), onPeopleQuery: (String) -> Unit = {}, onPerson: (Person) -> Unit = {},
     onRoom: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     var submitted by rememberSaveable { mutableStateOf(false) }
