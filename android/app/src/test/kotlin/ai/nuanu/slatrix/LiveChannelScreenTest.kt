@@ -12,6 +12,7 @@ import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasProgressBarRangeInfo
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -85,6 +86,21 @@ class LiveChannelScreenTest {
         compose.onNode(progress).assertDoesNotExist()
         compose.mainClock.advanceTimeBy(400)
         compose.onNode(progress).assertExists()
+    }
+
+    @Test fun theStartOfAChannelOrDirectMessageShowsItsIntro() {
+        val state = mutableStateOf(ConversationState(listOf(message("Hello", minutes = 0)), loading = false))
+        val current = mutableStateOf(room)
+        compose.setContent {
+            SlatrixTheme { LiveChannelScreen(current.value, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}) }
+        }
+        compose.onNodeWithText("Hello").assertIsDisplayed()
+        compose.onNodeWithText("This is the very beginning of the #design channel.").assertDoesNotExist()
+
+        compose.runOnIdle { state.value = state.value.copy(hasMore = false) }
+        compose.onNodeWithText("This is the very beginning of the #design channel.").assertIsDisplayed()
+        compose.runOnIdle { current.value = RoomSummary("!mira:example.org", "Mira Chen", true, "", UnreadBadge.None, "MC", 2) }
+        compose.onNodeWithText("This conversation is just between Mira Chen and you.").assertIsDisplayed()
     }
 
     private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)
