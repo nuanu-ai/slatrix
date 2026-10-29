@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_base.EncryptionState
+import uniffi.ruma_events.MessageLikeEventType
 
 class MatrixRoomsTest {
     @Test fun retryKeepsTheLiveSyncUntilNotificationLookupCompletes() = runTest {
@@ -124,6 +125,19 @@ class MatrixRoomsTest {
         // Another client unstars it.
         alpha.emit(alpha.info.copy(isFavourite = false))
         rooms.state.first { state -> state.rooms.none { it.starred } }
+        rooms.close()
+    }
+
+    // capability: channel.read-only
+    @Test fun whetherYouMayPostFollowsTheRoomsPowerLevels() = runTest {
+        val news = TestRoom(roomInfo("!news:example.org", "News"))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(news)))
+        assertTrue("Unknown power levels keep the composer", rooms.state.first { !it.loading }.rooms.single().canPost)
+
+        news.emit(news.info.copy(powerLevels = PostingPowers(canPost = false)))
+        rooms.state.first { state -> state.rooms.single().canPost.not() }
+        news.emit(news.info.copy(powerLevels = PostingPowers(canPost = true)))
+        rooms.state.first { state -> state.rooms.single().canPost }
         rooms.close()
     }
 
@@ -451,6 +465,10 @@ private class RoomsSync : SyncService(NoHandle) {
     fun emitEntries(updates: List<RoomListEntriesUpdate>) {
         if (activeFilter) entriesListener?.onUpdate(updates)
     }
+}
+
+private class PostingPowers(private val canPost: Boolean) : RoomPowerLevels(NoHandle) {
+    override fun canOwnUserSendMessage(message: MessageLikeEventType): Boolean = canPost || message !is MessageLikeEventType.RoomMessage
 }
 
 private class RoomsHandle : TaskHandle(NoHandle) {

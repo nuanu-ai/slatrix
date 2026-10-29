@@ -57,6 +57,8 @@ data class RoomSummary(
     val latest: LatestMessage? = null,
     val starred: Boolean = false,
     val isPrivate: Boolean = false,
+    /** False where the room's power levels keep you from posting; unknown ones leave the composer. */
+    val canPost: Boolean = true,
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */

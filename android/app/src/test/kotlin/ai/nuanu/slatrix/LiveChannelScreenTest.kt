@@ -230,6 +230,19 @@ class LiveChannelScreenTest {
             send.top >= field.bottom && send.center.y in mention.top..mention.bottom && send.left > mention.right)
     }
 
+    // capability: channel.read-only
+    @Test fun aChannelYouCantPostInSaysSoInPlaceOfTheComposer() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room.copy(canPost = false), ConversationState(listOf(message("Welcome", minutes = 1)),
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("Welcome").assertIsDisplayed()
+        compose.onNodeWithText("You don’t have permission to post in this channel.").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Message #design").assertDoesNotExist()
+    }
+
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
 
     private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)
