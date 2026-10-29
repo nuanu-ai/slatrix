@@ -36,7 +36,7 @@ class ForwardScreenshots(private val dark: Boolean) {
         val message = ConversationMessage("m", "\$m", "@mira:example.org", "Mira Chen",
             "The new onboarding flow is up on staging. Would love eyes on the empty states.", null, 1_700_000_000_000L,
             MessageKind.Text, MessageSendState.Sent, false, "MC", 2)
-        compose.setContent { SlatrixTheme(dark = dark) { ForwardScreen(message, design, rooms, {}) {} } }
+        compose.setContent { SlatrixTheme(dark = dark) { ForwardScreen(message, design, rooms, { null }, {}) {} } }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/Forward-${if (dark) "dark" else "light"}.png")
     }
 

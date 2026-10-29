@@ -524,6 +524,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     suspend fun forwardable(message: ConversationMessage): MessageType? {
         val id = message.eventId ?: return null
         val event = quietly { timeline().getEventTimelineItemByEventId(id) } ?: return null
+        // A pending edit or delete could change what goes, so it waits for it, as on the Mac.
+        if (!event.isRemote || event.editSendState?.let { it is EventSendState.Sent } == false || event.redactionSendState != null) {
+            return null
+        }
         val type = ((event.content as? TimelineItemContent.MsgLike)?.content?.kind as? MsgLikeKind.Message)?.content?.msgType
         return type?.takeIf {
             it is MessageType.Text || it is MessageType.Notice || it is MessageType.Emote || it is MessageType.Image || it is MessageType.File

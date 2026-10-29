@@ -10,14 +10,16 @@ import org.matrix.rustcomponents.sdk.MessageType
 import uniffi.matrix_sdk_base.EncryptionState
 import uniffi.ruma_events.MessageLikeEventType
 
+private const val JOIN_FIRST = "Choose a conversation you’ve joined."
+
 /** Sends a copy of a message to another conversation, with the Mac's checks. */
 class MatrixForward(private val client: Client) {
     /** Queues a copy of [content] from [fromRoomId] in [toRoomId]; null once queued, else why it can't go. */
     suspend fun forward(content: MessageType, fromRoomId: String, toRoomId: String): String? = withContext(Dispatchers.Default) {
         try {
-            val destination = client.getRoom(toRoomId)?.takeIf { it.membership() == Membership.JOINED }
-                ?: return@withContext "Choose a conversation you’ve joined."
+            val destination = client.getRoom(toRoomId) ?: return@withContext JOIN_FIRST
             destination.use { room ->
+                if (room.membership() != Membership.JOINED) return@withContext JOIN_FIRST
                 // An encrypted message must never reach a server in plaintext, attachment keys included.
                 if (room.latestEncryptionState() != EncryptionState.ENCRYPTED &&
                     client.getRoom(fromRoomId)?.use { it.latestEncryptionState() } != EncryptionState.NOT_ENCRYPTED) {

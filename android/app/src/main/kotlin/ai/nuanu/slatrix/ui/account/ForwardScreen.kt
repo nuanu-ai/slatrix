@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -30,13 +31,31 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.launch
 
-/** Slack's Forward message page: the message, then the conversations to send it to, found by name. */
+/**
+ * Slack's Forward message page: the message, then the conversations to send it to, found by name. A pick [forward]s
+ * it, which answers why it can't go or null once it went; a refusal stays here to choose again.
+ */
 @Composable
-fun ForwardScreen(message: ConversationMessage, from: RoomSummary, rooms: List<RoomSummary>, onForward: (RoomSummary) -> Unit,
-    onBack: () -> Unit) {
+fun ForwardScreen(message: ConversationMessage, from: RoomSummary, rooms: List<RoomSummary>, forward: suspend (RoomSummary) -> String?,
+    onForwarded: (RoomSummary) -> Unit, onBack: () -> Unit) {
     val colors = SlatrixTheme.colors
+    val scope = rememberCoroutineScope()
     var query by rememberSaveable { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    var refusal by remember { mutableStateOf<String?>(null) }
+    fun pick(room: RoomSummary) {
+        // One copy per pick, as the Mac's busy guard keeps it.
+        if (sending) return
+        sending = true
+        refusal = null
+        scope.launch {
+            val failure = forward(room)
+            sending = false
+            if (failure == null) onForwarded(room) else refusal = failure
+        }
+    }
     val shown = remember(rooms, query) { rooms.filter { it.name.contains(query.trim(), ignoreCase = true) } }
     PushedPage("Forward message", onBack) {
         item {
@@ -50,9 +69,11 @@ fun ForwardScreen(message: ConversationMessage, from: RoomSummary, rooms: List<R
                     overflow = TextOverflow.Ellipsis)
             }
         }
+        refusal?.let { item { Text(it, Modifier.padding(horizontal = UiMetrics.GapLarge), style = MaterialTheme.typography.bodyMedium,
+            color = colors.destructive) } }
         item { SearchField(query, { query = it }, {}, Modifier) }
         items(shown, key = { it.id }) { room ->
-            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button) { onForward(room) }
+            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button) { pick(room) }
                 .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
                 // As wide as an avatar, so every name lines up.
