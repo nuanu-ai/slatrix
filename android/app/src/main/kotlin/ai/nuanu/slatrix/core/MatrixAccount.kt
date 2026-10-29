@@ -277,7 +277,8 @@ class MatrixAccount(
         val session = attempt.client.session()
         synchronized(lock) {
             checkOwner(attempt.owner)
-            if (attempt.fresh) attempt.persistence.persist(session)
+            // A refresh can land between reading the session and saving it.
+            if (attempt.fresh) attempt.persistence.persist(attempt.persistence.cached ?: session)
             pending = null
             connected = attempt
             operation = null
@@ -325,7 +326,8 @@ class MatrixAccount(
         initial: StoredSession?,
     ) : ClientSessionDelegate {
         private var active = true
-        private var cached = initial?.session?.copy()
+        var cached = initial?.session?.copy()
+            private set
         private var saved = initial != null
         var warning: String? = null
             private set
