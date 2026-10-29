@@ -74,6 +74,7 @@ data class ConversationMessage(
     val canRetry: Boolean = false,
     /** The failure paused the room's send queue, so retrying resumes the queue, as on the Mac. */
     val queuePaused: Boolean = false,
+    val edited: Boolean = false,
 ) : ConversationRow
 
 data class ConversationState(

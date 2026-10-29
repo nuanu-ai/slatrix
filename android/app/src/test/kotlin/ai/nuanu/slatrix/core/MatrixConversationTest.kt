@@ -221,6 +221,18 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.edited
+    @Test fun anEditedMessageSaysSo() = runTest {
+        val edited = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Fixed", null)), "Fixed", true, null)),
+            null, null, null,
+        ))
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Fixed", content = edited), conversationItem("b", "\$b", "Plain")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        assertEquals(listOf(true, false), conversation.state.first { it.rows.isNotEmpty() }.rows.messages.map { it.edited })
+        conversation.close()
+    }
+
     // capability: message.react.quick
     @Test fun reactingTogglesTheReactionOnTheMessageAndSaysWhenItAddedOne() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
