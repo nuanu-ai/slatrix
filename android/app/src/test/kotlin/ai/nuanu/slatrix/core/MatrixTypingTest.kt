@@ -16,13 +16,10 @@ import org.matrix.rustcomponents.sdk.TypingNotificationsListener
 
 class MatrixTypingTest {
     // capability: composer.typing
-    @Test fun typingTellsTheRoomUntilItPausesForThreeSecondsOrSends() = runTest {
+    @Test fun typingTellsTheRoomUntilItPausesForThreeSecondsOrSendsOrClears() = runTest {
         val room = TypingRoom()
         val typing = MatrixTyping(backgroundScope, TypingClient(room), room.id())
 
-        typing.changed("")
-        runCurrent()
-        assertEquals("An empty field says nothing", emptyList<Boolean>(), room.notices)
         typing.changed("H")
         runCurrent()
         advanceTimeBy(2_000)
@@ -37,9 +34,9 @@ class MatrixTypingTest {
         typing.stopped()
         runCurrent()
         assertEquals(listOf(true, true, false, true, false), room.notices)
-        typing.stopped()
+        typing.changed("")
         runCurrent()
-        assertEquals("Stopping twice says it once", 5, room.notices.size)
+        assertEquals("Clearing the field says you stopped", false, room.notices.last())
     }
 
     @Test fun othersTypingShowByNameButNeverYou() = runTest {
