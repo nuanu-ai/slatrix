@@ -11,7 +11,7 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
   - a 4–6 GB Gradle heap, since the generated Kotlin is large.
 - Colors and radii come from `design/tokens.json`, spelled out once in Kotlin, with a unit test that checks them against the file. Screens use roles, never raw colors or literal sizes, and a lint rule rejects them as `scripts/lint.sh` does on the Mac.
 - Product rules pass every case in `spec/`, with a unit test per file that reads it.
-- Notifications arrive through Firebase Cloud Messaging and a Sygnal push gateway.
+- Notifications arrive through Firebase Cloud Messaging. The Matrix push gateway is a small Cloud Function in the app's own Firebase project, so there is no server to run and no Firebase key to keep anywhere else.
 - Element X Android is AGPL: read it to see how the SDK is used, never copy from it. Slatrix is Apache 2.0.
 
 ## Tests
