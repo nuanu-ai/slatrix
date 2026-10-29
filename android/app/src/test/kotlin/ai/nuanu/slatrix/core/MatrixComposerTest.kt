@@ -21,6 +21,7 @@ import org.matrix.rustcomponents.sdk.RoomMembersIterator
 import org.matrix.rustcomponents.sdk.RoomPowerLevels
 
 class MatrixComposerTest {
+    // capability: composer.drafts
     @Test fun restoresDraftAndFlushesTheLastEditBeforeNavigation() = runTest {
         val room = ComposerRoom(ComposerDraft("Remember this", null, ComposerDraftType.NewMessage, emptyList()))
         val composer = MatrixComposer(backgroundScope, room) { true }

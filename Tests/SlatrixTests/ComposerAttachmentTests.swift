@@ -40,6 +40,7 @@ private final class FakePromise: NSFilePromiseReceiver, @unchecked Sendable {
 }
 
 struct ComposerAttachmentTests {
+    // capability: composer.attachments
     @Test("An attached file is queued once as a private copy that later edits to the original do not change")
     func stagesPrivateCopy() async throws {
         let scratch = try TemporaryDirectory()
@@ -166,6 +167,7 @@ struct ComposerAttachmentTests {
         #expect(throws: Importer.Failure.self) { try Importer.validateQueue([large, large, large]) }
     }
 
+    // capability: composer.attachments
     @Test("A pasted PNG is queued as a .png file with its bytes intact")
     func stagesPastedImage() async throws {
         let staged = try await Importer.stage(.image(onePixelPNG, png: true), existing: [])

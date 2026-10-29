@@ -60,6 +60,7 @@ struct ReadStatePolicyTests {
         $0.selectedRoomID = $0.roomID
     }
 
+    // capability: conversation.read
     @Test("The latest message you can see in the open room is marked read for your account")
     func visibleLatestEvent() throws {
         let target = try #require(ReadStatePolicy.automaticTarget(Self.visible))
@@ -88,6 +89,7 @@ struct ReadStatePolicyTests {
         #expect(!ReadStatePolicy.isCurrent(target, in: context))
     }
 
+    // capability: conversation.mark-unread
     @Test("Mark unread holds even while the bottom is visible and new messages arrive")
     func holdSurvivesNewMessages() throws {
         let target = try #require(ReadStatePolicy.automaticTarget(Self.visible))

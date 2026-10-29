@@ -84,6 +84,7 @@ struct ComposerFormatTests {
 
     struct Spec: Decodable { var send: [Send] }
 
+    // capability: composer.formatting
     @Test(
         "What a draft sends, from spec/composer.json",
         arguments: try SharedSpec.decode("spec/composer.json", as: Spec.self).send)
@@ -114,6 +115,7 @@ struct ComposerFormatTests {
         #expect(tags == ["strong", "em", "del", "code", "a", "br", "ul", "ol", "li", "blockquote", "pre"])
     }
 
+    // capability: composer.drafts
     @Test("A draft round-trips every format, mention, special character and run of spaces")
     func draftRoundTrip() {
         let paragraphs = [

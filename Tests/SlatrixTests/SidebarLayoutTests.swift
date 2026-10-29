@@ -69,6 +69,7 @@ struct SidebarLayoutTests {
                 == expected)
     }
 
+    // capability: app.narrow-window
     @Test("The rail and sidebar leave once the narrowest sidebar no longer fits beside a readable conversation")
     func sidebarCollapses() {
         #expect(!SidebarLayout.collapses(availableWidth: 778))
@@ -121,12 +122,14 @@ struct SidebarLayoutTests {
         ChatRoom(id: "muted mention", name: "muted mention", mentions: 1, muted: true),
     ]
 
+    // capability: home.sections-collapse
     @Test("A collapsed section keeps the open conversation and the ones its badge marks unread, in order")
     func collapsedSection() {
         let rooms = SidebarLayout.sectionRooms(Self.section, collapsed: true, selectedID: "open")
         #expect(rooms.map(\.id) == ["open", "unread", "mention", "marked", "dm", "muted mention"])
     }
 
+    // capability: home.conversations
     @Test("An expanded section lists every conversation")
     func expandedSection() {
         #expect(SidebarLayout.sectionRooms(Self.section, collapsed: false, selectedID: nil) == Self.section)

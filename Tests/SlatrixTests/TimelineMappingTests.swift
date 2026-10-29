@@ -44,6 +44,7 @@ struct TimelineMappingTests {
         #expect(message.id == "$found" && message.eventID == "$found")
     }
 
+    // capability: message.thread-summary
     @Test("A thread root carries its reply count and who replied last, and when")
     func threadSummary() throws {
         final class Summary: ThreadSummary, @unchecked Sendable {
@@ -73,6 +74,7 @@ struct TimelineMappingTests {
                     timestamp: Date(timeIntervalSince1970: 1_800_000_000)))
     }
 
+    // capability: message.image
     @Test("An image carries its pixel size, so its box is reserved before the thumbnail loads")
     func imageDimensions() throws {
         let image = ImageMessageContent(
@@ -112,6 +114,7 @@ struct TimelineMappingTests {
         #expect(try mapped(.image(content: image), body: "party").animated == animates)
     }
 
+    // capability: message.video
     @Test("A video carries its duration and size for its poster")
     func videoDuration() throws {
         let video = VideoMessageContent(

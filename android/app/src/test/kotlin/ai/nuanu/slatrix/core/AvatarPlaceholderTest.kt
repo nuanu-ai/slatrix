@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class AvatarPlaceholderTest {
+    // capability: people.avatars
     @Test fun `initials and colors match every shared avatar case`() {
         val spec = JsonParser.parseString(File(System.getProperty("slatrix.root"), "spec/avatar.json").readText()).asJsonObject
         for (item in spec["cases"].asJsonArray) {

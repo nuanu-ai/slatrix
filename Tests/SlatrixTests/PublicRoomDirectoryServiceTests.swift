@@ -108,6 +108,7 @@ struct PublicRoomDirectoryServiceTests {
 
     private func ids() -> [String] { service.entries.map(\.id) }
 
+    // capability: home.browse-channels
     @Test("An empty search lists your own server's rooms by room ID, with member count and join rule kept apart")
     func listsOwnServer() async {
         let search = DirectorySearchFake([a, b])
@@ -318,6 +319,7 @@ private func child(
 }
 
 extension PublicRoomDirectoryServiceTests {
+    // capability: home.browse-channels
     @Test("Browsing a workspace lists its channels from every page, not its nested spaces or direct messages")
     func listsWorkspaceChannels() async {
         let client = FakeClient()

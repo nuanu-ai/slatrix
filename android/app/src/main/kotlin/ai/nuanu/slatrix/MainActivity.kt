@@ -27,8 +27,9 @@ class MainActivity : ComponentActivity() {
             val rooms by accountModel.rooms.collectAsState()
             val workspace by accountModel.workspace.collectAsState()
             val threads by accountModel.threads.collectAsState()
+            val activity by accountModel.activity.collectAsState()
             val notification by accountModel.notificationTarget.collectAsState()
-            SlatrixApp(accountModel.account, identity, rooms, workspace, notification, threads) { target ->
+            SlatrixApp(accountModel.account, identity, rooms, workspace, notification, threads, activity) { target ->
                 accountModel.notificationHandled(target)
                 if (intent.getStringExtra(PushNotifications.USER_ID) == target.userId &&
                     intent.getStringExtra(PushNotifications.ROOM_ID) == target.roomId) {

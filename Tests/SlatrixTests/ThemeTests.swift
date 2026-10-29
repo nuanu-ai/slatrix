@@ -7,6 +7,7 @@ import Testing
 @MainActor
 @Suite("Themes")
 struct ThemeTests {
+    // capability: app.appearance
     @Test(
         "A theme picked before Slack's names came in stays picked",
         arguments: zip(["slate", "aubergine", "ocean", "forest"], [SidebarPalette.gray, .aubergine, .lagoon, .jade]))

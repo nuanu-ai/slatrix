@@ -75,6 +75,7 @@ class MatrixAccountDeviceTest {
         assertNull(store.load())
     }
 
+    // capability: auth.sign-in
     @Test fun signInPersistsTheAuthenticatedDeviceAndPreservesPasswordWhitespace() = runBlocking {
         val client = AuthClient()
         val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { homeserver, _, _, _, _ ->
@@ -133,6 +134,7 @@ class MatrixAccountDeviceTest {
         assertEquals(saved, SessionStore(context).load())
     }
 
+    // capability: auth.restore
     @Test fun restoreReusesTheDeviceStoreAndPersistsRefreshedTokens() = runBlocking {
         val client = AuthClient()
         val saved = StoredSession(
@@ -353,6 +355,7 @@ class MatrixAccountDeviceTest {
         assertTrue(unreadable.contentEquals(File(directory, "session.enc").readBytes()))
     }
 
+    // capability: auth.sign-out
     @Test fun signingOutReturnsToSignInAtOnceAndCleansUpBehindANewSignIn() = runBlocking {
         val client = AuthClient()
         val clients = ArrayDeque(listOf(client, AuthClient()))

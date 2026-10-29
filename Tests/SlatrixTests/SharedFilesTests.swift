@@ -209,6 +209,7 @@ final class SharedFilesTests {
         #expect(await eventually(condition))
     }
 
+    // capability: conversation.files
     @Test("Files lists the room's files and links from its own timeline, including threads, without sending receipts")
     func listsFromOwnTimeline() async throws {
         await open()

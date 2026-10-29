@@ -36,6 +36,7 @@ private let marker = FakeTimelineItem(virtual: .readMarker)
 private func remote(_ id: String) -> FakeTimelineItem { FakeTimelineItem(textEvent(id, body: "Message")) }
 
 struct UnreadMappingTests {
+    // capability: conversation.unread-line
     @Test("The first unread message is the next remote message after the SDK's read marker")
     func firstAfterMarker() {
         var local = textEvent("$misleading-local", body: "Local")
@@ -122,6 +123,7 @@ struct UnreadNavigationTests {
 struct UnreadSDKActionsTests {
     private let timeline = ReceiptTimeline(noHandle: .init())
 
+    // capability: conversation.read
     @Test("Reading a message sends the read receipt, then moves the fully-read marker to the same event")
     func acknowledgeOrder() async throws {
         try await UnreadSDKActions.acknowledge(timeline: timeline, eventID: "$visible") {}
@@ -161,6 +163,7 @@ struct UnreadSDKActionsTests {
         #expect(timeline.writes.all == ["read:$old"])
     }
 
+    // capability: conversation.mark-read
     @Test("Mark read sends the room's latest read receipt and fully-read marker")
     func markRoomRead() async throws {
         let room = ReceiptRoom(noHandle: .init())

@@ -28,6 +28,7 @@ import org.robolectric.annotation.GraphicsMode
 class LiveProfileScreenTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    // capability: app.appearance
     @Test fun anAccountCanChooseDarkModeFromPreferences() {
         val mode = mutableStateOf<Boolean?>(null)
         compose.setContent {
@@ -42,6 +43,7 @@ class LiveProfileScreenTest {
         compose.onNodeWithText("Dark").assertExists()
     }
 
+    // capability: app.appearance
     @Test fun anAccountCanChooseItsPaletteAndGoBack() {
         val palette = mutableStateOf(SidebarPalette.Aubergine)
         var returned = false

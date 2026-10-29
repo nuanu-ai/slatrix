@@ -78,6 +78,7 @@ struct MediaCaptionTests {
         }
     }
 
+    // capability: message.edit-caption
     @Test("Saving a new caption edits the original event with a room message", arguments: [false, true])
     func savesCaption(file: Bool) async throws {
         let c = try Captioning(file: file)
@@ -87,6 +88,7 @@ struct MediaCaptionTests {
         #expect(c.service.selectedRoomID == c.f.roomID)
     }
 
+    // capability: message.edit-caption
     @Test("Removing a caption queues an edit", arguments: [false, true])
     func removesCaption(file: Bool) async throws {
         let c = try Captioning(file: file)

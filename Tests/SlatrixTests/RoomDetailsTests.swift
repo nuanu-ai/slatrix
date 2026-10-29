@@ -76,6 +76,7 @@ private final class DetailsRoom: Room, @unchecked Sendable {
 
 @MainActor
 struct RoomDetailsTests {
+    // capability: channel.details
     @Test("Loading details reads the name and topic and asks the SDK which of them the user may edit")
     func loadsDetailsAndPermissions() async throws {
         let room = DetailsRoom()

@@ -6,6 +6,9 @@ import Testing
 
 @MainActor
 struct MessageActionTests {
+    // capability: message.reactions.toggle
+    // capability: message.edit
+    // capability: message.delete
     @Test("Reacting to, editing and deleting a thread root go to the thread timeline that showed it")
     func threadRootActionsUseThreadTimeline() async throws {
         let f = ActionFixture()
@@ -33,6 +36,7 @@ struct MessageActionTests {
         #expect(f.thread.writes.all.isEmpty)
     }
 
+    // capability: message.reactions.toggle
     @Test("Adding a reaction makes its emoji the most recent and saves it to the account; taking one back does not")
     func reactionsUpdateRecentEmoji() async throws {
         let f = ActionFixture()
@@ -81,6 +85,7 @@ struct MessageActionTests {
         #expect(f.main.writes.all.isEmpty && f.thread.writes.all.isEmpty)
     }
 
+    // capability: message.delete
     @Test("A delete still succeeds when its sync echo removes the row before the SDK call returns")
     func deleteSurvivesItsOwnEcho() async throws {
         let f = ActionFixture()

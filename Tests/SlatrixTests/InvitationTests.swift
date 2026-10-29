@@ -104,6 +104,7 @@ struct InvitationActionTests {
         #expect(InvitationRoomPlacement.classify(isSpace: isSpace, membership: membership) == expected)
     }
 
+    // capability: home.invitations
     @Test("A second Accept while the first is in flight shares its join and its destination")
     func duplicateAcceptSharesJoin() async throws {
         var pending = Set<String>()
@@ -141,6 +142,7 @@ struct InvitationActionTests {
         #expect(room.writes.all.isEmpty)
     }
 
+    // capability: home.invitations
     @Test("Declining an invited workspace leaves it and reports a workspace")
     func declineWorkspace() async throws {
         let space = InvitationRoom("!workspace:example.org", space: true)
@@ -203,6 +205,7 @@ struct InvitationPermissionTests {
         var allows: Bool { self == .allowed || self == .fallbackAllowed }
     }
 
+    // capability: channel.invite
     @Test(
         "Inviting someone needs invite permission, checked with the SDK when RoomInfo lacks it",
         arguments: Permission.allCases)
@@ -277,6 +280,7 @@ struct WorkspaceLinkTests {
         #expect(spaces.writes.all.isEmpty)
     }
 
+    // capability: channel.link-workspace
     @Test("Linking twice adds once, and unlinking removes only that workspace's link")
     func linkAndUnlink() async throws {
         let spaces = Spaces()

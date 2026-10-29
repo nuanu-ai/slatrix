@@ -56,6 +56,7 @@ struct TimelineScrollPolicyTests {
             ) == nil)
     }
 
+    // capability: conversation.unread-line
     @Test("A conversation resumed from its cache opens at its unread line, wherever the reader left off")
     func liveOpensAtUnread() {
         let loaded: Set = ["unread", "left"]
@@ -125,6 +126,7 @@ struct TimelineScrollPolicyTests {
         #expect(Policy.turnsLive(atBottom: atBottom, live: live, hasNewer: hasNewer, editing: editing) == turns)
     }
 
+    // capability: conversation.history
     @Test("History loads within three screens of either end")
     func loadsAhead() {
         #expect(Policy.needsOlder(Viewport(top: 1_799, height: 600, contentHeight: 9_000)))
