@@ -12,6 +12,7 @@ import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.ChannelDetailsActions
 import ai.nuanu.slatrix.ui.account.ChannelDetailsScreen
 import ai.nuanu.slatrix.ui.account.PinnedMessages
+import ai.nuanu.slatrix.ui.account.SharedFiles
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.runtime.CompositionLocalProvider
@@ -51,7 +52,12 @@ class ChannelDetailsScreenshots(private val dark: Boolean, private val fontScale
                 listOf("Avery", "Jordan", "Mira", "Sam").map { ChannelMember("@${it.lowercase()}:example.org", it) }
             },
             notifications = { NotificationSetting(NotificationChoice.Default, NotificationChoice.Mentions) },
-            pins = { PinnedMessages(ConversationState(pinned, loading = false)) })
+            pins = { PinnedMessages(ConversationState(pinned, loading = false)) },
+            files = {
+                SharedFiles(ConversationState(listOf(message("c", "Jordan", "onboarding-v3.fig", 40).copy(kind = MessageKind.Attachment),
+                    message("d", "Mira", "Research notes: https://example.org/research/onboarding", 50),
+                    message("e", "Avery", "Q3 roadmap.pdf", 60).copy(kind = MessageKind.Attachment)), loading = false, hasMore = true))
+            })
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
                 SlatrixTheme(dark = dark) { ChannelDetailsScreen(room, "@jordan:example.org", actions, {}, {}) {} }
@@ -69,6 +75,9 @@ class ChannelDetailsScreenshots(private val dark: Boolean, private val fontScale
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Pinned messages").performClick()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/ChannelDetails-pins-$name.png")
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Files").performClick()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/ChannelDetails-files-$name.png")
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Edit").performClick()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/ChannelDetails-edit-$name.png")

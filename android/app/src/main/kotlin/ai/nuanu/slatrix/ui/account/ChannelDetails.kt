@@ -3,12 +3,14 @@ package ai.nuanu.slatrix.ui.account
 import ai.nuanu.slatrix.core.ChannelMember
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.NotificationChoice
 import ai.nuanu.slatrix.core.NotificationSetting
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
@@ -19,6 +21,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.PeopleOutline
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.PersonAddAlt
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
@@ -30,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -52,12 +57,16 @@ data class ChannelDetailsActions(
     val setNotifications: suspend (NotificationChoice) -> Unit = {},
     /** The room's pinned messages, read while the Pinned messages page shows. */
     val pins: @Composable () -> PinnedMessages = { PinnedMessages() },
+    val files: @Composable () -> SharedFiles = { SharedFiles() },
 )
+
+/** Every message in a conversation, threads included, to find what was shared, and asking for older ones. */
+data class SharedFiles(val state: ConversationState = ConversationState(), val onLoadMore: () -> Unit = {})
 
 /** A conversation's pinned messages as they load, and unpinning one. */
 data class PinnedMessages(val state: ConversationState = ConversationState(), val onUnpin: (ConversationMessage) -> Unit = {})
 
-private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeople, Pins }
+private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeople, Pins, Files }
 
 /**
  * Slack Android's channel details, opened from the conversation's header: its name and description, notifications,
@@ -84,6 +93,7 @@ fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetails
             { loads++ }, details)
         DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener }
         DetailsPage.Pins -> PinsPage(room, me, actions.pins(), onOpenMessage, details)
+        DetailsPage.Files -> FilesPage(actions.files(), onOpenMessage, details)
     }
 }
 
@@ -139,6 +149,7 @@ private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, 
                 DetailsRow(Icons.Outlined.PushPin, "Pinned messages", room.pinned.size.takeIf { it > 0 }?.toString()) {
                     onPage(DetailsPage.Pins)
                 }
+                DetailsRow(Icons.Outlined.Description, "Files") { onPage(DetailsPage.Files) }
                 HorizontalDivider(color = colors.border)
                 DetailsRow(Icons.AutoMirrored.Outlined.Logout, "Leave ${noun(room)}", color = colors.destructive, chevron = false,
                     enabled = !leaving) { confirmLeave = true }
@@ -307,6 +318,58 @@ private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpe
             pins.state.loading && room.pinned.isNotEmpty() -> item { DelayedProgress() }
             else -> item {
                 ErrorLine(pins.state.error ?: if (room.pinned.isEmpty()) "No pinned messages" else "Couldn’t load pins", colors.textSecondary)
+            }
+        }
+    }
+}
+
+/**
+ * The files and links shared in the conversation, newest first, as the Mac's Files lists them: a file opens its message
+ * where it is, and a link opens in the browser.
+ */
+@Composable
+private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBack: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    val uris = LocalUriHandler.current
+    val shared = remember(files.state.rows) {
+        files.state.rows.asReversed().filterIsInstance<ConversationMessage>().flatMap { message ->
+            if (message.kind == MessageKind.Attachment) listOf(message to null)
+            else message.runs.mapNotNull { run -> run.link?.takeIf { it.startsWith("https://") || it.startsWith("http://") } }
+                .distinct().map { message to it }
+        }
+    }
+    PushedPage("Files", onBack) {
+        items(shared, key = { (message, link) -> message.id + (link ?: "") }) { (message, link) ->
+            Row(Modifier.fillMaxWidth().clickable { if (link != null) uris.openUri(link) else message.eventId?.let(onOpenMessage) }
+                .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+                Box(Modifier.size(UiMetrics.Avatar).background(colors.raised, MaterialTheme.shapes.small), contentAlignment = Alignment.Center) {
+                    Icon(if (link != null) Icons.Outlined.Link else Icons.Outlined.Description, null, Modifier.size(UiMetrics.Icon),
+                        tint = colors.textSecondary)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(link ?: message.body, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Shared by ${message.senderName} · ${dayLabel(message.timestamp)}", style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        val state = files.state
+        when {
+            state.loading -> item { DelayedProgress() }
+            state.error != null -> item {
+                ErrorLine(state.error, colors.textSecondary)
+                TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
+            }
+            else -> {
+                if (shared.isEmpty() && !state.loadingHistory) item { ErrorLine("Nothing shared yet", colors.textSecondary) }
+                // Older history is asked for, as on the Mac, rather than paged through on its own in a long conversation. The
+                // button stays while a page loads, so the end of the list doesn't move.
+                if (state.hasMore) item {
+                    TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall),
+                        enabled = !state.loadingHistory) { Text("Load more") }
+                }
             }
         }
     }
