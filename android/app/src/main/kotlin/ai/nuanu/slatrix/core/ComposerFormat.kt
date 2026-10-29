@@ -13,7 +13,11 @@ object ComposerFormat {
     private val userID = Regex("^$userPattern$")
     private val mentioned = Regex("(?<![A-Za-z0-9_])(?:$userPattern|@room(?![A-Za-z0-9_:]))")
 
-    fun plainTextDraft(text: String): String = escape(text).replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+    fun plainTextDraft(text: String): String = text.replace("\r\n", "\n").replace("\r", "\n").split('\n').joinToString("<br>") { line ->
+        line.mapIndexed { index, character ->
+            if (character == ' ' && (index == 0 || line[index - 1] == ' ')) "&nbsp;" else escape(character.toString())
+        }.joinToString("")
+    }
 
     fun message(draftHtml: String): ComposerMessage {
         val root = Jsoup.parseBodyFragment(draftHtml).body()
@@ -21,7 +25,7 @@ object ComposerFormat {
         val renderer = Renderer()
         val result = renderer.children(root)
         return ComposerMessage(
-            result.body.trim(' ', '\n', '\r'),
+            result.body.trim(' ', '\n', '\r').replace('\u00a0', ' '),
             result.html.trim().takeIf { renderer.formatted },
             renderer.mentions.sorted(),
             renderer.mentionsRoom,
@@ -96,9 +100,8 @@ object ComposerFormat {
             return if (tag == "p" || tag == "div") Fragment("\n${inner.body}\n", "${inner.html}<br>") else inner
         }
 
-        private fun text(value: String, literal: Boolean): Fragment {
-            val plain = value.replace('\u00a0', ' ')
-            if (literal) return Fragment(plain, escape(value))
+        private fun text(plain: String, literal: Boolean): Fragment {
+            if (literal) return Fragment(plain, escape(plain))
             val body = StringBuilder()
             val html = StringBuilder()
             var cursor = 0
