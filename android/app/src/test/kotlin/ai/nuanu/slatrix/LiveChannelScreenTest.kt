@@ -16,7 +16,10 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasProgressBarRangeInfo
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
@@ -123,6 +126,22 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Today").assertIsDisplayed()
         compose.onNodeWithText("Yesterday").assertIsDisplayed()
         compose.onNodeWithText("Oct 23rd, 2023").assertIsDisplayed()
+    }
+
+    @Test fun aGroupedMessageDropsAvatarAndNameAndKeepsItsTimeInItsMenu() {
+        val at = LocalDate.now().atTime(9, 41).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val rows = listOf(message("First", minutes = 0).copy(timestamp = at), message("Second", minutes = 0).copy(timestamp = at, grouped = true))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), ComposerState(loading = false),
+                    {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("Second").assertIsDisplayed()
+        compose.onAllNodesWithText("Mira", useUnmergedTree = true).assertCountEquals(1)
+        compose.onAllNodesWithText("M", useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithText("Second").performTouchInput { longClick() }
+        compose.onNodeWithText("9:41", substring = true).assertIsDisplayed()
     }
 
     private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)
