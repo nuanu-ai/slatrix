@@ -143,6 +143,13 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
         }
     }
 
+    /** False when the timeline never opened, so only reopening the room can help. */
+    fun retry(): Boolean {
+        if (!lifetime.isActive || ready.isCancelled) return false
+        loadOlder()
+        return true
+    }
+
     suspend fun send(message: ComposerMessage): Boolean {
         if (!lifetime.isActive || message.body.isBlank()) return false
         val task = operations.async {
