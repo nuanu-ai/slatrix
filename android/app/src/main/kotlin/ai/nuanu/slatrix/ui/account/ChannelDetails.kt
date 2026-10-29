@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
 /** What a conversation's details do; a failure throws, and its message is shown as is. */
 data class ChannelDetailsActions(
     val members: suspend () -> List<ChannelMember> = { emptyList() },
-    val save: suspend (name: String, topic: String) -> Unit = { _, _ -> },
+    val save: suspend (name: String?, topic: String?) -> Unit = { _, _ -> },
     val leave: suspend () -> Unit = {},
     val invite: suspend (userId: String) -> Unit = {},
     val notifications: suspend () -> NotificationSetting = { NotificationSetting(NotificationChoice.Default, NotificationChoice.All) },

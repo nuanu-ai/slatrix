@@ -46,20 +46,20 @@ class MatrixChannel(private val client: Client, private val roomId: String) {
     }
 
     /** Saves the name and description that changed; a description saved before the name failed still counts. */
-    suspend fun save(name: String, topic: String) = joined("Join this conversation before editing its details.") { room ->
+    suspend fun save(name: String?, topic: String?) = joined("Join this conversation before editing its details.") { room ->
         val info = room.roomInfo()
-        val renaming = name != info.rawName.orEmpty()
-        val retopic = topic != info.topic.orEmpty()
-        if (renaming && name.isBlank()) throw ChannelActionFailure("Enter a name.")
+        val renaming = name != null && name != info.rawName.orEmpty()
+        val retopic = topic != null && topic != info.topic.orEmpty()
+        if (renaming && name!!.isBlank()) throw ChannelActionFailure("Enter a name.")
         room.getPowerLevels().use { powers ->
             if (renaming && !powers.canOwnUserSendState(StateEventType.RoomName) ||
                 retopic && !powers.canOwnUserSendState(StateEventType.RoomTopic)) {
                 throw ChannelActionFailure("You don’t have permission to change this conversation’s details.")
             }
         }
-        if (renaming) room.setName(name)
+        if (renaming) room.setName(name!!)
         try {
-            if (retopic) room.setTopic(topic)
+            if (retopic) room.setTopic(topic!!)
         } catch (failure: Exception) {
             if (failure is CancellationException || !renaming) throw failure
             throw ChannelActionFailure("The name was saved. The description couldn’t be saved.")

@@ -53,16 +53,20 @@ class ChannelDetailsScreenTest {
     }
 
     // capability: channel.details
-    @Test fun editingSavesTheNameAndDescriptionWhereYourPowerLevelAllowsIt() {
-        var saved: Pair<String, String>? = null
-        details(room, ChannelDetailsActions(save = { name, topic -> saved = name to topic }))
+    @Test fun editingSavesOnlyTheNameOrDescriptionThatChanged() {
+        val saved = mutableListOf<Pair<String?, String?>>()
+        details(room, ChannelDetailsActions(save = { name, topic -> saved += name to topic }))
         compose.onNodeWithText("Launch reviews").assertIsDisplayed()
         compose.onNodeWithText("Edit").performClick()
-        compose.onNodeWithText("Name").performTextReplacement("studio")
         compose.onNodeWithText("Description").performTextReplacement("Critique")
         compose.onNodeWithText("Save").performClick()
         compose.onNodeWithText("Channel details").assertIsDisplayed()
-        compose.runOnIdle { assertEquals("studio" to "Critique", saved) }
+
+        compose.onNodeWithText("Edit").performClick()
+        compose.onNodeWithText("Name").performTextReplacement("studio ")
+        compose.onNodeWithText("Save").performClick()
+        compose.onNodeWithText("Channel details").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(listOf<Pair<String?, String?>>(null to "Critique", "studio" to null), saved) }
     }
 
     @Test fun withoutThePowerToChangeEitherThereIsNoEdit() {
@@ -88,18 +92,18 @@ class ChannelDetailsScreenTest {
 
     // capability: channel.leave
     @Test fun leavingAsksFirstAndThenLeaves() {
-        var left = 0
+        var left = false
         var gone = false
-        details(room, ChannelDetailsActions(leave = { left++ }), onLeft = { gone = true })
+        details(room, ChannelDetailsActions(leave = { left = true }), onLeft = { gone = true })
         compose.onNodeWithText("Leave channel").performClick()
         compose.onNodeWithText("You may need an invitation to rejoin.").assertIsDisplayed()
         compose.onNodeWithText("Cancel").performClick()
-        compose.runOnIdle { assertEquals(0, left) }
+        compose.runOnIdle { assertFalse(left) }
 
         compose.onNodeWithText("Leave channel").performClick()
         compose.onNodeWithText("Leave").performClick()
         compose.waitUntil { gone }
-        compose.runOnIdle { assertEquals(1, left) }
+        compose.runOnIdle { assertTrue(left) }
     }
 
     @Test fun aLeaveThatFailsSaysWhyAndStays() {
@@ -135,6 +139,26 @@ class ChannelDetailsScreenTest {
         compose.onNodeWithText("Nothing").performClick()
         compose.onNodeWithText("Something went wrong. Try again.").assertIsDisplayed()
         compose.onNodeWithText("All new messages").assertIsSelected()
+    }
+
+    @Test fun notificationsThatCouldNotLoadSayWhyAndTryAgain() {
+        var loads = 0
+        details(room, ChannelDetailsActions(notifications = {
+            if (loads++ == 0) throw ChannelActionFailure("This conversation is still loading. Try again.")
+            NotificationSetting(NotificationChoice.Mentions, NotificationChoice.All)
+        }))
+        compose.onNodeWithText("Notifications").performClick()
+        compose.onNodeWithText("This conversation is still loading. Try again.").assertIsDisplayed()
+        compose.onNodeWithText("Try again").performClick()
+        compose.onNodeWithText("Mentions and keywords").assertIsSelected()
+    }
+
+    @Test fun addPeopleOpenedFromMembersGoesBackToMembers() {
+        details(room)
+        compose.onNodeWithText("Members").performClick()
+        compose.onNodeWithText("Add people").performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Search members").assertIsDisplayed()
     }
 
     // capability: channel.invite

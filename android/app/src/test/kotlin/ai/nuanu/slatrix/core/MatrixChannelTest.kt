@@ -30,6 +30,19 @@ class MatrixChannelTest {
         assertEquals(listOf("studio"), room.names)
     }
 
+    @Test fun aDescriptionAloneLeavesAnUnnamedRoomUnnamedAndANameIsTrimmed() = runTest {
+        val unnamed = ChannelRoom(roomInfo("!dm:example.org", "Alice").copy(rawName = null))
+        val direct = MatrixChannel(ChannelClient(unnamed, settings), "!dm:example.org")
+        unnamed.powers = TestPowers(name = false)
+        direct.save(null, "Plans")
+        assertEquals(emptyList<String>(), unnamed.names)
+        assertEquals(listOf("Plans"), unnamed.topics)
+
+        unnamed.powers = TestPowers()
+        direct.save(" Trip ", null)
+        assertEquals(listOf("Trip"), unnamed.names)
+    }
+
     // capability: conversation.members
     @Test fun membersAreThoseWhoJoinedByName() = runTest {
         room.people = listOf(member("@sam:example.org", "Sam"), member("@ava:example.org", "Ava", MembershipState.Invite),
