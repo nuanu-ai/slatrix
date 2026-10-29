@@ -19,7 +19,7 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 - **Compose screens**: drive real screens with fictional data through Compose semantics and render them with Roborazzi. Catches navigation, draft and appearance regressions; captures support visual review but miss physical input, real server behavior and device timing.
 
 - **Shared design tokens**: resolve every light/dark palette and compare all colors, file/avatar colors and radii with `design/tokens.json`. Catches cross-platform drift; misses rendering.
-- **Window configuration**: inspect the real Activity's keyboard adjustment mode. Catches a missing resize request; actual IME geometry still needs emulator inspection.
+- **Window configuration**: inspect the real Activity's keyboard adjustment mode and system bar icon appearance. Catches a missing resize request or icons that ignore theme changes; actual IME geometry and icon contrast still need emulator inspection.
 - **Device startup**: launch the real application and call the native SDK through its generated bindings. Catches missing entry points, startup failures and JNI packaging; misses authenticated server behavior.
 - **Android lint**: run the real detector on Kotlin fixtures. Catches off-system Compose colors and sizes; misses rendered layout and contrast.
 
