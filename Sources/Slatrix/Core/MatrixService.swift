@@ -2125,7 +2125,19 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             source: .file(filename: url.path), caption: nil, formattedCaption: nil, mentions: nil, inReplyTo: nil,
             extraContentJson: relation)
         let kind: AttachmentKind
-        if mime.hasPrefix("image/") {
+        // A video's poster, removed once the video is up.
+        var posterFolder: URL?
+        defer { if let posterFolder { try? FileManager.default.removeItem(at: posterFolder) } }
+        if mime.hasPrefix("video/") {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "SlatrixPoster-" + UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            posterFolder = folder
+            let (info, poster) = await VideoUpload.prepare(
+                url, mimetype: mime, size: UInt64(values.fileSize ?? 0), posterFolder: folder)
+            try assertDestination(roomID)
+            kind = .video(videoInfo: info, thumbnailSource: poster.map { .file(filename: $0.path) })
+        } else if mime.hasPrefix("image/") {
             let shape = Self.displayedSize(url)
             kind = .image(
                 imageInfo: ImageInfo(
