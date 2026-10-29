@@ -16,6 +16,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  push-gateway:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: android/push-gateway/package-lock.json
+      - name: Test push gateway
+        working-directory: android/push-gateway
+        run: |
+          npm ci
+          npm test
+
   android:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -44,6 +60,8 @@ jobs:
       - name: Test, lint and build
         working-directory: android
         run: ./gradlew :lint-rules:test :app:recordRoborazziDebug :app:lintDebug :app:assembleDebug :app:assembleRelease --console=plain
+      - name: Check push build configuration
+        run: python3 -m unittest discover -s android/tests -p test_push_configuration.py
       - name: Enable hardware acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

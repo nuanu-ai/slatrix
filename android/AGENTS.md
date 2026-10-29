@@ -16,11 +16,18 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 
 ## Tests
 
+- **Matrix services against SDK fakes**: use subclasses of the generated SDK types. Catches authentication, stale completions and refresh persistence; misses real server behavior.
+- **Shared product policies**: run every case in each ported `spec/` file through the public Kotlin policy. Catches drift between apps; misses SDK mapping and rendering.
+
 - **Compose screens**: drive real screens with fictional data through Compose semantics and render them with Roborazzi. Catches navigation, draft and appearance regressions; captures support visual review but miss physical input, real server behavior and device timing.
 
 - **Shared design tokens**: resolve every light/dark palette and compare all colors, file/avatar colors and radii with `design/tokens.json`. Catches cross-platform drift; misses rendering.
+- **Session storage**: reopen encrypted sessions through the real Android Keystore and app files. Catches lost session fields, plaintext credentials, tampering and missing keys; misses hardware-specific key behavior and abrupt power loss.
 - **Appearance storage**: reopen Android preferences after changing theme and palette. Catches lost appearance choices; misses rendered application and abrupt process death.
 - **Window configuration**: inspect the real Activity's keyboard adjustment mode and system bar icon appearance. Catches a missing resize request or icons that ignore theme changes; actual IME geometry and icon contrast still need emulator inspection.
+- **Native composer input**: inject keyboard events into the real Compose screen with an SDK draft fake. Catches lost input across draft state updates; misses real server behavior and keyboard-specific autocorrection.
+- **Push delivery**: resolve the real messaging service, inspect its durable WorkManager work and render SDK notification statuses through Android's notification manager. Catches wiring, filtering, preview privacy, tap identity and duplicate alerts; misses the deployed gateway and device delivery.
+- **Build configuration**: run Gradle with external Firebase configuration and gateway properties. Catches rejected deployment URLs and unsafe configuration; misses Firebase APIs and delivery.
 - **Device startup**: launch the real application and call the native SDK through its generated bindings. Catches missing entry points, startup failures and JNI packaging; misses authenticated server behavior.
 - **Android lint**: run the real detector on Kotlin fixtures. Catches off-system Compose colors and sizes; misses rendered layout and contrast.
 

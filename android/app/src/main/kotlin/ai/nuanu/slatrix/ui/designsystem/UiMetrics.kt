@@ -25,5 +25,7 @@ object UiMetrics {
     val ShortcutHeight = 88.dp
     val ComposerMinHeight = 64.dp
     val ComposerFieldMinHeight = 56.dp
+    val FormWidth = 480.dp
+    const val ProgressDelayMillis = 400L
     val ExpandedWidth = 600.dp
 }

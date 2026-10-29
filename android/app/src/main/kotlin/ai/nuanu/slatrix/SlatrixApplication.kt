@@ -1,12 +1,15 @@
 package ai.nuanu.slatrix
 
 import android.app.Application
+import ai.nuanu.slatrix.core.AccountRuntime
 import org.matrix.rustcomponents.sdk.LogLevel
 import org.matrix.rustcomponents.sdk.TracingConfiguration
 import org.matrix.rustcomponents.sdk.initPlatform
 import org.matrix.rustsdk.Android
 
 class SlatrixApplication : Application() {
+    val runtime get() = AccountRuntime.get(this)
+
     override fun onCreate() {
         super.onCreate()
         Android.init(applicationContext)

@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "source": ".",
+    "codebase": "slatrix-push",
+    "runtime": "nodejs24",
+    "ignore": ["node_modules", ".git", ".firebase", "test", "*-debug.log*"]
+  }
+}
