@@ -35,10 +35,10 @@ firebase deploy --project slatrix-18cdc --only functions:slatrix-push
 
 Deploying creates the public `matrixPush` function in `europe-west1`. It scales to zero, with at most one instance, four concurrent requests, 256 MiB memory and a 30-second request timeout. These limits bound concurrency, not total spend; billing alerts and usage monitoring remain the owner's responsibility.
 
-Use the function URL printed by deployment, followed by `/_matrix/push/v1/notify`, as the Android push gateway URL. For the Firebase function URL form, the full endpoint is:
+Use the request URL shown in Firebase Console → Functions, followed by `/_matrix/push/v1/notify`, as the Android push gateway URL. For this deployment:
 
 ```text
-https://europe-west1-slatrix-18cdc.cloudfunctions.net/matrixPush/_matrix/push/v1/notify
+https://matrixpush-mfdhzgmbba-ew.a.run.app/_matrix/push/v1/notify
 ```
 
-The function-name prefix belongs to the deployment URL. The handler receives the `/_matrix/push/v1/notify` suffix. Confirm the deployed endpoint, IAM and delivery from a designated test account before treating Android notifications as working.
+Matrix requires that exact path. The `cloudfunctions.net` alias printed by the CLI includes the function name in its path, which homeservers reject. Use the direct Cloud Run request URL above. Confirm the deployed endpoint, IAM and delivery from a designated test account before treating Android notifications as working.

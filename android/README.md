@@ -37,7 +37,7 @@ Keep the Firebase configuration outside the repository, then pass its absolute p
 ```sh
 ./gradlew :app:assembleDebug \
   -PslatrixGoogleServices=/absolute/path/google-services.json \
-  -PslatrixPushGateway=https://europe-west1-slatrix-18cdc.cloudfunctions.net/matrixPush/_matrix/push/v1/notify
+  -PslatrixPushGateway=https://matrixpush-mfdhzgmbba-ew.a.run.app/_matrix/push/v1/notify
 ```
 
 The Firebase file must include `ai.nuanu.slatrix.dev` for debug builds or
