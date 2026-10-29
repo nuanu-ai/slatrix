@@ -20,7 +20,7 @@ class MessageBodyRendererTest {
 
     private fun expectedRun(run: JsonObject) = MessageRun(
         text = run["text"].asString,
-        styles = run["style"]?.asJsonArray?.map { TextStyle.valueOf(it.asString.replaceFirstChar(Char::uppercaseChar)) }?.toSet().orEmpty(),
+        styles = run["style"]?.asJsonArray?.map { MessageTextStyle.valueOf(it.asString.replaceFirstChar(Char::uppercaseChar)) }?.toSet().orEmpty(),
         link = run["link"]?.asString,
         mention = run["mention"]?.asString,
         block = MessageBlock(quote = run["quote"]?.asInt ?: 0, list = run["list"]?.asInt ?: 0, code = run["code"]?.asBoolean ?: false),

@@ -34,4 +34,8 @@ object UiMetrics {
     val ActionTile = 86.dp
     /** The accent rule beside a quoted message. */
     val QuoteBar = 3.dp
+    /** A list's indent, in multiples of the text size, as on the Mac. */
+    const val ListIndentScale = 1.6f
+    /** Code reads a little smaller than the text around it, as on the Mac. */
+    const val CodeTextScale = 0.9f
 }
