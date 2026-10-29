@@ -37,8 +37,8 @@ class MessageSearchQuery(text: String, val mode: Mode = Mode.Query, val roomId: 
     /** Where the index matched in [body]: it lowercases whole words split at anything not a letter or digit. */
     fun highlights(body: String): List<IntRange> {
         val operators = if (mode == Mode.Query) setOf("AND", "OR", "NOT") else emptySet()
-        val terms = text.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() && it !in operators }.map { it.lowercase() }.toSet()
-        return Regex("[\\p{L}\\p{N}]+").findAll(body).filter { it.value.lowercase() in terms }.map { it.range }.toList()
+        val terms = text.split(Separators).filter { it.isNotEmpty() && it !in operators }.map { it.lowercase() }.toSet()
+        return Word.findAll(body).filter { it.value.lowercase() in terms }.map { it.range }.toList()
     }
 
     companion object {
@@ -49,7 +49,7 @@ class MessageSearchQuery(text: String, val mode: Mode = Mode.Query, val roomId: 
          * or `@` and quotes around spaces; a person by Matrix ID or `me`. What doesn't resolve stays in the text.
          */
         fun parse(input: String, rooms: List<RoomSummary>, me: String?): MessageSearchQuery {
-            val words = ArrayDeque(input.split(Regex("\\s+")).filter { it.isNotEmpty() })
+            val words = ArrayDeque(input.split(Whitespace).filter { it.isNotEmpty() })
             val text = mutableListOf<String>()
             var roomId: String? = null
             var senderId: String? = null
@@ -118,7 +118,7 @@ object ConversationSearch {
             val name = fold(room.name)
             val tier = when {
                 needle.isEmpty() || name.startsWith(needle) -> 0
-                name.split(Regex("[^\\p{L}\\p{N}]+")).any { it.startsWith(needle) } -> 1
+                name.split(Separators).any { it.startsWith(needle) } -> 1
                 needle in name -> 2
                 else -> return@mapNotNull null
             }
@@ -127,5 +127,11 @@ object ConversationSearch {
     }
 
     private fun fold(value: String) =
-        Normalizer.normalize(value, Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").lowercase()
+        Normalizer.normalize(value, Normalizer.Form.NFD).replace(Marks, "").lowercase()
 }
+
+// Compiled once: ranking runs over every conversation on each keystroke.
+private val Word = Regex("[\\p{L}\\p{N}]+")
+private val Separators = Regex("[^\\p{L}\\p{N}]+")
+private val Whitespace = Regex("\\s+")
+private val Marks = Regex("\\p{Mn}+")
