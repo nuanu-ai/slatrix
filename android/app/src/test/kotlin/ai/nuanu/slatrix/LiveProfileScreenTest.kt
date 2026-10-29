@@ -1,6 +1,8 @@
 package ai.nuanu.slatrix
 
 import android.app.Application
+import ai.nuanu.slatrix.core.RoomListState
+import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.account.LiveProfileScreen
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -62,5 +64,19 @@ class LiveProfileScreenTest {
         compose.runOnIdle { assertEquals(false, returned) }
         compose.onNodeWithContentDescription("Back").performClick()
         compose.runOnIdle { assertEquals(true, returned) }
+    }
+
+    @Test @Config(qualifiers = "w840dp-h900dp-420dpi")
+    fun expandedHomePlacesItsDestinationsInAWorkingRail() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(loading = false), {}, {}, {})
+            }
+        }
+        val home = compose.onNodeWithText("Home").fetchSemanticsNode().boundsInRoot
+        val dms = compose.onNodeWithText("DMs").fetchSemanticsNode().boundsInRoot
+        assertEquals(home.center.x, dms.center.x, 1f)
+        compose.onNodeWithText("DMs").performClick()
+        compose.onNodeWithText("Direct messages").assertExists()
     }
 }
