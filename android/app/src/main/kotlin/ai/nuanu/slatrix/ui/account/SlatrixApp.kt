@@ -11,6 +11,7 @@ import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.ComposerState
+import ai.nuanu.slatrix.core.WorkspacePreferences
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.compose.BackHandler
@@ -60,6 +61,9 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
         }
         when {
             state is AccountState.Connected -> {
+                val userId = (state as AccountState.Connected).userId
+                val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
+                var selectedSpaceId by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val roomState = rooms?.state?.collectAsState()?.value ?: RoomListState()
                 val selected = workspace?.selected?.collectAsState()?.value
@@ -85,7 +89,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             }
                             else -> LiveHomeScreen((state as AccountState.Connected).userId, roomState,
                                 { id -> roomState.rooms.firstOrNull { it.id == id }?.let { workspace?.open(it) } },
-                                { you = true }, { rooms?.retry() })
+                                { you = true }, { rooms?.retry() }, selectedSpaceId,
+                                { selectedSpaceId = it; workspacePreferences.selectedSpaceId = it })
                         }
                     }
                     (state as AccountState.Connected).warning?.let { warning ->

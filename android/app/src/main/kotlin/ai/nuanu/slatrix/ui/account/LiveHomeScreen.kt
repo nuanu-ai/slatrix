@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
+import ai.nuanu.slatrix.core.WorkspaceMembership
 import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -19,6 +20,8 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -36,8 +39,10 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}) {
     var directOnly by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
+    var switching by remember { mutableStateOf(false) }
     val colors = SlatrixTheme.colors
-    val visible = state.rooms.filter { (!directOnly || it.direct) && it.name.contains(query, ignoreCase = true) }
+    val visible = state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) &&
+        (!directOnly || it.direct) && it.name.contains(query, ignoreCase = true) }
     BoxWithConstraints(Modifier.fillMaxSize().background(colors.frame)) {
         val expanded = maxWidth >= UiMetrics.ExpandedWidth
         Row(Modifier.fillMaxSize()) {
@@ -56,9 +61,25 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
             Column(Modifier.weight(1f)) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.RootHeaderHeight)
                     .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (directOnly) "Direct messages" else userId.substringAfter(':', "Home"), Modifier.weight(1f),
-                        style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
+            Box(Modifier.weight(1f)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) { switching = true }
+                    .semantics { contentDescription = "Switch workspace" }, verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                    Text(if (directOnly) "Direct messages" else state.spaces.firstOrNull { it.id == selectedSpaceId }?.name ?: if (selectedSpaceId == null) "All conversations" else "Home",
+                        Modifier.weight(1f, fill = false), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(Icons.Outlined.ExpandMore, null, Modifier.size(UiMetrics.Icon))
+                }
+                DropdownMenu(expanded = switching, onDismissRequest = { switching = false }) {
+                    DropdownMenuItem(text = { Text("All conversations") }, onClick = { switching = false; onSpace(null) },
+                        trailingIcon = { if (selectedSpaceId == null) Icon(Icons.Outlined.Check, "Selected") })
+                    state.spaces.sortedWith(compareBy({ !it.isTopLevel }, { it.name.lowercase(java.util.Locale.ROOT) })).forEach { space ->
+                        DropdownMenuItem(text = { Text(space.name) }, onClick = { switching = false; onSpace(space.id) },
+                            leadingIcon = { LiveAvatar(space.initials, space.colorIndex, compact = true) },
+                            trailingIcon = { if (selectedSpaceId == space.id) Icon(Icons.Outlined.Check, "Selected") })
+                    }
+                }
+            }
                     Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
                         .clickable(role = Role.Button, onClick = onYou).semantics { contentDescription = "You" }, contentAlignment = Alignment.Center) {
                         LiveAvatar(AvatarPlaceholder.initials(userId.substringBefore(':')), AvatarPlaceholder.colorIndex(userId), compact = true)
