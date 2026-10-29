@@ -94,6 +94,17 @@ class MessageActionSheetTest {
         compose.runOnIdle { assertEquals(listOf("Ship it"), forwarded) }
     }
 
+    // capability: message.save
+    @Test fun saveForLaterSavesOrRemovesTheMessage() {
+        val saved = mutableListOf<Pair<String, Boolean>>()
+        show(MessageActions(saved = setOf(mine.eventId!!), onSave = { message, save -> saved += message.body to save }))
+        open("Ship it")
+        compose.onNodeWithText("Save for later").performClick()
+        open("On it")
+        compose.onNodeWithText("Remove from Later").performClick()
+        compose.runOnIdle { assertEquals(listOf("Ship it" to true, "On it" to false), saved) }
+    }
+
     // capability: message.copy-link
     // capability: message.pin
     @Test fun pinOrUnpinIsOfferedWhereYouMayPin() {
