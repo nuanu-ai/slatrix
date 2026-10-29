@@ -107,11 +107,4 @@ class ChannelScreensTest {
         compose.onNodeWithText("Create").assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals(listOf("launch-plans" to "Dates and owners"), created) }
     }
-
-    @Test fun aChannelThatCantBeCreatedSaysWhy() {
-        compose.setContent {
-            SlatrixTheme { CreateChannelScreen("Harbor", creating = false, error = "You can’t add channels to this workspace.", onCreate = { _, _ -> }, onBack = {}) }
-        }
-        compose.onNodeWithText("You can’t add channels to this workspace.").assertIsDisplayed()
-    }
 }

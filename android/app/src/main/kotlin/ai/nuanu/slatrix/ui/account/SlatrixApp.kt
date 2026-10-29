@@ -79,7 +79,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var you by rememberSaveable { mutableStateOf(false) }
     var preferences by rememberSaveable { mutableStateOf(false) }
     // Browse channels or Create a channel, pushed over Home; null while neither is open.
-    var channels by rememberSaveable { mutableStateOf<String?>(null) }
+    var channels by rememberSaveable { mutableStateOf<ChannelPage?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     // Back during a restore leaves the app; cancelling would show sign-in with the session still saved.
     BackHandler(enabled = (state as? AccountState.Connecting)?.restoring == false || state is AccountState.ChooseMethod ||
@@ -159,7 +159,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
                             channels != null -> { {
                                 val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
-                                if (channels == BrowseChannels) LiveBrowseChannels(rooms, selectedSpaceId, openChannel) { channels = null }
+                                if (channels == ChannelPage.Browse) LiveBrowseChannels(rooms, selectedSpaceId, openChannel) { channels = null }
                                 else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
                                     openChannel, { notice = it }) { channels = null }
                             } }
@@ -178,12 +178,10 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             }
                         }
                     }
-                    notice?.let { text ->
+                    notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
+                    // One place for both, so a notice never sits on top of the account's warning.
+                    (notice ?: (state as AccountState.Connected).warning)?.let { text ->
                         Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(text) }
-                        LaunchedEffect(text) { delay(UiMetrics.NoticeMillis); notice = null }
-                    }
-                    (state as AccountState.Connected).warning?.let { warning ->
-                        Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(warning) }
                     }
                 }
             }
@@ -263,7 +261,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
 @Composable
 private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (String) -> Unit,
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit,
     activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
@@ -272,7 +270,7 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
     }
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
-        onBrowseChannels = { onChannels(BrowseChannels) }, onCreateChannel = { onChannels(CreateChannel) },
+        onBrowseChannels = { onChannels(ChannelPage.Browse) }, onCreateChannel = { onChannels(ChannelPage.Create) },
         search = {
             val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()
             val inScope = remember(state.rooms, selectedSpaceId) {
@@ -309,5 +307,4 @@ private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads
     }
 }
 
-private const val BrowseChannels = "browse"
-private const val CreateChannel = "create"
+private enum class ChannelPage { Browse, Create }

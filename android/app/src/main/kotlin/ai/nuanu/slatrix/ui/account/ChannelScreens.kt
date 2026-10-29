@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.core.Channels
 import ai.nuanu.slatrix.core.DirectoryChannel
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.listed
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -69,6 +71,9 @@ import kotlinx.coroutines.launch
 fun BrowseChannelsScreen(title: String, state: ChannelDirectoryState, joined: Set<String>, joining: String?, error: String?,
     onSearch: (String) -> Unit, onMore: () -> Unit, onChannel: (DirectoryChannel) -> Unit, onBack: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
+    // After the first answer, a search in flight keeps what was said, so a note never swaps for a spinner as you type.
+    val answered = remember { booleanArrayOf(false) }
+    if (!state.loading) answered[0] = true
     Box(Modifier.fillMaxSize()) {
         PushedPage(title, onBack) {
             item { SearchField(query, { query = it; onSearch(it) }, { onSearch(query) }, Modifier, "Search channels") }
@@ -77,7 +82,7 @@ fun BrowseChannelsScreen(title: String, state: ChannelDirectoryState, joined: Se
             }
             when {
                 state.error != null -> item { Note(state.error) }
-                state.loading -> item { ConnectionIndicator(true, null) }
+                state.loading && !answered[0] -> item { ConnectionIndicator(true, null) }
                 // Asks for the next page as the end comes into view.
                 state.more -> item { LaunchedEffect(state.channels.size) { onMore() } }
                 state.channels.isEmpty() -> item { Note(if (query.isBlank()) "No channels yet" else "No channels found") }
@@ -103,7 +108,7 @@ private fun DirectoryRow(channel: DirectoryChannel, joined: Boolean, joining: Bo
                 style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         // The progress takes the label's place, so the row never changes size.
-        Box(contentAlignment = Alignment.CenterEnd) {
+        Box(Modifier.widthIn(min = UiMetrics.Icon), contentAlignment = Alignment.CenterEnd) {
             if (joining) DelayedSpinner()
             else if (joined) Text("Joined", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
         }
@@ -198,9 +203,10 @@ fun LiveBrowseChannels(rooms: MatrixRooms?, spaceId: String?, onOpen: (RoomSumma
                 joining = channel.id
                 error = null
                 scope.launch {
-                    val room = Channels.join(client, channel, rooms.state)
+                    if (!Channels.join(client, channel)) error = "Couldn’t join ${channel.name}."
+                    // A slow sync leaves the row Joined, to open with another tap.
+                    else rooms.state.listed(channel.id)?.let(onOpen)
                     joining = null
-                    if (room != null) onOpen(room) else error = "Couldn’t join ${channel.name}."
                 }
             }
         }, onBack)
@@ -222,10 +228,11 @@ fun LiveCreateChannel(rooms: MatrixRooms?, spaceId: String?, workspace: String?,
             val created = Channels.create(client, name, topic, spaceId, rooms.state)
             creating = false
             val room = created.room
-            if (room == null) error = created.error
-            else {
-                created.error?.let(onNotice)
-                onOpen(room)
+            when {
+                !created.made -> error = created.error
+                room != null -> { created.error?.let(onNotice); onOpen(room) }
+                // Made, but not listed yet: the form goes, so another Create can't make a second one.
+                else -> { onNotice(created.error ?: "Created. It’ll show up in a moment."); onBack() }
             }
         }
     }, onBack)

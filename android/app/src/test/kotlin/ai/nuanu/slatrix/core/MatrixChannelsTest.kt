@@ -6,12 +6,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.CreateRoomParameters
 import org.matrix.rustcomponents.sdk.JoinRule
+import org.matrix.rustcomponents.sdk.Membership
 import org.matrix.rustcomponents.sdk.NoHandle
 import org.matrix.rustcomponents.sdk.PublicRoomJoinRule
 import org.matrix.rustcomponents.sdk.Room
@@ -73,13 +75,12 @@ class MatrixChannelsTest {
     }
 
     // capability: home.browse-channels
-    @Test fun joiningAChannelOpensItOnceTheRoomListHasIt() = runTest {
+    @Test fun joiningAChannelUsesTheServersItCameFrom() = runTest {
         val client = ChannelsClient()
-        val rooms = MutableStateFlow(RoomListState(loading = false))
-        val joining = async { Channels.join(client, DirectoryChannel("!design:example.org", "design", null, 12, true, via = listOf("example.org")), rooms) }
+        assertTrue(Channels.join(client, DirectoryChannel("!design:example.org", "design", null, 12, true, via = listOf("example.org"))))
         assertEquals("!design:example.org" to listOf("example.org"), client.joined.await())
-        rooms.value = RoomListState(listOf(Design), loading = false)
-        assertEquals(Design, joining.await())
+        client.joinFails = true
+        assertFalse("A refused join says so", Channels.join(client, DirectoryChannel("!ops:example.org", "ops", null, 2, true)))
     }
 
     // capability: home.create-channel
@@ -90,11 +91,31 @@ class MatrixChannelsTest {
 
         val created = Channels.create(client, " design ", "Reviews ", Harbor, rooms)
 
-        assertEquals(ChannelCreation(Design), created)
+        assertEquals(ChannelCreation(Design, made = true), created)
         val request = client.created.single()
         assertEquals("design" to "Reviews", request.name to request.topic)
         assertTrue(request.isEncrypted && request.visibility == RoomVisibility.Private && request.preset == RoomPreset.PRIVATE_CHAT)
         assertEquals(listOf(Design.id to Harbor), client.linked)
+    }
+
+    @Test fun aChannelTheWorkspaceWontTakeStillOpensAndSaysSo() = runTest {
+        val client = ChannelsClient().apply { createdId = Design.id; linkFails = true }
+        val created = Channels.create(client, "design", "", Harbor, MutableStateFlow(RoomListState(listOf(Design), loading = false)))
+        assertEquals(ChannelCreation(Design, "Created, but couldn’t add it to the workspace.", made = true), created)
+    }
+
+    @Test fun theServersDirectoryLoadsItsNextPageWhenAsked() = runTest {
+        val client = ChannelsClient()
+        client.directory = listOf(description("!design:example.org", "design", PublicRoomJoinRule.PUBLIC, 12u))
+        client.nextPage = listOf(description("!ops:example.org", "ops", PublicRoomJoinRule.PUBLIC, 2u))
+        val directory = ChannelDirectory(backgroundScope, client, null)
+
+        directory.search("")
+        assertTrue(directory.state.first { !it.loading && it.channels.size == 1 }.more)
+        directory.loadMore()
+        val all = directory.state.first { !it.loading && it.channels.size == 2 }
+        assertEquals(listOf("design", "ops"), all.channels.map { it.name })
+        assertFalse(all.more)
     }
 
     @Test fun aChannelIsNotCreatedInAWorkspaceYouCantAddChannelsTo() = runTest {
@@ -114,6 +135,9 @@ private class ChannelsClient : Client(NoHandle) {
     var directoryFails = false
     var hierarchy = emptyList<SpaceRoom>()
     var canManage = true
+    var joinFails = false
+    var linkFails = false
+    var nextPage: List<RoomDescription>? = null
     var createdId = "!created:example.org"
     val filter = CompletableDeferred<String?>()
     val joined = CompletableDeferred<Pair<String, List<String>>>()
@@ -131,7 +155,12 @@ private class ChannelsClient : Client(NoHandle) {
             if (directoryFails) throw IllegalStateException("Directory unavailable")
             listener?.onUpdate(listOf(RoomDirectorySearchEntryUpdate.Reset(directory)))
         }
-        override suspend fun isAtLastPage(): Boolean = true
+        private var paged = false
+        override suspend fun isAtLastPage(): Boolean = nextPage == null || paged
+        override suspend fun nextPage() {
+            paged = true
+            listener?.onUpdate(listOf(RoomDirectorySearchEntryUpdate.Append(nextPage.orEmpty())))
+        }
     }
 
     override suspend fun spaceService(): SpaceService = object : SpaceService(NoHandle) {
@@ -139,16 +168,21 @@ private class ChannelsClient : Client(NoHandle) {
             override fun paginationState(): SpaceRoomListPaginationState = SpaceRoomListPaginationState.Idle(endReached = true)
             override suspend fun rooms(): List<SpaceRoom> = hierarchy.takeIf { spaceId == Harbor }.orEmpty()
         }
-        override suspend fun addChildToSpace(childId: String, spaceId: String) { linked += childId to spaceId }
+        override suspend fun addChildToSpace(childId: String, spaceId: String) {
+            if (linkFails) throw IllegalStateException("Not ready")
+            linked += childId to spaceId
+        }
     }
 
     override fun getRoom(roomId: String): Room? = if (roomId != Harbor) null else object : Room(NoHandle) {
+        override fun membership(): Membership = Membership.JOINED
         override suspend fun getPowerLevels(): RoomPowerLevels = object : RoomPowerLevels(NoHandle) {
             override fun canOwnUserSendState(stateEvent: StateEventType): Boolean = canManage && stateEvent is StateEventType.SpaceChild
         }
     }
 
     override suspend fun joinRoomByIdOrAlias(roomIdOrAlias: String, serverNames: List<String>): Room {
+        if (joinFails) throw IllegalStateException("Forbidden")
         joined.complete(roomIdOrAlias to serverNames)
         return object : Room(NoHandle) {}
     }

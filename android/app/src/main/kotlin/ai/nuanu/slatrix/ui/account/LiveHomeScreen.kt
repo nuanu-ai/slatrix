@@ -294,7 +294,7 @@ private fun SectionHeader(section: HomeSection, open: Boolean, onOpen: (() -> Un
         .padding(start = UiMetrics.GapLarge, end = if (onOpen == null) UiMetrics.GapLarge else UiMetrics.GapTiny),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
         Icon(section.icon, null, Modifier.size(UiMetrics.Icon))
-        Row(Modifier.weight(1f).then(if (onOpen != null) Modifier.heightIn(min = UiMetrics.ListRow)
+        Row(Modifier.weight(1f).then(if (onOpen != null) Modifier.heightIn(min = UiMetrics.Touch)
             .clickable(role = Role.Button, onClick = onOpen) else Modifier), verticalAlignment = Alignment.CenterVertically) {
             // Slack's section titles are 14 sp, a step under the rows.
             Text(section.label, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelLarge,
@@ -311,7 +311,7 @@ private fun SectionHeader(section: HomeSection, open: Boolean, onOpen: (() -> Un
 /** Slack's Add channel row, closing the Channels section. */
 @Composable
 private fun AddChannelRow(onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button, onClick = onClick)
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button, onClick = onClick)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
         Icon(SlackIcons.Plus, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.textBody)

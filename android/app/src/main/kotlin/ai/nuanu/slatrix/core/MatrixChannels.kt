@@ -3,8 +3,11 @@ package ai.nuanu.slatrix.core
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -20,6 +23,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.CreateRoomParameters
 import org.matrix.rustcomponents.sdk.JoinRule
+import org.matrix.rustcomponents.sdk.Membership
 import org.matrix.rustcomponents.sdk.PublicRoomJoinRule
 import org.matrix.rustcomponents.sdk.RoomDescription
 import org.matrix.rustcomponents.sdk.RoomDirectorySearchEntriesListener
@@ -56,53 +60,60 @@ class ChannelDirectory(private val scope: CoroutineScope, private val client: Cl
     private val generation = AtomicLong()
     private var job: Job? = null
     private var more: Channel<Unit>? = null
-    private var workspaceChannels: List<DirectoryChannel>? = null
+    // Read once and shared by every search, so typing while it loads never starts it over.
+    private val workspaceChannels = spaceId?.let { id -> scope.async(Dispatchers.Default, CoroutineStart.LAZY) { workspace(id) } }
 
     fun search(query: String) {
         val token = generation.incrementAndGet()
         job?.cancel()
         val term = query.trim()
+        if (term.toByteArray().size > 2_048 || term.any(Char::isISOControl)) {
+            job = null
+            mutableState.value = ChannelDirectoryState(error = "Use a shorter search without control characters.")
+            return
+        }
         val requests = Channel<Unit>(Channel.CONFLATED).also { more = it }
-        // What was listed stays until the new results replace it, so typing never blanks the list.
-        mutableState.update { it.copy(loading = true, more = false, error = null) }
+        // What was listed stays until the new results replace it, so typing never blanks the list; a workspace's list,
+        // once read, filters at once.
+        mutableState.update { it.copy(loading = workspaceChannels?.isCompleted != true, more = false, error = null) }
         job = scope.launch(Dispatchers.Default) {
             fun publish(change: (ChannelDirectoryState) -> ChannelDirectoryState) {
                 mutableState.update { if (generation.get() == token) change(it) else it }
             }
             try {
-                if (spaceId != null) {
-                    val all = workspaceChannels ?: workspace(spaceId).also { workspaceChannels = it }
+                if (workspaceChannels != null) {
+                    val all = workspaceChannels.await()
                     publish { ChannelDirectoryState(all.filter { it.matches(term) }) }
                     return@launch
                 }
                 // Waits out typing, so each keystroke doesn't ask the server.
                 if (term.isNotEmpty()) delay(250)
-                val search = client.roomDirectorySearch()
-                val results = mutableListOf<RoomDescription>()
-                val handle = search.results(object : RoomDirectorySearchEntriesListener {
-                    override fun onUpdate(roomEntriesUpdate: List<RoomDirectorySearchEntryUpdate>) {
-                        val channels = synchronized(results) {
-                            roomEntriesUpdate.forEach { results.apply(it) }
-                            results.mapNotNull { it.channel() }.distinctBy { it.id }
+                client.roomDirectorySearch().use { search ->
+                    val results = mutableListOf<RoomDescription>()
+                    val handle = search.results(object : RoomDirectorySearchEntriesListener {
+                        override fun onUpdate(roomEntriesUpdate: List<RoomDirectorySearchEntryUpdate>) {
+                            val channels = synchronized(results) {
+                                roomEntriesUpdate.forEach { results.apply(it) }
+                                results.mapNotNull { it.channel() }.distinctBy { it.id }
+                            }
+                            publish { it.copy(channels = channels) }
                         }
-                        publish { it.copy(channels = channels) }
+                    })
+                    try {
+                        search.search(term.ifEmpty { null }, 50u, null)
+                        publish { it.copy(channels = synchronized(results) { results.mapNotNull { r -> r.channel() }.distinctBy { c -> c.id } }) }
+                        while (true) {
+                            val last = search.isAtLastPage()
+                            publish { it.copy(loading = false, more = !last) }
+                            if (last) break
+                            requests.receive()
+                            publish { it.copy(loading = true) }
+                            search.nextPage()
+                        }
+                    } finally {
+                        runCatching { handle.cancel() }
+                        handle.close()
                     }
-                })
-                try {
-                    search.search(term.ifEmpty { null }, 50u, null)
-                    publish { it.copy(channels = synchronized(results) { results.mapNotNull { r -> r.channel() }.distinctBy { c -> c.id } }) }
-                    while (true) {
-                        val last = search.isAtLastPage()
-                        publish { it.copy(loading = false, more = !last) }
-                        if (last) break
-                        requests.receive()
-                        publish { it.copy(loading = true) }
-                        search.nextPage()
-                    }
-                } finally {
-                    runCatching { handle.cancel() }
-                    handle.close()
-                    search.close()
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -153,44 +164,56 @@ class ChannelDirectory(private val scope: CoroutineScope, private val client: Cl
 
 /** Joining and creating channels, each opened once the room list has it. */
 object Channels {
-    /** Joins [channel] and returns it from the room list, or null when it couldn't be joined. */
-    suspend fun join(client: Client, channel: DirectoryChannel, rooms: Flow<RoomListState>): RoomSummary? = quietly {
-        client.joinRoomByIdOrAlias(channel.id, channel.via).close()
-        rooms.listed(channel.id)
+    /** Joins [channel]; false when that failed. It opens once the room list has it. */
+    suspend fun join(client: Client, channel: DirectoryChannel): Boolean = withContext(Dispatchers.Default) {
+        try {
+            client.joinRoomByIdOrAlias(channel.id, channel.via).close()
+            true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /**
      * Creates a private, encrypted channel, as the Mac does, and adds it to the workspace [spaceId] if there is one. Fails
-     * before creating anything when you can't add channels to that workspace.
+     * before creating anything when you can't add channels to that workspace. Once made, it is linked and waited for
+     * even if you leave, so it never ends up outside its workspace.
      */
     suspend fun create(client: Client, name: String, topic: String, spaceId: String?, rooms: Flow<RoomListState>): ChannelCreation =
         withContext(Dispatchers.Default) {
-            try {
+            val id = try {
                 if (spaceId != null) {
                     val allowed = client.getRoom(spaceId)?.use { space ->
-                        space.getPowerLevels().use { it.canOwnUserSendState(StateEventType.SpaceChild) }
+                        space.membership() == Membership.JOINED &&
+                            space.getPowerLevels().use { it.canOwnUserSendState(StateEventType.SpaceChild) }
                     } == true
                     if (!allowed) return@withContext ChannelCreation(error = "You can’t add channels to this workspace.")
                 }
-                val id = client.createRoom(CreateRoomParameters(name = name.trim(), topic = topic.trim().ifEmpty { null },
+                client.createRoom(CreateRoomParameters(name = name.trim(), topic = topic.trim().ifEmpty { null },
                     isEncrypted = true, visibility = RoomVisibility.Private, preset = RoomPreset.PRIVATE_CHAT))
-                val room = rooms.listed(id) ?: return@withContext ChannelCreation(error = "Created, but it hasn’t arrived yet.")
-                val linked = spaceId == null || runCatching { client.spaceService().use { it.addChildToSpace(id, spaceId) } }.isSuccess
-                ChannelCreation(room, if (linked) null else "Created, but couldn’t add it to the workspace.")
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                ChannelCreation(error = "Couldn’t create the channel.")
+                return@withContext ChannelCreation(error = "Couldn’t create the channel.")
+            }
+            withContext(NonCancellable) {
+                // The workspace link reads the channel's synced state, as on the Mac, so it waits for sync to list it.
+                val room = rooms.listed(id)
+                val linked = spaceId == null || try {
+                    client.spaceService().use { it.addChildToSpace(id, spaceId) }
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+                ChannelCreation(room, if (linked) null else "Created, but couldn’t add it to the workspace.", made = true)
             }
         }
-
-    private suspend fun <T> quietly(block: suspend () -> T): T? = withContext(Dispatchers.Default) {
-        try { block() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
-    }
 }
 
-/** A channel just made, and what went wrong if anything did; [room] is null when it can't be opened. */
-data class ChannelCreation(val room: RoomSummary? = null, val error: String? = null)
+/** A channel just made, or why not; [room] is null until the room list has it. */
+data class ChannelCreation(val room: RoomSummary? = null, val error: String? = null, val made: Boolean = false)
 
 /** [id] from the room list once sync has it there. */
 internal suspend fun Flow<RoomListState>.listed(id: String): RoomSummary? =
