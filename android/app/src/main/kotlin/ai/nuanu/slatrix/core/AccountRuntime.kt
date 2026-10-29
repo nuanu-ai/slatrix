@@ -1,6 +1,8 @@
 package ai.nuanu.slatrix.core
 
 import android.app.Application
+import ai.nuanu.slatrix.BuildConfig
+import ai.nuanu.slatrix.push.PushRegistrationWorker
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +39,7 @@ class AccountRuntime private constructor(application: Application) {
                     client = next
                     mutableRooms.value = next?.let { MatrixRooms(scope, it) }
                     mutableIdentity.value = next?.let { IdentityVerification(scope, it) }
+                    if (next != null && BuildConfig.PUSH_GATEWAY.isNotEmpty()) PushRegistrationWorker.enqueue(application)
                 }
             }
         }

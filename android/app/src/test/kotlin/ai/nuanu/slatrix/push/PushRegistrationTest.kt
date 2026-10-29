@@ -2,6 +2,8 @@ package ai.nuanu.slatrix.push
 
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
+import androidx.work.Configuration
+import androidx.work.WorkManager
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -21,6 +23,7 @@ class PushRegistrationTest {
         val registration = PushRegistration(context)
         registration.updateToken("previous-token")
         registration.register(server, "@alex:example.org", "https://push.example.org/_matrix/push/v1/notify")
+        WorkManager.initialize(context, Configuration.Builder().build())
         val service = Robolectric.buildService(PushMessagingService::class.java).create().get()
 
         service.onNewToken("firebase-refreshed-token")
