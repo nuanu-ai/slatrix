@@ -476,6 +476,7 @@ private class JumpRoom(private val live: Timeline, private val around: Timeline)
     val focuses = mutableListOf<TimelineFocus>()
     var aroundFailure: Exception? = null
     override suspend fun setUnreadFlag(newValue: Boolean) = Unit
+    override fun ownUserId(): String = "@me:example.org"
     override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline {
         focuses += configuration.focus
         if (configuration.focus is TimelineFocus.Event) aroundFailure?.let { throw it }
