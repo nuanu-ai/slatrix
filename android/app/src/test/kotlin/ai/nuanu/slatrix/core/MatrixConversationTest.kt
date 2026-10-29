@@ -240,6 +240,25 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.reply
+    @Test fun aReplyQuotesItsMessageAndAnEditReplacesYourOwn() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello", editable = true)))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        assertTrue(conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single().editable)
+
+        val reply = async { conversation.send(ComposerMessage("Agreed", null, emptyList(), false, ComposerTarget.Reply("\$one", "Mira Chen", "Hello"))) }
+        assertEquals("\$one", timeline.replies.receive())
+        assertEquals("Agreed", ((timeline.submissions.receive().type) as MessageType.Text).content.body)
+        timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
+        assertTrue(reply.await())
+
+        assertTrue(conversation.send(ComposerMessage("Hello again", null, emptyList(), false, ComposerTarget.Edit("\$one", "Hello"))))
+        val (id, edited) = timeline.edits.receive()
+        assertEquals(EventOrTransactionId.EventId("\$one"), id)
+        assertEquals("Hello again", (((edited as EditedContent.RoomMessage).content as ConversationContent).type as MessageType.Text).content.body)
+        conversation.close()
+    }
+
     @Test fun aFailedDeleteSaysSoForAMoment() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.redactFailure = IllegalStateException("Offline")
@@ -372,6 +391,15 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         submissions.send(msg as ConversationContent)
         return sendResults.receive().getOrThrow()
     }
+    val replies = Channel<String>(Channel.UNLIMITED)
+    override suspend fun sendReply(msg: RoomMessageEventContentWithoutRelation, eventId: String): SendHandle {
+        replies.send(eventId)
+        return send(msg)
+    }
+    val edits = Channel<Pair<EventOrTransactionId, EditedContent>>(Channel.UNLIMITED)
+    override suspend fun edit(eventOrTransactionId: EventOrTransactionId, newContent: EditedContent) {
+        edits.send(eventOrTransactionId to newContent)
+    }
 }
 
 private class ConversationContent(val type: MessageType) : RoomMessageEventContentWithoutRelation(NoHandle) {
@@ -391,6 +419,7 @@ private fun conversationItem(
     content: TimelineItemContent? = null,
     sender: String = "@mira:example.org",
     timestamp: ULong = 1_700_000_000_000u,
+    editable: Boolean = false,
     onMap: () -> Unit = {},
 ): TimelineItem {
     val event = EventTimelineItem(
@@ -398,7 +427,7 @@ private fun conversationItem(
         eventOrTransactionId = if (local) EventOrTransactionId.TransactionId(eventId) else EventOrTransactionId.EventId(eventId),
         sender = sender,
         senderProfile = ProfileDetails.Ready(if (sender == "@mira:example.org") "Mira Chen" else "Sam Okafor", false, null, null, null),
-        forwarder = null, forwarderProfile = null, isOwn = false, isEditable = false,
+        forwarder = null, forwarderProfile = null, isOwn = editable, isEditable = editable,
         content = content ?: TimelineItemContent.MsgLike(MsgLikeContent(
             MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)),
             null, null, null,
