@@ -1,7 +1,6 @@
 package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.AvatarPlaceholder
-import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -15,8 +14,9 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Brush
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,9 +30,49 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 
+/** The You tab's content: who is signed in, Preferences, and signing out. */
 @Composable
-fun LiveProfileScreen(
-    userId: String,
+internal fun LiveYouTab(userId: String, onPreferences: () -> Unit, onSignOut: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    val localpart = userId.removePrefix("@").substringBefore(':')
+    var confirming by rememberSaveable { mutableStateOf(false) }
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("Sign out?") },
+            text = { Text(userId) },
+            confirmButton = { TextButton(onClick = { confirming = false; onSignOut() }) { Text("Sign out") } },
+            dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } },
+        )
+    }
+    LazyColumn(Modifier.fillMaxSize()) {
+        item {
+            Row(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge),
+                horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+                LiveAvatar(AvatarPlaceholder.initials(localpart), AvatarPlaceholder.colorIndex(userId), UiMetrics.ProfileAvatar)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
+                    Text(localpart, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(userId, style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
+                }
+            }
+            HorizontalDivider(Modifier.padding(vertical = UiMetrics.GapSmall), color = colors.border)
+            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button, onClick = onPreferences)
+                .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Tune, null, Modifier.size(UiMetrics.GapSection))
+                Text("Preferences", style = MaterialTheme.typography.bodyLarge)
+            }
+            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) { confirming = true }
+                .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.AutoMirrored.Outlined.Logout, null, Modifier.size(UiMetrics.GapSection))
+                Text("Sign out", style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+    }
+}
+
+@Composable
+fun LivePreferencesScreen(
     dark: Boolean,
     darkOverride: Boolean?,
     palette: SidebarPalette,
@@ -40,12 +80,10 @@ fun LiveProfileScreen(
     onPalette: (SidebarPalette) -> Unit,
     onBack: () -> Unit,
 ) {
-    var preferences by rememberSaveable { mutableStateOf(false) }
     var choosingMode by rememberSaveable { mutableStateOf(false) }
     val colors = SlatrixTheme.colors
-    val localpart = userId.removePrefix("@").substringBefore(':')
     val colorMode = when (darkOverride) { null -> "System default"; false -> "Light"; true -> "Dark" }
-    BackHandler { if (preferences) preferences = false else onBack() }
+    BackHandler(onBack = onBack)
 
     if (choosingMode) {
         AlertDialog(
@@ -69,58 +107,35 @@ fun LiveProfileScreen(
     }
     Column(Modifier.fillMaxSize().background(colors.canvas).navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { if (preferences) preferences = false else onBack() }, modifier = Modifier.size(UiMetrics.Touch)) {
+            IconButton(onClick = onBack, modifier = Modifier.size(UiMetrics.Touch)) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
             }
-            Text(if (preferences) "Preferences" else "You", Modifier.padding(start = UiMetrics.GapSmall),
+            Text("Preferences", Modifier.padding(start = UiMetrics.GapSmall),
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
         HorizontalDivider(color = colors.border)
         LazyColumn {
-            if (!preferences) {
-                item {
-                    Row(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge),
-                        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(UiMetrics.ProfileAvatar).clip(MaterialTheme.shapes.large)
-                            .background(DesignTokens.avatarColors[AvatarPlaceholder.colorIndex(userId)]), contentAlignment = Alignment.Center) {
-                            Text(AvatarPlaceholder.initials(localpart), style = AvatarStyle.label, color = colors.onAccent, maxLines = 1)
-                        }
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
-                            Text(localpart, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(userId, style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
-                        }
-                    }
-                    HorizontalDivider(Modifier.padding(vertical = UiMetrics.GapLarge), color = colors.border)
-                    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) { preferences = true }
-                        .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Settings, null, Modifier.size(UiMetrics.GapSection))
-                        Text("Preferences", style = MaterialTheme.typography.bodyLarge)
+            item {
+                Text("Appearance", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ComposerMinHeight).clickable(role = Role.Button) { choosingMode = true }
+                    .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+                    Icon(Icons.Outlined.Brush, null, Modifier.size(UiMetrics.GapSection))
+                    Column {
+                        Text("Color mode", style = MaterialTheme.typography.bodyLarge)
+                        Text(colorMode, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
                     }
                 }
-            } else {
-                item {
-                    Text("Appearance", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ComposerMinHeight).clickable(role = Role.Button) { choosingMode = true }
-                        .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-                        Icon(Icons.Outlined.Brush, null, Modifier.size(UiMetrics.GapSection))
-                        Column {
-                            Text("Color mode", style = MaterialTheme.typography.bodyLarge)
-                            Text(colorMode, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
-                        }
-                    }
-                    Text("Color theme", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Column(Modifier.selectableGroup()) {
-                        listOf(SidebarPalette.Aubergine, SidebarPalette.Lagoon).forEach { choice ->
-                            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
-                                .selectable(selected = palette == choice, role = Role.RadioButton, onClick = { onPalette(choice) })
-                                .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(UiMetrics.GapSection).clip(MaterialTheme.shapes.small)
-                                    .background(DesignTokens.colors(dark, choice).getValue("selectionStrong")))
-                                Text(choice.name, Modifier.weight(1f).padding(horizontal = UiMetrics.GapMedium), style = MaterialTheme.typography.bodyLarge)
-                                RadioButton(selected = palette == choice, onClick = null)
-                            }
+                Text("Color theme", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Column(Modifier.selectableGroup()) {
+                    listOf(SidebarPalette.Aubergine, SidebarPalette.Lagoon).forEach { choice ->
+                        Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
+                            .selectable(selected = palette == choice, role = Role.RadioButton, onClick = { onPalette(choice) })
+                            .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(UiMetrics.GapSection).clip(MaterialTheme.shapes.small)
+                                .background(DesignTokens.colors(dark, choice).getValue("selectionStrong")))
+                            Text(choice.name, Modifier.weight(1f).padding(horizontal = UiMetrics.GapMedium), style = MaterialTheme.typography.bodyLarge)
+                            RadioButton(selected = palette == choice, onClick = null)
                         }
                     }
                 }

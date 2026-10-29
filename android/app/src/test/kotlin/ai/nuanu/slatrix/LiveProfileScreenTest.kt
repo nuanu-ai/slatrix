@@ -3,7 +3,7 @@ package ai.nuanu.slatrix
 import android.app.Application
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
-import ai.nuanu.slatrix.ui.account.LiveProfileScreen
+import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
@@ -32,11 +32,9 @@ class LiveProfileScreenTest {
         val mode = mutableStateOf<Boolean?>(null)
         compose.setContent {
             SlatrixTheme(dark = mode.value ?: false) {
-                LiveProfileScreen("@alex:example.org", mode.value ?: false, mode.value, SidebarPalette.Aubergine,
-                    { mode.value = it }, {}, {})
+                LivePreferencesScreen(mode.value ?: false, mode.value, SidebarPalette.Aubergine, { mode.value = it }, {}, {})
             }
         }
-        compose.onNodeWithText("Preferences").performClick()
         compose.onNodeWithText("System default").assertExists()
         compose.onNodeWithText("Color mode").performClick()
         compose.onNodeWithText("Dark").performClick()
@@ -44,24 +42,17 @@ class LiveProfileScreenTest {
         compose.onNodeWithText("Dark").assertExists()
     }
 
-    @Test fun anAccountCanChooseItsPaletteAndReturnToItsIdentity() {
+    @Test fun anAccountCanChooseItsPaletteAndGoBack() {
         val palette = mutableStateOf(SidebarPalette.Aubergine)
         var returned = false
         compose.setContent {
             SlatrixTheme(palette = palette.value) {
-                LiveProfileScreen("@alex:example.org", false, null, palette.value,
-                    {}, { palette.value = it }, { returned = true })
+                LivePreferencesScreen(false, null, palette.value, {}, { palette.value = it }, { returned = true })
             }
         }
-        compose.onNodeWithText("@alex:example.org").assertExists()
-        compose.onNodeWithText("Preferences").performClick()
         compose.onNodeWithText("Aubergine").assertIsSelected()
         compose.onNodeWithText("Lagoon").performScrollTo().performClick().assertIsSelected()
         compose.runOnIdle { assertEquals(SidebarPalette.Lagoon, palette.value) }
-        compose.onNodeWithContentDescription("Back").performClick()
-        compose.onNodeWithText("alex").assertExists()
-        compose.onNodeWithText("@alex:example.org").assertExists()
-        compose.runOnIdle { assertEquals(false, returned) }
         compose.onNodeWithContentDescription("Back").performClick()
         compose.runOnIdle { assertEquals(true, returned) }
     }

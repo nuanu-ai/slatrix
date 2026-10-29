@@ -95,7 +95,7 @@ Use the native Material 3 type ramp supplied by `SlatrixTheme`. Account headings
 
 ## Layout
 
-Use `UiMetrics`: the spacing steps are in the frontmatter. Lists use large horizontal gutters and small vertical row padding. Interactive rows have a minimum touch height (48dp), with content allowed to grow for larger text. Root headers have a minimum height (72dp). Account forms are centered with a maximum width (480dp).
+Use `UiMetrics`: the spacing steps are in the frontmatter. Lists use large horizontal gutters and small vertical row padding. Interactive rows have a minimum touch height (48dp), with content allowed to grow for larger text. Root headers have a minimum height (72dp) and sit on the palette's dark frame color with white text in both modes, as Slack's do. Account forms are centered with a maximum width (480dp).
 
 Below the expanded threshold (600dp), Home and DMs use bottom navigation with You. At the threshold, navigation moves into a rail. Honor status bars, navigation bars and the keyboard. Keep conversation identity stable as content changes.
 
@@ -113,7 +113,7 @@ Account actions are full-width green buttons with white labels. Browser alternat
 
 Search uses an outlined field with a leading search icon. The composer has a thin border, body text, an accent cursor and a send icon; it expands to five text lines. Keep its keyboard semantics and accessible label.
 
-Conversation rows pair a channel icon or initials tile with a single-line title and optional unread count. Unread titles are bold. Message rows align an initials tile with sender, timestamp and selectable body text. Preserve stable message keys.
+Conversation rows pair a channel icon or initials tile with a single-line title and optional unread count. Rows in the DMs tab add the time and up to two lines of the latest message. Unread titles are bold, and unread state is announced as a state description. Initials tiles have a fixed size; the initials shrink to fit. Message rows align an initials tile with sender, timestamp and selectable body text. Preserve stable message keys.
 
 Preferences uses full-row selection with radio semantics for color mode and palette. Errors appear as snackbars over the content. Connection progress waits (400ms); its reserved space prevents the account form from moving.
 

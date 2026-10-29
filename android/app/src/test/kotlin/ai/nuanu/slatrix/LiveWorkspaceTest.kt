@@ -53,7 +53,7 @@ class LiveWorkspaceTest {
         val nuanu = RoomSummary("!work:example.org", "Work channel", false, "", UnreadBadge.None, "W", 0, setOf("!nuanu:example.org"))
         val test = RoomSummary("!test:example.org", "Test channel", false, "", UnreadBadge.None, "T", 1, setOf("!studio:example.org"))
         val direct = RoomSummary("!sam:example.org", "Sam", true, "", UnreadBadge.None, "S", 2)
-        val rooms = RoomListState(listOf(nuanu, test, direct), loading = false, spaces = listOf(
+        val rooms = RoomListState(listOf(nuanu, test, direct), loading = false, spacesKnown = true, spaces = listOf(
             SpaceSummary("!nuanu:example.org", "Nuanu", true, "N", 0),
             SpaceSummary("!studio:example.org", "Test Studio", true, "TS", 1),
         ))
