@@ -102,6 +102,8 @@ data class ConversationMessage(
     val replyTo: ReplyPreview? = null,
     /** How much of an attachment you're sending has gone up, from 0 to 1. */
     val uploadProgress: Float? = null,
+    /** The sender's picture, drawn over the initials once it loads. */
+    val avatarUrl: String? = null,
 ) : ConversationRow {
     /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
     val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }

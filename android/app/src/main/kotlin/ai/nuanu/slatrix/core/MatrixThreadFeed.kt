@@ -22,7 +22,8 @@ import org.matrix.rustcomponents.sdk.ThreadListItemEvent
 import org.matrix.rustcomponents.sdk.ThreadListService
 import org.matrix.rustcomponents.sdk.ThreadListUpdate
 
-data class ThreadFeedMessage(val senderName: String, val initials: String, val colorIndex: Int, val body: String, val timestamp: Long)
+data class ThreadFeedMessage(val senderName: String, val initials: String, val colorIndex: Int, val body: String, val timestamp: Long,
+    val avatarUrl: String? = null)
 
 data class ThreadFeedItem(
     val roomId: String,

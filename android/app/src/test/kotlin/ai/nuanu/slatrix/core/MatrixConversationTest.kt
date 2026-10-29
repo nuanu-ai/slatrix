@@ -27,6 +27,7 @@ class MatrixConversationTest {
         assertEquals("Hello", message.body)
         assertEquals("Mira Chen", message.senderName)
         assertEquals("MC", message.initials)
+        assertEquals("The sender's picture comes with the message", "mxc://example.org/mira", message.avatarUrl)
         conversation.close()
     }
 
@@ -789,7 +790,8 @@ private fun conversationItem(
         isRemote = !local,
         eventOrTransactionId = if (local) EventOrTransactionId.TransactionId(eventId) else EventOrTransactionId.EventId(eventId),
         sender = sender,
-        senderProfile = ProfileDetails.Ready(if (sender == "@mira:example.org") "Mira Chen" else "Sam Okafor", false, null, null, null),
+        senderProfile = ProfileDetails.Ready(if (sender == "@mira:example.org") "Mira Chen" else "Sam Okafor", false,
+            "mxc://example.org/" + sender.drop(1).substringBefore(':'), null, null),
         forwarder = null, forwarderProfile = null, isOwn = editable, isEditable = editable,
         content = content ?: TimelineItemContent.MsgLike(MsgLikeContent(
             MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)),

@@ -41,6 +41,7 @@ data class ActivityItem(
     val reactedTo: String? = null,
     /** Not opened yet, so Slack tints it. */
     val unread: Boolean = true,
+    val avatarUrl: String? = null,
 )
 
 private const val MAX_ITEMS = 300

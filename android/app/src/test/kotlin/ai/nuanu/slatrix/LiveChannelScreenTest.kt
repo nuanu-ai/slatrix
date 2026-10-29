@@ -24,6 +24,14 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.compose.ui.test.performClick
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalView
+import android.graphics.Bitmap
+import ai.nuanu.slatrix.ui.account.AvatarLoader
+import ai.nuanu.slatrix.ui.account.LocalAvatarLoader
+import kotlinx.coroutines.CompletableDeferred
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
@@ -181,6 +189,42 @@ class LiveChannelScreenTest {
         compose.onAllNodesWithText("M", useUnmergedTree = true).assertCountEquals(1)
         compose.onNodeWithText("Second").performTouchInput { longClick() }
         compose.onNodeWithText("Today at 9:41", substring = true).assertIsDisplayed()
+    }
+
+    // capability: conversation.grouping
+    @Test fun aMessageGroupShowsItsSendersPictureOnceLoadedWithoutMovingTheRow() {
+        val picture = CompletableDeferred<ImageBitmap>()
+        val rows = listOf(message("First", minutes = 0).copy(avatarUrl = "mxc://example.org/mira"))
+        var view: android.view.View? = null
+        compose.setContent {
+            view = LocalView.current
+            CompositionLocalProvider(LocalAvatarLoader provides object : AvatarLoader {
+                override suspend fun load(url: String, sizePx: Int) = picture.await().takeIf { url == "mxc://example.org/mira" }
+            }) {
+                SlatrixTheme {
+                    LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), ComposerState(loading = false),
+                        {}, {}, {}, {}, {}, {}, {}, {})
+                }
+            }
+        }
+        val before = compose.onNodeWithText("First").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle {
+            picture.complete(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.RED) }.asImageBitmap())
+        }
+        compose.waitForIdle()
+
+        assertEquals("The row keeps its place and height", before, compose.onNodeWithText("First").fetchSemanticsNode().boundsInRoot)
+        val name = compose.onNodeWithText("Mira", useUnmergedTree = true).fetchSemanticsNode()
+        val density = name.layoutInfo.density.density
+        // The avatar sits before the name, its top level with the name's.
+        val at = name.boundsInWindow
+        val pixel = compose.runOnIdle {
+            val root = checkNotNull(view).rootView
+            val bitmap = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
+            root.draw(android.graphics.Canvas(bitmap))
+            bitmap.getPixel((at.left - 20 * density).toInt(), (at.top + 10 * density).toInt())
+        }
+        assertEquals(android.graphics.Color.RED, pixel)
     }
 
     // capability: message.retry-failed
