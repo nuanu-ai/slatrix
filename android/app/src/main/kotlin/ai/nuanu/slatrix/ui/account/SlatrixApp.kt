@@ -220,7 +220,13 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
         { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
         { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
-        open.threadRoot, rememberMessageActions(conversation, composer, main),
+        open.threadRoot, rememberMessageActions(conversation, composer, main).let { actions ->
+            // Marking a channel unread leaves it, as in Slack, so it shows unread in the list; a thread has its own read state.
+            remember(actions, open.threadRoot) {
+                if (open.threadRoot != null) actions
+                else actions.copy(onMarkUnread = { scope.launch { if (conversation?.markUnread() == true) owner?.back() } })
+            }
+        },
         ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
             onNeedPeople = { composer?.loadPeople() },
             onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
@@ -236,11 +242,16 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
     selectedSpaceId: String?, onSpace: (String?) -> Unit, activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val open: (String) -> Unit = remember(rooms, workspace) {
         { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
     }
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
+        onMarkUnread = { id, unread ->
+            (rooms?.setUnread(id, unread) ?: false).also { if (it && !unread) PushNotifications(context).clear(id) }
+        },
+        onMarkAllRead = { rooms?.markAllRead() ?: false },
         search = {
             val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()
             val inScope = remember(state.rooms, selectedSpaceId) {

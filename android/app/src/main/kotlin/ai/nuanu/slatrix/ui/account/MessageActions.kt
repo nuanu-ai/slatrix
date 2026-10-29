@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.MarkChatUnread
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material3.AlertDialog
@@ -70,6 +71,7 @@ data class MessageActions(
     val onQuote: ((ConversationMessage) -> Unit)? = null,
     val onEdit: ((ConversationMessage) -> Unit)? = null,
     val onDelete: ((ConversationMessage) -> Unit)? = null,
+    val onMarkUnread: ((ConversationMessage) -> Unit)? = null,
 )
 
 /** Slack Android's sheet holds five, beside Add reaction. */
@@ -149,6 +151,10 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
             if (message.sendState == MessageSendState.Failed) {
                 if (message.canRetry) SheetAction(Icons.Outlined.Refresh, "Retry", colors.textPrimary) { onRetrySend(message); onDismiss() }
                 SheetAction(Icons.Outlined.Delete, "Delete message", colors.destructive) { onDeleteUnsent(message); onDismiss() }
+            }
+            val markUnread = actions.onMarkUnread
+            if (eventId != null && markUnread != null) SheetAction(Icons.Outlined.MarkChatUnread, "Mark unread", colors.textPrimary) {
+                markUnread(message); onDismiss()
             }
             val link = actions.link
             if (eventId != null && link != null) SheetAction(Icons.Outlined.Link, "Copy link to message", colors.textPrimary) {

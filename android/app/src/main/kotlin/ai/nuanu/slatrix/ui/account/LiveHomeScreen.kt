@@ -26,6 +26,10 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.MarkChatRead
+import androidx.compose.material.icons.outlined.MarkChatUnread
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -67,17 +71,30 @@ fun LiveWorkspace(cover: (@Composable () -> Unit)?, home: @Composable () -> Unit
 @Composable
 fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Unit, onYou: () -> Unit, onRetry: () -> Unit,
     selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}, onStar: suspend (String, Boolean) -> Boolean = { _, _ -> true },
+    /** Marks a conversation unread, or with false read. */
+    onMarkUnread: suspend (String, Boolean) -> Boolean = { _, _ -> true }, onMarkAllRead: suspend () -> Boolean = { true },
     search: @Composable () -> Unit = {}, activity: @Composable () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     var actions by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    // A star shows at once, as Slack's does, and holds until the account's tag catches up or the change fails.
+    // A star or a read state shows at once, as Slack's do, and holds until the account catches up or the change fails.
     var starring by remember { mutableStateOf(emptyMap<String, Boolean>()) }
-    LaunchedEffect(state.rooms) { starring = starring.filter { (id, starred) -> state.rooms.none { it.id == id && it.starred == starred } } }
-    val shown = remember(state, starring) {
-        if (starring.isEmpty()) state
-        else state.copy(rooms = state.rooms.map { room -> starring[room.id]?.let { room.copy(starred = it) } ?: room })
+    var marking by remember { mutableStateOf(emptyMap<String, Boolean>()) }
+    LaunchedEffect(state.rooms) {
+        starring = starring.filter { (id, starred) -> state.rooms.none { it.id == id && it.starred == starred } }
+        marking = marking.filter { (id, unread) -> state.rooms.none { it.id == id && (it.unread != UnreadBadge.None) == unread } }
+    }
+    val shown = remember(state, starring, marking) {
+        if (starring.isEmpty() && marking.isEmpty()) state
+        else state.copy(rooms = state.rooms.map { room ->
+            val starred = starring[room.id]?.let { room.copy(starred = it) } ?: room
+            when (marking[room.id]) {
+                true -> if (starred.unread == UnreadBadge.None) starred.copy(unread = UnreadBadge.Bold) else starred
+                false -> starred.copy(unread = UnreadBadge.None)
+                null -> starred
+            }
+        })
     }
     val homeList = rememberLazyListState()
     val directList = rememberLazyListState()
@@ -142,12 +159,29 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     }
     // Looked up on each change, so the sheet follows the room's live name and star, and closes if the room goes.
     shown.rooms.firstOrNull { it.id == actions }?.let { room ->
-        ConversationActions(room, { starred ->
+        val unreadIds = shown.rooms.filter { it.unread != UnreadBadge.None }.map { it.id }
+        ConversationActions(room, unreadIds.isNotEmpty(), { starred ->
             starring = starring + (room.id to starred)
             scope.launch {
                 if (!onStar(room.id, starred)) {
                     starring = starring - room.id
                     notice = if (starred) "Couldn’t star ${room.name}." else "Couldn’t unstar ${room.name}."
+                }
+            }
+        }, { unread ->
+            marking = marking + (room.id to unread)
+            scope.launch {
+                if (!onMarkUnread(room.id, unread)) {
+                    marking = marking - room.id
+                    notice = if (unread) "Couldn’t mark ${room.name} unread." else "Couldn’t mark ${room.name} as read."
+                }
+            }
+        }, {
+            marking = marking + unreadIds.associateWith { false }
+            scope.launch {
+                if (!onMarkAllRead()) {
+                    marking = marking - unreadIds.toSet()
+                    notice = "Couldn’t mark everything as read."
                 }
             }
         }) { actions = null }
@@ -373,26 +407,37 @@ private fun LiveDirectRow(room: RoomSummary, onRoom: (String) -> Unit, onActions
 /** Slack's long-press sheet for a conversation: its name, then what can be done with it. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ConversationActions(room: RoomSummary, onStar: (Boolean) -> Unit, onDismiss: () -> Unit) {
+private fun ConversationActions(room: RoomSummary, anyUnread: Boolean, onStar: (Boolean) -> Unit, onMarkUnread: (Boolean) -> Unit,
+    onMarkAllRead: () -> Unit, onDismiss: () -> Unit) {
     val noun = if (room.direct) "conversation" else "channel"
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    // Applied once the sheet is gone, so its labels don't flip while it eases out.
+    fun then(action: () -> Unit) { scope.launch { sheet.hide() }.invokeOnCompletion { action(); onDismiss() } }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, shape = SlatrixTheme.topPanelShape,
         containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             Text(room.name, Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
                 style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) {
-                // Applied once the sheet is gone, so its label doesn't flip while it eases out.
-                val star = !room.starred
-                scope.launch { sheet.hide() }.invokeOnCompletion { onStar(star); onDismiss() }
+            val starred = room.starred
+            SheetRow(if (starred) SlackIcons.StarFilled else SlackIcons.Star, if (starred) "Unstar $noun" else "Star $noun") {
+                then { onStar(!starred) }
             }
-                .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge),
-                verticalAlignment = Alignment.CenterVertically) {
-                Icon(if (room.starred) SlackIcons.StarFilled else SlackIcons.Star, null, Modifier.size(UiMetrics.Icon))
-                Text(if (room.starred) "Unstar $noun" else "Star $noun", style = MaterialTheme.typography.bodyLarge)
-            }
+            val unread = room.unread != UnreadBadge.None
+            SheetRow(if (unread) Icons.Outlined.MarkChatRead else Icons.Outlined.MarkChatUnread,
+                if (unread) "Mark as read" else "Mark unread") { then { onMarkUnread(!unread) } }
+            if (anyUnread) SheetRow(Icons.Outlined.DoneAll, "Mark all as read") { then(onMarkAllRead) }
         }
+    }
+}
+
+@Composable
+private fun SheetRow(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button, onClick = onClick)
+        .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(UiMetrics.Icon))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
