@@ -12,6 +12,14 @@ const isObject = (value) => value !== null && typeof value === 'object' && !Arra
 const boundedText = (value, bytes) => typeof value === 'string' && value.length > 0
   && Buffer.byteLength(value) <= bytes && !/[\s\x00-\x1f\x7f]/u.test(value);
 
+function isInvalidToken(error) {
+  if (invalidTokenCodes.has(error?.code)) return true;
+  const details = error?.httpResponse?.data?.error?.details;
+  return error?.code === 'messaging/invalid-argument' && Array.isArray(details)
+    && details.some((detail) => detail?.['@type'] === 'type.googleapis.com/google.firebase.fcm.v1.FcmError'
+      && detail.errorCode === 'INVALID_ARGUMENT');
+}
+
 function validNotification(value) {
   return isObject(value)
     && ((value.event_id === undefined && value.room_id === undefined && isObject(value.counts))
@@ -67,7 +75,7 @@ export const matrixPush = onRequest({
     data: { event_id: notification.event_id, room_id: notification.room_id },
     android: { priority: notification.prio === 'low' ? 'normal' : 'high', restrictedPackageName: device.app_id },
   })));
-  if (results.some((result) => result.status === 'rejected' && !invalidTokenCodes.has(result.reason?.code))) {
+  if (results.some((result) => result.status === 'rejected' && !isInvalidToken(result.reason))) {
     response.set('Retry-After', '60').status(503).json({ errcode: 'M_UNKNOWN', error: 'Push delivery unavailable' });
     return;
   }

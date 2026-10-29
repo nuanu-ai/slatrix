@@ -4,7 +4,7 @@ A Firebase HTTP function forwards Matrix event and room IDs to FCM. It sends dat
 
 The [Matrix push gateway API](https://spec.matrix.org/latest/push-gateway-api/) permits badge-only updates. This gateway acknowledges those without sending FCM. Only expired or invalid registration tokens appear in `rejected`; other [FCM failures](https://firebase.google.com/docs/cloud-messaging/error-codes) return 503 for Matrix to retry. A retry can redeliver to a device that already succeeded.
 
-Requests allow up to 100 device registrations, a 4 KiB push key per device, 255 UTF-8 bytes per Matrix ID and a 1 MiB JSON body. The device limit accommodates accounts with many installations while bounding provider fan-out. Only `ai.nuanu.slatrix.dev` and `ai.nuanu.slatrix` are accepted, with FCM restricted to the same Android package. This allowlist is not authentication: the endpoint is public, as Matrix requires. Do not log requests, push keys or provider error details.
+Requests allow up to 100 device registrations, a 4 KiB push key per device, 255 UTF-8 bytes per Matrix ID and a 1 MiB JSON body. The device limit accommodates accounts with many installations while bounding provider fan-out. Only `ai.nuanu.slatrix.dev` and `ai.nuanu.slatrix` are accepted, with FCM restricted to the same Android package. This allowlist is not authentication: the endpoint is public, as Matrix requires. The handler does not log requests, push keys or provider error details. The Functions Framework parses JSON before invoking it and can log malformed request bodies.
 
 ## Test
 
