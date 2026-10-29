@@ -1,6 +1,10 @@
 package ai.nuanu.slatrix.core
 
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -12,8 +16,8 @@ import org.matrix.rustcomponents.sdk.*
 @Config(application = android.app.Application::class, sdk = [35])
 class MatrixActivityTest {
     // capability: activity.feed
-    @Test fun syncNotificationsBecomeTheNewestFirstFeedWithoutOwnOrRepeatedEvents() {
-        val activity = MatrixActivity("@alex:example.org")
+    @Test fun syncNotificationsBecomeTheNewestFirstFeedWithoutOwnOrRepeatedEvents() = runTest {
+        val activity = MatrixActivity("@alex:example.org", backgroundScope) { _, _ -> null }
         activity.listener.onNotification(notification("\$mention", "Can you review?", at = 1_000u, mention = true), "!team:example.org")
         activity.listener.onNotification(notification("\$reply", "Agreed", at = 3_000u, thread = "\$root"), "!team:example.org")
         activity.listener.onNotification(notification("\$dm", "Lunch?", at = 2_000u, direct = true), "!sam:example.org")
@@ -21,7 +25,7 @@ class MatrixActivityTest {
         activity.listener.onNotification(notification("\$mention", "Can you review?", at = 1_000u, mention = true), "!team:example.org")
         activity.listener.onNotification(reaction("\$liked", "👍", at = 5_000u), "!team:example.org")
 
-        assertEquals(listOf("\$liked", "\$reply", "\$dm", "\$mention"), activity.items.value.map { it.eventId })
+        assertEquals(listOf("\$liked", "\$reply", "\$dm", "\$mention"), activity.items.first { it.size == 4 }.map { it.eventId })
         val (liked, reply, dm, mention) = activity.items.value
         assertEquals(ActivityKind.Reaction, liked.kind)
         assertEquals("👍", liked.body)
@@ -33,6 +37,20 @@ class MatrixActivityTest {
         assertEquals("Team", mention.roomName)
         assertEquals("Sam", mention.senderName)
         assertEquals("Can you review?", mention.body)
+    }
+
+    // capability: activity.feed
+    @Test fun aReactionShowsTheMessageItReactedToAndAnItemStaysUnreadUntilOpened() = runTest {
+        val activity = MatrixActivity("@alex:example.org", backgroundScope) { room, event ->
+            if (room == "!team:example.org" && event == "\$mine") "Ship it on Friday?" else null
+        }
+        activity.listener.onNotification(reaction("\$liked", "👍", at = 5_000u), "!team:example.org")
+
+        val liked = activity.items.first { it.isNotEmpty() }.single()
+        assertEquals("Ship it on Friday?", liked.reactedTo)
+        assertTrue(liked.unread)
+        activity.markRead(liked.id)
+        assertFalse(activity.items.value.single().unread)
     }
 }
 

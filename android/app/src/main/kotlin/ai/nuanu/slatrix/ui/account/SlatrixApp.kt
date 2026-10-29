@@ -236,7 +236,7 @@ private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads
     val known = rooms?.state?.collectAsState()?.value?.rooms.orEmpty()
     fun room(id: String) = known.firstOrNull { it.id == id }
     val items = remember(all, known, selectedSpaceId) { all.inWorkspace(known, selectedSpaceId) }
-    ActivityScreen(items, { item -> room(item.roomId)?.let { jump(it, item.eventId, item.threadRoot) } },
+    ActivityScreen(items, { item -> activity?.markRead(item.id); room(item.roomId)?.let { jump(it, item.eventId, item.threadRoot) } },
         { id, root -> room(id)?.let { threads?.open(it, root) } }) {
         val inScope = remember(known, selectedSpaceId) { known.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) } }
         // Asks for the feed only while the Threads filter shows, and again only when the set of conversations changes.
