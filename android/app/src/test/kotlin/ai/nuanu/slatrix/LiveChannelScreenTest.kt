@@ -279,6 +279,8 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("This is the very beginning of the design channel.").assertIsDisplayed()
         compose.onNodeWithText("# design").assertDoesNotExist()
         compose.onAllNodesWithContentDescription("Private channel").assertCountEquals(2)
+        // Slack's composer names a private channel without a hash too.
+        compose.onNodeWithContentDescription("Message design").assertIsDisplayed()
     }
 
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
