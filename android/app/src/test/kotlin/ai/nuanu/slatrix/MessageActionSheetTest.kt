@@ -40,11 +40,11 @@ class MessageActionSheetTest {
     private val mine = message("On it", "Jordan")
     private val reactions = mutableListOf<Pair<String, String>>()
 
-    private fun show(actions: MessageActions, onOpenThread: ((String) -> Unit)? = null, notice: String? = null) {
+    private fun show(actions: MessageActions, onOpenThread: (String) -> Unit = {}, notice: String? = null) {
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(listOf(theirs, mine), loading = false, hasMore = false, notice = notice),
-                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, actions, onOpenThread)
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread, actions = actions)
             }
         }
     }

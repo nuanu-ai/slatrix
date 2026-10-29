@@ -72,7 +72,7 @@ class PushNotifications(private val context: Context) {
         val intent = Intent(context, MainActivity::class.java)
             .setAction("${context.packageName}.OPEN_NOTIFICATION")
             .setData("slatrix://notification/$key".toUri())
-            .putExtra(USER_ID, userId).putExtra(ROOM_ID, roomId).putExtra(EVENT_ID, eventId)
+            .putExtra(USER_ID, userId).putExtra(ROOM_ID, roomId).putExtra(EVENT_ID, eventId).putExtra(THREAD_ID, resolved?.threadId)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val tap = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         fun builder() = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification)
@@ -92,6 +92,7 @@ class PushNotifications(private val context: Context) {
         const val USER_ID = "push_user_id"
         const val ROOM_ID = "push_room_id"
         const val EVENT_ID = "push_event_id"
+        const val THREAD_ID = "push_thread_id"
 
         /** The conversation on screen while the app is resumed; it needs no alert. */
         @Volatile var openRoom: String? = null

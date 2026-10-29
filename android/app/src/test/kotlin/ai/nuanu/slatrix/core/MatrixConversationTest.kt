@@ -308,6 +308,20 @@ class MatrixConversationTest {
         timeline.emit(listOf(TimelineDiff.PushBack(conversationItem("late", "\$late", "Too late"))))
         assertEquals(closed, conversation.state.value)
     }
+
+    // capability: thread.read-state
+    @Test fun aThreadSendsOnlyItsOwnReadReceiptAndLeavesTheChannelUnread() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "Plan?"), conversationItem("reply", "\$reply", "Yes")))
+        val room = ConversationRoom(timeline)
+        val conversation = MatrixConversation(backgroundScope, room, threadRoot = "\$root")
+        conversation.state.first { it.rows.isNotEmpty() }
+
+        assertTrue(conversation.markRead("\$reply"))
+        assertEquals(ReceiptType.READ to "\$reply", timeline.receipts.receive())
+        assertTrue("The channel's own read marker must not move", timeline.receipts.tryReceive().isFailure)
+        assertTrue("Reading a thread must not clear the channel's unread mark", room.markedUnread)
+        conversation.close()
+    }
 }
 
 private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
