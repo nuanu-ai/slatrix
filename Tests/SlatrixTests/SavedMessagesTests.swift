@@ -116,23 +116,25 @@ struct SavedMessagesRuleTests {
     }
 }
 
-/// Account data as the SDK keeps it: what the store last synced, what a sync brings, and what this device writes.
+/// One account's Later on the server, as this device's SDK reads, hears and writes it.
 final class LaterClient: Client, @unchecked Sendable {
     private let lock = NSLock()
     private var listeners: [RawAccountDataListener] = []
     private var content: String?
     private var failing = false
-    /// The content of every write that reached the server, oldest first.
-    let writes = Recorder<String>()
     /// Every write tried, whether or not it reached the server.
     let attempts = Recorder<String>()
-    /// The type every write and subscription named.
+    /// The type every read, write and subscription named.
     let types = Recorder<String>()
+    /// Holds a write's reply after it lands, until the test releases it.
+    let replies = Gate()
     init(stored: String? = nil) {
         content = stored
         super.init(noHandle: .init())
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    /// What the account holds: the last write to land, or the last list a sync brought.
+    var server: String? { lock.withLock { content } }
     var failsWrites: Bool {
         get { lock.withLock { failing } }
         set { lock.withLock { failing = newValue } }
@@ -152,7 +154,8 @@ final class LaterClient: Client, @unchecked Sendable {
         let fails = failsWrites
         attempts.append(content)
         if fails { throw ClientError.Generic(msg: "fixture is offline", details: nil) }
-        writes.append(content)
+        lock.withLock { self.content = content }
+        await replies.wait()
     }
     /// A sync bringing what another device wrote.
     func sync(_ content: String) {
@@ -206,8 +209,8 @@ struct SavedMessagesServiceTests {
         later.merge(SavedMessages(saved: [kept]), accountID: owner)
         later.attach(client, accountID: owner)
 
-        #expect(await eventually { !client.writes.all.isEmpty })
-        #expect(try JSONValue(json: client.writes.all[0]) == JSONValue(json: #"{"saved":[\#(one)],"removed":[]}"#))
+        #expect(await eventually { client.server != nil })
+        #expect(try JSONValue(json: client.server ?? "") == JSONValue(json: #"{"saved":[\#(one)],"removed":[]}"#))
         #expect(Set(client.types.all) == [try SavedMessagesRuleTests.spec.get().eventType])
     }
 
@@ -225,7 +228,7 @@ struct SavedMessagesServiceTests {
         client.failsWrites = false
         matrix.applyConnection(
             MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
-        #expect(await eventually { client.writes.all.last.map(savedIDs) == ["$two", "$one"] })
+        #expect(await eventually { client.server.map(savedIDs) == ["$two", "$one"] })
     }
 
     @Test("A save here survives another device writing the account's list without it")
@@ -235,11 +238,28 @@ struct SavedMessagesServiceTests {
         later.attach(client, accountID: owner)
         #expect(await eventually { later.list.saved.map(\.eventID) == ["$one"] })
         later.toggle(roomID: "!general:example.org", eventID: "$two")
-        #expect(await eventually { client.writes.all.last.map(savedIDs) == ["$two", "$one"] })
+        #expect(await eventually { client.server.map(savedIDs) == ["$two", "$one"] })
 
         // Written by a device that hadn't seen $two yet, after this one wrote.
         client.sync(#"{"saved":[\#(three),\#(one)],"removed":[]}"#)
-        #expect(await eventually { client.writes.all.last.map(savedIDs) == ["$two", "$three", "$one"] })
+        #expect(await eventually { client.server.map(savedIDs) == ["$two", "$three", "$one"] })
+    }
+
+    @Test("A save here outlasts another device's list that lands while this one's write waits for its reply")
+    func syncDuringWrite() async {
+        let client = LaterClient(stored: #"{"saved":[\#(one)],"removed":[]}"#)
+        let later = SavedMessagesService()
+        later.attach(client, accountID: owner)
+        #expect(await eventually { later.list.saved.map(\.eventID) == ["$one"] })
+        client.replies.arm()
+        later.toggle(roomID: "!general:example.org", eventID: "$two")
+        #expect(await eventually { client.server.map(savedIDs) == ["$two", "$one"] })
+
+        // Written by a device that hadn't seen $two yet, after this one's write landed.
+        client.sync(#"{"saved":[\#(one)],"removed":[]}"#)
+        await drainMainActor()
+        client.replies.release()
+        #expect(await eventually { client.server.map(savedIDs) == ["$two", "$one"] })
     }
 
     @Test("Signing out keeps the account's Later for its last local save, and the next account starts from its own")
