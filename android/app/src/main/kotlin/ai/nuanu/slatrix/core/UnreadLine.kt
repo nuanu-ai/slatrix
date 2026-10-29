@@ -14,7 +14,6 @@ object UnreadLine {
 
     /** The fully-read event an unread conversation opens at; one only marked unread by hand has nothing to resume. */
     fun resumeAt(room: RoomUnread, fullyRead: String?): String? = fullyRead?.takeIf {
-        room.membership == "join" && (room.messages > 0 || room.notifications > 0) && it.length > 1 && it.startsWith("$") &&
-            it.toByteArray().size <= 2_048 && it.none(Char::isISOControl)
+        room.membership == "join" && (room.messages > 0 || room.notifications > 0) && isMatrixId(it, "$")
     }
 }

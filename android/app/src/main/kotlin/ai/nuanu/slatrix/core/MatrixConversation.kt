@@ -129,7 +129,12 @@ data class ConversationState(
     /** Loaded around an older message rather than live, until the reader reaches the newest and it turns live. */
     val focused: Boolean = false,
     /** The first message after the read marker, which Slack's New line goes above; a thread has none, as on the Mac. */
-    val unread: String? = null,
+    val firstUnread: String? = null,
+    /**
+     * Opened where its unread messages start, so it shows the New line at the top. The SDK's marker alone doesn't say
+     * so: m.fully_read can trail a read receipt.
+     */
+    val startsAtUnread: Boolean = false,
 )
 
 /** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
@@ -168,7 +173,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
     private val ownUserId = room.ownUserId()
     private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null,
-        ownUserId = ownUserId))
+        ownUserId = ownUserId, startsAtUnread = resume))
     val state: StateFlow<ConversationState> = mutableState.asStateFlow()
     private val ready = CompletableDeferred<Unit>()
     private val updates = Channel<Update>(Channel.UNLIMITED)
@@ -195,7 +200,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     }
 
     private inner class Source(val timeline: Timeline, val focused: Boolean) {
-        /** Rows, the read marker, or null for an item the conversation doesn't show. */
+        /** The read marker sits among the rows, since where it falls is where the New line goes. */
         val items = mutableListOf<Any?>()
         var handle: TaskHandle? = null
 
@@ -234,7 +239,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     swapped = true
                 } else if (deciding) {
                     deciding = false
-                    if (!source.holds(at)) try {
+                    // Around a thread reply the SDK shows only its thread, so a read marker on one opens live, as on the Mac.
+                    val around = !source.holds(at) &&
+                        !(resume && quietly { room.loadOrFetchEvent(checkNotNull(at)).use { it.threadRootEventId() } } != null)
+                    if (around) try {
                         open(TimelineFocus.Event(checkNotNull(at), 30u, TimelineEventFocusThreadMode.Automatic(true))) {
                             pending = it
                             pendingAnchor = null
@@ -254,7 +262,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 if (first != oldest) { oldest = first; blankPages = 0 }
                 mutableState.update {
                     it.copy(rows = withRoot(rows), loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
-                        highlight = it.highlight ?: at?.takeIf { id -> !resume && source.holds(id) }, unread = unread)
+                        highlight = it.highlight ?: at?.takeIf { id -> !resume && source.holds(id) }, firstUnread = unread)
                 }
             }
         } catch (cancelled: CancellationException) {

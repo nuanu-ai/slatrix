@@ -84,18 +84,18 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     // A jump waits to show until it has scrolled to its message, so the newest rows never flash or count as read.
     val rows by rememberUpdatedState(state.rows)
-    // The New line stays where it first showed, as on the Mac, though reading moves the SDK's marker past the newest. The
-    // conversation opens with it at the top, decided when its first rows show, unless a jump says where.
-    val unread = remember { object { var line: String? = null; var start: String? = null; var decided = false } }
-    if (unread.line == null && state.unread != null && state.rows.any { (it as? ConversationMessage)?.eventId == state.unread }) {
-        unread.line = state.unread
+    // The New line stays where it first showed, as on the Mac, though reading moves the SDK's marker past the newest. A
+    // resumed conversation opens with it at the top, decided when its first rows show, unless a jump says where.
+    val newLine = remember { object { var at: String? = null; var start: String? = null; var decided = false } }
+    if (newLine.at == null && state.rows.any { it is ConversationMessage && it.eventId != null && it.eventId == state.firstUnread }) {
+        newLine.at = state.firstUnread
     }
-    if (!unread.decided && !state.loading && state.rows.isNotEmpty()) {
-        unread.decided = true
-        unread.start = unread.line.takeIf { state.highlight == null }
+    if (!newLine.decided && !state.loading && state.rows.isNotEmpty()) {
+        newLine.decided = true
+        newLine.start = newLine.at.takeIf { state.startsAtUnread && state.highlight == null }
     }
-    val line = unread.line
-    val opensAt = state.highlight ?: unread.start
+    val line = newLine.at
+    val opensAt = state.highlight ?: newLine.start
     var jumped by remember(opensAt) { mutableStateOf(opensAt == null) }
     val latest = state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?
     val read by rememberUpdatedState(onRead)
@@ -128,7 +128,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         following = false
         try {
             list.scrollToItem(rows.size - 1 - index)
-            if (target == unread.start) {
+            if (target == newLine.start) {
                 // The line tops the screen with the unread messages under it; fewer than a screenful sit at the bottom.
                 val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == rows.size - 1 - index }
                 list.scrollBy(-(list.layoutInfo.viewportSize.height - (item?.size ?: 0)).coerceAtLeast(0).toFloat())
