@@ -8,6 +8,7 @@ import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.ConnectedAccountScreen
+import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
@@ -31,7 +32,9 @@ class IdentityScreenTest {
         val rooms = RoomListState(listOf(RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)), loading = false)
         compose.setContent {
             SlatrixTheme {
-                ConnectedAccountScreen(identity.value, rooms, {}, {}, {}, {}, {}, {}, {})
+                ConnectedAccountScreen(identity.value, {}, {}, {}, {}, {}, {}, {}) {
+                    LiveHomeScreen("@alex:example.org", rooms, {}, {}, {})
+                }
             }
         }
         compose.onNodeWithText("Confirm it’s you").assertExists()

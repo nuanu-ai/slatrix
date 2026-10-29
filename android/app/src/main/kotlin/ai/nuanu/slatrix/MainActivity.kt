@@ -18,7 +18,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             val identity by accountModel.identity.collectAsState()
             val rooms by accountModel.rooms.collectAsState()
-            SlatrixApp(accountModel.account, identity, rooms)
+            val workspace by accountModel.workspace.collectAsState()
+            SlatrixApp(accountModel.account, identity, rooms, workspace)
         }
         consumeCallback(intent)
     }

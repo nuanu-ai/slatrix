@@ -41,12 +41,13 @@ import androidx.compose.ui.text.style.TextAlign
 
 @Composable
 fun ConnectedAccountScreen(
-    identity: IdentityState, rooms: RoomListState,
+    identity: IdentityState,
     onRequest: () -> Unit, onAccept: () -> Unit, onConfirm: () -> Unit, onReject: () -> Unit,
     onRecover: (String) -> Unit, onCancel: () -> Unit, onRetry: () -> Unit,
+    content: @Composable () -> Unit,
 ) {
     if (!identity.requiresVerification) {
-        LiveRoomList(rooms)
+        content()
         return
     }
     var recovery by remember { mutableStateOf(false) }
@@ -98,28 +99,3 @@ fun ConnectedAccountScreen(
     }
 }
 
-@Composable
-private fun LiveRoomList(state: RoomListState) {
-    Surface(Modifier.fillMaxSize(), color = SlatrixTheme.colors.canvas) {
-        Box(Modifier.safeDrawingPadding().fillMaxSize()) {
-            Column(Modifier.fillMaxSize()) {
-                Text("Home", style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.padding(UiMetrics.GapSection))
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(UiMetrics.GapLarge)) {
-                    items(state.rooms, key = { it.id }) { room ->
-                        Row(Modifier.fillMaxWidth().sizeIn(minHeight = UiMetrics.Touch),
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                            Text(if (room.direct) room.initials else "#", style = MaterialTheme.typography.titleMedium)
-                            Text(room.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = if (room.unread == UnreadBadge.None) FontWeight.Normal else FontWeight.Bold)
-                            (room.unread as? UnreadBadge.Count)?.let { Text(it.label, color = SlatrixTheme.colors.mentionText) }
-                        }
-                    }
-                    if (state.loading) item { ConnectionIndicator(true, null) }
-                    else if (state.rooms.isEmpty()) item { Text("Your conversations will appear here.", style = MaterialTheme.typography.bodyLarge) }
-                }
-            }
-            state.error?.let { message -> Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(message) } }
-        }
-    }
-}

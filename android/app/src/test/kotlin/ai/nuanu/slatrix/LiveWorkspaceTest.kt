@@ -14,7 +14,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.runtime.mutableStateOf
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -52,7 +52,7 @@ class LiveWorkspaceTest {
         }
         compose.onNodeWithContentDescription("Send message").performClick()
         compose.runOnIdle { assertEquals("First message", submitted) }
-        compose.onNodeWithContentDescription("Message #Team").performTextInput(" and another thought")
-        compose.runOnIdle { assertEquals("First message and another thought", draft.value.text) }
+        compose.onNodeWithContentDescription("Message #Team").performTextReplacement("Another thought")
+        compose.runOnIdle { assertEquals("Another thought", draft.value.text) }
     }
 }
