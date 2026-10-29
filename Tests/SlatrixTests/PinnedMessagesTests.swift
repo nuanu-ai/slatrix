@@ -146,6 +146,39 @@ struct PinnedMessagesTests {
         #expect(await eventually { service.state == "ready" })
     }
 
+    struct OrderCase: Decodable, CustomTestStringConvertible {
+        var name: String
+        var pinned: [String]
+        var events: [String]
+        var shown: [String]
+        var testDescription: String { name }
+    }
+    struct LimitCase: Decodable, CustomTestStringConvertible {
+        var name: String
+        var total: Int
+        var note: String?
+        var testDescription: String { name }
+    }
+    struct PinsSpec: Decodable {
+        var order: [OrderCase]
+        var limit: [LimitCase]
+    }
+
+    // capability: conversation.pins
+    @Test(
+        "Pins show in the shared cases' order",
+        arguments: try SharedSpec.decode("spec/pinned-messages.json", as: PinsSpec.self).order)
+    func sharedOrder(spec: OrderCase) {
+        #expect(PinnedMessagesMapping.arrange(spec.events, pinned: spec.pinned) { $0 } == spec.shown)
+    }
+
+    @Test(
+        "A room past the SDK's limit says how many pins show, as the shared cases say",
+        arguments: try SharedSpec.decode("spec/pinned-messages.json", as: PinsSpec.self).limit)
+    func sharedLimit(spec: LimitCase) {
+        #expect(PinnedMessagesMapping.limitNote(total: spec.total) == spec.note)
+    }
+
     // capability: conversation.pins
     @Test("Pins show in SDK order with edits and deletions applied, skipping other events and duplicates")
     func opensPins() async throws {

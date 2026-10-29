@@ -8,6 +8,10 @@ enum PinnedMessagesMapping {
     static let sdkLimit = 128
     static let pageSize = 30
 
+    static func arrange<Item>(_ items: [Item], pinned: [String], id: (Item) -> String) -> [Item] { items }
+
+    static func limitNote(total: Int) -> String? { nil }
+
     static func messages(_ items: [TimelineItem], roomID: String, pinnedIDs: Set<String>, ownID: String?)
         -> [ChatMessage]
     {
