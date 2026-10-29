@@ -11,12 +11,17 @@ import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.test.hasProgressBarRangeInfo
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -50,6 +55,39 @@ class LiveChannelScreenTest {
         compose.runOnIdle { state.value = state.value.copy(loadingHistory = false) }
         compose.waitUntil("A page that showed nothing asks again while the top is near") { requests == 2 }
     }
+
+    @Test fun theHistoryIndicatorSitsAboveTheOldestMessageAndCoversNone() {
+        val many = (1..40).map { message("Message $it", minutes = it) }
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(many, loading = false, loadingHistory = true),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {})
+            }
+        }
+        repeat(10) { compose.onRoot().performTouchInput { swipeDown() } }
+        val indicator = compose.onNode(progress).fetchSemanticsNode().boundsInRoot
+        assertTrue("The indicator sits above the oldest message",
+            indicator.bottom <= compose.onNodeWithText("Message 1").fetchSemanticsNode().boundsInRoot.top)
+        compose.onAllNodes(hasText("Message", substring = true) or hasText("Mira")).fetchSemanticsNodes().forEach {
+            assertFalse("The indicator covers a message", indicator.top < it.boundsInRoot.bottom && it.boundsInRoot.top < indicator.bottom)
+        }
+    }
+
+    @Test fun theHistoryIndicatorWaitsBeforeShowing() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message("Hello", minutes = 0)), loading = false, loadingHistory = true),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.mainClock.advanceTimeBy(200)
+        compose.onNode(progress).assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(400)
+        compose.onNode(progress).assertExists()
+    }
+
+    private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)
 
     private fun message(body: String, minutes: Int, sender: String = "Mira", state: MessageSendState = MessageSendState.Sent) =
         ConversationMessage(body, "\$$body", "@${sender.lowercase()}:example.org", sender, body, null,
