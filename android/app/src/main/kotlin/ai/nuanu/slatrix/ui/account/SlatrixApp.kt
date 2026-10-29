@@ -38,6 +38,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
 import ai.nuanu.slatrix.core.OpenChannel
 import ai.nuanu.slatrix.core.MatrixActivity
+import ai.nuanu.slatrix.core.inWorkspace
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
@@ -120,7 +121,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         }) {
                             LiveHome(userId, rooms, workspace, { you = true }, selectedSpaceId,
                                 { selectedSpaceId = it; workspacePreferences.selectedSpaceId = it }) {
-                                LiveActivity(activity, rooms, workspace, threads)
+                                LiveActivity(activity, rooms, workspace, threads, selectedSpaceId)
                             }
                         }
                     }
@@ -186,8 +187,11 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
 
 /** Collects Activity here, so a new item recomposes only its tab. A thread reply opens its thread over Activity. */
 @Composable
-private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, threads: MatrixWorkspace?) {
-    val items = activity?.items?.collectAsState()?.value.orEmpty()
-    fun room(id: String) = rooms?.state?.value?.rooms?.firstOrNull { it.id == id }
+private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, threads: MatrixWorkspace?,
+    selectedSpaceId: String?) {
+    val all = activity?.items?.collectAsState()?.value.orEmpty()
+    val known = rooms?.state?.collectAsState()?.value?.rooms.orEmpty()
+    fun room(id: String) = known.firstOrNull { it.id == id }
+    val items = remember(all, known, selectedSpaceId) { all.inWorkspace(known, selectedSpaceId) }
     ActivityScreen(items, { id -> room(id)?.let { workspace?.open(it) } }, { id, root -> room(id)?.let { threads?.open(it, root) } })
 }

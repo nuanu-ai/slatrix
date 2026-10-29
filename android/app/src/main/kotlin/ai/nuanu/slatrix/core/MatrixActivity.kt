@@ -31,6 +31,12 @@ data class ActivityItem(
 
 private const val MAX_ITEMS = 300
 
+/** The items from [rooms] in workspace [spaceId], as the Mac scopes Activity; a room no longer listed drops out. */
+fun List<ActivityItem>.inWorkspace(rooms: List<RoomSummary>, spaceId: String?): List<ActivityItem> {
+    val inScope = rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, spaceId) }.mapTo(HashSet()) { it.id }
+    return filter { it.roomId in inScope }
+}
+
 /**
  * What the SDK says notified you, newest first, as on the Mac: the events sync and pushes deliver while the app runs.
  * Reactions show when a push rule lets them notify.
