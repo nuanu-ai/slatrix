@@ -18,6 +18,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,7 +26,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** What a conversation row shows of a message: its formatted text, quotes, attachments, reactions and thread. */
+/** What a conversation row shows of a message. */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(application = Application::class, sdk = [35], qualifiers = "w412dp-h892dp-420dpi")
@@ -50,6 +51,15 @@ class MessageContentTest {
         show(message("**Ship** it", html = "<strong>Ship</strong> it"))
         val text = compose.onNodeWithText("Ship it", useUnmergedTree = true).text()
         assertEquals(listOf("Ship"), text.spanStyles.filter { it.item.fontWeight == FontWeight.Bold }.map { text.substring(it.start, it.end) })
+    }
+
+    // capability: message.rich-text
+    @Test fun aListItemsTextAfterANestedListLinesUpWithTheItem() {
+        show(message("one inner tail", html = "<ul><li>one<ul><li>inner</li></ul>tail</li></ul><blockquote>said<ul><li>this</li></ul></blockquote>"))
+        fun left(text: String) = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.left
+        assertEquals(left("one"), left("tail"))
+        assertTrue("The nested item sits further in", left("inner") > left("one"))
+        assertTrue("A list in a quote sits past the quote's bar", left("this") > left("one"))
     }
 
     // capability: message.edited
