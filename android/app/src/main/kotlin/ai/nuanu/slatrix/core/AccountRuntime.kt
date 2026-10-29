@@ -53,6 +53,7 @@ class AccountRuntime private constructor(application: Application) {
                 if (next !== client) {
                     mutableIdentity.value?.close()
                     mutableRooms.value?.close()
+                    mutableActivity.value?.close()
                     mutableIdentity.value = null
                     mutableRooms.value = null
                     client = next
@@ -61,7 +62,7 @@ class AccountRuntime private constructor(application: Application) {
                     mutableRooms.value = next?.let { MatrixRooms(scope, it, foreground) }
                     mutableIdentity.value = next?.let { IdentityVerification(scope, it) }
                     mutableActivity.value = next?.let { client ->
-                        MatrixActivity((state as AccountState.Connected).userId).also {
+                        MatrixActivity((state as AccountState.Connected).userId, scope, { roomId, eventId -> messageText(client, roomId, eventId) }).also {
                             scope.launch {
                                 try {
                                     client.registerNotificationHandler(it.listener)

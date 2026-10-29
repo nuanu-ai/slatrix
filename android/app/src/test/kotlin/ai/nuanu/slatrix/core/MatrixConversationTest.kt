@@ -402,6 +402,27 @@ class MatrixConversationTest {
         assertFalse(opened.focused)
         conversation.close()
     }
+
+    // capability: thread.open
+    @Test fun aThreadShowsTheRootTheChannelHadAtOnceAndKeepsItsRowWhenTheThreadLoadsIt() = runTest {
+        val root = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", "Plan?", null,
+            1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0, grouped = true)
+        val timeline = ConversationTimeline(emptyList())
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root", root = root)
+
+        val first = conversation.state.value
+        assertFalse("The root needs no wait", first.loading)
+        assertEquals(listOf("\$root"), first.rows.map { (it as ConversationMessage).eventId })
+        assertFalse("The root starts the thread, so it shows its sender", first.rows.messages.single().grouped)
+
+        runCurrent()
+        // The day's divider sits above the root in the thread's timeline; above the root, nothing shows.
+        timeline.emit(listOf(TimelineDiff.Reset(listOf(dateDivider("day", 1_700_000_000_000u),
+            conversationItem("thread-root", "\$root", "Plan?"), conversationItem("reply", "\$reply", "Yes")))))
+        val loaded = conversation.state.first { it.rows.size == 2 }
+        assertEquals("The root keeps its row, so it never redraws", listOf(first.rows.single().id, "reply"), loaded.rows.map { it.id })
+        conversation.close()
+    }
 }
 
 private class JumpRoom(private val live: Timeline, private val around: Timeline) : Room(NoHandle) {

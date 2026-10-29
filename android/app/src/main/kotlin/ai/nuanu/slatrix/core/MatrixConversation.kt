@@ -1,5 +1,7 @@
 package ai.nuanu.slatrix.core
 
+import java.time.Instant
+import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -101,6 +103,7 @@ fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Bo
     previous.senderId == message.senderId && message.timestamp - previous.timestamp < 5 * 60_000L
 
 private const val MAX_BLANK_PAGES = 5
+private const val ROOT_KEY = "thread-root"
 private const val NOTICE_MILLIS = 4_000L
 
 /** The value, or null when [block] failed; cancellation still cancels. */
@@ -114,10 +117,14 @@ internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } c
  * the newest message and it turns live, as on the Mac.
  */
 class MatrixConversation(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null,
-    private val at: String? = null) {
+    private val at: String? = null,
+    /** The thread's root as its channel shows it, on screen at once while the thread loads, as on the Mac. */
+    root: ConversationMessage? = null) {
+    // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
+    private val root = root?.copy(id = ROOT_KEY, grouped = false)
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
-    private val mutableState = MutableStateFlow(ConversationState())
+    private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null))
     val state: StateFlow<ConversationState> = mutableState.asStateFlow()
     private val ready = CompletableDeferred<Unit>()
     private val updates = Channel<Update>(Channel.UNLIMITED)
@@ -198,7 +205,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val first = rows.firstOrNull { it is ConversationMessage }?.id
                 if (first != oldest) { oldest = first; blankPages = 0 }
                 mutableState.update {
-                    it.copy(rows = rows, loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
+                    it.copy(rows = withRoot(rows), loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
                         highlight = it.highlight ?: at?.takeIf { id -> source.holds(id) })
                 }
             }
@@ -318,6 +325,23 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         val done = CompletableDeferred<Unit>()
         updates.send(Update.CaughtUp(done))
         done.await()
+    }
+
+    /** The thread's rows topped by its root, which keeps the channel's row so it never redraws when the thread loads it. */
+    private fun withRoot(rows: List<ConversationRow>): List<ConversationRow> {
+        val root = root ?: return rows
+        val index = rows.indexOfFirst { (it as? ConversationMessage)?.eventId == root.eventId }
+        val shown = (rows.getOrNull(index) as? ConversationMessage)?.copy(id = ROOT_KEY) ?: root
+        // Nothing sits above the root, as in Slack, and a reply on the root's day needs no divider under it either, so
+        // the root never moves when the thread loads it.
+        val rest = rows.drop(index + 1)
+        val sameDay = (rest.firstOrNull() as? DayDivider)?.let { sameDay(it.timestamp, shown.timestamp) } == true
+        return listOf(shown) + if (sameDay) rest.drop(1) else rest
+    }
+
+    private fun sameDay(a: Long, b: Long): Boolean {
+        val zone = ZoneId.systemDefault()
+        return Instant.ofEpochMilli(a).atZone(zone).toLocalDate() == Instant.ofEpochMilli(b).atZone(zone).toLocalDate()
     }
 
     private fun newestEvent(): String? =

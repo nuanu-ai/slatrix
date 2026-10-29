@@ -176,6 +176,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         HorizontalDivider(color = colors.border)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val rows = state.rows
+            // A reset re-pages the thread; the last count stays until the new one is known, so the bar doesn't blank.
+            var replies by remember { mutableStateOf<Int?>(null) }
+            if (threadRoot != null && !state.hasMore) {
+                replies = rows.count { it is ConversationMessage && it.eventId != null && it.eventId != threadRoot }
+            }
             val firstReply = remember(rows, threadRoot) {
                 rows.getOrNull(rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot } + 1)?.id.takeIf { threadRoot != null }
             }
@@ -190,8 +195,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                         is ConversationMessage -> Box(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
                             if (threadRoot != null && row.eventId == threadRoot) Column {
                                 LiveMessageRow(row) { menu = it }
-                                // The root shows once the whole thread has loaded, so its sent replies are all here.
-                                RepliesBar(rows.count { it is ConversationMessage && it.eventId != null && it.eventId != threadRoot })
+                                // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
+                                RepliesBar(replies)
                             // The first reply starts under the replies bar, so it shows its sender again.
                             } else LiveMessageRow(if (row.id == firstReply) row.copy(grouped = false) else row) { menu = it }
                         }
@@ -201,8 +206,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 item(key = "top") {
                     when {
                         !state.hasMore && !state.loading -> if (threadRoot == null) ConversationIntro(room)
-                        // A thread fills in from its newest replies, so it shows the wait even before any arrive.
-                        threadRoot != null -> HistoryProgress(state.loading || state.loadingHistory)
+                        // A thread with its root on screen waits in its replies bar; one opened without it shows the wait.
+                        threadRoot != null -> if (state.rows.isEmpty()) HistoryProgress(true)
                         state.rows.isNotEmpty() -> HistoryProgress(state.loadingHistory)
                     }
                 }
@@ -224,12 +229,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
 
 /** Slack's bar between a thread's root and its replies. */
 @Composable
-private fun RepliesBar(count: Int) {
+private fun RepliesBar(count: Int?) {
     val colors = SlatrixTheme.colors
-    if (count < 1) return
+    if (count == 0) return
     Column(Modifier.fillMaxWidth().padding(top = UiMetrics.GapSmall)) {
         HorizontalDivider(color = colors.border)
-        Text(if (count == 1) "1 reply" else "$count replies",
+        Text(when (count) { null -> ""; 1 -> "1 reply"; else -> "$count replies" },
             Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge).wrapContentHeight(),
             style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = colors.textPrimary)
         HorizontalDivider(color = colors.border)
