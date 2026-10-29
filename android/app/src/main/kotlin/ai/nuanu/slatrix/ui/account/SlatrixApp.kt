@@ -97,6 +97,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
     var preferences by rememberSaveable { mutableStateOf(false) }
+    // An invitation opened from Home, pushed over it.
+    var invitation by rememberSaveable { mutableStateOf<String?>(null) }
     // Someone's profile, pushed over whatever is open, and the name to show until theirs loads.
     var person by rememberSaveable { mutableStateOf<Pair<String, String?>?>(null) }
     // Browse channels or Create a channel, pushed over Home; null while neither is open.
@@ -176,6 +178,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         val room = rooms.state.mapNotNull { target.roomFor(userId, it.rooms) }.first()
                         you = false
                         preferences = false
+                        invitation = null
                         channels = null
                         person = null
                         later = false
@@ -194,6 +197,10 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 { palette = it; appearance.paletteName = it.name }, { preferences = false }) {
                                     LiveNotificationSettings(userId) { client.getNotificationSettings() }
                                 } } }
+                            invitation != null -> { { invitation?.let { id ->
+                                LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
+                                    { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
+                            } } }
                             person != null -> { { person?.let { (id, name) ->
                                 LivePersonProfile(id, name, userId, people, rooms?.state, { room ->
                                     person = null
@@ -232,7 +239,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             else -> null
                         }) {
                             LiveHome(userId, userAvatarUrl, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it },
-                                saved.size, { later = true }) {
+                                saved.size, { later = true }, { invitation = it }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
@@ -384,7 +391,7 @@ private fun rememberConversation(client: Client, roomId: String, view: Conversat
 @Composable
 private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, laterCount: Int, onLater: () -> Unit,
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, laterCount: Int, onLater: () -> Unit, onInvitation: (String) -> Unit,
     activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
@@ -394,6 +401,7 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
     }
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
+        onInvitation = onInvitation,
         onBrowseChannels = { onChannels(ChannelPage.Browse) }, onCreateChannel = { onChannels(ChannelPage.Create) },
         onMarkUnread = { id, unread ->
             (rooms?.setUnread(id, unread) ?: false).also { if (it && !unread) PushNotifications(context).clear(id) }
