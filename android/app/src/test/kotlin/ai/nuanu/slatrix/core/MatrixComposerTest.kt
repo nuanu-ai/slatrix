@@ -12,8 +12,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.ComposerDraft
 import org.matrix.rustcomponents.sdk.ComposerDraftType
+import org.matrix.rustcomponents.sdk.MembershipState
 import org.matrix.rustcomponents.sdk.NoHandle
+import org.matrix.rustcomponents.sdk.PowerLevel
 import org.matrix.rustcomponents.sdk.Room
+import org.matrix.rustcomponents.sdk.RoomMember
+import org.matrix.rustcomponents.sdk.RoomMembersIterator
+import org.matrix.rustcomponents.sdk.RoomPowerLevels
 
 class MatrixComposerTest {
     @Test fun restoresDraftAndFlushesTheLastEditBeforeNavigation() = runTest {
@@ -131,6 +136,51 @@ class MatrixComposerTest {
         composer.close()
     }
 
+    // capability: composer.mentions
+    @Test fun aChosenMentionSendsAPillThatEditsAroundItAndTheDraftKeep() = runTest {
+        val room = ComposerRoom()
+        val sent = Channel<ComposerMessage>(Channel.UNLIMITED)
+        val composer = MatrixComposer(backgroundScope, room) { sent.send(it); true }
+        composer.state.first { !it.loading }
+        composer.edit("Hi @mi")
+        composer.mention(3, 6, MentionCandidate.Member(MentionPerson("@mira:example.org", "Mira Chen")))
+        assertEquals("Hi @Mira Chen ", composer.state.value.text)
+        composer.edit("Oh hi @Mira Chen ")
+        composer.edit("Oh hi @Mira Chen, thanks")
+        composer.close()
+
+        val reopened = MatrixComposer(backgroundScope, room) { sent.send(it); true }
+        assertEquals("Oh hi @Mira Chen, thanks", reopened.state.first { !it.loading }.text)
+        reopened.send()
+        val message = sent.receive()
+        assertEquals("Oh hi @Mira Chen, thanks", message.body)
+        assertEquals(listOf("@mira:example.org"), message.mentions)
+        assertEquals("Oh hi <a href=\"https://matrix.to/#/@mira:example.org\">Mira Chen</a>, thanks", message.html)
+
+        reopened.state.first { !it.sending }
+        reopened.edit("@ro")
+        reopened.mention(0, 3, MentionCandidate.Room)
+        reopened.mention(6, 6, MentionCandidate.Member(MentionPerson("@sam:example.org", "Sam")))
+        reopened.edit("@room @Sa")
+        reopened.send()
+        val broken = sent.receive()
+        assertEquals("A pill edited inside turns back into text", emptyList<String>(), broken.mentions)
+        assertTrue(broken.mentionsRoom)
+        reopened.close()
+    }
+
+    @Test fun peopleToMentionLoadWithWhetherYouMayNotifyTheRoom() = runTest {
+        val room = ComposerRoom()
+        val composer = MatrixComposer(backgroundScope, room) { true }
+        composer.state.first { !it.loading }
+        composer.loadPeople()
+        val people = composer.people.first { it != null }!!
+        assertEquals(listOf(MentionPerson("@mira:example.org", "Mira Chen"), MentionPerson("@sam:example.org", "sam", "invite")),
+            people.members)
+        assertTrue(people.offersRoom)
+        composer.close()
+    }
+
     @Test fun storageFailuresRetryWithoutReplacingTheUnrestoredDraftOrSendingIt() = runTest {
         val room = ComposerRoom(ComposerDraft("Stored safely", null, ComposerDraftType.NewMessage, emptyList()))
         room.loadFailure = IllegalStateException("Store unavailable")
@@ -173,4 +223,18 @@ private class ComposerRoom(var draft: ComposerDraft? = null) : Room(NoHandle) {
         this.draft = draft
     }
     override suspend fun clearComposerDraft(threadRoot: String?) { draft = null }
+    override fun ownUserId(): String = "@me:example.org"
+    override suspend fun members(): RoomMembersIterator {
+        val chunks = ArrayDeque(listOf(listOf(member("@mira:example.org", "Mira Chen", MembershipState.Join)),
+            listOf(member("@sam:example.org", null, MembershipState.Invite))))
+        return object : RoomMembersIterator(NoHandle) {
+            override fun len(): UInt = 2u
+            override fun nextChunk(chunkSize: UInt): List<RoomMember>? = chunks.removeFirstOrNull()
+        }
+    }
+    override suspend fun getPowerLevels(): RoomPowerLevels = object : RoomPowerLevels(NoHandle) {
+        override fun canUserTriggerRoomNotification(userId: String): Boolean = userId == "@me:example.org"
+    }
+    private fun member(id: String, name: String?, membership: MembershipState) = RoomMember(id, name, null, null, null,
+        membership, false, PowerLevel.Value(0), false, uniffi.matrix_sdk.RoomMemberRole.USER, null, false)
 }

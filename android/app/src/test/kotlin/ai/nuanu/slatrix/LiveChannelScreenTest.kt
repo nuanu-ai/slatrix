@@ -205,7 +205,7 @@ class LiveChannelScreenTest {
         compose.runOnIdle { assertEquals(failed, deleted) }
     }
 
-    @Test fun theHeaderNamesTheChannelInPrimaryTextAndSendSitsInTheComposerField() {
+    @Test fun theHeaderNamesTheChannelInPrimaryTextAndSendEndsTheComposerToolbar() {
         compose.setContent {
             SlatrixTheme(dark = false) {
                 LiveChannelScreen(room.copy(topic = "Launch reviews"), ConversationState(loading = false, hasMore = false),
@@ -219,7 +219,9 @@ class LiveChannelScreenTest {
         }
         val field = compose.onNodeWithContentDescription("Message #design").fetchSemanticsNode().boundsInRoot
         val send = compose.onNodeWithContentDescription("Send message").fetchSemanticsNode().boundsInRoot
-        assertTrue("Send sits beside the text, inside the field", send.center.y in field.top..field.bottom && send.left >= field.right)
+        val mention = compose.onNodeWithContentDescription("Mention someone").fetchSemanticsNode().boundsInRoot
+        assertTrue("Send ends the toolbar row under the field, as in Slack",
+            send.top >= field.bottom && send.center.y in mention.top..mention.bottom && send.left > mention.right)
     }
 
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
