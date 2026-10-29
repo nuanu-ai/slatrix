@@ -21,7 +21,9 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -264,6 +266,24 @@ class ChannelDetailsScreenTest {
             assertEquals(listOf("https://example.org/notes"), links)
             assertTrue(older)
         }
+    }
+
+    @Test fun loadMoreHoldsItsPlaceWhileLoadingAndAFailedPageTriesAgain() {
+        val files = mutableStateOf(SharedFiles(ConversationState(listOf(pinned("spec.pdf").copy(kind = MessageKind.Attachment)),
+            loading = false, loadingHistory = true)))
+        var asked = false
+        details(room, ChannelDetailsActions(files = { files.value }))
+        compose.onNodeWithText("Files").performClick()
+        compose.onNodeWithText("Load more").assertIsNotEnabled()
+
+        compose.runOnIdle {
+            files.value = SharedFiles(files.value.state.copy(loadingHistory = false, error = "Couldn’t load this conversation.")) {
+                asked = true
+            }
+        }
+        compose.onNodeWithText("Couldn’t load this conversation.").assertIsDisplayed()
+        compose.onNodeWithText("Try again").performClick()
+        compose.runOnIdle { assertTrue(asked) }
     }
 
     private fun pinned(body: String) = ConversationMessage(body, "\$$body", "@mira:example.org", "Mira", body, null,
