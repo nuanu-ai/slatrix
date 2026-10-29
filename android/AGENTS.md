@@ -22,6 +22,7 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 
 - **Compose screens**: drive real screens with fictional data through Compose semantics and render them with Roborazzi. Catches navigation, draft and appearance regressions; captures support visual review but miss physical input, real server behavior and device timing.
 
+- **Opening attachments**: download through an SDK fake into the real cache, then read the intent and content link Android would hand another app. Catches files saved outside the shared folder, a provider path that doesn't match and a missing read grant; misses the app that opens the file.
 - **Shared design tokens**: resolve every light/dark palette and compare all colors, file/avatar colors and radii with `design/tokens.json`. Catches cross-platform drift; misses rendering.
 - **Session storage**: reopen encrypted sessions through the real Android Keystore and app files. Catches lost session fields, plaintext credentials, tampering and missing keys; misses hardware-specific key behavior and abrupt power loss.
 - **Appearance and notification storage**: reopen Android preferences after changing theme, palette, previews or what notifies. Catches lost choices and one account's choice reaching another; misses rendered application and abrupt process death.

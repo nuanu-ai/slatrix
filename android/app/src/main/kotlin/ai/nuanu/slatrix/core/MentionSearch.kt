@@ -3,7 +3,7 @@ package ai.nuanu.slatrix.core
 import java.text.Normalizer
 
 /** A room member as the Matrix spec names their [membership]: "join", "invite", "leave" or "ban". */
-data class MentionPerson(val id: String, val name: String, val membership: String = "join")
+data class MentionPerson(val id: String, val name: String, val membership: String = "join", val avatarUrl: String? = null)
 
 sealed interface MentionCandidate {
     data class Member(val person: MentionPerson) : MentionCandidate

@@ -201,6 +201,23 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: home.workspace-switcher
+    @Test fun workspacesAndDirectMessagesCarryTheirPictures() = runTest {
+        val client = RoomsClient(listOf(
+            TestRoom(roomInfo("!harbor:example.org", "Harbor", space = true).copy(avatarUrl = "mxc://example.org/harbor")),
+            TestRoom(roomInfo("!sam:example.org", "Sam", direct = true)
+                .copy(heroes = listOf(RoomHero("@sam:example.org", "Sam", "mxc://example.org/sam", null, null)))),
+            TestRoom(roomInfo("!team:example.org", "Team")),
+        ))
+        val rooms = MatrixRooms(backgroundScope, client)
+        val state = rooms.state.first { !it.loading && it.spaces.isNotEmpty() }
+
+        assertEquals("mxc://example.org/harbor", state.spaces.single().avatarUrl)
+        assertEquals("A direct message shows the other person", "mxc://example.org/sam", state.rooms.single { it.direct }.avatarUrl)
+        assertNull(state.rooms.single { it.name == "Team" }.avatarUrl)
+        rooms.close()
+    }
+
     @Test fun anAccountWithNoRoomsFinishesLoading() = runTest {
         val rooms = MatrixRooms(backgroundScope, RoomsClient(emptyList()))
         assertEquals(emptyList<RoomSummary>(), rooms.state.first { !it.loading && it.spacesKnown }.rooms)
@@ -306,6 +323,16 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: conversation.unread-line
+    @Test fun anUnreadRoomKnowsWhereItsUnreadMessagesStart() = runTest {
+        val room = TestRoom(roomInfo("!a:example.org", "Alpha", messages = 2u).copy(fullyReadEventId = "\$read"))
+        val client = RoomsClient(listOf(room))
+        client.services.trySend(RoomsSync())
+        val rooms = MatrixRooms(backgroundScope, client)
+        assertEquals("\$read", rooms.state.first { !it.loading }.rooms.single().resumeAt)
+        rooms.close()
+    }
+
     @Test fun retryReplacesFailedSyncAndIgnoresItsLateErrorsAndRooms() = runTest {
         val room = TestRoom(roomInfo("!a:example.org", "Alpha"))
         val client = RoomsClient(listOf(room))
@@ -408,7 +435,8 @@ class MatrixRoomsTest {
         val foreground = MutableStateFlow(false)
         val rooms = MatrixRooms(backgroundScope, client, foreground)
 
-        assertSame(NotificationStatus.EventNotFound, rooms.notification("!team:example.org", "\$event"))
+        // The lookup waits for the sync on the clock; on the test's virtual time its timeout would fire before the rooms publish it.
+        assertSame(NotificationStatus.EventNotFound, withContext(Dispatchers.Default) { rooms.notification("!team:example.org", "\$event") })
         assertSame(sync, (client.notificationSetup as NotificationProcessSetup.SingleProcess).syncService)
         sync.stopped.await()
         assertFalse("A hidden app keeps its sync stopped", sync.running.value)

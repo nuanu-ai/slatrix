@@ -33,6 +33,8 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
@@ -70,7 +72,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     onBrowseChannels: (() -> Unit)? = null, onCreateChannel: (() -> Unit)? = null,
     /** How many messages wait in Later, for its card at the top of Home; null leaves the card out. */
     laterCount: Int? = null, onLater: () -> Unit = {},
-    search: @Composable () -> Unit = {}, activity: @Composable () -> Unit = {}) {
+    search: @Composable () -> Unit = {}, userAvatarUrl: String? = null, activity: @Composable () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     var actions by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -106,7 +108,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                 }
             }
             Column(Modifier.weight(1f)) {
-                HomeHeader(tab, userId, state, selectedSpaceId, onSpace, onYou)
+                HomeHeader(tab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
                 Surface(Modifier.weight(1f).fillMaxWidth(), shape = SlatrixTheme.topPanelShape, color = colors.canvas) {
                     Box(Modifier.fillMaxSize()) {
                         when (tab) {
@@ -163,7 +165,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
 }
 
 @Composable
-private fun HomeHeader(tab: HomeTab, userId: String, state: RoomListState, selectedSpaceId: String?, onSpace: (String?) -> Unit, onYou: () -> Unit) {
+private fun HomeHeader(tab: HomeTab, userId: String, userAvatarUrl: String?, state: RoomListState, selectedSpaceId: String?, onSpace: (String?) -> Unit, onYou: () -> Unit) {
     var switching by remember { mutableStateOf(false) }
     CompositionLocalProvider(LocalContentColor provides SlatrixTheme.colors.onAccent) {
         // The avatar's touch target overhangs its tile, so the end gutter is smaller and the tile lines up with Slack's.
@@ -191,7 +193,8 @@ private fun HomeHeader(tab: HomeTab, userId: String, state: RoomListState, selec
             }
             Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
                 .clickable(role = Role.Button, onClick = onYou).semantics { contentDescription = "You" }, contentAlignment = Alignment.Center) {
-                LiveAvatar(AvatarPlaceholder.initials(userId.removePrefix("@").substringBefore(':')), AvatarPlaceholder.colorIndex(userId), UiMetrics.HeaderAvatar)
+                LiveAvatar(AvatarPlaceholder.initials(userId.removePrefix("@").substringBefore(':')), AvatarPlaceholder.colorIndex(userId),
+                    UiMetrics.HeaderAvatar, userAvatarUrl)
             }
         }
     }
@@ -236,6 +239,7 @@ private fun WorkspaceIcon(space: SpaceSummary?, size: Dp, loading: Boolean = fal
         if (space == null && !loading) Icon(SlackIcons.Tray, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.onAccent)
         else if (space != null) Text(space.initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label,
             color = SlatrixTheme.colors.onAccent, maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
+        Picture(space?.avatarUrl, size)
     }
 }
 
@@ -363,7 +367,7 @@ private fun LiveRoomRow(room: RoomSummary, onRoom: (String) -> Unit, onActions: 
         .unreadState(room).padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapTiny),
         verticalAlignment = Alignment.CenterVertically) {
         if (room.direct) {
-            LiveAvatar(room.initials, room.colorIndex, UiMetrics.CompactAvatar)
+            LiveAvatar(room.initials, room.colorIndex, UiMetrics.CompactAvatar, room.avatarUrl)
             Spacer(Modifier.width(UiMetrics.GapMedium))
         } else {
             Icon(if (room.isPrivate) SlackIcons.Lock else SlackIcons.Hash, if (room.isPrivate) "Private channel" else null,
@@ -384,7 +388,7 @@ private fun LiveDirectRow(room: RoomSummary, onRoom: (String) -> Unit, onActions
     Row(Modifier.fillMaxWidth().conversation(room, onRoom, onActions).unreadState(room)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-        LiveAvatar(room.initials, room.colorIndex, UiMetrics.ListAvatar)
+        LiveAvatar(room.initials, room.colorIndex, UiMetrics.ListAvatar, room.avatarUrl)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
@@ -467,11 +471,18 @@ internal fun latestTime(timestamp: Long): String {
 }
 
 @Composable
-internal fun LiveAvatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.Avatar) {
+internal fun LiveAvatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.Avatar, url: String? = null) {
     Box(Modifier.size(size).clip(if (size > UiMetrics.Avatar) MaterialTheme.shapes.large else MaterialTheme.shapes.small)
         .background(DesignTokens.avatarColors[colorIndex]), contentAlignment = Alignment.Center) {
         // Two letters shrink to fit, so every avatar in a list has the same width.
         Text(initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label, color = SlatrixTheme.colors.onAccent,
             maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
+        Picture(url, size)
     }
+}
+
+/** The picture at [url] over whatever sits beneath it, once it has loaded, in the same box, so nothing moves. */
+@Composable
+private fun Picture(url: String?, size: Dp) {
+    rememberAvatar(url, size)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
 }
