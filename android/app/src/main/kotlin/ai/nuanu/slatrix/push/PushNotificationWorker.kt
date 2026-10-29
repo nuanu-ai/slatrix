@@ -45,8 +45,7 @@ class PushNotificationWorker(context: Context, parameters: WorkerParameters) : C
                         null
                     }
                     if ((runtime.account.state.value as? AccountState.Connected)?.client === account.client) {
-                        val previewAllowed = runtime.identity.value?.state?.value?.requiresVerification == false
-                        notifications.show(account.userId, roomId, eventId, status, previewAllowed = previewAllowed)
+                        notifications.show(account.userId, roomId, eventId, status, runtime.identity.value?.state?.value)
                     }
                 } finally {
                     status?.destroy()

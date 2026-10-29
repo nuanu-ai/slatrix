@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.Application
 import android.app.Notification
 import android.app.NotificationManager
+import ai.nuanu.slatrix.core.IdentityState
+import ai.nuanu.slatrix.core.IdentityStatus
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -22,12 +24,23 @@ class PushNotificationsTest {
         shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         val manager = context.getSystemService(NotificationManager::class.java)
 
-        PushNotifications(context).show("@alex:example.org", "!team:example.org", "\$unverified", notificationMessage())
+        for ((event, identity) in listOf(
+            "\$default" to null,
+            "\$unknown" to IdentityState(),
+            "\$unverified" to IdentityState(status = IdentityStatus.Unverified),
+        )) {
+            manager.cancelAll()
+            PushNotifications(context).show("@alex:example.org", "!team:example.org", event, notificationMessage(), identity)
 
-        val notification = manager.activeNotifications.single().notification
-        assertEquals("Slatrix", notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
-        assertEquals("New message", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
-        assertEquals(Notification.GROUP_ALERT_ALL, notification.groupAlertBehavior)
+            val notification = manager.activeNotifications.single().notification
+            assertEquals("Slatrix", notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+            assertEquals("New message", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+            assertEquals(Notification.GROUP_ALERT_ALL, notification.groupAlertBehavior)
+        }
+
+        manager.cancelAll()
+        PushNotifications(context).show("@alex:example.org", "!team:example.org", "\$new-account", notificationMessage(), IdentityState(hasIdentity = false))
+        assertEquals("Sam: Review budget?", manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
 
     @Test fun sdkPrivacyDecisionsAndDismissedDuplicatesSurviveNotificationDelivery() {
@@ -42,7 +55,7 @@ class PushNotificationsTest {
         notifications.show(user, room, "\$redacted", NotificationStatus.EventRedacted)
         assertTrue(manager.activeNotifications.isEmpty())
 
-        notifications.show(user, room, "\$resolved", notificationMessage(), previewAllowed = true)
+        notifications.show(user, room, "\$resolved", notificationMessage(), identity = IdentityState(status = IdentityStatus.Verified))
         val notification = manager.activeNotifications.single().notification
         assertEquals("Team", notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
         assertEquals("Sam: Review budget?", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
@@ -54,7 +67,7 @@ class PushNotificationsTest {
         assertEquals(room, target.getStringExtra(PushNotifications.ROOM_ID))
 
         manager.cancelAll()
-        PushNotifications(context).show(user, room, "\$resolved", notificationMessage(), previewAllowed = true)
+        PushNotifications(context).show(user, room, "\$resolved", notificationMessage(), identity = IdentityState(status = IdentityStatus.Verified))
         assertTrue("A repeated gateway delivery must not resurrect a dismissed notification", manager.activeNotifications.isEmpty())
 
         notifications.show(user, room, "\$missing", NotificationStatus.EventNotFound)

@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import ai.nuanu.slatrix.MainActivity
 import ai.nuanu.slatrix.R
+import ai.nuanu.slatrix.core.IdentityState
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import java.security.MessageDigest
@@ -26,13 +27,14 @@ class PushNotifications(private val context: Context) {
     val enabled: Boolean get() = manager.areNotificationsEnabled() && (Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
 
-    fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, previewAllowed: Boolean = false) = synchronized(deliveryLock) {
+    fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState? = null) = synchronized(deliveryLock) {
         if (!enabled || status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted) return@synchronized
         val key = pushKey(userId, roomId, eventId)
         val delivered = preferences.getString("delivered", "").orEmpty().split('\n').filter { it.isNotEmpty() }
         if (key in delivered) return@synchronized
 
-        val item = (status as? NotificationStatus.Event)?.item?.takeIf { previewAllowed }
+        val resolved = (status as? NotificationStatus.Event)?.item
+        val item = resolved?.takeIf { identity?.requiresVerification == false }
         val event = (item?.event as? NotificationEvent.Timeline)?.event
         val content = (event?.content() as? TimelineEventContent.MessageLike)?.content
         if (content is MessageLikeEventContent.RoomRedaction) return@synchronized
@@ -58,7 +60,7 @@ class PushNotifications(private val context: Context) {
         val notification = builder().setContentTitle(title).setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(publicNotification)
-            .setOnlyAlertOnce(true).setSilent(item?.isNoisy != true).build()
+            .setOnlyAlertOnce(true).setSilent(resolved?.isNoisy != true).build()
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
                 Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return@synchronized
         manager.notify(key, 0, notification)
