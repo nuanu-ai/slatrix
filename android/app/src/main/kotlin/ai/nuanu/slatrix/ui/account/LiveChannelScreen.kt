@@ -282,6 +282,7 @@ private fun LiveMessageRow(message: ConversationMessage, onMenu: (ConversationMe
             }
             Text(message.body, style = MaterialTheme.typography.bodyLarge,
                 color = if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody)
+            message.uploadProgress?.let { LinearProgressIndicator({ it }, Modifier.fillMaxWidth().padding(top = UiMetrics.GapTiny)) }
         }
     }
 }

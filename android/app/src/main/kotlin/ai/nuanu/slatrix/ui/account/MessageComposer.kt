@@ -8,6 +8,10 @@ import ai.nuanu.slatrix.core.MentionPeople
 import ai.nuanu.slatrix.core.MentionSearch
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,7 +33,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AlternateEmail
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.EmojiEmotions
@@ -66,6 +77,7 @@ data class ComposerActions(
     val people: MentionPeople? = null,
     val onNeedPeople: () -> Unit = {},
     val onMention: (start: Int, end: Int, candidate: MentionCandidate) -> Unit = { _, _, _ -> },
+    val onAttach: ((List<Uri>) -> Unit)? = null,
 )
 
 /**
@@ -150,6 +162,7 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                 }
             })
         Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
+            actions.onAttach?.takeIf { !editing }?.let { AttachButton(it) }
             IconButton(onClick = { picking = true }, enabled = !composer.loading) {
                 Icon(Icons.Outlined.EmojiEmotions, "Emoji", tint = colors.textPrimary)
             }
@@ -167,6 +180,39 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                     tint = if (composer.text.isNotBlank()) colors.accent else colors.textTertiary)
             }
         }
+    }
+}
+
+/** Slack's "+": a circle that offers photos and videos, or any file, from the system pickers. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AttachButton(onAttach: (List<Uri>) -> Unit) {
+    val colors = SlatrixTheme.colors
+    var choosing by remember { mutableStateOf(false) }
+    val media = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { if (it.isNotEmpty()) onAttach(it) }
+    val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) onAttach(it) }
+    IconButton(onClick = { choosing = true }, colors = IconButtonDefaults.iconButtonColors(containerColor = colors.raised)) {
+        Icon(Icons.Outlined.Add, "Attachments", tint = colors.textPrimary)
+    }
+    if (choosing) ModalBottomSheet(onDismissRequest = { choosing = false }, shape = SlatrixTheme.topPanelShape,
+        containerColor = colors.canvas) {
+        Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
+            AttachChoice(Icons.Outlined.PhotoLibrary, "Photos & videos") {
+                choosing = false
+                media.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+            }
+            AttachChoice(Icons.Outlined.Description, "Files") { choosing = false; files.launch(arrayOf("*/*")) }
+        }
+    }
+}
+
+@Composable
+private fun AttachChoice(icon: ImageVector, label: String, onClick: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(onClick = onClick).padding(horizontal = UiMetrics.GapLarge),
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(UiMetrics.SheetIcon), tint = colors.textPrimary)
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = colors.textPrimary)
     }
 }
 
