@@ -1,12 +1,15 @@
 package ai.nuanu.slatrix
 
 import ai.nuanu.slatrix.ui.mockups.SlatrixMockups
+import ai.nuanu.slatrix.ui.mockups.MockScreen
 import android.app.Application
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,5 +38,18 @@ class MockNavigationTest {
         compose.onNodeWithText("Love this direction.", substring = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Ava Patel").assertIsDisplayed()
+    }
+    @Test fun threadReplyPreservesTheChannelDraft() {
+        compose.setContent { SlatrixMockups(initialScreen = MockScreen.Channel) }
+        compose.onNodeWithText("Message #design").performTextInput("Channel draft")
+        compose.onNodeWithText("3 replies").performScrollTo().performClick()
+        compose.onNodeWithText("Reply…").performTextInput("Looks ready.")
+        compose.onNodeWithContentDescription("Send reply").performClick()
+        compose.onNodeWithText("Looks ready.").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Channel draft").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Send message").performClick()
+        compose.onNodeWithText("Channel draft").assertIsDisplayed()
+        compose.onNodeWithText("Message #design").assertIsDisplayed()
     }
 }
