@@ -69,8 +69,14 @@ class VideoImportTest {
         ShadowMediaMetadataRetriever.addMetadata(source, MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT, "1080")
         ShadowMediaMetadataRetriever.addMetadata(source, MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION, "90")
         ShadowMediaMetadataRetriever.addMetadata(source, MediaMetadataRetriever.METADATA_KEY_DURATION, "4000")
-        // The frame as the track stores it, on its side.
-        ShadowMediaMetadataRetriever.addFrame(context, uri, 1_000_000L, Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888))
+        // The frame as the track stores it, on its side: what is up in the video is its left half.
+        val sideways = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888).apply {
+            android.graphics.Canvas(this).apply {
+                drawRect(0f, 0f, 960f, 1080f, android.graphics.Paint().apply { color = android.graphics.Color.RED })
+                drawRect(960f, 0f, 1920f, 1080f, android.graphics.Paint().apply { color = android.graphics.Color.BLUE })
+            }
+        }
+        ShadowMediaMetadataRetriever.addFrame(context, uri, 1_000_000L, sideways)
 
         val video = AttachmentImport(context).prepare(uri)
         assertEquals(1080 to 1920, video.width to video.height)
@@ -80,6 +86,8 @@ class VideoImportTest {
         assertEquals("The poster goes up from the video's folder, which is cleared after", File(video.path).parentFile, file.parentFile)
         val drawn = BitmapFactory.decodeFile(file.path)
         assertEquals(450 to 800, drawn.width to drawn.height)
+        fun reddish(x: Int, y: Int) = drawn.getPixel(x, y).let { android.graphics.Color.red(it) > android.graphics.Color.blue(it) }
+        assertTrue("Turned upright, not stretched: the left half is now on top", reddish(225, 100) && !reddish(225, 700))
         assertEquals(450 to 800, poster.width to poster.height)
         assertEquals(file.length(), poster.size)
     }

@@ -2,11 +2,14 @@ package ai.nuanu.slatrix.core
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
+import androidx.core.graphics.scale
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -41,7 +44,7 @@ class AttachmentImport(context: Context) {
             folder.deleteRecursively()
             throw failure
         }
-        if (mimeType.startsWith("video/")) return@withContext video(copy, name, mimeType)
+        if (mimeType.startsWith("video/")) return@withContext video(uri, copy, name, mimeType)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             .takeIf { mimeType.startsWith("image/") }?.also { BitmapFactory.decodeFile(copy.path, it) }
             ?.takeIf { it.outWidth > 0 && it.outHeight > 0 }
@@ -53,21 +56,45 @@ class AttachmentImport(context: Context) {
             bounds?.let { if (turned) it.outHeight else it.outWidth }, bounds?.let { if (turned) it.outWidth else it.outHeight })
     }
 
-    /** A video's shown size and length, so other apps can play it in place. */
-    private fun video(copy: File, name: String, mimeType: String): OutgoingAttachment {
+    /**
+     * A video's shown size and length, and its poster from a frame near the start, as Slack's videos carry, so others can
+     * reserve its box and show it before it plays. Read from the picked file while its permission lasts; the poster is
+     * written beside the copy, so it goes when the upload is done.
+     */
+    private fun video(uri: Uri, copy: File, name: String, mimeType: String): OutgoingAttachment {
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(copy.path)
+            retriever.setDataSource(context, uri)
             fun number(key: Int) = retriever.extractMetadata(key)?.toLongOrNull()
-            val turned = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.let { it % 180 == 90L } == true
-            val width = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt()
-            val height = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt()
-            return OutgoingAttachment(copy.path, name, mimeType, copy.length(), if (turned) height else width,
-                if (turned) width else height, number(MediaMetadataRetriever.METADATA_KEY_DURATION))
+            val rotation = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
+            val shown = VideoUpload.shown(number(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt(),
+                number(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt(), rotation)
+            val duration = number(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val poster = shown?.let { poster(retriever, copy.parentFile!!, VideoUpload.posterAt(duration), rotation, it) }
+            return OutgoingAttachment(copy.path, name, mimeType, copy.length(), shown?.first, shown?.second, duration, poster)
         } catch (_: RuntimeException) {
             return OutgoingAttachment(copy.path, name, mimeType, copy.length(), null, null)
         } finally {
             retriever.release()
         }
+    }
+
+    /** The frame at [atMillis], upright and drawn at the poster's size, as a JPEG in [folder]; null when none can be read. */
+    private fun poster(retriever: MediaMetadataRetriever, folder: File, atMillis: Long, rotation: Int, shown: Pair<Int, Int>): VideoPoster? {
+        val frame = retriever.getFrameAtTime(atMillis * 1_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return null
+        val (width, height) = VideoUpload.posterSize(shown.first, shown.second)
+        // Some versions hand the frame over as the track stores it, on its side.
+        val sideways = rotation % 180 != 0 && (frame.width > frame.height) != (shown.first > shown.second)
+        val upright = if (sideways) Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height,
+            Matrix().apply { postRotate(rotation.toFloat()) }, true) else frame
+        val drawn = upright.scale(width, height)
+        val file = File(folder, "poster-${UUID.randomUUID()}.jpg")
+        file.outputStream().use { drawn.compress(Bitmap.CompressFormat.JPEG, POSTER_QUALITY, it) }
+        setOf(frame, upright, drawn).forEach { it.recycle() }
+        return VideoPoster(file.path, width, height, file.length())
+    }
+
+    private companion object {
+        const val POSTER_QUALITY = 80
     }
 }
