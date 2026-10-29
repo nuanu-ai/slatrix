@@ -7,6 +7,7 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.MatrixComposer
@@ -72,6 +73,14 @@ class ComposerInputTest {
             assertTrue("Draft never became editable", loaded.await(5, TimeUnit.SECONDS))
             instrumentation.waitForIdleSync()
             val automation = instrumentation.uiAutomation
+            // Connecting UiAutomation turns accessibility on; until the app hears of it, a view sends no events.
+            val accessible = CountDownLatch(1)
+            scenario.onActivity { activity ->
+                val manager = activity.getSystemService(AccessibilityManager::class.java)
+                manager.addAccessibilityStateChangeListener { if (it) accessible.countDown() }
+                if (manager.isEnabled) accessible.countDown()
+            }
+            assertTrue("Accessibility never reached the app", accessible.await(5, TimeUnit.SECONDS))
             fun field(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
                 if (node == null) return null
                 if (node.contentDescription?.toString() == "Message #design") return node

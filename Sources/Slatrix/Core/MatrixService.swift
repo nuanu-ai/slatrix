@@ -1336,8 +1336,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         selection = token
         updateSubscriptions(id)
         // The previous conversation stays up while this one reads its cache, so its rows replace the old ones in
-        // one frame; only a slow open shows the room before its rows.
+        // one frame; only a slow open shows the room before its rows. A check for `anchor` never shows it: rows that
+        // miss the anchor would flash before the anchor's own.
         let handoff = Task { [weak self] in
+            guard anchor == nil else { return }
             try? await Task.sleep(for: LoadingPresentation.handoff)
             guard !Task.isCancelled else { return }
             self?.showConversation(id, eventID: eventID, token: token)
