@@ -40,6 +40,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performTouchInput
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -151,6 +152,24 @@ class LiveHomeScreenTest {
 
         compose.runOnIdle { assertEquals(listOf("!general:example.org" to true, "!sam:example.org" to false), starred) }
         compose.onNodeWithText("Star channel").assertDoesNotExist()
+    }
+
+    @Test fun aStarredConversationMovesToStarredBeforeTheServerAnswers() {
+        val saved = CompletableDeferred<Boolean>()
+        val rooms = listOf(channel("!general:example.org", "general"), channel("!random:example.org", "random"))
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
+                    onStar = { _, _ -> saved.await() })
+            }
+        }
+        compose.onNodeWithText("general").performTouchInput { longClick() }
+        compose.onNodeWithText("Star channel").performClick()
+
+        assertTrue(top("Starred") < top("general") && top("general") < top("Channels"))
+        saved.complete(false)
+        compose.onNodeWithText("Couldn’t star general.").assertIsDisplayed()
+        compose.onNodeWithText("Starred").assertDoesNotExist()
     }
 
     @Test fun aStarThatDoesNotSaveSaysSo() {
