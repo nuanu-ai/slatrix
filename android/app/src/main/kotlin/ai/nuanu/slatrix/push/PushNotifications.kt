@@ -12,6 +12,7 @@ import android.os.Build
 import ai.nuanu.slatrix.MainActivity
 import ai.nuanu.slatrix.R
 import ai.nuanu.slatrix.core.IdentityState
+import ai.nuanu.slatrix.core.IdentityStatus
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
@@ -36,7 +37,7 @@ class PushNotifications(private val context: Context) {
         if (key in delivered) return@synchronized
 
         val resolved = (status as? NotificationStatus.Event)?.item
-        val item = resolved?.takeIf { identity?.requiresVerification == false }
+        val item = resolved?.takeIf { identity != null && identity.status != IdentityStatus.Unknown && !identity.requiresVerification }
         val event = (item?.event as? NotificationEvent.Timeline)?.event
         val content = (event?.content() as? TimelineEventContent.MessageLike)?.content
         if (content is MessageLikeEventContent.RoomRedaction) return@synchronized

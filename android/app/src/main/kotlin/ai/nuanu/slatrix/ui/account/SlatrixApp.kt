@@ -18,6 +18,7 @@ import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.compose.BackHandler
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -53,7 +54,13 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var palette by rememberSaveable { mutableStateOf(SidebarPalette.entries.firstOrNull { it.name == appearance.paletteName } ?: SidebarPalette.Aubergine) }
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
-    BackHandler(enabled = state is AccountState.Connecting || state is AccountState.ChooseMethod || state is AccountState.BrowserSignIn) { account.cancel() }
+    // A restore keeps its session, so Back leaves the app instead of signing out.
+    BackHandler(enabled = (state as? AccountState.Connecting)?.restoring == false || state is AccountState.ChooseMethod ||
+        state is AccountState.BrowserSignIn || (state as? AccountState.Failed)?.let { it.options != null && !it.canRetryRestore } == true) {
+        account.cancel()
+    }
+    var restoreFailed by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state) { if ((state as? AccountState.Failed)?.canRetryRestore == true) restoreFailed = true }
     SlatrixTheme(dark = dark, palette = palette) {
         val failure = state as? AccountState.Failed
         val connecting = state as? AccountState.Connecting
@@ -126,6 +133,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 LaunchedEffect(browser.attemptId) { open() }
                 BrowserSignInScreen(browser.options.homeserver, error, open, account::cancel)
             }
+            // Like Slack's launch, a first restore shows only the background.
+            connecting?.restoring == true && !restoreFailed -> Box(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas))
             connecting?.restoring == true || failure?.canRetryRestore == true ->
                 RestoreSessionScreen(connecting != null, failure?.message, account::restore, account::signOut)
             options != null && (options.password || options.oauth || options.sso) ->

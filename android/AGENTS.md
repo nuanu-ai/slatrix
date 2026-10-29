@@ -28,6 +28,7 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 - **Native composer input**: inject keyboard events into the real Compose screen with an SDK draft fake. Catches lost input across draft state updates; misses real server behavior and keyboard-specific autocorrection.
 - **Push delivery**: resolve the real messaging service, inspect its durable WorkManager work and render SDK notification statuses through Android's notification manager. Catches wiring, filtering, preview privacy, tap identity and duplicate alerts; misses the deployed gateway and device delivery.
 - **Build configuration**: run Gradle with external Firebase configuration and gateway properties. Catches rejected deployment URLs and unsafe configuration; misses Firebase APIs and delivery.
+- **Launch**: render the app on a device with a session in the real Keystore and an SDK fake that holds the restore. Catches screens that flash while restoring and a Back that drops a saved session; misses real server timing.
 - **Device startup**: launch the real application and call the native SDK through its generated bindings. Catches missing entry points, startup failures and JNI packaging; misses authenticated server behavior.
 - **Android lint**: run the real detector on Kotlin fixtures. Catches off-system Compose colors and sizes; misses rendered layout and contrast.
 

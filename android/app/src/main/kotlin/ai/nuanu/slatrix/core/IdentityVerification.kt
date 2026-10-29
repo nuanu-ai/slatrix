@@ -43,7 +43,7 @@ data class IdentityState(
     val requestDeviceName: String? = null,
 ) {
     val verified: Boolean get() = status == IdentityStatus.Verified
-    val requiresVerification: Boolean get() = !verified && hasIdentity != false
+    val requiresVerification: Boolean get() = status == IdentityStatus.Unverified && hasIdentity != false
 }
 
 class IdentityVerification(private val scope: CoroutineScope, private val client: Client) : AutoCloseable {
