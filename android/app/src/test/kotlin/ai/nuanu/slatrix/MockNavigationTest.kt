@@ -7,10 +7,12 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTextInput
 import org.junit.Rule
 import org.junit.Test
@@ -80,6 +82,19 @@ class MockNavigationTest {
         compose.onNodeWithText("Thread").assertIsDisplayed()
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Threads").assertIsSelected()
+    }
+    @Test fun statusEditingUsesAnOverlayAndCancelKeepsTheSavedStatus() {
+        compose.setContent { SlatrixMockups() }
+        compose.onNodeWithContentDescription("You").performClick()
+        compose.onNodeWithText("Set a status").performClick()
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithText("What's your status?").performTextInput("Reviewing designs")
+        compose.onNodeWithText("Save").performClick()
+        compose.onNodeWithText("Reviewing designs").performClick()
+        compose.onNodeWithText("Reviewing designs").performTextReplacement("Unsaved change")
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithText("Reviewing designs").assertIsDisplayed()
+        compose.onNodeWithText("Unsaved change").assertDoesNotExist()
     }
     @Test fun youChangesAndRetainsTheAppearance() {
         compose.setContent { SlatrixMockups() }
