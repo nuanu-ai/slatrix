@@ -21,6 +21,8 @@ Read and send conversations, follow threads, and notice messages that need atten
 ## Capabilities and Constraints
 
 The first screens use fictional data: Home, DMs, Activity, a channel, a thread, and You.
+Follow Slack for actions Slatrix supports through Matrix. Omit unsupported features
+and controls that do nothing.
 The owner chooses a direction before Matrix is connected. Live acceptance uses an
 owner-provided test account and room. Notifications use FCM and Sygnal.
 
