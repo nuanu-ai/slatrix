@@ -115,6 +115,21 @@ class PushRegistrationTest {
         registration.register(server, "@alex:example.org", "https://push.example.org/_matrix/push/v1/notify")
         assertEquals(setOf("registered-token"), server.pushers.keys)
     }
+
+    @Test fun signingOutRemovesTheCurrentAndRotatedPushers() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val server = PusherClient()
+        val registration = PushRegistration(context)
+        registration.updateToken("original-token")
+        registration.register(server, "@alex:example.org", "https://push.example.org/_matrix/push/v1/notify")
+        registration.updateToken("rotated-token")
+        server.rejectDeletion = true
+        runCatching { registration.register(server, "@alex:example.org", "https://push.example.org/_matrix/push/v1/notify") }
+        server.rejectDeletion = false
+
+        registration.unregister(server, "@alex:example.org")
+        assertEquals(emptySet<String>(), server.pushers.keys)
+    }
 }
 
 private class PusherClient : Client(NoHandle) {
