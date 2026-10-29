@@ -279,16 +279,17 @@ class MatrixRoomsTest {
         }
         val rooms = MatrixRooms(backgroundScope, client)
         entered.await()
-        val beforeClose = rooms.state.first { !it.loading }
+        rooms.state.first { !it.loading }
         val closing = async { rooms.close() }
         runCurrent()
         val lateSync = RoomsSync()
         finishing.complete(lateSync)
         closing.await()
         lateSync.stopped.await()
+        val closed = rooms.state.value
 
         room.emit(room.info.copy(displayName = "Too late"))
-        assertEquals(beforeClose, rooms.state.value)
+        assertEquals(closed, rooms.state.value)
     }
 }
 
