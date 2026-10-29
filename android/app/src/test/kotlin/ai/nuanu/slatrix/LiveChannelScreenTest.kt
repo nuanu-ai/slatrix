@@ -9,7 +9,13 @@ import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
+import ai.nuanu.slatrix.ui.designsystem.DesignTokens
+import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
 import android.app.Application
 import android.content.ClipboardManager
 import android.content.Context
@@ -171,6 +177,23 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Lost on the way").performTouchInput { longClick() }
         compose.onNodeWithText("Delete message").performClick()
         compose.runOnIdle { assertEquals(failed, deleted) }
+    }
+
+    @Test fun theHeaderNamesTheChannelInPrimaryTextAndSendSitsInTheComposerField() {
+        compose.setContent {
+            SlatrixTheme(dark = false) {
+                LiveChannelScreen(room.copy(topic = "Launch reviews"), ConversationState(loading = false, hasMore = false),
+                    ComposerState(text = "Draft", loading = false), {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("design", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action ->
+            val layouts = mutableListOf<TextLayoutResult>()
+            action(layouts)
+            assertEquals(DesignTokens.colors(false, SidebarPalette.Aubergine).getValue("textPrimary"), layouts.single().layoutInput.style.color)
+        }
+        val field = compose.onNodeWithContentDescription("Message #design").fetchSemanticsNode().boundsInRoot
+        val send = compose.onNodeWithContentDescription("Send message").fetchSemanticsNode().boundsInRoot
+        assertTrue("Send sits beside the text, inside the field", send.center.y in field.top..field.bottom && send.left >= field.right)
     }
 
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
