@@ -85,7 +85,7 @@ private fun ThreadRow(thread: ThreadFeedItem, onClick: () -> Unit) {
 private fun ThreadMessage(message: ThreadFeedMessage, avatar: Dp, lines: Int) {
     val colors = SlatrixTheme.colors
     Row(horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-        LiveAvatar(message.initials, message.colorIndex, avatar)
+        LiveAvatar(message.initials, message.colorIndex, avatar, message.avatarUrl)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,

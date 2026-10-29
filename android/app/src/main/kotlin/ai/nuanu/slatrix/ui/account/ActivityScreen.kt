@@ -125,7 +125,7 @@ private fun ActivityRow(item: ActivityItem, onClick: () -> Unit) {
         .clickable(role = Role.Button, onClick = onClick).padding(UiMetrics.GapLarge),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
         Box(Modifier.padding(top = UiMetrics.GapTiny)) {
-            LiveAvatar(item.initials, item.colorIndex)
+            LiveAvatar(item.initials, item.colorIndex, url = item.avatarUrl)
             // Slack marks each item's avatar with what happened: the reaction, a mention, a thread or a DM.
             Box(Modifier.align(Alignment.BottomEnd).offset(x = UiMetrics.GapTiny, y = UiMetrics.GapTiny).size(UiMetrics.Icon)
                 .background(colors.canvas, CircleShape), contentAlignment = Alignment.Center) {

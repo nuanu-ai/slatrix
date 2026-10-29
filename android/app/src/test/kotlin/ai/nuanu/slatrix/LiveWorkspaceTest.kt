@@ -14,6 +14,8 @@ import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -79,6 +81,7 @@ class LiveWorkspaceTest {
                     { submitted = draft.value.text; draft.value = draft.value.copy(sending = true) }, {}, {}, {}, {}, {}, {})
             }
         }
+        compose.onNode(hasContentDescription("Message #Team") and hasSetTextAction()).performClick()
         compose.onNodeWithContentDescription("Send message").performClick()
         compose.runOnIdle { assertEquals("First message", submitted) }
         compose.onNodeWithContentDescription("Message #Team").performTextReplacement("Another thought")
