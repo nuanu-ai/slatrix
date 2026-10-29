@@ -34,12 +34,12 @@ object VideoUpload {
         return max(1, (width * scale).roundToInt()) to max(1, (height * scale).roundToInt())
     }
 
-    /** The upload and its kind: the video under its own name, with its poster going up beside it. */
-    fun attachment(video: OutgoingAttachment): Pair<UploadSource, AttachmentKind> {
+    /** What the SDK sends the video as: m.video with its info, and its poster going up beside it. */
+    fun kind(video: OutgoingAttachment): AttachmentKind {
         val poster = video.poster
         val info = VideoInfo(video.durationMillis?.let(java.time.Duration::ofMillis), video.height?.toULong(), video.width?.toULong(),
             video.mimeType, video.size.toULong(),
             poster?.let { ThumbnailInfo(it.height.toULong(), it.width.toULong(), POSTER_MIMETYPE, it.size.toULong()) }, null, null)
-        return UploadSource.File(video.path) to AttachmentKind.Video(info, poster?.let { UploadSource.File(it.path) })
+        return AttachmentKind.Video(info, poster?.let { UploadSource.File(it.path) })
     }
 }

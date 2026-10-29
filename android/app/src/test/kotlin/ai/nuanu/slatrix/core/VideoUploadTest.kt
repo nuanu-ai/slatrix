@@ -1,6 +1,5 @@
 package ai.nuanu.slatrix.core
 
-import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -26,30 +25,28 @@ class VideoUploadTest {
             assertEquals(name, frame["width"].asInt to frame["height"].asInt, poster)
 
             val file = video["name"].asString
-            val (source, kind) = VideoUpload.attachment(OutgoingAttachment("/cache/upload/$file", file, video["mimetype"].asString,
+            val kind = VideoUpload.kind(OutgoingAttachment("/cache/upload/$file", file, video["mimetype"].asString,
                 video["size"].asLong, shown.first, shown.second, duration,
                 case.long("posterBytes")?.let { VideoPoster("/cache/upload/poster.jpg", poster.first, poster.second, it) }))
+            // m.video and its info; the body is the file's own name, which the import keeps for the upload.
+            val sent = case["sent"].asJsonObject
+            assertEquals(name, "m.video", sent["msgtype"].asString)
             val info = (kind as AttachmentKind.Video).videoInfo
-            val sent = JsonObject().apply {
-                addProperty("msgtype", "m.video")
-                addProperty("body", File((source as UploadSource.File).filename).name)
-                add("info", JsonObject().apply {
-                    addProperty("w", info.width?.toLong())
-                    addProperty("h", info.height?.toLong())
-                    info.duration?.let { addProperty("duration", it.toMillis()) }
-                    addProperty("mimetype", info.mimetype)
-                    addProperty("size", info.size?.toLong())
-                    info.thumbnailInfo?.let { thumbnail ->
-                        add("thumbnail_info", JsonObject().apply {
-                            addProperty("w", thumbnail.width?.toLong())
-                            addProperty("h", thumbnail.height?.toLong())
-                            addProperty("mimetype", thumbnail.mimetype)
-                            addProperty("size", thumbnail.size?.toLong())
-                        })
-                    }
-                })
-            }
-            assertEquals(name, case["sent"], sent)
+            assertEquals(name, sent["info"], JsonObject().apply {
+                addProperty("w", info.width?.toLong())
+                addProperty("h", info.height?.toLong())
+                info.duration?.let { addProperty("duration", it.toMillis()) }
+                addProperty("mimetype", info.mimetype)
+                addProperty("size", info.size?.toLong())
+                info.thumbnailInfo?.let { thumbnail ->
+                    add("thumbnail_info", JsonObject().apply {
+                        addProperty("w", thumbnail.width?.toLong())
+                        addProperty("h", thumbnail.height?.toLong())
+                        addProperty("mimetype", thumbnail.mimetype)
+                        addProperty("size", thumbnail.size?.toLong())
+                    })
+                }
+            })
             assertEquals(name, case.long("posterBytes") != null, kind.thumbnailSource == UploadSource.File("/cache/upload/poster.jpg"))
         }
     }

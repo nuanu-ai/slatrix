@@ -529,7 +529,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                         val params = UploadParameters(UploadSource.File(attachment.path), null, null, null, null,
                             threadRoot?.let(::threadRelation))
                         val size = attachment.size.toULong()
-                        val kind = if (attachment.mimeType.startsWith("video/")) VideoUpload.attachment(attachment).second
+                        val kind = if (attachment.mimeType.startsWith("video/")) VideoUpload.kind(attachment)
                         else if (attachment.width != null && attachment.height != null) AttachmentKind.Image(
                             ImageInfo(attachment.height.toULong(), attachment.width.toULong(), attachment.mimeType, size, null, null, null, null),
                             null)
