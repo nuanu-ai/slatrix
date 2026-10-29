@@ -469,6 +469,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     let activity = ActivityService()
     let people = PeopleService()
     let pinnedMessages = PinnedMessagesService()
+    let savedMessages = SavedMessagesService()
     let sharedFiles = SharedFilesService()
     let avatarImages = AvatarImageCache()
     /// Decoded inline images and posters by event and source, so a row that comes back draws its picture at once.
@@ -933,6 +934,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let generation = sessionGeneration
         let id = try newClient.userId()
         user = ChatUser(id: id, name: id)
+        savedMessages.attach(newClient, accountID: id)
         verificationAttachTask = Task { [weak self] in
             guard let self, self.sessionGeneration == generation else { return }
             await self.verification.attach(client: newClient)
@@ -1042,6 +1044,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadForwardMedia = [:]
         people.attach(nil)
         pinnedMessages.attach(nil)
+        savedMessages.attach(nil, accountID: nil)
         sharedFiles.attach(nil)
         threadFeed.close()
         activity.clear()
@@ -2707,7 +2710,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         isRetryingConnection = feedback.isRetrying
         canRetryConnection = feedback.canRetry
         switch feedback.state {
-        case .running: status = .ready
+        case .running:
+            status = .ready
+            savedMessages.resume()
         case .failed: status = .error
         case .idle, .connecting, .offline, .stopped: status = .syncing
         }

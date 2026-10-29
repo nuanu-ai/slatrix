@@ -1,4 +1,6 @@
 import Foundation
+import MatrixRustSDK
+import Observation
 
 /// Later, one list per account that every device shares through account data, by the rules in
 /// `spec/saved-messages.json`. A message keeps only its latest entry, saved or removed, so merging two devices' lists
@@ -112,4 +114,98 @@ struct SavedMessages: Equatable {
         Int64(min(max((date.timeIntervalSince1970 * 1_000).rounded(), 0), 9_007_199_254_740_991))
     }
     private static func date(_ milliseconds: Int64) -> Date { Date(timeIntervalSince1970: Double(milliseconds) / 1_000) }
+}
+
+private final class AccountDataObserver: RawAccountDataListener {
+    let callback: @Sendable (String) -> Void
+    init(_ callback: @escaping @Sendable (String) -> Void) { self.callback = callback }
+    func onChange(content: String) { callback(content) }
+}
+
+/// Keeps an account's Later in step with its account data: merges what other devices write as each sync brings it,
+/// and writes back whatever this device holds that the account lacks. A failed write stays here and goes again with
+/// the next change, sync or reconnection.
+@MainActor
+@Observable final class SavedMessagesService {
+    private(set) var list = SavedMessages()
+    @ObservationIgnored private var accountID: String?
+    @ObservationIgnored private var session = UUID()
+    @ObservationIgnored private var handle: TaskHandle?
+    @ObservationIgnored private var writer: Task<Void, Never>?
+    @ObservationIgnored private var changes: AsyncStream<Void>.Continuation?
+    /// The account's list as last read or written; nil until read, so nothing is written over a list not yet seen.
+    @ObservationIgnored private var published: SavedMessages?
+
+    /// The signed-in account's client, or nil on sign-out. The list stays with its account until another's arrives,
+    /// so the last save to the device's vault still has it.
+    func attach(_ client: Client?, accountID: String?) {
+        handle?.cancel()
+        handle = nil
+        writer?.cancel()
+        changes?.finish()
+        changes = nil
+        published = nil
+        session = UUID()
+        guard let client, let accountID else { return }
+        own(accountID)
+        let session = session
+        handle = client.observeRawAccountDataEvent(
+            eventType: SavedMessages.eventType,
+            listener: AccountDataObserver { content in
+                Task { @MainActor [weak self] in
+                    guard let self, self.session == session else { return }
+                    self.receive(content)
+                }
+            })
+        Task { [weak self] in
+            let stored: String?
+            do { stored = try await client.accountData(eventType: SavedMessages.eventType) } catch { return }
+            // A sync that already answered is at least as new as the store.
+            guard let self, self.session == session, self.published == nil else { return }
+            self.receive(stored)
+        }
+        // One write at a time; a change while one is out waits for it, and a failed one waits for the next change.
+        let (stream, changes) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        self.changes = changes
+        writer = Task { [weak self] in
+            for await _ in stream {
+                guard let self, let published = self.published, self.list != published else { continue }
+                let next = self.list
+                guard (try? await client.setAccountData(eventType: SavedMessages.eventType, content: next.json)) != nil,
+                    self.session == session
+                else { continue }
+                self.published = next
+            }
+        }
+    }
+
+    /// What the device's vault held for the account when it opened.
+    func merge(_ local: SavedMessages, accountID: String) {
+        own(accountID)
+        update(list.merged(with: local))
+    }
+
+    func toggle(roomID: String, eventID: String) {
+        update(list.toggled(roomID: roomID, eventID: eventID, at: Date()))
+    }
+
+    /// Writes what an earlier attempt couldn't, now the connection is back.
+    func resume() { changes?.yield() }
+
+    private func own(_ accountID: String) {
+        guard accountID != self.accountID else { return }
+        self.accountID = accountID
+        list = SavedMessages()
+    }
+
+    private func receive(_ content: String?) {
+        let remote = SavedMessages(json: content)
+        published = remote
+        update(list.merged(with: remote))
+    }
+
+    private func update(_ next: SavedMessages) {
+        if next != list { list = next }
+        changes?.yield()
+    }
 }
