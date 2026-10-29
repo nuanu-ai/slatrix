@@ -26,6 +26,8 @@ data class OpenChannel(
 )
 
 class MatrixWorkspace(scope: CoroutineScope, client: Client) {
+    /** Read once a conversation needs it; the thread workspace shares the main one's. */
+    val emojiHistory by lazy { EmojiHistory(scope, client) }
     private val mutableSelected = MutableStateFlow<OpenChannel?>(null)
     val selected: StateFlow<OpenChannel?> = mutableSelected.asStateFlow()
     private val requests = Channel<Pair<Long, OpenChannel?>>(Channel.CONFLATED)

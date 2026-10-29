@@ -189,6 +189,7 @@ private class WorkspaceClient(private val beforeSave: suspend () -> Unit = {}) :
     val handles = mutableListOf<Room>()
     val focuses = mutableListOf<TimelineFocus>()
     var failSaves = false
+    override suspend fun getRecentEmojis(): List<RecentEmoji> = emptyList()
     override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
         override fun id(): String = roomId
         override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =

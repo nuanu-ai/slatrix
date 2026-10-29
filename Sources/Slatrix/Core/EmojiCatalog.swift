@@ -86,13 +86,13 @@ enum EmojiCatalog {
 /// Recently used emoji, newest first, as Element keeps them in `io.element.recent_emoji`.
 enum EmojiRecents {
     /// Slack's one-click reactions before you have used any.
-    private static let defaults = ["✅", "👀", "🙌"]
+    private static let defaults = ["✅", "👀", "🙌", "👍", "🎉"]
 
     static func adding(_ emoji: String, to recent: [String]) -> [String] { [emoji] + recent.filter { $0 != emoji } }
 
-    /// The hover toolbar's three one-click reactions.
-    static func quick(_ recent: [String]) -> [String] {
-        Array((recent + defaults.filter { !recent.contains($0) }).prefix(3))
+    /// The one-click reactions: three on the hover toolbar, five in Android's message sheet.
+    static func quick(_ recent: [String], count: Int = 3) -> [String] {
+        Array((recent + defaults.filter { !recent.contains($0) }).prefix(count))
     }
 }
 

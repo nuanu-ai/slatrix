@@ -4,37 +4,64 @@ import Testing
 @testable import Slatrix
 
 struct EmojiTests {
-    private func top(_ query: String) -> String? { EmojiCatalog.search(query).first?.value }
+    struct Search: Decodable, CustomTestStringConvertible {
+        var name: String
+        var query: String
+        var first: String?
+        var order: [String]?
+        var testDescription: String { name }
+    }
+    struct Shortcode: Decodable, CustomTestStringConvertible {
+        var name: String
+        var value: String
+        var shortcode: String
+        var testDescription: String { name }
+    }
+    struct Quick: Decodable, CustomTestStringConvertible {
+        var name: String
+        var recent: [String]
+        var count: Int
+        var quick: [String]
+        var testDescription: String { name }
+    }
+    struct Adding: Decodable, CustomTestStringConvertible {
+        var name: String
+        var emoji: String
+        var recent: [String]
+        var after: [String]
+        var testDescription: String { name }
+    }
+    struct Spec: Decodable {
+        var search: [Search]
+        var shortcode: [Shortcode]
+        var quick: [Quick]
+        var adding: [Adding]
+    }
+    private static let spec = Result { try SharedSpec.decode("spec/emoji.json", as: Spec.self) }
 
     // capability: message.react.picker
-    @Test("Search finds an emoji by any of Slack's shortcodes, with or without colons")
-    func shortcodeSearch() {
-        #expect(top(":+1:") == "👍")
-        #expect(top("thumbsup") == "👍")
-        #expect(top(":heart:") == "❤️")
-        #expect(top("tada") == "🎉")
+    @Test("Shared search case", arguments: try spec.get().search)
+    func search(spec: Search) throws {
+        let results = EmojiCatalog.search(spec.query).map(\.value)
+        #expect(results.first == spec.first)
+        let positions = try (spec.order ?? []).map { try #require(results.firstIndex(of: $0)) }
+        #expect(positions == positions.sorted())
     }
 
-    @Test("An exact shortcode outranks one it starts, which outranks a later word")
-    func ranking() throws {
-        let results = EmojiCatalog.search("heart").map(\.value)
-        let starts = try #require(results.firstIndex(of: "😍"))  // :heart_eyes:
-        let laterWord = try #require(results.firstIndex(of: "💔"))  // :broken_heart:
-        #expect(results.first == "❤️")
-        #expect(starts < laterWord)
-        #expect(top("smile") == "😄")
-        #expect(EmojiCatalog.search("thumbs up").first?.value == "👍")
-        #expect(EmojiCatalog.search("zzzqqq").isEmpty)
-        #expect(EmojiCatalog.search("  ").isEmpty)
+    @Test("Shared shortcode case", arguments: try spec.get().shortcode)
+    func shortcode(spec: Shortcode) {
+        #expect(EmojiCatalog.shortcode(for: spec.value) == spec.shortcode)
     }
 
-    @Test("A reaction's shortcode is Slack's, with its skin tone, and its key when it is not an emoji")
-    func shortcodeLookup() {
-        #expect(EmojiCatalog.shortcode(for: "👍") == ":+1:")
-        #expect(EmojiCatalog.shortcode(for: "👍🏽") == ":+1::skin-tone-4:")
-        // Another client may send a heart without its emoji presentation selector.
-        #expect(EmojiCatalog.shortcode(for: "\u{2764}") == ":heart:")
-        #expect(EmojiCatalog.shortcode(for: "lgtm") == "lgtm")
+    // capability: message.react.quick
+    @Test("Shared quick reactions case", arguments: try spec.get().quick)
+    func quick(spec: Quick) {
+        #expect(EmojiRecents.quick(spec.recent, count: spec.count) == spec.quick)
+    }
+
+    @Test("Shared recent emoji case", arguments: try spec.get().adding)
+    func adding(spec: Adding) {
+        #expect(EmojiRecents.adding(spec.emoji, to: spec.recent) == spec.after)
     }
 
     @Test("A chosen skin tone applies to emoji that take one and leaves the rest alone")
@@ -70,22 +97,6 @@ struct EmojiTests {
         #expect(move(13, .down) == 13)
         #expect(move(13, .right) == 13)
         #expect(move(1, .up) == 1)
-    }
-
-    @Test("A used emoji moves to the front of the recent list without repeating")
-    func recentOrder() {
-        #expect(EmojiRecents.adding("🎉", to: ["👍", "🎉", "🔥"]) == ["🎉", "👍", "🔥"])
-        #expect(EmojiRecents.adding("🚀", to: ["👍"]) == ["🚀", "👍"])
-    }
-
-    // capability: message.react.quick
-    @Test("The toolbar offers the three most recent emoji, filled from Slack's defaults")
-    func quickReactions() {
-        #expect(EmojiRecents.quick(["🎉", "👍", "🔥", "🚀"]) == ["🎉", "👍", "🔥"])
-        let filled = EmojiRecents.quick(["✅"])
-        #expect(filled.first == "✅")
-        #expect(filled.count == 3 && Set(filled).count == 3)
-        #expect(EmojiRecents.quick([]).count == 3)
     }
 
     // capability: message.reactions.show

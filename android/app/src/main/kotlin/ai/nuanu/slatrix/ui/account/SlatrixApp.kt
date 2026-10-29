@@ -123,10 +123,10 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 { darkOverride = it; appearance.darkMode = it },
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
-                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads) } } }
+                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace) { root -> threads?.open(selected.room, root) }
+                                LiveConversation(selected, workspace, workspace) { root -> threads?.open(selected.room, root) }
                             } } } }
                             else -> null
                         }) {
@@ -169,7 +169,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
-private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, onOpenThread: (String) -> Unit = {}) {
+private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?, onOpenThread: (String) -> Unit = {}) {
     val context = LocalContext.current
     val conversation = open.conversation
     val composer = open.composer
@@ -184,7 +184,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, onOpenT
             }
         },
         { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot) },
-        { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) }, onOpenThread, open.threadRoot)
+        { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) }, onOpenThread, open.threadRoot,
+        rememberMessageActions(conversation, main))
 }
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
