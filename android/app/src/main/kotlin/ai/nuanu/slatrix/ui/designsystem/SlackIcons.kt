@@ -41,6 +41,8 @@ object SlackIcons {
     /** A clock with a turning-back arrow, for recent searches. */
     val History = outline("history", "M4.75 12 A7.25 7.25 0 1 0 6.9 6.85 M4.75 4.5 V8.25 H8.5 M12 8.25 V12 L14.75 14")
     val Plus = outline("plus", "M12 5 V19 M5 12 H19")
+    /** Slack's forward: an arrow that turns off to the right. */
+    val Forward = outline("forward", "M14 5.5 L19.5 10.75 L14 16 M19.5 10.75 H11.5 A6.5 6.5 0 0 0 5 17.25 V18.5")
     val Tray = outline("tray", "M4 13 H8.5 L9.5 15.5 H14.5 L15.5 13 H20 M4 13 V18.5 A1.5 1.5 0 0 0 5.5 20 H18.5 " +
         "A1.5 1.5 0 0 0 20 18.5 V13 L17.5 5.5 H6.5 Z")
 

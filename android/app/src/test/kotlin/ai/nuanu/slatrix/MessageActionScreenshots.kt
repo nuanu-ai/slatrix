@@ -50,7 +50,7 @@ class MessageActionScreenshots(private val dark: Boolean) {
             message("b", "Jordan", "Looking now. The illustrations read well in dark mode too.", 10).copy(editable = true),
         )
         val actions = MessageActions(quick = listOf("🙂", "❤️", "👍", "💯", "🐛"), recent = listOf("🙂", "❤️", "👍"),
-            onReact = { _, _ -> }, link = { "" }, onDelete = {}, onQuote = {}, onEdit = {}, onPin = { _, _ -> }, onMarkUnread = {})
+            onReact = { _, _ -> }, link = { "" }, onDelete = {}, onQuote = {}, onEdit = {}, onForward = {}, onPin = { _, _ -> }, onMarkUnread = {})
         compose.setContent {
             SlatrixTheme(dark = dark) {
                 LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), ComposerState(loading = false),

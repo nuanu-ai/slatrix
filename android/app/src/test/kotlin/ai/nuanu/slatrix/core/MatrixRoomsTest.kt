@@ -170,6 +170,22 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: channel.link-workspace
+    @Test fun aChannelKnowsTheWorkspacesItSitsInDirectlyAndWhichYouMayManage() = runTest {
+        val client = RoomsClient(listOf(
+            TestRoom(roomInfo("!studio:example.org", "Studio", space = true).copy(powerLevels = TestPowers(spaceChild = false))),
+            TestRoom(roomInfo("!design:example.org", "Design", space = true)),
+            TestRoom(roomInfo("!work:example.org", "Operations")),
+        ))
+        client.spaces = RoomsSpaces(mapOf("!work:example.org" to listOf("!design:example.org"),
+            "!design:example.org" to listOf("!studio:example.org")))
+        val rooms = MatrixRooms(backgroundScope, client)
+        val state = rooms.state.first { state -> state.rooms.any { it.spaceIds.size == 2 } }
+        assertEquals(setOf("!design:example.org"), state.rooms.single().parentIds)
+        assertEquals(mapOf("Design" to true, "Studio" to false), state.spaces.associate { it.name to it.canManageRooms })
+        rooms.close()
+    }
+
     // capability: home.star-toggle
     @Test fun starringAConversationTagsItAsAFavourite() = runTest {
         val alpha = TestRoom(roomInfo("!a:example.org", "Alpha"))
@@ -534,11 +550,12 @@ private class RoomsSync : SyncService(NoHandle) {
 
 /** What you may do in a room; the event type objects compare through the SDK, so they're told apart by type. */
 internal class TestPowers(private val post: Boolean = true, private val name: Boolean = true, private val topic: Boolean = true,
-    private val invite: Boolean = true, private val pin: Boolean = true) : RoomPowerLevels(NoHandle) {
+    private val invite: Boolean = true, private val pin: Boolean = true, private val spaceChild: Boolean = true) : RoomPowerLevels(NoHandle) {
     override fun canOwnUserSendMessage(message: MessageLikeEventType): Boolean = post || message !is MessageLikeEventType.RoomMessage
     override fun canOwnUserSendState(stateEvent: StateEventType): Boolean = when (stateEvent) {
         is StateEventType.RoomName -> name
         is StateEventType.RoomTopic -> topic
+        is StateEventType.SpaceChild -> spaceChild
         else -> true
     }
     override fun canOwnUserInvite(): Boolean = invite

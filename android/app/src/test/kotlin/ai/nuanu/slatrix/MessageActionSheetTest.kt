@@ -85,6 +85,15 @@ class MessageActionSheetTest {
         compose.onNodeWithText("Mark unread").assertDoesNotExist()
     }
 
+    // capability: message.forward
+    @Test fun forwardSendsTheMessageOnToChooseWhere() {
+        val forwarded = mutableListOf<String>()
+        show(MessageActions(onForward = { forwarded += it.body }))
+        open("Ship it")
+        compose.onNodeWithText("Forward").performClick()
+        compose.runOnIdle { assertEquals(listOf("Ship it"), forwarded) }
+    }
+
     // capability: message.copy-link
     // capability: message.pin
     @Test fun pinOrUnpinIsOfferedWhereYouMayPin() {

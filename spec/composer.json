@@ -168,6 +168,14 @@
         "@dl:example.org"
       ],
       "mentionsRoom": false
+    },
+    {
+      "name": "Blank lines before and after a formatted message are dropped",
+      "draft": "<br><strong>hi</strong><br><br>",
+      "body": "hi",
+      "html": "<strong>hi</strong>",
+      "mentions": [],
+      "mentionsRoom": false
     }
   ]
 }

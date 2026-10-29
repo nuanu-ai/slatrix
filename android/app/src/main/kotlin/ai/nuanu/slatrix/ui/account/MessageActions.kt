@@ -10,6 +10,7 @@ import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.content.ClipData
@@ -75,6 +76,8 @@ data class MessageActions(
     val onDelete: ((ConversationMessage) -> Unit)? = null,
     /** Marks the conversation unread; Matrix keeps no unread point inside it, so it doesn't take the message. */
     val onMarkUnread: (() -> Unit)? = null,
+    /** Opens the conversation picker that forwards the message. */
+    val onForward: ((ConversationMessage) -> Unit)? = null,
     /** The room's pinned messages, which the sheet offers to unpin; [onPin] is null where you may not pin. */
     val pinned: Set<String> = emptySet(),
     val onPin: ((ConversationMessage, pin: Boolean) -> Unit)? = null,
@@ -86,6 +89,9 @@ data class MessageActions(
 private const val QUICK_REACTIONS = 5
 
 private val textKinds = setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)
+
+/** What a forward can copy. A row doesn't know an attachment's kind, so a video or audio one says it can't go once tapped. */
+private val forwardKinds = textKinds + MessageKind.Attachment
 
 /** Slack's long-press sheet, the emoji picker it opens and the delete confirmation, one after another. */
 @Composable
@@ -147,12 +153,14 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
                 }
             }
             val quote = actions.onQuote
-            if (eventId != null && (onOpenThread != null || quote != null)) {
+            val forward = actions.onForward?.takeIf { message.kind in forwardKinds }
+            if (eventId != null && (onOpenThread != null || quote != null || forward != null)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge).padding(bottom = UiMetrics.GapSmall),
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                     if (onOpenThread != null) ActionTile(Icons.Outlined.ChatBubbleOutline, "Reply", Modifier.weight(1f)) {
                         onOpenThread(eventId); onDismiss()
                     }
+                    if (forward != null) ActionTile(SlackIcons.Forward, "Forward", Modifier.weight(1f)) { forward(message); onDismiss() }
                     if (quote != null) ActionTile(Icons.Outlined.FormatQuote, "Quote", Modifier.weight(1f)) { quote(message); onDismiss() }
                 }
             }
