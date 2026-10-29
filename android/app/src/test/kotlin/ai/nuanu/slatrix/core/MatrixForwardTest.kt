@@ -58,7 +58,7 @@ private class ForwardRoom(private val roomId: String, private val encryption: En
     override fun membership(): Membership = membership
     override suspend fun latestEncryptionState(): EncryptionState = encryption
     override suspend fun getPowerLevels(): RoomPowerLevels = object : RoomPowerLevels(NoHandle) {
-        override fun canOwnUserSendMessage(message: MessageLikeEventType): Boolean = canPost && message == MessageLikeEventType.RoomMessage
+        override fun canOwnUserSendMessage(message: MessageLikeEventType): Boolean = canPost && message is MessageLikeEventType.RoomMessage
     }
     override suspend fun timeline(): Timeline = timeline
 }
