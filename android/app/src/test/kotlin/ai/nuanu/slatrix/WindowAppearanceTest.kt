@@ -2,7 +2,7 @@ package ai.nuanu.slatrix
 
 import android.app.Application
 import android.view.WindowInsetsController
-import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -22,17 +22,17 @@ import org.robolectric.annotation.GraphicsMode
 class WindowAppearanceTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    @Test fun darkModeSwitchUpdatesSystemBarIcons() {
+    @Test fun darkDefaultAndLightOverrideUpdateSystemBarIcons() {
         val lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
             WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
         compose.runOnIdle {
-            assertEquals(lightBars, compose.activity.window.insetsController!!.systemBarsAppearance and lightBars)
+            assertEquals(0, compose.activity.window.insetsController!!.systemBarsAppearance and lightBars)
         }
         compose.onNodeWithContentDescription("You").performClick()
         compose.onNodeWithText("Preferences").performClick()
-        compose.onNodeWithText("Dark mode").performScrollTo().performClick().assertIsOn()
+        compose.onNodeWithText("Dark mode").performScrollTo().performClick().assertIsOff()
         compose.runOnIdle {
-            assertEquals(0, compose.activity.window.insetsController!!.systemBarsAppearance and lightBars)
+            assertEquals(lightBars, compose.activity.window.insetsController!!.systemBarsAppearance and lightBars)
         }
     }
 }
