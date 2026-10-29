@@ -408,6 +408,31 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.pin
+    @Test fun pinningPinsOrUnpinsTheMessageAndAFailureSaysSo() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val message = conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single()
+        conversation.pin(message, true)
+        assertEquals("\$one" to true, timeline.pins.receive())
+        conversation.pin(message, false)
+        assertEquals("\$one" to false, timeline.pins.receive())
+
+        timeline.pinFailure = IllegalStateException("Forbidden")
+        conversation.pin(message, true)
+        assertEquals("Couldn’t pin this message.", conversation.state.first { it.notice != null }.notice)
+        conversation.close()
+    }
+
+    // capability: conversation.pins
+    @Test fun pinnedMessagesComeFromTheRoomsPinnedTimeline() = runTest {
+        val room = ConversationRoom(ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Ship it"))))
+        val pinned = MatrixConversation(backgroundScope, room, pinned = true)
+        assertEquals(listOf("Ship it"), pinned.state.first { it.rows.isNotEmpty() }.rows.messages.map { it.body })
+        assertTrue(room.configuration?.focus is TimelineFocus.PinnedEvents)
+        pinned.close()
+    }
+
     @Test fun aFailedDeleteSaysSoForAMoment() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.redactFailure = IllegalStateException("Offline")
@@ -615,6 +640,18 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     override suspend fun redactEvent(eventOrTransactionId: EventOrTransactionId, reason: String?) {
         redactFailure?.let { throw it }
         redacted.send(eventOrTransactionId)
+    }
+    val pins = Channel<Pair<String, Boolean>>(Channel.UNLIMITED)
+    var pinFailure: Exception? = null
+    override suspend fun pinEvent(eventId: String): Boolean {
+        pinFailure?.let { throw it }
+        pins.send(eventId to true)
+        return true
+    }
+    override suspend fun unpinEvent(eventId: String): Boolean {
+        pinFailure?.let { throw it }
+        pins.send(eventId to false)
+        return true
     }
     val fetched = Channel<String>(Channel.UNLIMITED)
     override suspend fun fetchDetailsForEvent(eventId: String) { fetched.send(eventId) }
