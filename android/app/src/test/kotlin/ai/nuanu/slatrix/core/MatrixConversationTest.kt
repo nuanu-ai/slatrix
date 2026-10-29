@@ -431,6 +431,27 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.forward
+    @Test fun aMessageForwardsAsItsLatestTextOrItsFileButNotAVideo() = runTest {
+        fun media(type: MessageType) = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(type, "clip", false, null)), null, null, null))
+        val source = object : MediaSource(NoHandle) {}
+        val file = MessageType.File(FileMessageContent("plan.pdf", null, null, source, null))
+        val video = MessageType.Video(VideoMessageContent("clip.mp4", null, null, source, null))
+        val timeline = ConversationTimeline(listOf(
+            conversationItem("a", "\$text", "Edited to this"),
+            conversationItem("b", "\$file", "plan.pdf", content = media(file)),
+            conversationItem("c", "\$video", "clip.mp4", content = media(video)),
+        ))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val rows = conversation.state.first { it.rows.messages.size == 3 }.rows.messages
+
+        assertEquals(MessageType.Text(TextMessageContent("Edited to this", null)), conversation.forwardable(rows[0]))
+        assertEquals(file, conversation.forwardable(rows[1]))
+        assertNull(conversation.forwardable(rows[2]))
+        conversation.close()
+    }
+
     // capability: message.copy-link
     @Test fun aMessageLinksToItsEventInTheRoom() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
@@ -639,6 +660,9 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         pins.send(eventId to false)
         return true
     }
+    override suspend fun getEventTimelineItemByEventId(eventId: String): EventTimelineItem =
+        checkNotNull(cached.firstNotNullOfOrNull { item -> item.asEvent()?.takeIf {
+            (it.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId == eventId } })
     val fetched = Channel<String>(Channel.UNLIMITED)
     override suspend fun fetchDetailsForEvent(eventId: String) { fetched.send(eventId) }
     override suspend fun addListener(listener: TimelineListener): TaskHandle {
