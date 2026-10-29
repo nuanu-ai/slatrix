@@ -85,7 +85,7 @@ class ComposerInputTest {
                 automation.waitForIdle(100, 1_000)
                 found = field(automation.rootInActiveWindow)
             }
-            val input = requireNotNull(found) { "Composer input is missing" }
+            val input = requireNotNull(found) { "Composer input is missing; the active window is ${automation.rootInActiveWindow?.packageName}" }
             val bounds = Rect().also(input::getBoundsInScreen)
             val time = SystemClock.uptimeMillis()
             listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP).forEach { action ->
