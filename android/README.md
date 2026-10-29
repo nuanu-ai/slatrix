@@ -35,6 +35,8 @@ The + on Home and DMs starts a new message: find someone by name or Matrix ID an
 your direct message with them. Tap a name, a picture or a mention to open that person's profile, and Message to open
 your direct message with them, made if there is none; a direct message's header opens
 the other person.
+In You, View profile opens your profile; Edit profile there changes your display name and
+photo, cropped to a square.
 Open You, then Preferences, to change the color mode and sidebar palette.
 Color mode follows the system until you choose Light or Dark.
 

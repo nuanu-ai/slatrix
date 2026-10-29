@@ -53,7 +53,8 @@ import kotlinx.coroutines.launch
  * Contact information. [opening] holds Message while it finds or makes the conversation; [error] says why it couldn't.
  */
 @Composable
-fun PersonProfileScreen(person: Person, own: Boolean, opening: Boolean, error: String?, onMessage: () -> Unit, onBack: () -> Unit) {
+fun PersonProfileScreen(person: Person, own: Boolean, opening: Boolean, error: String?, onMessage: () -> Unit,
+    onEdit: (() -> Unit)? = null, onBack: () -> Unit) {
     val colors = SlatrixTheme.colors
     Box(Modifier.fillMaxSize()) {
         PushedPage("Profile", onBack) {
@@ -72,6 +73,11 @@ fun PersonProfileScreen(person: Person, own: Boolean, opening: Boolean, error: S
                         else Icon(SlackIcons.Messages, null, Modifier.size(UiMetrics.Icon))
                         Text("Message", Modifier.padding(start = UiMetrics.GapSmall), style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                    }
+                    // Slack's Edit Profile, where Message is for anyone else.
+                    if (own && onEdit != null) OutlinedButton(onEdit, Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch),
+                        shape = MaterialTheme.shapes.small) {
+                        Text("Edit profile", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary)
                     }
                 }
                 HorizontalDivider(color = colors.border)
@@ -106,7 +112,7 @@ fun PersonProfileScreen(person: Person, own: Boolean, opening: Boolean, error: S
  */
 @Composable
 fun LivePersonProfile(userId: String, known: String?, me: String, people: MatrixPeople?, rooms: Flow<RoomListState>?,
-    onOpen: (RoomSummary) -> Unit, onBack: () -> Unit) {
+    onOpen: (RoomSummary) -> Unit, onEdit: (() -> Unit)? = null, onBack: () -> Unit) {
     val person by produceState(Person(userId, known ?: userId), userId, people) {
         people?.profile(userId)?.let { value = it }
     }
@@ -123,6 +129,6 @@ fun LivePersonProfile(userId: String, known: String?, me: String, people: Matrix
                 if (room != null) onOpen(room) else error = "Couldn’t open the conversation."
             }
         }
-    }, onBack)
+    }, onEdit, onBack)
     error?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); error = null } }
 }
