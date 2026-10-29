@@ -88,6 +88,25 @@ class PushNotificationsTest {
         assertEquals("Slatrix", fallback.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
         assertEquals("New message", fallback.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
+
+    @Test fun aPushForAnEventNobodyCanFindAlertsOnlyInAJoinedRoom() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val notifications = PushNotifications(context)
+        val client = object : Client(NoHandle) {
+            override fun getRoom(roomId: String): Room? = if (roomId != "!team:example.org") null else object : Room(NoHandle) {
+                override fun membership() = Membership.JOINED
+            }
+        }
+
+        notifications.deliver(client, "@alex:example.org", "!forged:example.org", "\$missing", NotificationStatus.EventNotFound, null)
+        notifications.deliver(client, "@alex:example.org", "!forged:example.org", "\$unresolved", null, null)
+        assertTrue(manager.activeNotifications.isEmpty())
+
+        notifications.deliver(client, "@alex:example.org", "!team:example.org", "\$missing", NotificationStatus.EventNotFound, null)
+        assertEquals("New message", manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    }
 }
 
 private fun notificationMessage(noisy: Boolean = true) = NotificationStatus.Event(NotificationItem(
