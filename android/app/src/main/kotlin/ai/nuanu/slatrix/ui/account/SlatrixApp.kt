@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountState
 import ai.nuanu.slatrix.core.AttachmentImport
+import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.MatrixChannel
@@ -216,7 +217,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     val scope = rememberCoroutineScope()
     var details by rememberSaveable(open.room.id) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
-        LiveChannelScreen(room, timeline, draft, { composer?.edit(it); open.typing?.changed(it) }, { composer?.send(); open.typing?.stopped() },
+        LiveChannelScreen(room, timeline, draft, { composer?.edit(it); if (draft.target !is ComposerTarget.Edit) open.typing?.changed(it) }, { composer?.send(); open.typing?.stopped() },
             { owner?.back() }, { conversation?.loadOlder() },
             { event ->
                 scope.launch {

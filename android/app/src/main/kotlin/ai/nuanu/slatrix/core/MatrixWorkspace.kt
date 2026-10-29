@@ -66,7 +66,8 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
                     if (generation.get() == token) {
                         current = requested.copy(conversation = timeline, composer = composer,
-                            typing = MatrixTyping(scope, client, requested.room.id))
+                            // Matrix typing is room-wide, so a thread keeps out of it, as on the Mac.
+                            typing = MatrixTyping(scope, client, requested.room.id).takeIf { requested.threadRoot == null })
                         mutableSelected.value = current
                     } else release()
                 } catch (cancelled: CancellationException) {
