@@ -578,7 +578,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         (profile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: sender
 
     /** Parents asked for once each, since the SDK updates every reply that quotes one when it arrives. */
-    private val askedFor = mutableSetOf<String>()
+    private val askedFor = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private fun replyPreview(reply: InReplyToDetails): ReplyPreview {
         val id = reply.eventId()
@@ -594,9 +594,13 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             is EmbeddedEventDetails.Error -> ReplyPreview(id, ReplyPreview.State.Unavailable)
             is EmbeddedEventDetails.Pending -> ReplyPreview(id, ReplyPreview.State.Loading)
             is EmbeddedEventDetails.Unavailable -> {
-                // The SDK answers with the parent or an error in a later update of the reply.
+                // The SDK answers with the parent or an error in a later update of the reply. A request that failed, say
+                // offline, is made again the next time the reply updates.
                 if (askedFor.add(id)) operations.launch {
-                    runCatching { timeline().fetchDetailsForEvent(id) }.onFailure { if (it is CancellationException) throw it }
+                    runCatching { timeline().fetchDetailsForEvent(id) }.onFailure {
+                        if (it is CancellationException) throw it
+                        askedFor.remove(id)
+                    }
                 }
                 ReplyPreview(id, ReplyPreview.State.Loading)
             }
