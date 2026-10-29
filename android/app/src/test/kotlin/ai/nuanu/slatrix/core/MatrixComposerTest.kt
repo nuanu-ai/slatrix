@@ -1,6 +1,5 @@
 package ai.nuanu.slatrix.core
 
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runCurrent
@@ -58,7 +57,12 @@ class MatrixComposerTest {
         composer.close()
         val reopened = MatrixComposer(backgroundScope, room) { true }
         assertEquals("Hi @mira:example.org\n<tomorrow>", reopened.state.first { !it.loading }.text)
+        reopened.send()
+        assertEquals("", reopened.state.first { !it.sending }.text)
         reopened.close()
+        val sent = MatrixComposer(backgroundScope, room) { true }
+        assertEquals("", sent.state.first { !it.loading }.text)
+        sent.close()
     }
 }
 
