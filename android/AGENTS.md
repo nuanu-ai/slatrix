@@ -16,6 +16,9 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 
 ## Tests
 
+- **Matrix services against SDK fakes**: use subclasses of the generated SDK types. Catches authentication, stale completions and refresh persistence; misses real server behavior.
+- **Shared product policies**: run every case in each ported `spec/` file through the public Kotlin policy. Catches drift between apps; misses SDK mapping and rendering.
+
 - **Compose screens**: drive real screens with fictional data through Compose semantics and render them with Roborazzi. Catches navigation, draft and appearance regressions; captures support visual review but miss physical input, real server behavior and device timing.
 
 - **Shared design tokens**: resolve every light/dark palette and compare all colors, file/avatar colors and radii with `design/tokens.json`. Catches cross-platform drift; misses rendering.

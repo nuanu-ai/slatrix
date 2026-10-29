@@ -1,6 +1,9 @@
 package ai.nuanu.slatrix
 
 import android.app.Application
+import ai.nuanu.slatrix.ui.mockups.SlatrixMockups
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
 import android.view.WindowInsetsController
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
@@ -31,6 +34,7 @@ class WindowAppearanceTest {
     fun followsSystemDarkUntilLightIsChosen() = checkAppearance(0, "Light", lightBars)
 
     private fun checkAppearance(initialBars: Int, choice: String, chosenBars: Int) {
+        compose.activity.setContent { SlatrixMockups(dark = isSystemInDarkTheme()) }
         compose.runOnIdle {
             assertEquals(initialBars, compose.activity.window.insetsController!!.systemBarsAppearance and lightBars)
         }
