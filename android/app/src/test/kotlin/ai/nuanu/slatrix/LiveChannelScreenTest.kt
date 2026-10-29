@@ -36,13 +36,13 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasProgressBarRangeInfo
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
@@ -82,7 +82,7 @@ class LiveChannelScreenTest {
         compose.runOnIdle { assertEquals("The newest page is far from the top", 0, requests) }
         compose.onNodeWithText("Earlier messages").assertDoesNotExist()
 
-        repeat(20) { compose.onRoot().performTouchInput { swipeDown() } }
+        repeat(20) { compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown() } }
         compose.waitUntil { requests == 1 }
         compose.runOnIdle { state.value = state.value.copy(loadingHistory = true) }
         compose.waitForIdle()
@@ -111,7 +111,7 @@ class LiveChannelScreenTest {
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
             }
         }
-        repeat(10) { compose.onRoot().performTouchInput { swipeDown() } }
+        repeat(10) { compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown() } }
         val indicator = compose.onNode(progress).fetchSemanticsNode().boundsInRoot
         assertTrue("The indicator sits above the oldest message",
             indicator.bottom <= compose.onNodeWithText("Message 1").fetchSemanticsNode().boundsInRoot.top)
@@ -294,6 +294,24 @@ class LiveChannelScreenTest {
         compose.onNodeWithContentDescription("Add a reply").assertDoesNotExist()
     }
 
+    @Test fun theMemberLineHoldsItsPlaceUntilTheCountArrivesAndADirectMessageHasNone() {
+        val shown = mutableStateOf(room.copy(topic = "Launch reviews"))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(shown.value, ConversationState(loading = false, hasMore = false), ComposerState(loading = false),
+                    {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        val waiting = compose.onNodeWithText("design").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { shown.value = shown.value.copy(memberCount = 1) }
+        compose.onNodeWithText("1 member").assertIsDisplayed()
+        assertEquals("Nothing moves when the count arrives", waiting, compose.onNodeWithText("design").fetchSemanticsNode().boundsInRoot)
+
+        compose.runOnIdle { shown.value = RoomSummary("!sam:example.org", "Sam", true, "", UnreadBadge.None, "S", 0, memberCount = 2) }
+        compose.waitForIdle()
+        compose.onNodeWithText("2 members").assertDoesNotExist()
+    }
+
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
 
     private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)
@@ -314,7 +332,7 @@ class LiveChannelScreenTest {
         compose.runOnIdle { assertEquals("Newer messages wait until the reader reaches the newest", 0, newer) }
 
         // On the conversation itself: a swipe that starts on the composer doesn't scroll it.
-        repeat(30) { compose.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performTouchInput { swipeUp() } }
+        repeat(30) { compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeUp() } }
         compose.waitUntil { newer > 0 }
     }
 
