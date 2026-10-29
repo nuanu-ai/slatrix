@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
@@ -41,6 +42,20 @@ class MatrixConversationTest {
         conversation.state.first { !it.hasMore }
         timeline.emit(listOf(TimelineDiff.Clear))
         assertTrue(conversation.state.first { it.messages.isEmpty() }.hasMore)
+        conversation.close()
+    }
+
+    @Test fun aFailedReadReceiptStaysQuietAndALaterReadRetries() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.messages.isNotEmpty() }
+        timeline.receiptFailure = IllegalStateException("Offline")
+
+        assertFalse(conversation.markRead("\$one"))
+        assertNull(conversation.state.value.error)
+        timeline.receiptFailure = null
+        assertTrue(conversation.markRead("\$one"))
+        assertEquals(ReceiptType.READ to "\$one", timeline.receipts.receive())
         conversation.close()
     }
 
@@ -150,7 +165,11 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         pageStarted.complete(Unit)
         return try { page.await() } finally { pageCancelled.complete(Unit) }
     }
-    override suspend fun sendReadReceipt(receiptType: ReceiptType, eventId: String) { receipts.send(receiptType to eventId) }
+    var receiptFailure: Exception? = null
+    override suspend fun sendReadReceipt(receiptType: ReceiptType, eventId: String) {
+        receiptFailure?.let { throw it }
+        receipts.send(receiptType to eventId)
+    }
     fun emit(diff: List<TimelineDiff>) { listener?.onUpdate(diff) }
     override fun createMessageContent(msgType: MessageType): RoomMessageEventContentWithoutRelation = ConversationContent(msgType)
     override suspend fun send(msg: RoomMessageEventContentWithoutRelation): SendHandle {
