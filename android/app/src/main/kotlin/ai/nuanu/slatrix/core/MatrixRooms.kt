@@ -49,7 +49,11 @@ data class RoomSummary(
     val initials: String,
     val colorIndex: Int,
     val spaceIds: Set<String> = emptySet(),
+    val latest: LatestMessage? = null,
 )
+
+/** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
+data class LatestMessage(val body: String?, val timestamp: Long, val own: Boolean)
 
 data class SpaceSummary(
     val id: String,
@@ -64,6 +68,8 @@ data class RoomListState(
     val loading: Boolean = true,
     val error: String? = null,
     val spaces: List<SpaceSummary> = emptyList(),
+    /** False until the first space lookup finishes; rooms show at once, with no [RoomSummary.spaceIds] yet. */
+    val spacesKnown: Boolean = false,
 )
 
 class MatrixRooms(scope: CoroutineScope, internal val client: Client) {

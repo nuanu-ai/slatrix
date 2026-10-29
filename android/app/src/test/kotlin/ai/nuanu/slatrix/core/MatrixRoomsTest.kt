@@ -1,9 +1,11 @@
 package ai.nuanu.slatrix.core
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -12,6 +14,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_base.EncryptionState
@@ -32,7 +35,8 @@ class MatrixRoomsTest {
         val rooms = MatrixRooms(backgroundScope, client)
         original.started.await()
 
-        val notification = async { rooms.notification("!team:example.org", "\$event") }
+        // The lookup's timeout runs on the clock, not the test's virtual time, while the rooms work off the test thread.
+        val notification = async(Dispatchers.Default) { rooms.notification("!team:example.org", "\$event") }
         assertEquals("!team:example.org" to "\$event", fetching.await())
         assertSame(original, (client.notificationSetup as NotificationProcessSetup.SingleProcess).syncService)
         rooms.retry()
@@ -61,13 +65,65 @@ class MatrixRoomsTest {
             "!test:example.org" to listOf("!nested:example.org"),
         ))
         val rooms = MatrixRooms(backgroundScope, client)
-        runCurrent()
+        val state = rooms.state.first { state -> state.rooms.any { it.name == "Sandbox" && it.spaceIds.isNotEmpty() } }
 
-        assertEquals(listOf("Design", "Nuanu", "Test Studio"), rooms.state.value.spaces.map { it.name })
-        assertEquals(listOf("Nuanu", "Test Studio"), rooms.state.value.spaces.filter { it.isTopLevel }.map { it.name })
-        assertEquals(setOf("!nested:example.org", "!studio:example.org"), rooms.state.value.rooms.single { it.name == "Sandbox" }.spaceIds)
-        assertEquals(setOf("!nuanu:example.org"), rooms.state.value.rooms.single { it.name == "Operations" }.spaceIds)
-        assertEquals(emptySet<String>(), rooms.state.value.rooms.single { it.direct }.spaceIds)
+        assertEquals(listOf("Design", "Nuanu", "Test Studio"), state.spaces.map { it.name })
+        assertEquals(listOf("Nuanu", "Test Studio"), state.spaces.filter { it.isTopLevel }.map { it.name })
+        assertEquals(setOf("!nested:example.org", "!studio:example.org"), state.rooms.single { it.name == "Sandbox" }.spaceIds)
+        assertEquals(setOf("!nuanu:example.org"), state.rooms.single { it.name == "Operations" }.spaceIds)
+        assertEquals(emptySet<String>(), state.rooms.single { it.direct }.spaceIds)
+        rooms.close()
+    }
+
+    @Test fun aChannelJoinedLaterArrivesInItsWorkspace() = runTest {
+        val invited = TestRoom(roomInfo("!work:example.org", "Operations", membership = Membership.INVITED))
+        val client = RoomsClient(listOf(TestRoom(roomInfo("!nuanu:example.org", "Nuanu", space = true)), invited))
+        client.spaces = RoomsSpaces(mapOf("!work:example.org" to listOf("!nuanu:example.org")))
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        sync.started.await()
+        assertEquals(emptyList<RoomSummary>(), rooms.state.first { it.spacesKnown }.rooms)
+
+        invited.info = invited.info.copy(membership = Membership.JOINED)
+        sync.emitEntries(listOf(RoomListEntriesUpdate.Set(1u, invited)))
+        val joined = rooms.state.first { state -> state.rooms.any { it.spaceIds.isNotEmpty() } }
+        assertEquals(setOf("!nuanu:example.org"), joined.rooms.single().spaceIds)
+        rooms.close()
+    }
+
+    @Test fun anAccountWithNoRoomsFinishesLoading() = runTest {
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(emptyList()))
+        assertEquals(emptyList<RoomSummary>(), rooms.state.first { !it.loading && it.spacesKnown }.rooms)
+        rooms.close()
+    }
+
+    @Test fun cachedRoomsShowBeforeTheirWorkspacesAreKnown() = runTest {
+        val spacesKnown = CompletableDeferred<Unit>()
+        val lookingUp = CompletableDeferred<Unit>()
+        val client = RoomsClient(listOf(
+            TestRoom(roomInfo("!nuanu:example.org", "Nuanu", space = true)),
+            TestRoom(roomInfo("!work:example.org", "Operations")),
+            TestRoom(roomInfo("!dm:example.org", "Avery", direct = true)),
+        ))
+        client.spaces = object : SpaceService(NoHandle) {
+            override suspend fun topLevelJoinedSpaces(): List<SpaceRoom> {
+                lookingUp.complete(Unit)
+                spacesKnown.await()
+                return emptyList()
+            }
+            override suspend fun joinedParentIdsOfChild(childId: String): List<String> =
+                if (childId == "!work:example.org") listOf("!nuanu:example.org") else emptyList()
+        }
+        val rooms = MatrixRooms(backgroundScope, client)
+        lookingUp.await()
+        val cached = rooms.state.first { !it.loading }
+        assertFalse(cached.spacesKnown)
+        assertEquals(listOf("Avery", "Operations"), cached.rooms.map { it.name })
+
+        spacesKnown.complete(Unit)
+        val known = rooms.state.first { it.spacesKnown }
+        assertEquals(setOf("!nuanu:example.org"), known.rooms.single { it.name == "Operations" }.spaceIds)
         rooms.close()
     }
 
@@ -79,37 +135,64 @@ class MatrixRoomsTest {
             TestRoom(roomInfo("!invite:example.org", "Invitation", membership = Membership.INVITED)),
         ))
         val rooms = MatrixRooms(backgroundScope, client)
-        runCurrent()
+        val state = rooms.state.first { !it.loading }
 
-        assertEquals(listOf("Alpha", "Zebra"), rooms.state.value.rooms.map { it.name })
-        assertEquals(UnreadBadge.Count("3"), rooms.state.value.rooms.last().unread)
-        assertEquals("Z", rooms.state.value.rooms.last().initials)
+        assertEquals(listOf("Alpha", "Zebra"), state.rooms.map { it.name })
+        assertEquals(UnreadBadge.Count("3"), state.rooms.last().unread)
+        assertEquals("Z", state.rooms.last().initials)
         rooms.close()
     }
 
-    @Test fun roomUpdatesMapUnreadAndRemovedRoomsIgnoreLateCallbacks() = runTest {
+    @Test fun directMessagesLeadWithTheNewestAndPreviewIt() = runTest {
+        val older = TestRoom(roomInfo("!avery:example.org", "Avery", direct = true), latest(1_000u, "See you at noon", own = false))
+        val newer = TestRoom(roomInfo("!blake:example.org", "Blake", direct = true), latest(2_000u, "Shipped it", own = true))
+        val client = RoomsClient(listOf(older, newer, TestRoom(roomInfo("!team:example.org", "Team"))))
+        val rooms = MatrixRooms(backgroundScope, client)
+        val state = rooms.state.first { !it.loading }
+
+        assertEquals(listOf("Blake", "Avery"), state.rooms.filter { it.direct }.map { it.name })
+        assertEquals(LatestMessage("Shipped it", 2_000, own = true), state.rooms.first { it.name == "Blake" }.latest)
+
+        older.latest = latest(3_000u, "Running late", own = false)
+        older.emit(older.info.copy(numUnreadMessages = 1u))
+        val updated = rooms.state.first { state -> state.rooms.any { it.latest?.body == "Running late" } }
+        assertEquals(listOf("Avery", "Blake"), updated.rooms.filter { it.direct }.map { it.name })
+        rooms.close()
+    }
+
+    @Test fun anUpdateToOneRoomKeepsEveryOtherRoomsSummary() = runTest {
+        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha"))
+        val client = RoomsClient(listOf(alpha, TestRoom(roomInfo("!b:example.org", "Beta"))))
+        val rooms = MatrixRooms(backgroundScope, client)
+        val before = rooms.state.first { !it.loading }.rooms.single { it.name == "Beta" }
+
+        alpha.emit(alpha.info.copy(numUnreadMessages = 2u))
+        val after = rooms.state.first { state -> state.rooms.any { it.unread != UnreadBadge.None } }
+        assertSame(before, after.rooms.single { it.name == "Beta" })
+        rooms.close()
+    }
+
+    @Test fun roomUpdatesMapUnreadAndLeftRoomsIgnoreLateCallbacks() = runTest {
         val room = TestRoom(roomInfo("!a:example.org", "Alpha", direct = true))
-        val client = RoomsClient(listOf(room))
+        val other = TestRoom(roomInfo("!b:example.org", "Beta"))
+        val client = RoomsClient(listOf(room, other))
         val sync = RoomsSync()
         client.services.trySend(sync)
         val rooms = MatrixRooms(backgroundScope, client)
         sync.started.await()
-        runCurrent()
+        rooms.state.first { !it.loading }
 
         room.emit(room.info.copy(displayName = "Renamed", topic = "A topic", numUnreadMessages = ULong.MAX_VALUE))
-        runCurrent()
-        val renamed = rooms.state.value.rooms.single()
-        assertEquals("Renamed", renamed.name)
+        val renamed = rooms.state.first { state -> state.rooms.any { it.name == "Renamed" } }.rooms.single { it.direct }
         assertEquals("A topic", renamed.topic)
         assertEquals(UnreadBadge.Count("99+"), renamed.unread)
 
-        client.cached = emptyList()
-        sync.emitEntries(listOf(RoomListEntriesUpdate.PopBack))
-        runCurrent()
-        assertEquals(emptyList<RoomSummary>(), rooms.state.value.rooms)
-        room.emit(room.info.copy(displayName = "Stale room"))
-        runCurrent()
-        assertEquals(emptyList<RoomSummary>(), rooms.state.value.rooms)
+        room.emit(room.info.copy(membership = Membership.LEFT))
+        sync.emitEntries(listOf(RoomListEntriesUpdate.Remove(0u)))
+        assertEquals(listOf("Beta"), rooms.state.first { state -> state.rooms.none { it.direct } }.rooms.map { it.name })
+        room.emit(room.info.copy(displayName = "Stale room", membership = Membership.JOINED))
+        other.emit(other.info.copy(displayName = "Beta renamed"))
+        assertEquals(listOf("Beta renamed"), rooms.state.first { state -> state.rooms.any { it.name == "Beta renamed" } }.rooms.map { it.name })
         rooms.close()
     }
 
@@ -123,21 +206,51 @@ class MatrixRoomsTest {
         val rooms = MatrixRooms(backgroundScope, client)
         failed.started.await()
         failed.emitState(SyncServiceState.ERROR)
-        runCurrent()
-        assertNotNull(rooms.state.value.error)
+        assertNotNull(rooms.state.first { it.error != null }.error)
 
         rooms.retry()
         replacement.started.await()
         failed.stopped.await()
-        runCurrent()
-        assertNull(rooms.state.value.error)
+        rooms.state.first { it.error == null }
         failed.emitState(SyncServiceState.ERROR)
         failed.emitEntries(listOf(RoomListEntriesUpdate.Reset(listOf(TestRoom(roomInfo("!stale:example.org", "Stale"))))))
-        runCurrent()
-        assertNull(rooms.state.value.error)
-        assertEquals(listOf("Alpha"), rooms.state.value.rooms.map { it.name })
+        room.emit(room.info.copy(displayName = "Alpha renamed"))
+        val state = rooms.state.first { state -> state.rooms.any { it.name == "Alpha renamed" } }
+        assertNull(state.error)
+        assertEquals(listOf("Alpha renamed"), state.rooms.map { it.name })
         rooms.close()
         replacement.stopped.await()
+    }
+
+    @Test fun aBurstOfMessagesAtABusyAccountsScaleStaysWithinBudget() = runTest {
+        val spaces = (0 until 10).map { TestRoom(roomInfo("!space$it:example.org", "Space $it", space = true)) }
+        val channels = (0 until 440).map { TestRoom(roomInfo("!c$it:example.org", "channel $it")) }
+        val people = (0 until 50).map { TestRoom(roomInfo("!d$it:example.org", "Person $it", direct = true)) }
+        val listed = (spaces + channels + people).toMutableList<TestRoom>()
+        val client = RoomsClient(listed.toList())
+        client.spaces = RoomsSpaces(channels.withIndex().associate { (index, room) -> room.info.id to listOf("!space${index % 10}:example.org") })
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        sync.started.await()
+        sync.emitEntries(listOf(RoomListEntriesUpdate.Reset(listed.toList())))
+        rooms.state.first { state -> state.rooms.size == 490 && state.rooms.none { !it.direct && it.spaceIds.isEmpty() } }
+
+        val started = System.nanoTime()
+        repeat(300) { message ->
+            val room = if (message % 3 == 0) people[message % people.size] else channels[message % channels.size]
+            room.emit(room.info.copy(numUnreadMessages = room.info.numUnreadMessages + 1u))
+            val index = listed.indexOf(room)
+            listed.removeAt(index)
+            listed.add(0, room)
+            sync.emitEntries(listOf(RoomListEntriesUpdate.Remove(index.toUInt()), RoomListEntriesUpdate.PushFront(room)))
+        }
+        val last = channels.last()
+        last.emit(last.info.copy(displayName = "last message"))
+        rooms.state.first { state -> state.rooms.any { it.name == "last message" } }
+        val elapsed = (System.nanoTime() - started) / 1_000_000
+        assertTrue("300 messages across 500 rooms took $elapsed ms", elapsed < BurstBudgetMillis)
+        rooms.close()
     }
 
     @Test fun closeStopsEvenSyncThatFinishesAfterCancellationAndRejectsLateRoomChanges() = runTest {
@@ -151,8 +264,7 @@ class MatrixRoomsTest {
         }
         val rooms = MatrixRooms(backgroundScope, client)
         entered.await()
-        runCurrent()
-        val beforeClose = rooms.state.value
+        val beforeClose = rooms.state.first { !it.loading }
         val closing = async { rooms.close() }
         runCurrent()
         val lateSync = RoomsSync()
@@ -161,10 +273,12 @@ class MatrixRoomsTest {
         lateSync.stopped.await()
 
         room.emit(room.info.copy(displayName = "Too late"))
-        runCurrent()
         assertEquals(beforeClose, rooms.state.value)
     }
 }
+
+// About three times the 14–38 ms measured locally; rebuilding the whole list per message took 400–750 ms.
+private const val BurstBudgetMillis = 120L
 
 private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
     var notificationSetup: NotificationProcessSetup? = null
@@ -186,10 +300,11 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
     }
 }
 
-private class TestRoom(var info: RoomInfo) : Room(NoHandle) {
+private class TestRoom(var info: RoomInfo, var latest: LatestEventValue = LatestEventValue.None) : Room(NoHandle) {
     private var listener: RoomInfoListener? = null
     override fun id(): String = info.id
     override suspend fun roomInfo(): RoomInfo = info
+    override suspend fun latestEvent(): LatestEventValue = latest
     override fun subscribeToRoomInfoUpdates(listener: RoomInfoListener): TaskHandle {
         this.listener = listener
         return RoomsHandle()
@@ -265,6 +380,15 @@ private fun roomInfo(
     fullyReadEventId = null, pinnedEventIds = emptyList(), joinRule = null,
     historyVisibility = RoomHistoryVisibility.Shared, powerLevels = null, roomVersion = null,
     privilegedCreatorsRole = false,
+)
+
+private fun latest(timestamp: ULong, body: String, own: Boolean) = LatestEventValue.Remote(
+    timestamp = timestamp, sender = "@sam:example.org", isOwn = own,
+    profile = ProfileDetails.Ready("Sam", false, null, null, null),
+    content = TimelineItemContent.MsgLike(MsgLikeContent(
+        MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)),
+        null, null, null,
+    )),
 )
 
 private class RoomsSpaces(private val parents: Map<String, List<String>> = emptyMap()) : SpaceService(NoHandle) {
