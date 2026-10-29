@@ -140,7 +140,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 // The top of the conversation, which also lets an empty one ask for history.
                 item(key = "top") {
                     if (!state.hasMore && !state.loading) ConversationIntro(room)
-                    else if (state.loadingHistory && state.rows.isNotEmpty()) HistoryProgress()
+                    else if (state.rows.isNotEmpty()) HistoryProgress(state.loadingHistory)
                 }
             }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
@@ -218,9 +218,10 @@ private fun dayLabel(timestamp: Long): String {
 }
 
 @Composable
-private fun HistoryProgress() {
+private fun HistoryProgress(loading: Boolean) {
     var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { delay(UiMetrics.ProgressDelayMillis); visible = true }
+    // Shows after the delay and hides only after as long a gap, so back-to-back pages don't blink it.
+    LaunchedEffect(loading) { delay(UiMetrics.ProgressDelayMillis); visible = loading }
     Box(Modifier.fillMaxWidth().height(UiMetrics.Touch), contentAlignment = Alignment.Center) {
         if (visible) CircularProgressIndicator(Modifier.size(UiMetrics.Icon))
     }
