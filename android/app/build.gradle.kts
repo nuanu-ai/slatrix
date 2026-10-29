@@ -11,6 +11,7 @@ extensions.configure<ApplicationExtension> {
     compileSdk = 36
     defaultConfig {
         applicationId = "ai.nuanu.slatrix"
+        manifestPlaceholders["authRedirectScheme"] = "com.github.nuanu-ai.slatrix"
         minSdk = 24
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         targetSdk = 36
@@ -23,12 +24,14 @@ extensions.configure<ApplicationExtension> {
         resValues = true
     }
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildTypes {
         debug {
             applicationIdSuffix = ".dev"
+            manifestPlaceholders["authRedirectScheme"] = "com.github.nuanu-ai.slatrix.dev"
             versionNameSuffix = "-dev"
             resValue("string", "app_name", "Slatrix Dev")
         }
@@ -52,6 +55,9 @@ kotlin { compilerOptions { jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 dependencies {
     implementation(project(":matrix-sdk"))
+    implementation("androidx.browser:browser:1.10.0")
+    implementation("org.jsoup:jsoup:1.23.2")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

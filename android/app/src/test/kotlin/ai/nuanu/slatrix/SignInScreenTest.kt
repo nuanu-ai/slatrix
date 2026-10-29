@@ -1,10 +1,13 @@
 package ai.nuanu.slatrix
 
 import android.app.Application
-import ai.nuanu.slatrix.ui.account.SignInScreen
+import ai.nuanu.slatrix.ui.account.SignInMethodsScreen
+import ai.nuanu.slatrix.core.SignInOptions
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -27,16 +30,14 @@ class SignInScreenTest {
         var submitted: List<String>? = null
         compose.setContent {
             SlatrixTheme {
-                SignInScreen(connecting = false, error = null,
-                    onSignIn = { server, user, password -> submitted = listOf(server, user, password) },
-                    onCancel = {}, onRetryRestore = null)
+                SignInMethodsScreen(options = SignInOptions("https://matrix.example.org", true, false, false), connecting = false, error = null,
+                    onSignIn = { user, password -> submitted = listOf(user, password) }, onBrowser = {}, onBack = {})
             }
         }
-        compose.onNodeWithText("Sign in").assertIsNotEnabled()
-        compose.onNodeWithText("Homeserver").performTextInput("matrix.example.org")
+        compose.onNode(hasText("Sign in") and hasClickAction()).assertIsNotEnabled()
         compose.onNodeWithText("Username").performTextInput("alice")
         compose.onNodeWithText("Password").performTextInput("  secret  ")
-        compose.onNodeWithText("Sign in").performClick()
-        compose.runOnIdle { assertEquals(listOf("matrix.example.org", "alice", "  secret  "), submitted) }
+        compose.onNode(hasText("Sign in") and hasClickAction()).performClick()
+        compose.runOnIdle { assertEquals(listOf("alice", "  secret  "), submitted) }
     }
 }
