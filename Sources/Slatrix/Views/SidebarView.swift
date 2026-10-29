@@ -323,7 +323,7 @@ private struct SidebarRoomRow: View, Equatable {
                     AvatarView(name: room.name, size: m.avatarSmall, matrix: matrix, source: room.avatarURL)
                         .opacity(room.muted && !selected ? 0.5 : 1)
                 } else {
-                    Image(systemName: room.isEncrypted ? "lock" : "number").font(m.font(.body)).frame(
+                    Image(systemName: room.channelSymbol).font(m.font(.body)).frame(
                         width: m.avatarSmall)
                 }
                 Text(room.name).font(m.font(.body, badge != .none ? .bold : .regular)).lineLimit(1)

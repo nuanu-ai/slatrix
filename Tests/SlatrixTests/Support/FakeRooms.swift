@@ -21,7 +21,8 @@ func roomInfo(
         cachedUserDefinedNotificationMode: nil, hasRoomCall: false, activeRoomCallParticipants: [],
         activeRoomCallConsensusIntent: .none, isMarkedUnread: false, numUnreadMessages: unread,
         numUnreadNotifications: unread, numUnreadMentions: 0, fullyReadEventId: nil, pinnedEventIds: [],
-        joinRule: joinRule, historyVisibility: .joined, powerLevels: nil, roomVersion: "10", privilegedCreatorsRole: false)
+        joinRule: joinRule, historyVisibility: .joined, powerLevels: nil, roomVersion: "10",
+        privilegedCreatorsRole: false)
 }
 
 final class FakeRoom: Room, @unchecked Sendable {

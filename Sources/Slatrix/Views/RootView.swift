@@ -1054,7 +1054,8 @@ struct RootView: View {
                         BindingScope({ draftBinding(room.id) }) { text in
                             MessageComposer(
                                 text: text,
-                                placeholder: room.isDirect ? "Message \(room.name)" : "Message #\(room.name)",
+                                placeholder: room.isDirect || room.isPrivate
+                                    ? "Message \(room.name)" : "Message #\(room.name)",
                                 members: matrix.members,
                                 recentSenders: { [matrix] in matrix.messages.reversed().map(\.senderID) },
                                 canMentionRoom: matrix.canMentionRoom,

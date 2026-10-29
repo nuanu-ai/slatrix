@@ -19,6 +19,8 @@ struct ChatRoom: Identifiable, Hashable {
     var topic: String = ""
     var isDirect = false
     var isEncrypted = false
+    /// Slack's private channel: no one joins without an invitation.
+    var isPrivate = false
     var unread = 0
     var unreadMessages = 0
     var isMarkedUnread = false

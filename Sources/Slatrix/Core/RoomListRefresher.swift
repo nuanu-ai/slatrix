@@ -266,10 +266,16 @@ final class RoomListRefresher {
         while let parent = pending.popLast() {
             if ancestors.insert(parent).inserted { pending += parents[parent] ?? [] }
         }
+        // A restricted room is open to its space, so it's a public channel there.
+        let isPrivate =
+            switch info.joinRule {
+            case .invite, .knock, .private: true
+            default: false
+            }
         return .room(
             ChatRoom(
                 id: info.id, name: info.displayName ?? info.id, topic: info.topic ?? "",
-                isDirect: info.isDirect, isEncrypted: isEncrypted,
+                isDirect: info.isDirect, isEncrypted: isEncrypted, isPrivate: isPrivate,
                 unread: Int(info.numUnreadNotifications), unreadMessages: Int(info.numUnreadMessages),
                 isMarkedUnread: info.isMarkedUnread, mentions: Int(info.numUnreadMentions),
                 favorite: info.isFavourite, muted: info.cachedUserDefinedNotificationMode == .mute,
