@@ -113,3 +113,32 @@ test('badge-count updates are acknowledged without FCM while partial event IDs a
   }
   assert.deepEqual(delivered, []);
 });
+
+test('only expired or invalid registration tokens remove Matrix pushers; other failures retry', async (t) => {
+  let providerCode;
+  t.mock.method(getMessaging(), 'send', async (message) => {
+    if (message.token === 'failed-token') {
+      throw Object.assign(new Error('Provider detail must not be returned'), { code: providerCode });
+    }
+    return 'projects/test/messages/delivered';
+  });
+  const devices = [
+    { app_id: 'ai.nuanu.slatrix.dev', pushkey: 'failed-token' },
+    { app_id: 'ai.nuanu.slatrix', pushkey: 'healthy-token' },
+  ];
+  for (const code of [
+    'messaging/registration-token-not-registered', 'messaging/invalid-registration-token',
+    'messaging/invalid-argument', 'messaging/invalid-credential', 'messaging/mismatched-credential',
+    'messaging/server-unavailable', 'messaging/quota-exceeded', 'messaging/internal-error', undefined,
+  ]) {
+    providerCode = code;
+    const response = await post({ notification: notification({ devices }) });
+    if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
+      assert.equal(response.status, 200, code);
+      assert.deepEqual(await response.json(), { rejected: ['failed-token'] });
+    } else {
+      assert.equal(response.status, 503, code);
+      assert.equal((await response.text()).includes('Provider detail'), false);
+    }
+  }
+});
