@@ -144,7 +144,7 @@ private class ChannelsClient : Client(NoHandle) {
 
     override fun getRoom(roomId: String): Room? = if (roomId != Harbor) null else object : Room(NoHandle) {
         override suspend fun getPowerLevels(): RoomPowerLevels = object : RoomPowerLevels(NoHandle) {
-            override fun canOwnUserSendState(stateEvent: StateEventType): Boolean = canManage && stateEvent == StateEventType.SpaceChild
+            override fun canOwnUserSendState(stateEvent: StateEventType): Boolean = canManage && stateEvent is StateEventType.SpaceChild
         }
     }
 

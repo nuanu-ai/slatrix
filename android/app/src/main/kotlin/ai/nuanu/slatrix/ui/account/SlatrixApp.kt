@@ -59,6 +59,7 @@ import androidx.compose.ui.Alignment
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
@@ -77,6 +78,9 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
     var preferences by rememberSaveable { mutableStateOf(false) }
+    // Browse channels or Create a channel, pushed over Home; null while neither is open.
+    var channels by rememberSaveable { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
     // Back during a restore leaves the app; cancelling would show sign-in with the session still saved.
     BackHandler(enabled = (state as? AccountState.Connecting)?.restoring == false || state is AccountState.ChooseMethod ||
         state is AccountState.BrowserSignIn || (state as? AccountState.Failed)?.let { it.options != null && !it.canRetryRestore } == true) {
@@ -139,6 +143,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         val room = rooms.state.mapNotNull { target.roomFor(userId, it.rooms) }.first()
                         you = false
                         preferences = false
+                        channels = null
                         jump(room, target.eventId, target.threadRoot)
                         onNotificationHandled(target)
                     }
@@ -152,6 +157,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             preferences -> { { LivePreferencesScreen(dark, darkOverride, palette,
                                 { darkOverride = it; appearance.darkMode = it },
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
+                            channels != null -> { {
+                                val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
+                                if (channels == BrowseChannels) LiveBrowseChannels(rooms, selectedSpaceId, openChannel) { channels = null }
+                                else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
+                                    openChannel, { notice = it }) { channels = null }
+                            } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
                             thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
@@ -160,12 +171,16 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace) {
+                            LiveHome(userId, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
                             }
                         }
+                    }
+                    notice?.let { text ->
+                        Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(text) }
+                        LaunchedEffect(text) { delay(UiMetrics.NoticeMillis); notice = null }
                     }
                     (state as AccountState.Connected).warning?.let { warning ->
                         Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(warning) }
@@ -248,7 +263,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
 @Composable
 private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit, activity: @Composable () -> Unit) {
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (String) -> Unit,
+    activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
     val open: (String) -> Unit = remember(rooms, workspace) {
@@ -256,6 +272,7 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
     }
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
+        onBrowseChannels = { onChannels(BrowseChannels) }, onCreateChannel = { onChannels(CreateChannel) },
         search = {
             val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()
             val inScope = remember(state.rooms, selectedSpaceId) {
@@ -291,3 +308,6 @@ private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads
         ThreadsFeed(threadFeed, it)
     }
 }
+
+private const val BrowseChannels = "browse"
+private const val CreateChannel = "create"
