@@ -27,6 +27,7 @@ import org.matrix.rustcomponents.sdk.SessionVerificationData
 import org.matrix.rustcomponents.sdk.TaskHandle
 import org.matrix.rustcomponents.sdk.VerificationState
 import org.matrix.rustcomponents.sdk.VerificationStateListener
+import org.matrix.rustcomponents.sdk.UserIdentity
 
 @RunWith(AndroidJUnit4::class)
 class IdentityVerificationDeviceTest {
@@ -101,12 +102,29 @@ class IdentityVerificationDeviceTest {
         }
     }
 
+    @Test fun absentCrossSigningIdentityDoesNotTrapANewAccountBehindVerification() = runBlocking {
+        val encryption = IdentityEncryption(VerificationState.UNVERIFIED)
+        encryption.identityAction = { null }
+        val verification = IdentityVerification(scope, IdentityClient(encryption))
+        try {
+            val ready = withTimeout(5_000) {
+                verification.state.first { it.phase == IdentityPhase.ChooseMethod }
+            }
+            assertEquals(false, ready.hasIdentity)
+            assertFalse(ready.verified)
+            assertFalse(ready.requiresVerification)
+        } finally {
+            verification.close()
+        }
+    }
+
 }
 
 private class IdentityClient(
     private val identityEncryption: IdentityEncryption,
     private val controller: IdentityController = IdentityController(),
 ) : Client(NoHandle) {
+    override fun userId(): String = "@alice:example.org"
     override fun encryption(): Encryption = identityEncryption
     override suspend fun getSessionVerificationController(): SessionVerificationController = controller
 }
@@ -114,6 +132,8 @@ private class IdentityClient(
 private class IdentityEncryption(var sdkState: VerificationState = VerificationState.UNKNOWN) : Encryption(NoHandle) {
     var observer: VerificationStateListener? = null
     var recoverAction: suspend (String) -> Unit = {}
+    var identityAction: suspend () -> UserIdentity? = { UserIdentity(NoHandle) }
+    override suspend fun userIdentity(userId: String, fallbackToServer: Boolean): UserIdentity? = identityAction()
     override suspend fun waitForE2eeInitializationTasks() = Unit
     override fun verificationState(): VerificationState = sdkState
     override fun verificationStateListener(listener: VerificationStateListener): TaskHandle {
