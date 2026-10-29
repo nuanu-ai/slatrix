@@ -432,23 +432,27 @@ class MatrixConversationTest {
     }
 
     // capability: message.forward
-    @Test fun aMessageForwardsAsItsLatestTextOrItsFileButNotAVideo() = runTest {
+    @Test fun aMessageForwardsAsItsTextOrItsFileButNotAVideoOrWhileAnEditOrDeleteIsPending() = runTest {
         fun media(type: MessageType) = TimelineItemContent.MsgLike(MsgLikeContent(
             MsgLikeKind.Message(MessageContent(type, "clip", false, null)), null, null, null))
         val source = object : MediaSource(NoHandle) {}
         val file = MessageType.File(FileMessageContent("plan.pdf", null, null, source, null))
         val video = MessageType.Video(VideoMessageContent("clip.mp4", null, null, source, null))
         val timeline = ConversationTimeline(listOf(
-            conversationItem("a", "\$text", "Edited to this"),
+            conversationItem("a", "\$text", "Ship it"),
             conversationItem("b", "\$file", "plan.pdf", content = media(file)),
             conversationItem("c", "\$video", "clip.mp4", content = media(video)),
+            conversationItem("d", "\$editing", "Being edited", editState = EventSendState.NotSentYet(null)),
+            conversationItem("e", "\$deleting", "Being deleted", deleting = true),
         ))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        val rows = conversation.state.first { it.rows.messages.size == 3 }.rows.messages
+        val rows = conversation.state.first { it.rows.messages.size == 5 }.rows.messages
 
-        assertEquals(MessageType.Text(TextMessageContent("Edited to this", null)), conversation.forwardable(rows[0]))
+        assertEquals(MessageType.Text(TextMessageContent("Ship it", null)), conversation.forwardable(rows[0]))
         assertEquals(file, conversation.forwardable(rows[1]))
         assertNull(conversation.forwardable(rows[2]))
+        assertNull("A pending edit could change what goes", conversation.forwardable(rows[3]))
+        assertNull(conversation.forwardable(rows[4]))
         conversation.close()
     }
 
@@ -728,6 +732,8 @@ private fun conversationItem(
     sender: String = "@mira:example.org",
     timestamp: ULong = 1_700_000_000_000u,
     editable: Boolean = false,
+    editState: EventSendState? = null,
+    deleting: Boolean = false,
     onMap: () -> Unit = {},
 ): TimelineItem {
     val event = EventTimelineItem(
@@ -741,7 +747,8 @@ private fun conversationItem(
             null, null, null,
         )),
         reactions = reactions, eventTypeRaw = "m.room.message", timestamp = timestamp,
-        localSendState = sendState, editSendState = null, redactionSendState = null, localCreatedAt = null,
+        localSendState = sendState, editSendState = editState,
+        redactionSendState = if (deleting) EventSendState.NotSentYet(null) else null, localCreatedAt = null,
         readReceipts = emptyMap(), origin = null, canBeRepliedTo = true,
         lazyProvider = object : LazyTimelineItemProvider(NoHandle) {},
     )

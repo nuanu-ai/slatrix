@@ -8,11 +8,13 @@ import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.ForwardScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -35,7 +37,7 @@ class ForwardScreenTest {
         val message = ConversationMessage("m", "\$m", "@mira:example.org", "Mira Chen", "Launch moves to Thursday", null,
             1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0)
         val forwarded = mutableListOf<String>()
-        compose.setContent { SlatrixTheme { ForwardScreen(message, design, rooms, { forwarded += it.id }) {} } }
+        compose.setContent { SlatrixTheme { ForwardScreen(message, design, rooms, { null }, { forwarded += it.id }) {} } }
 
         compose.onNodeWithText("Launch moves to Thursday").assertExists()
         compose.onNodeWithText("Mira Chen").assertExists()
@@ -43,5 +45,26 @@ class ForwardScreenTest {
         compose.onNodeWithText("Sam Okafor").assertDoesNotExist()
         compose.onNodeWithText("general").performClick()
         compose.runOnIdle { assertEquals(listOf("!general:example.org"), forwarded) }
+    }
+
+    @Test fun aRefusalStaysOnThePageAndATapWhileSendingSendsNothingMore() {
+        val design = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        val news = RoomSummary("!news:example.org", "news", false, "", UnreadBadge.None, "N", 1)
+        val message = ConversationMessage("m", "\$m", "@mira:example.org", "Mira Chen", "Launch moves to Thursday", null,
+            1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0)
+        val answer = CompletableDeferred<String?>()
+        var asked = 0
+        var forwarded = 0
+        compose.setContent {
+            SlatrixTheme { ForwardScreen(message, design, listOf(design, news), { asked++; answer.await() }, { forwarded++ }) {} }
+        }
+        compose.onNodeWithText("news").performClick()
+        compose.onNodeWithText("news").performClick()
+        answer.complete("You can’t post in that conversation. Choose another.")
+        compose.onNodeWithText("You can’t post in that conversation. Choose another.").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(1, asked)
+            assertEquals(0, forwarded)
+        }
     }
 }
