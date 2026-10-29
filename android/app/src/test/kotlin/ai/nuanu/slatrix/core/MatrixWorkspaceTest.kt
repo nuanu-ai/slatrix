@@ -255,7 +255,11 @@ class MatrixWorkspaceTest {
         assertSame(kept[4], visit(rooms[5]))
         workspace.back()
         runCurrent()
-        assertNotSame("Unread messages open fresh, at the New line", kept[4], visit(rooms[5].copy(resumeAt = "\$read")))
+        val reopened = visit(rooms[5].copy(resumeAt = "\$read"))
+        assertNotSame("Unread messages open fresh, at the New line", kept[4], reopened)
+        workspace.back()
+        runCurrent()
+        assertNotSame("So does one marked unread", reopened, visit(rooms[5].copy(unread = UnreadBadge.Bold)))
         workspace.close()
     }
 }

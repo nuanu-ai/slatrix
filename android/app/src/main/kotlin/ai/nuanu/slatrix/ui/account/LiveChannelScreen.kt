@@ -297,7 +297,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
         val placeholder = when {
             threadRoot != null -> "Add a reply"
-            room.direct -> "Message ${room.name}"
+            room.direct || room.isPrivate -> "Message ${room.name}"
             else -> "Message #${room.name}"
         }
         val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
