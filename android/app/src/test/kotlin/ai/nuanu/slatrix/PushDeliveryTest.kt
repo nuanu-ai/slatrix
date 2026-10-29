@@ -1,12 +1,20 @@
 package ai.nuanu.slatrix
 
+import android.Manifest
 import android.app.Application
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
 import androidx.work.WorkManager
+import ai.nuanu.slatrix.push.NotificationTarget
 import ai.nuanu.slatrix.push.PushMessagingService
+import ai.nuanu.slatrix.push.PushNotifications
+import androidx.lifecycle.ViewModelProvider
+import androidx.test.core.app.ActivityScenario
+import org.matrix.rustcomponents.sdk.NotificationStatus
+import org.robolectric.Shadows.shadowOf
 import com.google.firebase.messaging.RemoteMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -36,6 +44,23 @@ class PushDeliveryTest {
 
         val durableDelivery = workManager.getWorkInfosByTag("ai.nuanu.slatrix.push.PushNotificationWorker").get()
         assertTrue("FCM delivery must remain scheduled after the service callback ends", durableDelivery.isNotEmpty())
+    }
+
+    @Test fun onlyANotificationThisAppDeliveredCanOpenItsRoom() {
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = application.getSystemService(NotificationManager::class.java)
+        PushNotifications(application).show("@alex:example.org", "!team:example.org", "\$delivered", NotificationStatus.EventNotFound)
+        val delivered = shadowOf(manager.activeNotifications.single().notification.contentIntent).savedIntent
+        val forged = Intent(delivered).putExtra(PushNotifications.EVENT_ID, "\$never-delivered")
+
+        for ((intent, expected) in listOf(forged to null, delivered to NotificationTarget("@alex:example.org", "!team:example.org"))) {
+            ActivityScenario.launch<MainActivity>(intent).use { scenario ->
+                scenario.onActivity { activity ->
+                    assertEquals(expected, ViewModelProvider(activity)[AccountViewModel::class.java].notificationTarget.value)
+                }
+            }
+        }
     }
 
     @Test fun firebaseDeliveryReachesThePrivateApplicationService() {

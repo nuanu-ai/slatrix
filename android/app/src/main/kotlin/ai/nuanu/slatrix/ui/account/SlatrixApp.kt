@@ -14,6 +14,7 @@ import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.WorkspacePreferences
 import ai.nuanu.slatrix.push.NotificationTarget
+import ai.nuanu.slatrix.push.PushNotifications
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.compose.BackHandler
@@ -110,7 +111,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 val scope = androidx.compose.runtime.rememberCoroutineScope()
                                 LiveChannelScreen(selected.room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
                                     { workspace?.back() }, { conversation?.loadOlder() },
-                                    { event -> scope.launch { conversation?.markRead(event) } },
+                                    { event -> scope.launch { if (conversation?.markRead(event) == true) PushNotifications(context).clear(selected.room.id) } },
                                     { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) workspace?.open(selected.room) },
                                     { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) })
                             } } }

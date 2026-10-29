@@ -76,7 +76,7 @@ data class RoomListState(
     val spacesKnown: Boolean = false,
 )
 
-class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
+class MatrixRooms(scope: CoroutineScope, internal val client: Client, private val foreground: StateFlow<Boolean> = MutableStateFlow(true)) {
     private val syncLock = Mutex()
     private val activeSync = MutableStateFlow<SyncService?>(null)
     private val mutableState = MutableStateFlow(RoomListState())
@@ -168,6 +168,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
             }
             is Event.Connection -> if (event.generation == syncGeneration.get()) {
                 error = event.error
+                // A network error pauses a room's send queue; what waited there goes out once sync is back.
+                if (event.running) runCatching { client.enableAllSendQueues(true) }
             }
         }
     }
@@ -340,19 +342,20 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
             var stream: TaskHandle? = null
             var stateHandle: TaskHandle? = null
             try {
-                service = client.syncService().withOfflineMode().finish()
+                val current = client.syncService().withOfflineMode().finish()
+                service = current
                 currentCoroutineContext().ensureActive()
-                stateHandle = service.state(object : SyncServiceStateObserver {
+                stateHandle = current.state(object : SyncServiceStateObserver {
                     override fun onUpdate(state: SyncServiceState) {
                         val error = when (state) {
                             SyncServiceState.ERROR, SyncServiceState.TERMINATED -> "Couldn’t sync conversations."
                             SyncServiceState.OFFLINE -> "You’re offline."
                             else -> null
                         }
-                        events.trySend(Event.Connection(error, generation))
+                        events.trySend(Event.Connection(error, generation, state == SyncServiceState.RUNNING))
                     }
                 })
-                list = service.roomListService().allRooms()
+                list = current.roomListService().allRooms()
                 // The limit truncates actual room vectors; it does not reserve that capacity.
                 entries = list.entriesWithDynamicAdapters(UInt.MAX_VALUE, object : RoomListEntriesListener {
                     override fun onUpdate(roomEntriesUpdate: List<RoomListEntriesUpdate>) {
@@ -362,9 +365,13 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
                 stream = entries.entriesStream()
                 controller = entries.controller()
                 check(controller.setFilter(RoomListEntriesDynamicFilterKind.All(emptyList())))
-                service.start()
-                syncLock.withLock { activeSync.value = service }
-                retries.receive()
+                syncLock.withLock { activeSync.value = current }
+                coroutineScope {
+                    // While the app is hidden, a push lookup runs its own short encryption sync through this service.
+                    val visibility = launch { foreground.collect { if (it) current.start() else current.stop() } }
+                    retries.receive()
+                    visibility.cancel()
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -413,6 +420,6 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
         data class Spaces(val parents: Map<String, List<String>>?, val error: String? = null) : Event
         data class Info(val info: RoomInfo, val room: Followed) : Event
         data class Entries(val updates: List<RoomListEntriesUpdate>, val generation: Long) : Event
-        data class Connection(val error: String?, val generation: Long) : Event
+        data class Connection(val error: String?, val generation: Long, val running: Boolean = false) : Event
     }
 }

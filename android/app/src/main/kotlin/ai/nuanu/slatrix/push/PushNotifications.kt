@@ -17,6 +17,11 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import java.security.MessageDigest
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.Membership
 import org.matrix.rustcomponents.sdk.MessageLikeEventContent
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.NotificationEvent
@@ -29,9 +34,22 @@ class PushNotifications(private val context: Context) {
     val enabled: Boolean get() = manager.areNotificationsEnabled() && (Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
 
+    fun deliver(client: Client, userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState?) {
+        // Anyone holding the push token can name any event; only a joined room earns an alert we can't resolve.
+        if (status !is NotificationStatus.Event &&
+            runCatching { client.getRoom(roomId)?.membership() }.getOrNull() != Membership.JOINED) return
+        show(userId, roomId, eventId, status, identity)
+    }
+
+    fun delivered(userId: String, roomId: String, eventId: String): Boolean = synchronized(deliveryLock) {
+        pushKey(userId, roomId, eventId) in preferences.getString("delivered", "").orEmpty().split('\n')
+    }
+
+    fun clear(roomId: String) = manager.activeNotifications.filter { it.tag == roomId }.forEach { manager.cancel(it.tag, it.id) }
+
     @SuppressLint("UseKtx") // KTX edit discards the commit result.
     fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState? = null) = synchronized(deliveryLock) {
-        if (!enabled || status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted) return@synchronized
+        if (!enabled || status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted || roomId == openRoom) return@synchronized
         val key = pushKey(userId, roomId, eventId)
         val delivered = preferences.getString("delivered", "").orEmpty().split('\n').filter { it.isNotEmpty() }
         if (key in delivered) return@synchronized
@@ -54,7 +72,7 @@ class PushNotifications(private val context: Context) {
         val intent = Intent(context, MainActivity::class.java)
             .setAction("${context.packageName}.OPEN_NOTIFICATION")
             .setData("slatrix://notification/$key".toUri())
-            .putExtra(USER_ID, userId).putExtra(ROOM_ID, roomId)
+            .putExtra(USER_ID, userId).putExtra(ROOM_ID, roomId).putExtra(EVENT_ID, eventId)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val tap = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         fun builder() = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification)
@@ -66,13 +84,22 @@ class PushNotifications(private val context: Context) {
             .setOnlyAlertOnce(true).setSilent(resolved?.isNoisy != true).build()
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
                 Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return@synchronized
-        manager.notify(key, 0, notification)
+        manager.notify(roomId, key.hashCode(), notification)
         check(preferences.edit().putString("delivered", (delivered + key).takeLast(512).joinToString("\n")).commit())
     }
 
     companion object {
         const val USER_ID = "push_user_id"
         const val ROOM_ID = "push_room_id"
+        const val EVENT_ID = "push_event_id"
+
+        /** The conversation on screen while the app is resumed; it needs no alert. */
+        @Volatile var openRoom: String? = null
+
+        /** On a cold start the identity is still loading; waiting a moment lets a verified device show the message. */
+        suspend fun knownIdentity(identity: StateFlow<IdentityState>?): IdentityState? = identity?.let {
+            withTimeoutOrNull(5_000) { it.first { state -> state.status != IdentityStatus.Unknown } } ?: it.value
+        }
         private const val CHANNEL = "messages"
         private val deliveryLock = Any()
     }

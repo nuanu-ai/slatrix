@@ -7,6 +7,10 @@ import android.app.NotificationManager
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityStatus
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -87,6 +91,60 @@ class PushNotificationsTest {
         val fallback = manager.activeNotifications.single().notification
         assertEquals("Slatrix", fallback.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
         assertEquals("New message", fallback.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    }
+
+    @Test fun aPushForAnEventNobodyCanFindAlertsOnlyInAJoinedRoom() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val notifications = PushNotifications(context)
+        val client = object : Client(NoHandle) {
+            override fun getRoom(roomId: String): Room? = if (roomId != "!team:example.org") null else object : Room(NoHandle) {
+                override fun membership() = Membership.JOINED
+            }
+        }
+
+        notifications.deliver(client, "@alex:example.org", "!forged:example.org", "\$missing", NotificationStatus.EventNotFound, null)
+        notifications.deliver(client, "@alex:example.org", "!forged:example.org", "\$unresolved", null, null)
+        assertTrue(manager.activeNotifications.isEmpty())
+
+        notifications.deliver(client, "@alex:example.org", "!team:example.org", "\$missing", NotificationStatus.EventNotFound, null)
+        assertEquals("New message", manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    }
+
+    @Test fun aColdStartWaitsBrieflyForTheIdentityBeforeChoosingWhatToShow() = runTest {
+        val identity = MutableStateFlow(IdentityState())
+        val known = async { PushNotifications.knownIdentity(identity) }
+        runCurrent()
+        identity.value = IdentityState(status = IdentityStatus.Verified)
+        assertEquals(IdentityStatus.Verified, known.await()?.status)
+
+        identity.value = IdentityState()
+        assertEquals(IdentityStatus.Unknown, PushNotifications.knownIdentity(identity)?.status)
+    }
+
+    @Test fun theOpenConversationRaisesNoAlertAndClearingARoomRemovesOnlyItsAlerts() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val notifications = PushNotifications(context)
+        val verified = IdentityState(status = IdentityStatus.Verified)
+
+        PushNotifications.openRoom = "!team:example.org"
+        try {
+            notifications.show("@alex:example.org", "!team:example.org", "\$while-open", notificationMessage(), verified)
+            assertTrue(manager.activeNotifications.isEmpty())
+        } finally {
+            PushNotifications.openRoom = null
+        }
+
+        notifications.show("@alex:example.org", "!team:example.org", "\$first", notificationMessage(), verified)
+        notifications.show("@alex:example.org", "!team:example.org", "\$second", notificationMessage(), verified)
+        notifications.show("@alex:example.org", "!other:example.org", "\$elsewhere", notificationMessage(), verified)
+        notifications.clear("!team:example.org")
+
+        val remaining = manager.activeNotifications.single().notification
+        assertEquals("!other:example.org", shadowOf(remaining.contentIntent).savedIntent.getStringExtra(PushNotifications.ROOM_ID))
     }
 }
 

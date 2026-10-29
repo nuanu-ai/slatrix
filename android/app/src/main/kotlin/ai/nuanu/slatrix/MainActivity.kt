@@ -6,6 +6,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import ai.nuanu.slatrix.ui.account.SlatrixApp
@@ -32,6 +37,18 @@ class MainActivity : ComponentActivity() {
             }
         }
         consumeCallback(intent)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                try {
+                    accountModel.workspace.collectLatest { workspace ->
+                        PushNotifications.openRoom = null
+                        workspace?.selected?.collect { PushNotifications.openRoom = it?.room?.id }
+                    }
+                } finally {
+                    PushNotifications.openRoom = null
+                }
+            }
+        }
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -44,7 +61,11 @@ class MainActivity : ComponentActivity() {
         if (intent.action == "$packageName.OPEN_NOTIFICATION") {
             val userId = intent.getStringExtra(PushNotifications.USER_ID)
             val roomId = intent.getStringExtra(PushNotifications.ROOM_ID)
-            if (userId != null && roomId != null) accountModel.openNotification(NotificationTarget(userId, roomId))
+            val eventId = intent.getStringExtra(PushNotifications.EVENT_ID)
+            // The launcher activity is exported, so only a notification this app posted may open a room.
+            if (userId != null && roomId != null && eventId != null && PushNotifications(this).delivered(userId, roomId, eventId)) {
+                accountModel.openNotification(NotificationTarget(userId, roomId))
+            }
         }
         intent.data = null
     }

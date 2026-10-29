@@ -15,6 +15,7 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_base.EncryptionState
@@ -290,6 +291,38 @@ class MatrixRoomsTest {
         room.emit(room.info.copy(displayName = "Too late"))
         assertEquals(beforeClose, rooms.state.value)
     }
+
+    @Test fun aSyncThatRunsAgainResumesSendQueuesTheSdkPaused() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        client.sendQueuesEnabled.first { it }
+        client.sendQueuesEnabled.value = false
+
+        sync.emitState(SyncServiceState.OFFLINE)
+        sync.emitState(SyncServiceState.RUNNING)
+        client.sendQueuesEnabled.first { it }
+        rooms.close()
+    }
+
+    @Test fun syncRunsOnlyInTheForegroundWhileAPushStillResolvesItsEvent() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val foreground = MutableStateFlow(false)
+        val rooms = MatrixRooms(backgroundScope, client, foreground)
+
+        assertSame(NotificationStatus.EventNotFound, rooms.notification("!team:example.org", "\$event"))
+        assertSame(sync, (client.notificationSetup as NotificationProcessSetup.SingleProcess).syncService)
+        sync.stopped.await()
+        assertFalse("A hidden app keeps its sync stopped", sync.running.value)
+        foreground.value = true
+        sync.running.first { it }
+        foreground.value = false
+        sync.running.first { !it }
+        rooms.close()
+    }
 }
 
 // About three times the 14–38 ms measured locally; rebuilding the whole list per message took 400–750 ms.
@@ -304,6 +337,8 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
             override suspend fun getNotification(roomId: String, eventId: String): NotificationStatus = lookup(roomId, eventId)
         }
     }
+    val sendQueuesEnabled = MutableStateFlow(false)
+    override suspend fun enableAllSendQueues(enable: Boolean) { sendQueuesEnabled.value = enable }
     var spaces: SpaceService = RoomsSpaces()
     override suspend fun spaceService(): SpaceService = spaces
     val services = Channel<SyncService>(Channel.UNLIMITED)
@@ -359,11 +394,16 @@ private class RoomsSync : SyncService(NoHandle) {
         stateListener = listener
         return RoomsHandle()
     }
+    val running = MutableStateFlow(false)
     override suspend fun start() {
         started.complete(Unit)
+        running.value = true
         emitState(SyncServiceState.RUNNING)
     }
-    override suspend fun stop() { stopped.complete(Unit) }
+    override suspend fun stop() {
+        running.value = false
+        stopped.complete(Unit)
+    }
     fun emitState(state: SyncServiceState) { stateListener?.onUpdate(state) }
     fun emitEntries(updates: List<RoomListEntriesUpdate>) {
         if (activeFilter) entriesListener?.onUpdate(updates)
