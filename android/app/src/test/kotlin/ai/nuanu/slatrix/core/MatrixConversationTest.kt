@@ -63,8 +63,9 @@ class MatrixConversationTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.pageFailure = IllegalStateException("Offline")
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        conversation.loadOlder()
-        conversation.state.first { it.error != null && !it.loadingHistory && it.rows.isNotEmpty() }
+        conversation.state.first { !it.loading }
+        repeat(20) { conversation.loadOlder(); runCurrent() }
+        assertNotNull(conversation.state.value.error)
         assertTrue(conversation.markRead("\$one"))
         assertNotNull("Reading must not hide the history error", conversation.state.value.error)
 
