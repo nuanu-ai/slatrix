@@ -331,6 +331,37 @@ struct WindowHostedTests {
         #expect(await eventually(timeout: .seconds(8)) { !toastShown() })
     }
 
+    // capability: message.save.sync
+    @Test("A message saved on another device joins Later after its sync, and the card already there stays as it was")
+    func laterFromAnotherDevice() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        func message(_ id: String, _ body: String) -> ChatMessage {
+            ChatMessage(
+                id: id, roomID: "!later:example.org", senderID: "@ana:example.org", senderName: "Ana", body: body,
+                timestamp: Date(timeIntervalSince1970: 1_761_955_000))
+        }
+        let older = message("$older", "Budget is in the doc")
+        let newer = message("$newer", "Ship it on Thursday")
+        // Where the preview reads a saved message from.
+        harness.matrix.threadMessages = [older, newer]
+        let entry = { (id: String, ts: Int) in #"{"room_id":"!later:example.org","event_id":"\#(id)","ts":\#(ts)}"# }
+        let client = LaterClient(stored: #"{"saved":[\#(entry("$older", 1_761_955_200_000))],"removed":[]}"#)
+        harness.matrix.savedMessages.attach(client, accountID: "preview.you")
+        harness.menu("later")
+        func card(_ message: ChatMessage) -> NSView? {
+            harness.shown().first { ($0 as? MessageTextView)?.string == message.body }
+        }
+        #expect(await eventually { card(older) != nil })
+        let shown = try #require(card(older))
+
+        client.sync(
+            #"{"saved":[\#(entry("$newer", 1_761_955_300_000)),\#(entry("$older", 1_761_955_200_000))],"removed":[]}"#)
+        #expect(await eventually { card(newer) != nil })
+        #expect(card(older) === shown)
+    }
+
     // capability: app.offline-banner
     @Test("Going offline shows a banner over the conversation, and reconnecting clears it, with the timeline still")
     func offlineBanner() async throws {
