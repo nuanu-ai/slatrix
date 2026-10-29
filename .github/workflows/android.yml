@@ -43,7 +43,7 @@ jobs:
           scripts/build-sdk.sh --android
       - name: Test, lint and build
         working-directory: android
-        run: ./gradlew :lint-rules:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease --console=plain
+        run: ./gradlew :lint-rules:test :app:recordRoborazziDebug :app:lintDebug :app:assembleDebug :app:assembleRelease --console=plain
       - name: Enable hardware acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -62,7 +62,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-results
+          retention-days: 30
           path: |
             android/app/build/outputs/apk/
             android/app/build/reports/
+            android/app/build/outputs/roborazzi/
             android/lint-rules/build/reports/

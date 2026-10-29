@@ -1,7 +1,6 @@
 package ai.nuanu.slatrix
 
 import ai.nuanu.slatrix.ui.mockups.SlatrixMockups
-import ai.nuanu.slatrix.ui.mockups.MockScreen
 import android.app.Application
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
@@ -42,7 +41,8 @@ class MockNavigationTest {
         compose.onNodeWithText("Ava Patel").assertIsDisplayed()
     }
     @Test fun threadReplyPreservesTheChannelDraft() {
-        compose.setContent { SlatrixMockups(initialScreen = MockScreen.Channel) }
+        compose.setContent { SlatrixMockups() }
+        compose.onNodeWithText("design").performClick()
         compose.onNodeWithText("Message #design").performTextInput("Channel draft")
         compose.onNodeWithText("3 replies").performScrollTo().performClick()
         compose.onNodeWithText("Reply…").performTextInput("Looks ready.")
@@ -55,7 +55,8 @@ class MockNavigationTest {
         compose.onNodeWithText("Message #design").assertIsDisplayed()
     }
     @Test fun activityFiltersAndReturnsFromItsThread() {
-        compose.setContent { SlatrixMockups(initialScreen = MockScreen.Activity) }
+        compose.setContent { SlatrixMockups() }
+        compose.onNodeWithText("Activity").performClick()
         compose.onNodeWithText("All notifications").assertIsDisplayed()
         compose.onNodeWithText("Mentions").performClick()
         compose.onNodeWithText("Sam Taylor").assertDoesNotExist()

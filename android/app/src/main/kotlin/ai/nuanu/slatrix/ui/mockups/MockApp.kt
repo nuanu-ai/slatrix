@@ -36,16 +36,14 @@ enum class MockScreen { Home, Dms, Activity, Channel, Thread, You }
 
 @Composable
 fun SlatrixMockups(
-    initialScreen: MockScreen = MockScreen.Home,
     dark: Boolean = false,
-    initialPalette: SidebarPalette = SidebarPalette.Aubergine,
 ) {
-    var screen by rememberSaveable { mutableStateOf(initialScreen) }
-    var tab by rememberSaveable { mutableStateOf(initialScreen.takeIf { it in rootScreens } ?: MockScreen.Home) }
+    var screen by rememberSaveable { mutableStateOf(MockScreen.Home) }
+    var tab by rememberSaveable { mutableStateOf(MockScreen.Home) }
     val stateHolder = rememberSaveableStateHolder()
     var threadReturn by rememberSaveable { mutableStateOf(MockScreen.Channel) }
     var roomId by rememberSaveable { mutableStateOf("design") }
-    var palette by rememberSaveable { mutableStateOf(initialPalette) }
+    var palette by rememberSaveable { mutableStateOf(SidebarPalette.Aubergine) }
     var darkOverride by rememberSaveable { mutableStateOf<Int?>(null) }
     var drafts by rememberSaveable { mutableStateOf(mapOf<String, String>()) }
     var sentByRoom by remember { mutableStateOf(mapOf<String, List<MockMessage>>()) }
