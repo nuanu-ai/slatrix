@@ -64,7 +64,7 @@ class PushDeliveryTest {
     }
 
     // capability: thread.from-notification
-    @Test fun aThreadReplysNotificationOpensItsThread() {
+    @Test fun aThreadRepliesNotificationTargetsItsThread() {
         val application = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         val manager = application.getSystemService(NotificationManager::class.java)

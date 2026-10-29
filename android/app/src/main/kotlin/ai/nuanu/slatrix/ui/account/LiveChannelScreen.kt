@@ -151,15 +151,20 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> if (threadRoot != null && row.eventId == threadRoot) Column {
                             LiveMessageRow(row) { menu = it }
-                            RepliesBar(rows.count { it is ConversationMessage } - 1)
+                            // The root shows once the whole thread has loaded, so its sent replies are all here.
+                            RepliesBar(rows.count { it is ConversationMessage && it.eventId != null && it.eventId != threadRoot })
                         // The first reply starts under the replies bar, so it shows its sender again.
                         } else LiveMessageRow(if (row.id == firstReply) row.copy(grouped = false) else row) { menu = it }
                     }
                 }
                 // The top of the conversation, which also lets an empty one ask for history; a thread tops out at its root.
                 item(key = "top") {
-                    if (!state.hasMore && !state.loading) { if (threadRoot == null) ConversationIntro(room) }
-                    else if (state.rows.isNotEmpty()) HistoryProgress(state.loadingHistory)
+                    when {
+                        !state.hasMore && !state.loading -> if (threadRoot == null) ConversationIntro(room)
+                        // A thread fills in from its newest replies, so it shows the wait even before any arrive.
+                        threadRoot != null -> HistoryProgress(state.loading || state.loadingHistory)
+                        state.rows.isNotEmpty() -> HistoryProgress(state.loadingHistory)
+                    }
                 }
             }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
