@@ -189,6 +189,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val sendLock = Mutex()
     private val readLock = Mutex()
     private var lastRead: String? = null
+    /** Marked unread on this visit, so reading stops; guarded by [readLock]. */
+    private var heldUnread = false
     /** The timeline on screen; it and [pending] change only on [operations], which runs on one thread. */
     private var shown: Source? = null
     /** A timeline that replaces [shown] once it holds [pendingAnchor], or with none at its first update. */
@@ -576,7 +578,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             readLock.withLock {
                 try {
                     val timeline = timeline()
-                    if (!isLatestRemote(eventId)) return@withLock false
+                    if (heldUnread || !isLatestRemote(eventId)) return@withLock false
                     if (lastRead == eventId) return@withLock true
                     // A thread's timeline sends this for the thread; the channel's marker and unread flag stay.
                     timeline.sendReadReceipt(ReceiptType.READ, eventId)
@@ -598,6 +600,21 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     false
                 }
             }
+        }
+        return try { task.await() } finally { task.cancel() }
+    }
+
+    /**
+     * Marks the conversation unread, as Slack's Mark unread on a message does. Matrix can't move the fully-read marker
+     * back, so it sets the room's unread flag; while the conversation stays open, its newest message doesn't read it again.
+     */
+    suspend fun markUnread(): Boolean {
+        if (!lifetime.isActive) return false
+        val task = operations.async {
+            // After any read already under way, so that read can't clear the flag.
+            val marked = readLock.withLock { (quietly { room.setUnreadFlag(true) } != null).also { heldUnread = it } }
+            if (!marked) operations.launch { announce("Couldn’t mark this conversation unread.") }
+            marked
         }
         return try { task.await() } finally { task.cancel() }
     }

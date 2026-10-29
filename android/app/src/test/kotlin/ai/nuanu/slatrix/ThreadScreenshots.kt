@@ -17,6 +17,8 @@ import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -64,6 +66,7 @@ class ThreadScreenshots(private val dark: Boolean) {
         draft = ComposerState(text, loading = false, styles = listOf(
             ComposerStyle(0, 6, ComposerStyle.Kind.Bold), ComposerStyle(19, 42, ComposerStyle.Kind.Bullet),
             ComposerStyle(38, 42, ComposerStyle.Kind.Italic), ComposerStyle(47, 51, ComposerStyle.Kind.Link, "https://example.org")))
+        compose.onNode(hasContentDescription("Add a reply") and hasSetTextAction()).performClick()
         compose.onNodeWithContentDescription("Formatting").performClick()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/Thread-formatting-${if (dark) "dark" else "light"}.png")
     }
