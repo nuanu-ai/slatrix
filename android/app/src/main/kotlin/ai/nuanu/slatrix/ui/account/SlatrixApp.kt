@@ -35,6 +35,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
@@ -91,23 +92,22 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 val userId = (state as AccountState.Connected).userId
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
                 var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
+                val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
+                val selected = workspace?.selected?.collectAsState()?.value
                 // Read inside derivedStateOf, so room list updates recompose the app only when the workspace changes.
+                // Only a pick is saved: a fallback while spaces still load must not replace what the person chose.
                 val roomList = rooms?.state?.collectAsState()
-                val choice by remember(roomList) {
+                val showing = rememberUpdatedState(selected?.room)
+                val selectedSpaceId by remember(roomList, userId) {
                     derivedStateOf {
                         val list = roomList?.value
-                        if (list?.spacesKnown == true) WorkspaceRail.choose(remembered, null, list.spaces, list.rooms) to true
-                        else remembered?.takeUnless { it == WorkspaceRail.AllToken } to false
+                        if (list?.spacesKnown == true) WorkspaceRail.choose(remembered, showing.value, list.spaces, list.rooms)
+                        else remembered?.takeUnless { it == WorkspaceRail.AllToken }
                     }
                 }
-                val selectedSpaceId = choice.first
                 val chooseSpace: (String?) -> Unit = { id ->
                     (id ?: WorkspaceRail.AllToken).let { remembered = it; workspacePreferences.selectedSpaceId = it }
                 }
-                // Keeps what opened, so a first launch's pick holds as channel counts change.
-                LaunchedEffect(choice) { if (choice.second && (choice.first ?: WorkspaceRail.AllToken) != remembered) chooseSpace(choice.first) }
-                val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
-                val selected = workspace?.selected?.collectAsState()?.value
                 val thread = threads?.selected?.collectAsState()?.value
                 val covered = rememberSaveableStateHolder()
                 // The Threads filter's feed lives here, under the covers, so coming back from a thread finds it as it was.

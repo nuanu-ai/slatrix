@@ -166,9 +166,11 @@ private fun HomeHeader(tab: HomeTab, userId: String, state: RoomListState, selec
                         val space = state.spaces.firstOrNull { it.id == selectedSpaceId }
                         Row(Modifier.heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) { switching = true }
                             .semantics { contentDescription = "Switch workspace" }, verticalAlignment = Alignment.CenterVertically) {
-                            WorkspaceIcon(space, UiMetrics.HeaderAvatar)
+                            // A saved workspace whose space hasn't loaded yet keeps its place blank rather than say All.
+                            val loading = space == null && selectedSpaceId != null
+                            WorkspaceIcon(space, UiMetrics.HeaderAvatar, loading)
                             Spacer(Modifier.width(UiMetrics.GapMedium))
-                            HeaderTitle(space?.name ?: "All conversations", Modifier.weight(1f, fill = false))
+                            HeaderTitle(space?.name ?: if (loading) "" else "All conversations", Modifier.weight(1f, fill = false))
                             Spacer(Modifier.width(UiMetrics.GapSmall))
                             Icon(SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.Icon))
                         }
@@ -218,11 +220,11 @@ private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, on
 
 /** A workspace's rounded-square icon: its initials on the palette's color, or a tray for All conversations. */
 @Composable
-private fun WorkspaceIcon(space: SpaceSummary?, size: Dp) {
+private fun WorkspaceIcon(space: SpaceSummary?, size: Dp, loading: Boolean = false) {
     Box(Modifier.size(size).clip(MaterialTheme.shapes.large).background(SlatrixTheme.colors.selectionStrong),
         contentAlignment = Alignment.Center) {
-        if (space == null) Icon(SlackIcons.Tray, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.onAccent)
-        else Text(space.initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label,
+        if (space == null && !loading) Icon(SlackIcons.Tray, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.onAccent)
+        else if (space != null) Text(space.initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label,
             color = SlatrixTheme.colors.onAccent, maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
     }
 }
