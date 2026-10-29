@@ -554,7 +554,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return rows
     }
 
-    private data class Shown(val kind: MessageKind, val body: String, val html: String? = null)
+    private data class Shown(val kind: MessageKind, val body: String, val html: String? = null,
+        val attachment: MessageAttachment? = null)
 
     private fun shown(kind: MsgLikeKind): Shown = when (kind) {
         is MsgLikeKind.Message -> {
@@ -563,8 +564,26 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 is MessageType.Text -> Shown(MessageKind.Text, kind.content.body, html(type.content.formatted))
                 is MessageType.Notice -> Shown(MessageKind.Notice, kind.content.body, html(type.content.formatted))
                 is MessageType.Emote -> Shown(MessageKind.Emote, kind.content.body, html(type.content.formatted))
-                is MessageType.Image, is MessageType.Audio, is MessageType.Video,
-                is MessageType.File, is MessageType.Gallery -> Shown(MessageKind.Attachment, kind.content.body)
+                // A caption is the attachment's text; without one the text is its name, which the row doesn't repeat.
+                is MessageType.Image -> type.content.let {
+                    Shown(MessageKind.Attachment, it.caption ?: it.filename, html(it.formattedCaption), MessageAttachment(
+                        MessageAttachment.Kind.Image, it.filename, it.info?.mimetype, it.info?.size?.long, it.info?.width?.int,
+                        it.info?.height?.int, it.source, it.info?.thumbnailSource))
+                }
+                is MessageType.Video -> type.content.let {
+                    Shown(MessageKind.Attachment, it.caption ?: it.filename, html(it.formattedCaption), MessageAttachment(
+                        MessageAttachment.Kind.Video, it.filename, it.info?.mimetype, it.info?.size?.long, it.info?.width?.int,
+                        it.info?.height?.int, it.source, it.info?.thumbnailSource))
+                }
+                is MessageType.Audio -> type.content.let {
+                    Shown(MessageKind.Attachment, it.caption ?: it.filename, html(it.formattedCaption), MessageAttachment(
+                        MessageAttachment.Kind.Audio, it.filename, it.info?.mimetype, it.info?.size?.long, null, null, it.source))
+                }
+                is MessageType.File -> type.content.let {
+                    Shown(MessageKind.Attachment, it.caption ?: it.filename, html(it.formattedCaption), MessageAttachment(
+                        MessageAttachment.Kind.File, it.filename, it.info?.mimetype, it.info?.size?.long, null, null, it.source))
+                }
+                is MessageType.Gallery -> Shown(MessageKind.Attachment, kind.content.body)
                 else -> Shown(MessageKind.Unsupported, kind.content.body)
             }
         }
@@ -574,6 +593,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         is MsgLikeKind.Poll -> Shown(MessageKind.Unsupported, kind.question)
         else -> Shown(MessageKind.Unsupported, "Unsupported message")
     }
+
+    private val ULong.long get() = coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
+    private val ULong.int get() = coerceAtMost(Int.MAX_VALUE.toULong()).toInt()
 
     private fun name(profile: ProfileDetails, sender: String) =
         (profile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: sender
@@ -614,14 +636,14 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
         val content = (event.content as? TimelineItemContent.MsgLike)?.content ?: return null
         val senderName = name(event.senderProfile, event.sender)
-        val (kind, body, html) = shown(content.kind)
+        val shown = shown(content.kind)
         val failure = event.localSendState as? EventSendState.SendingFailed
         return ConversationMessage(
             id = item.uniqueId().id,
             eventId = if (event.isRemote) (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId else null,
-            senderId = event.sender, senderName = senderName, body = body,
-            formattedBody = html,
-            timestamp = event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong(), kind = kind,
+            senderId = event.sender, senderName = senderName, body = shown.body,
+            formattedBody = shown.html,
+            timestamp = event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong(), kind = shown.kind,
             sendState = when (event.localSendState) {
                 is EventSendState.NotSentYet -> MessageSendState.Sending
                 is EventSendState.SendingFailed -> MessageSendState.Failed
@@ -634,7 +656,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 failure.error !is QueueWedgeError.MissingMediaContent && failure.error !is QueueWedgeError.InvalidMimeType,
             queuePaused = failure?.isRecoverable == true,
             // An edit goes out as text, so only a text message keeps its kind.
-            editable = event.isEditable && kind == MessageKind.Text,
+            editable = event.isEditable && shown.kind == MessageKind.Text,
             edited = (content.kind as? MsgLikeKind.Message)?.content?.isEdited == true,
             reactions = event.reactions.map { reaction ->
                 MessageReaction(reaction.key, reaction.senders.size, reaction.senders.any { it.senderId == ownUserId },
@@ -647,6 +669,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong())
             }?.takeIf { it.replies > 0 },
             replyTo = content.inReplyTo?.let(::replyPreview),
+            attachment = shown.attachment,
         ).also { it.runs }
     }
 }

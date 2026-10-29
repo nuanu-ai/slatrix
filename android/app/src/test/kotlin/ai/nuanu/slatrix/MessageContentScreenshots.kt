@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
+import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageReaction
 import ai.nuanu.slatrix.core.MessageThread
@@ -14,6 +15,10 @@ import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import android.graphics.Bitmap
+import java.io.ByteArrayOutputStream
+import org.matrix.rustcomponents.sdk.MediaSource
+import org.matrix.rustcomponents.sdk.NoHandle
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -37,6 +42,11 @@ class MessageContentScreenshots(private val dark: Boolean) {
         val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
         val today = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 9); set(Calendar.MINUTE, 0) }.timeInMillis
         val minute = 60_000L
+        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office" }
+        val png = ByteArrayOutputStream().also {
+            Bitmap.createBitmap(1600, 900, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(96, 125, 139)) }
+                .compress(Bitmap.CompressFormat.PNG, 100, it)
+        }.toByteArray()
         fun message(id: String, sender: String, body: String, html: String?, at: Long) =
             ConversationMessage(id, "\$$id", "@${sender.lowercase()}:example.org", sender, body, html, today + at * minute,
                 MessageKind.Text, MessageSendState.Sent, sender == "Jordan", sender.take(1), if (sender == "Mira") 2 else 5)
@@ -54,11 +64,15 @@ class MessageContentScreenshots(private val dark: Boolean) {
             message("c", "Jordan", "", "<p>Plan:</p><ol><li>Fix the <del>banner</del> header</li><li>Ship</li></ol>" +
                 "<pre><code>./gradlew assembleRelease</code></pre>", 7).copy(grouped = true, edited = true),
             message("d", "Sam", "This message was deleted", null, 12).copy(kind = MessageKind.Deleted),
+            message("e", "Mira", "office.jpg", null, 20).copy(kind = MessageKind.Attachment, attachment = MessageAttachment(
+                MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, source)),
+            message("f", "Mira", "Q3 report.pdf", null, 21).copy(kind = MessageKind.Attachment, grouped = true,
+                attachment = MessageAttachment(MessageAttachment.Kind.File, "Q3 report.pdf", "application/pdf", 250_000, null, null, source)),
         )
         compose.setContent {
             SlatrixTheme(dark = dark) {
                 LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false, ownUserId = "@jordan:example.org"),
-                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, loadPicture = { _, _, _ -> png })
             }
         }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/MessageContent-${if (dark) "dark" else "light"}.png")

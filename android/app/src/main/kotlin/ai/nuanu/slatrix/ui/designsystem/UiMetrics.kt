@@ -37,6 +37,14 @@ object UiMetrics {
     val QuoteBar = 3.dp
     /** Reaction chips and the thread replies line, as tall as Slack Android's. */
     val ChipHeight = 32.dp
+    /** The tallest an inline image gets; wider ones fill the row. */
+    val MediaMaxHeight = 320.dp
+    /** What one of an image's own pixels takes inline, so a small image keeps its size, as on the Mac. */
+    val MediaPixel = 1.dp
+    /** The most pixels a side of the full-screen picture asks for. */
+    const val ViewerPixels = 2_048
+    const val ViewerMaxZoom = 5f
+    const val ViewerDoubleTapZoom = 2.5f
     /** A list's indent, in multiples of the text size, as on the Mac. */
     const val ListIndentScale = 1.6f
     /** Code reads a little smaller than the text around it, as on the Mac. */

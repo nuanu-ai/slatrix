@@ -5,6 +5,8 @@ import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountState
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
+import ai.nuanu.slatrix.core.MatrixMedia
+import java.io.File
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityVerification
 import ai.nuanu.slatrix.core.MatrixRooms
@@ -93,6 +95,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
         when {
             state is AccountState.Connected -> {
                 val userId = (state as AccountState.Connected).userId
+                val client = (state as AccountState.Connected).client
+                val media = remember(client) { MatrixMedia(client, File(context.cacheDir, "media")) }
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
                 var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
@@ -150,10 +154,10 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 { darkOverride = it; appearance.darkMode = it },
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
-                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump) } } }
+                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, media) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace, jump) { root, row -> threads?.open(selected.room, root, root = row) }
+                                LiveConversation(selected, workspace, workspace, jump, media) { root, row -> threads?.open(selected.room, root, root = row) }
                             } } } }
                             else -> null
                         }) {
@@ -196,7 +200,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
 private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
-    jump: (RoomSummary, String, String?) -> Unit, onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
+    jump: (RoomSummary, String, String?) -> Unit, media: MatrixMedia, onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     val conversation = open.conversation
     val composer = open.composer
@@ -216,7 +220,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         open.threadRoot, rememberMessageActions(conversation, composer, main),
         ComposerActions(onCancelTarget = { composer?.cancelTarget() }), { conversation?.loadNewer(it) },
         // A quote doesn't know its parent's thread, so it asks before jumping.
-        { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } })
+        { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } },
+        media::picture, { openAttachment(context, media, it) })
 }
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
