@@ -18,10 +18,11 @@ import kotlinx.coroutines.launch
  * [onOpen]s there. Other links, and conversations you're not in, go on to the browser; a malformed Matrix link says so.
  */
 @Composable
-fun ProvideMatrixLinks(rooms: List<RoomSummary>, resolveAlias: suspend (String) -> String?,
+fun ProvideMatrixLinks(rooms: () -> List<RoomSummary>, resolveAlias: suspend (String) -> String?,
     onOpen: (RoomSummary, eventId: String?) -> Unit, onNotice: (String) -> Unit, content: @Composable () -> Unit) {
     val outer = LocalUriHandler.current
     val scope = rememberCoroutineScope()
+    // Read only when a link opens, so the room list's updates never recompose the conversation.
     val joined by rememberUpdatedState(rooms)
     val resolve by rememberUpdatedState(resolveAlias)
     val open by rememberUpdatedState(onOpen)
@@ -31,10 +32,12 @@ fun ProvideMatrixLinks(rooms: List<RoomSummary>, resolveAlias: suspend (String) 
             override fun openUri(uri: String) {
                 if (!MatrixLinks.isMatrix(uri)) return outer.openUri(uri)
                 val link = MatrixLinks.parse(uri) ?: return notice("Slatrix can’t open this link.")
-                fun show(roomId: String?, event: String?) = joined.firstOrNull { it.id == roomId }?.let { open(it, event) } ?: outer.openUri(uri)
+                // A browser can't open a matrix: URI, so it gets the matrix.to link.
+                fun browse() = outer.openUri(if (uri.startsWith("https:")) uri else link.web)
+                fun show(roomId: String?, event: String?) = joined().firstOrNull { it.id == roomId }?.let { open(it, event) } ?: browse()
                 when (val target = link.target) {
                     // shortcut: people open in the browser, until the app shows their profiles.
-                    is MatrixLink.Target.User -> outer.openUri(uri)
+                    is MatrixLink.Target.User -> browse()
                     is MatrixLink.Target.Room -> show(target.id, target.event)
                     is MatrixLink.Target.Alias -> scope.launch { show(resolve(target.alias), target.event) }
                 }

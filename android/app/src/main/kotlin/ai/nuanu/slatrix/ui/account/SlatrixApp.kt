@@ -256,7 +256,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
     Box(Modifier.fillMaxSize()) {
         // A Matrix link in a message opens here; a message in a thread opens in its thread, so it is looked up first.
-        ProvideMatrixLinks(roomList?.value?.rooms.orEmpty(), { alias -> rooms?.client?.let { MatrixLinks.roomIdOf(it, alias) } },
+        ProvideMatrixLinks({ roomList?.value?.rooms.orEmpty() }, { alias -> rooms?.client?.let { MatrixLinks.roomIdOf(it, alias) } },
             { target, event ->
                 if (event != null) scope.launch { jump(target, event, main?.threadRootOf(target.id, event)) }
                 else { if (open.threadRoot != null) owner?.back(); main?.open(target) }
@@ -273,7 +273,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
             { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
             open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { remember(it) { it.copy(onForward = { m ->
-                scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { notice = "This message can’t be notice." } }
+                scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { notice = "This message can’t be forwarded." } }
             }) } },
             ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
                 onNeedPeople = { composer?.loadPeople() },
