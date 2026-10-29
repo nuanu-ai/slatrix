@@ -84,7 +84,7 @@ class MessageContentTest {
         compose.onNodeWithText("Fixed the typo (edited)", useUnmergedTree = true).assertExists()
     }
 
-    // capability: message.rich-text
+    // capability: message.mention-pills
     @Test fun aMentionOfYouStandsOutFromOtherMentions() {
         show(message("@me @sam", html = "<a href=\"https://matrix.to/#/@me:example.org\">Me</a> " +
             "<a href=\"https://matrix.to/#/@sam:example.org\">Sam</a>"))
