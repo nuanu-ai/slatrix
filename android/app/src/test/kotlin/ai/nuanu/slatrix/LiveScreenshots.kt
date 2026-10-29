@@ -4,12 +4,15 @@ import ai.nuanu.slatrix.core.LatestMessage
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.MessageSearchQuery
 import ai.nuanu.slatrix.core.MessageSearchState
+import ai.nuanu.slatrix.core.NotifyAbout
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SearchHit
 import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
+import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.LiveYouScreen
+import ai.nuanu.slatrix.ui.account.NotificationRows
 import ai.nuanu.slatrix.ui.account.SearchScreen
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -78,14 +81,17 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
             SlatrixTheme(dark = dark, palette = palette) {
                 val colors = SlatrixTheme.colors
                 Column {
-                    Box(Modifier.fillMaxWidth().height(StatusBar).background(if (tab == "You") colors.canvas else colors.workspaceBar))
+                    Box(Modifier.fillMaxWidth().height(StatusBar).background(if (tab in Pushed) colors.canvas else colors.workspaceBar))
                     Box(Modifier.weight(1f)) {
                         if (tab == "You") LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, {})
+                        else if (tab == "Preferences") LivePreferencesScreen(dark, null, palette, {}, {}, {}) {
+                            NotificationRows(NotifyAbout.DirectAndMentions, true, null, {}, {})
+                        }
                         else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spaces = spaces, spacesKnown = true),
                             {}, {}, {}, Harbor, onBrowseChannels = {}, onCreateChannel = {},
                             search = { SearchScreen(rooms, "@alex:example.org", hits, {}, {}, {}, listOf("release notes", "offsite photos", "budget in:#design"), onRoom = {}) })
                     }
-                    Box(Modifier.fillMaxWidth().height(GestureBar).background(if (tab == "You") colors.canvas else colors.raised))
+                    Box(Modifier.fillMaxWidth().height(GestureBar).background(if (tab in Pushed) colors.canvas else colors.raised))
                 }
             }
         }
@@ -110,11 +116,12 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
         /** The reference phone's bars: 128 px and 63 px at 420 dpi. */
         private val StatusBar = 48.8.dp
         private val GestureBar = 24.dp
+        private val Pushed = setOf("You", "Preferences")
         private const val Harbor = "!harbor:example.org"
 
         @JvmStatic @Parameters(name = "{0}-{1}-{2}")
         fun cases(): List<Array<Any>> = buildList {
-            for (tab in listOf("Home", "DMs", "You", "Switcher", "Sheet", "AddChannel", "Recent", "Search", "SearchResults")) for (dark in listOf(false, true)) add(arrayOf(tab, dark, SidebarPalette.Aubergine))
+            for (tab in listOf("Home", "DMs", "You", "Preferences", "Switcher", "Sheet", "AddChannel", "Recent", "Search", "SearchResults")) for (dark in listOf(false, true)) add(arrayOf(tab, dark, SidebarPalette.Aubergine))
             add(arrayOf("Home", false, SidebarPalette.Lagoon))
         }
     }

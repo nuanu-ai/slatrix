@@ -2,6 +2,8 @@ package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.ComposerState
+import ai.nuanu.slatrix.core.ComposerStyle
+import ai.nuanu.slatrix.core.ComposerStyles
 import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.MentionCandidate
 import ai.nuanu.slatrix.core.MentionPeople
@@ -62,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -72,13 +75,14 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 
-/** What the composer can do beyond typing and sending; a mention needs [people], an attachment [onAttach]. */
+/** What the composer can do beyond typing and sending; a mention needs [people], an attachment [onAttach], "Aa" [onFormat]. */
 data class ComposerActions(
     val onCancelTarget: () -> Unit = {},
     val people: MentionPeople? = null,
     val onNeedPeople: () -> Unit = {},
     val onMention: (start: Int, end: Int, candidate: MentionCandidate) -> Unit = { _, _, _ -> },
     val onAttach: ((List<Uri>) -> Unit)? = null,
+    val onFormat: ((start: Int, end: Int, kind: ComposerStyle.Kind, href: String?) -> Unit)? = null,
 )
 
 /**
@@ -125,6 +129,22 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         val selection = shown.selection
         replace(selection.min, selection.max, emoji)
     }) { picking = false }
+    var formatting by remember { mutableStateOf(false) }
+    // The selection a link goes on, while its sheet asks for the address; at the caret, the link there.
+    var linking by remember { mutableStateOf<TextRange?>(null) }
+    val focus = LocalFocusManager.current
+    val onFormat = actions.onFormat
+    val range = linking
+    if (range != null && onFormat != null) {
+        val link = composer.styles.firstOrNull { it.kind == ComposerStyle.Kind.Link && it.start <= range.max && range.min <= it.end &&
+            (!range.collapsed || it.start < range.min && range.min < it.end) }
+        val target = if (range.collapsed && link != null) TextRange(link.start, link.end) else range
+        LinkSheet(target.collapsed, link?.href, { label, href ->
+            linking = null
+            if (label != null) replace(target.min, target.max, label)
+            onFormat(target.min, if (label != null) target.min + label.length else target.max, ComposerStyle.Kind.Link, href)
+        }) { linking = null }
+    }
     var height by remember { mutableIntStateOf(0) }
     // Slack's composer is a panel with rounded top corners over the conversation.
     Column(Modifier.fillMaxWidth().onSizeChanged { height = it.height }
@@ -147,6 +167,12 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         val attach = actions.onAttach?.takeIf { !editing }
         ReceiveKeyboardMedia(attach) {
             BasicTextField(shown, { next ->
+                val left = ComposerStyles.blockLeft(composer.styles, composer.typing, shown.text, next.text, shown.selection.min)
+                    .takeIf { shown.selection.collapsed && onFormat != null }
+                if (left != null) {
+                    onFormat?.invoke(shown.selection.min, shown.selection.min, left, null)
+                    return@BasicTextField
+                }
                 field = next
                 pending = null
                 val changed = next.text != lastText
@@ -156,6 +182,9 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                 modifier = Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium)
                     .semantics { contentDescription = placeholder },
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
+                visualTransformation = remember(composer.styles, composer.mentions, composer.typing, colors) {
+                    ComposerVisual(composer.styles, composer.mentions, composer.typing?.takeIf { it.position == 0 }?.kinds?.firstOrNull { it.block }, colors)
+                },
                 cursorBrush = SolidColor(colors.accent), maxLines = 5,
                 decorationBox = { inner ->
                     Box(Modifier.padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.CenterStart) {
@@ -166,18 +195,31 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                 })
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
-            attach?.let { AttachButton(it) }
-            IconButton(onClick = { picking = true }, enabled = !composer.loading) {
-                Icon(Icons.Outlined.EmojiEmotions, "Emoji", tint = colors.textPrimary)
-            }
-            IconButton(onClick = {
+            if (!formatting) attach?.let { AttachButton(it) }
+            if (onFormat != null) FormattingToggle(formatting, !composer.loading) { formatting = !formatting }
+            if (formatting && onFormat != null) {
                 val selection = shown.selection
-                val before = shown.text.substring(0, selection.min)
-                replace(selection.min, selection.max, if (before.isEmpty() || before.last().isWhitespace()) "@" else " @")
-            }, enabled = !composer.loading) {
-                Icon(Icons.Outlined.AlternateEmail, "Mention someone", tint = colors.textPrimary)
+                val caret = selection.max
+                val active = ComposerStyles.typing(composer.styles, composer.typing.takeIf { selection.collapsed }, composer.text,
+                    caret.coerceAtMost(composer.text.length))
+                FormattingBar(active, !composer.loading, { onFormat(selection.min, selection.max, it, null) }) {
+                    // The sheet's field takes the keyboard.
+                    focus.clearFocus()
+                    linking = selection
+                }
+            } else {
+                IconButton(onClick = { picking = true }, enabled = !composer.loading) {
+                    Icon(Icons.Outlined.EmojiEmotions, "Emoji", tint = colors.textPrimary)
+                }
+                IconButton(onClick = {
+                    val selection = shown.selection
+                    val before = shown.text.substring(0, selection.min)
+                    replace(selection.min, selection.max, if (before.isEmpty() || before.last().isWhitespace()) "@" else " @")
+                }, enabled = !composer.loading) {
+                    Icon(Icons.Outlined.AlternateEmail, "Mention someone", tint = colors.textPrimary)
+                }
+                Spacer(Modifier.weight(1f))
             }
-            Spacer(Modifier.weight(1f))
             IconButton(onClick = onSend, enabled = !composer.loading && !composer.sending && composer.text.isNotBlank()) {
                 Icon(if (editing) Icons.Outlined.Check else Icons.AutoMirrored.Filled.Send,
                     if (editing) "Save changes" else "Send message",

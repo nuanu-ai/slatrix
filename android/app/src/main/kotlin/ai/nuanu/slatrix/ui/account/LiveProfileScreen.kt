@@ -105,6 +105,7 @@ fun LivePreferencesScreen(
     onColorMode: (Boolean?) -> Unit,
     onPalette: (SidebarPalette) -> Unit,
     onBack: () -> Unit,
+    notifications: @Composable () -> Unit = {},
 ) {
     var choosingMode by rememberSaveable { mutableStateOf(false) }
     val colors = SlatrixTheme.colors
@@ -132,6 +133,7 @@ fun LivePreferencesScreen(
     }
     PushedPage("Preferences", onBack) {
             item {
+                notifications()
                 Text("Appearance", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ComposerMinHeight).clickable(role = Role.Button) { choosingMode = true }
                     .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),

@@ -7,6 +7,7 @@ import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.NotificationChoice
 import ai.nuanu.slatrix.core.NotificationSetting
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.PersonAddAlt
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Workspaces
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,6 +39,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -58,6 +61,8 @@ data class ChannelDetailsActions(
     /** The room's pinned messages, read while the Pinned messages page shows. */
     val pins: @Composable () -> PinnedMessages = { PinnedMessages() },
     val files: @Composable () -> SharedFiles = { SharedFiles() },
+    /** Adds the channel to a workspace or takes it out. */
+    val setInWorkspace: suspend (spaceId: String, adding: Boolean) -> Unit = { _, _ -> },
 )
 
 /** Every message in a conversation, threads included, to find what was shared, and asking for older ones. */
@@ -66,7 +71,7 @@ data class SharedFiles(val state: ConversationState = ConversationState(), val o
 /** A conversation's pinned messages as they load, and unpinning one. */
 data class PinnedMessages(val state: ConversationState = ConversationState(), val onUnpin: (ConversationMessage) -> Unit = {})
 
-private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeople, Pins, Files }
+private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeople, Pins, Files, Workspaces }
 
 /**
  * Slack Android's channel details, opened from the conversation's header: its name and description, notifications,
@@ -74,7 +79,7 @@ private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeopl
  */
 @Composable
 fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetailsActions, onLeft: () -> Unit,
-    onOpenMessage: (eventId: String) -> Unit, onBack: () -> Unit) {
+    onOpenMessage: (eventId: String) -> Unit, spaces: List<SpaceSummary> = emptyList(), onBack: () -> Unit) {
     var page by rememberSaveable { mutableStateOf(DetailsPage.Details) }
     // Where Add people goes back to: the page it was opened from.
     var opener by rememberSaveable { mutableStateOf(DetailsPage.Details) }
@@ -86,7 +91,7 @@ fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetails
     val open = { next: DetailsPage -> opener = page; page = next }
     val details = { page = DetailsPage.Details }
     when (page) {
-        DetailsPage.Details -> DetailsPage(room, notifications?.getOrNull(), actions, scope, onLeft, onBack, open)
+        DetailsPage.Details -> DetailsPage(room, notifications?.getOrNull(), actions, scope, onLeft, onBack, open, spaces.isNotEmpty())
         DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, details)
         DetailsPage.Edit -> EditPage(room, actions, scope, details)
         DetailsPage.Notifications -> NotificationsPage(notifications, actions, scope, { notifications = Result.success(it) },
@@ -94,6 +99,7 @@ fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetails
         DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener }
         DetailsPage.Pins -> PinsPage(room, me, actions.pins(), onOpenMessage, details)
         DetailsPage.Files -> FilesPage(actions.files(), onOpenMessage, details)
+        DetailsPage.Workspaces -> WorkspacesPage(room, spaces, actions, scope, details)
     }
 }
 
@@ -101,7 +107,7 @@ private fun noun(room: RoomSummary) = if (room.direct) "conversation" else "chan
 
 @Composable
 private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, actions: ChannelDetailsActions, scope: CoroutineScope,
-    onLeft: () -> Unit, onBack: () -> Unit, onPage: (DetailsPage) -> Unit) {
+    onLeft: () -> Unit, onBack: () -> Unit, onPage: (DetailsPage) -> Unit, hasWorkspaces: Boolean) {
     val colors = SlatrixTheme.colors
     var confirmLeave by rememberSaveable { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
@@ -150,6 +156,8 @@ private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, 
                     onPage(DetailsPage.Pins)
                 }
                 DetailsRow(Icons.Outlined.Description, "Files") { onPage(DetailsPage.Files) }
+                if (hasWorkspaces && !room.direct) DetailsRow(Icons.Outlined.Workspaces, "Workspaces",
+                    room.spaceIds.size.takeIf { it > 0 }?.toString()) { onPage(DetailsPage.Workspaces) }
                 HorizontalDivider(color = colors.border)
                 DetailsRow(Icons.AutoMirrored.Outlined.Logout, "Leave ${noun(room)}", color = colors.destructive, chevron = false,
                     enabled = !leaving) { confirmLeave = true }
@@ -372,6 +380,50 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
                 }
             }
         }
+    }
+}
+
+/**
+ * The workspaces you're in, as the Mac's Manage workspaces lists them: a channel is added to one or taken out where your
+ * power level lets you manage its channels, and one it's in only through another can hold it directly too.
+ */
+@Composable
+private fun WorkspacesPage(room: RoomSummary, spaces: List<SpaceSummary>, actions: ChannelDetailsActions, scope: CoroutineScope,
+    onBack: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    // A change shows at once and holds until the workspaces read again agree, which can take a sync, as a star does on Home.
+    var changed by remember { mutableStateOf(emptyMap<String, Boolean>()) }
+    LaunchedEffect(room.parentIds) { changed = changed.filter { (id, direct) -> (id in room.parentIds) != direct } }
+    PushedPage("Workspaces", onBack) {
+        items(spaces, key = { it.id }) { space ->
+            val direct = changed[space.id] ?: (space.id in room.parentIds)
+            // A group, so each row's button is read with its workspace.
+            Row(Modifier.fillMaxWidth().semantics { isTraversalGroup = true }.heightIn(min = UiMetrics.WorkspaceRow)
+                .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapSmall),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+                LiveAvatar(space.initials, space.colorIndex, UiMetrics.ListAvatar)
+                Column(Modifier.weight(1f)) {
+                    Text(space.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                    if (!direct && space.id in room.spaceIds) Text("Through another workspace", style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary)
+                }
+                TextButton(enabled = space.canManageRooms && !busy, onClick = {
+                    // A second tap before the button disables finds it busy.
+                    if (busy) return@TextButton
+                    busy = true
+                    error = null
+                    scope.launch {
+                        attempt { actions.setInWorkspace(space.id, !direct) }
+                            .onSuccess { changed = changed + (space.id to !direct) }.onFailure { error = it.message }
+                        busy = false
+                    }
+                }) { Text(if (direct) "Remove" else "Add") }
+            }
+        }
+        error?.let { item { ErrorLine(it) } }
     }
 }
 
