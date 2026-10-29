@@ -107,46 +107,44 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
      */
     @Volatile private var blankPages = 0
 
-    init {
-        operations.launch {
-            var timeline: Timeline? = null
-            var listener: TaskHandle? = null
-            try {
-                timeline = room.timelineWithConfiguration(TimelineConfiguration(
-                    focus = TimelineFocus.Live(hideThreadedEvents = true), filter = TimelineFilter.All,
-                    internalIdPrefix = null, dateDividerMode = DateDividerMode.DAILY,
-                    trackReadReceipts = TimelineReadReceiptTracking.MESSAGE_LIKE_EVENTS, reportUtds = false,
-                ))
-                currentCoroutineContext().ensureActive()
-                listener = timeline.addListener(object : TimelineListener {
-                    override fun onUpdate(diff: List<TimelineDiff>) { updates.trySend(diff) }
-                })
-                currentCoroutineContext().ensureActive()
-                // Still loading until the listener's first batch, the cached items, is published.
-                ready.complete(timeline)
-                var oldest: String? = null
-                for (batch in updates) {
-                    // asEvent blocks on the SDK, so a batch is mapped off the main thread.
-                    val rows = withContext(Dispatchers.Default) { batch.forEach(::apply); rows() }
-                    // A cleared or reset timeline starts over from the live end.
-                    val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
-                    val first = rows.firstOrNull { it is ConversationMessage }?.id
-                    if (first != oldest) { oldest = first; blankPages = 0 }
-                    mutableState.update { it.copy(rows = rows, loading = false, hasMore = it.hasMore || reset) }
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                currentCoroutineContext().ensureActive()
-                ready.completeExceptionally(failure)
-                mutableState.update { it.copy(loading = false, error = "Couldn’t load this conversation.") }
-            } finally {
-                ready.completeExceptionally(CancellationException())
-                listener?.let { runCatching { it.cancel() }; it.close() }
-                timeline?.close()
-                room.close()
-                updates.close()
+    private val updating = operations.launch {
+        var timeline: Timeline? = null
+        var listener: TaskHandle? = null
+        try {
+            timeline = room.timelineWithConfiguration(TimelineConfiguration(
+                focus = TimelineFocus.Live(hideThreadedEvents = true), filter = TimelineFilter.All,
+                internalIdPrefix = null, dateDividerMode = DateDividerMode.DAILY,
+                trackReadReceipts = TimelineReadReceiptTracking.MESSAGE_LIKE_EVENTS, reportUtds = false,
+            ))
+            currentCoroutineContext().ensureActive()
+            listener = timeline.addListener(object : TimelineListener {
+                override fun onUpdate(diff: List<TimelineDiff>) { updates.trySend(diff) }
+            })
+            currentCoroutineContext().ensureActive()
+            // Still loading until the listener's first batch, the cached items, is published.
+            ready.complete(timeline)
+            var oldest: String? = null
+            for (batch in updates) {
+                // asEvent blocks on the SDK, so a batch is mapped off the main thread.
+                val rows = withContext(Dispatchers.Default) { batch.forEach(::apply); rows() }
+                // A cleared or reset timeline starts over from the live end.
+                val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
+                val first = rows.firstOrNull { it is ConversationMessage }?.id
+                if (first != oldest) { oldest = first; blankPages = 0 }
+                mutableState.update { it.copy(rows = rows, loading = false, hasMore = it.hasMore || reset) }
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            currentCoroutineContext().ensureActive()
+            ready.completeExceptionally(failure)
+            mutableState.update { it.copy(loading = false, error = "Couldn’t load this conversation.") }
+        } finally {
+            ready.completeExceptionally(CancellationException())
+            listener?.let { runCatching { it.cancel() }; it.close() }
+            timeline?.close()
+            room.close()
+            updates.close()
         }
     }
 
@@ -173,9 +171,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
         }
     }
 
-    /** False when the timeline never opened, so only reopening the room can help. */
+    /** False once the timeline failed to open or stopped updating, so only reopening the room can help. */
     fun retry(): Boolean {
-        if (!lifetime.isActive || ready.isCancelled) return false
+        if (!updating.isActive) return false
         loadOlder()
         return true
     }
