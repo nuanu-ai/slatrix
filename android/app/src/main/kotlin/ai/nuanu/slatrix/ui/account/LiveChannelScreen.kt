@@ -49,7 +49,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    val latest = state.messages.lastOrNull { it.eventId != null }
+    val latest = state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?
     val read by rememberUpdatedState(onRead)
     LaunchedEffect(latest?.id, latest?.eventId, resumed) {
         val event = latest?.eventId ?: return@LaunchedEffect
@@ -61,7 +61,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             }
         }.distinctUntilChanged().collect { visible -> if (visible) read(event) }
     }
-    val newest = state.messages.lastOrNull()
+    val newest = state.rows.lastOrNull() as? ConversationMessage
     var following by remember { mutableStateOf(true) }
     LaunchedEffect(list) {
         snapshotFlow { list.isScrollInProgress }.collect { scrolling ->
@@ -93,7 +93,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true,
                 contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
-                items(state.messages.asReversed(), key = { it.id }) { message -> LiveMessageRow(message) }
+                items(state.rows.asReversed(), key = { it.id }) { row -> if (row is ConversationMessage) LiveMessageRow(row) }
                 if (state.hasMore) item {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                         TextButton(onClick = onLoadOlder, enabled = !state.loading && !state.loadingHistory) { Text("Earlier messages") }

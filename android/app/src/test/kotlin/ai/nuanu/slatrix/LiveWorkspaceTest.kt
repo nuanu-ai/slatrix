@@ -100,7 +100,7 @@ class LiveWorkspaceTest {
         compose.waitUntil { read == "\$First" }
         compose.runOnIdle {
             owner.lifecycle.currentState = Lifecycle.State.STARTED
-            timeline.value = timeline.value.copy(messages = timeline.value.messages + message("Next"))
+            timeline.value = timeline.value.copy(rows = timeline.value.rows + message("Next"))
         }
         compose.onNodeWithText("Next").assertIsDisplayed()
         compose.runOnIdle { assertEquals("\$First", read) }

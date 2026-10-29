@@ -31,6 +31,7 @@ class MatrixConversationTest {
     @Test fun aResetOrClearedTimelineLoadsOlderHistoryAgain() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.isNotEmpty() }
         conversation.loadOlder()
         timeline.page.complete(true)
         conversation.state.first { !it.hasMore }
@@ -63,7 +64,7 @@ class MatrixConversationTest {
         timeline.pageFailure = IllegalStateException("Offline")
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
         conversation.loadOlder()
-        conversation.state.first { it.error != null && !it.loadingHistory }
+        conversation.state.first { it.error != null && !it.loadingHistory && it.rows.isNotEmpty() }
         assertTrue(conversation.markRead("\$one"))
         assertNotNull("Reading must not hide the history error", conversation.state.value.error)
 

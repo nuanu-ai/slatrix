@@ -40,13 +40,18 @@ import org.matrix.rustcomponents.sdk.TimelineFocus
 import org.matrix.rustcomponents.sdk.TimelineItem
 import org.matrix.rustcomponents.sdk.TimelineItemContent
 import org.matrix.rustcomponents.sdk.TimelineListener
+import org.matrix.rustcomponents.sdk.VirtualTimelineItem
 import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
 
 enum class MessageKind { Text, Notice, Emote, Attachment, Encrypted, Deleted, Unsupported }
 enum class MessageSendState { Sent, Sending, Failed }
 
+sealed interface ConversationRow { val id: String }
+
+data class DayDivider(override val id: String, val timestamp: Long) : ConversationRow
+
 data class ConversationMessage(
-    val id: String,
+    override val id: String,
     val eventId: String?,
     val senderId: String,
     val senderName: String,
@@ -58,10 +63,12 @@ data class ConversationMessage(
     val own: Boolean,
     val initials: String,
     val colorIndex: Int,
-)
+    /** Follows a message from the same sender, so it shows without avatar and name. */
+    val grouped: Boolean = false,
+) : ConversationRow
 
 data class ConversationState(
-    val messages: List<ConversationMessage> = emptyList(),
+    val rows: List<ConversationRow> = emptyList(),
     val loading: Boolean = true,
     val loadingHistory: Boolean = false,
     val hasMore: Boolean = true,
@@ -69,6 +76,9 @@ data class ConversationState(
     val sending: Boolean = false,
     val sendError: String? = null,
 )
+
+/** A sender's messages group within this window, as on the Mac and in Slack. */
+private const val GROUPING_MILLIS = 5 * 60_000L
 
 class MatrixConversation(scope: CoroutineScope, private val room: Room) {
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
@@ -81,7 +91,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
     private val sendLock = Mutex()
     private val readLock = Mutex()
     private var lastRead: String? = null
-    private val items = mutableListOf<ConversationMessage?>()
+    private val items = mutableListOf<ConversationRow?>()
 
     init {
         operations.launch {
@@ -107,7 +117,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                         batch.forEach(::apply)
                         // A cleared or reset timeline starts over from the live end.
                         val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
-                        mutableState.update { it.copy(messages = items.filterNotNull(), loading = false, hasMore = it.hasMore || reset) }
+                        val rows = rows()
+                        mutableState.update { it.copy(rows = rows, loading = false, hasMore = it.hasMore || reset) }
                     }
                 }
             } catch (cancelled: CancellationException) {
@@ -216,28 +227,50 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
     }
 
     private fun isLatestRemote(eventId: String): Boolean =
-        lifetime.isActive && mutableState.value.messages.lastOrNull { it.eventId != null }?.eventId == eventId
+        lifetime.isActive && mutableState.value.rows.asReversed().firstNotNullOfOrNull { (it as? ConversationMessage)?.eventId } == eventId
 
     suspend fun close() { lifetime.cancelAndJoin() }
 
     private fun apply(diff: TimelineDiff) {
         when (diff) {
-            is TimelineDiff.Append -> items.addAll(diff.values.map(::message))
+            is TimelineDiff.Append -> items.addAll(diff.values.map(::row))
             is TimelineDiff.Clear -> items.clear()
-            is TimelineDiff.PushFront -> items.add(0, message(diff.value))
-            is TimelineDiff.PushBack -> items.add(message(diff.value))
+            is TimelineDiff.PushFront -> items.add(0, row(diff.value))
+            is TimelineDiff.PushBack -> items.add(row(diff.value))
             is TimelineDiff.PopFront -> items.removeAt(0)
             is TimelineDiff.PopBack -> items.removeAt(items.lastIndex)
-            is TimelineDiff.Insert -> items.add(diff.index.toInt(), message(diff.value))
-            is TimelineDiff.Set -> items[diff.index.toInt()] = message(diff.value)
+            is TimelineDiff.Insert -> items.add(diff.index.toInt(), row(diff.value))
+            is TimelineDiff.Set -> items[diff.index.toInt()] = row(diff.value)
             is TimelineDiff.Remove -> items.removeAt(diff.index.toInt())
             is TimelineDiff.Truncate -> items.subList(diff.length.toInt(), items.size).clear()
-            is TimelineDiff.Reset -> { items.clear(); items.addAll(diff.values.map(::message)) }
+            is TimelineDiff.Reset -> { items.clear(); items.addAll(diff.values.map(::row)) }
         }
     }
 
-    private fun message(item: TimelineItem): ConversationMessage? {
-        val event = item.asEvent() ?: return null
+    /** The visible rows, each message grouped under the one before it when the same sender sent it soon after. */
+    private fun rows(): List<ConversationRow> {
+        val rows = ArrayList<ConversationRow>(items.size)
+        var previous: ConversationMessage? = null
+        for (index in items.indices) {
+            val row = items[index] ?: continue
+            if (row !is ConversationMessage) {
+                rows.add(row)
+                previous = null
+                continue
+            }
+            val grouped = previous?.let { it.senderId == row.senderId && row.timestamp - it.timestamp < GROUPING_MILLIS } == true
+            // Stored back, so an unchanged row stays the same object in the next batch.
+            val current = if (row.grouped == grouped) row else row.copy(grouped = grouped).also { items[index] = it }
+            rows.add(current)
+            previous = current
+        }
+        return rows
+    }
+
+    private fun row(item: TimelineItem): ConversationRow? {
+        val event = item.asEvent() ?: return (item.asVirtual() as? VirtualTimelineItem.DateDivider)?.let {
+            DayDivider(item.uniqueId().id, it.ts.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
+        }
         val content = (event.content as? TimelineItemContent.MsgLike)?.content ?: return null
         val senderName = (event.senderProfile as? ProfileDetails.Ready)?.displayName
             ?.takeIf { it.isNotBlank() } ?: event.sender
