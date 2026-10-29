@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButtonDefaults
@@ -163,35 +164,38 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
             }
         }
         composer.target?.let { TargetBar(it, actions.onCancelTarget) }
-        BasicTextField(shown, { next ->
-            val left = ComposerStyles.blockLeft(composer.styles, composer.typing, shown.text, next.text, shown.selection.min)
-                .takeIf { shown.selection.collapsed && onFormat != null }
-            if (left != null) {
-                onFormat?.invoke(shown.selection.min, shown.selection.min, left, null)
-                return@BasicTextField
-            }
-            field = next
-            pending = null
-            val changed = next.text != lastText
-            lastText = next.text
-            if (changed) onDraft(next.text)
-        }, enabled = !composer.loading,
-            modifier = Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium)
-                .semantics { contentDescription = placeholder },
-            textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
-            visualTransformation = remember(composer.styles, composer.mentions, composer.typing, colors) {
-                ComposerVisual(composer.styles, composer.mentions, composer.typing?.takeIf { it.position == 0 }?.kinds?.firstOrNull { it.block }, colors)
-            },
-            cursorBrush = SolidColor(colors.accent), maxLines = 5,
-            decorationBox = { inner ->
-                Box(Modifier.padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.CenterStart) {
-                    if (composer.text.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge,
-                        color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    inner()
+        val attach = actions.onAttach?.takeIf { !editing }
+        ReceiveKeyboardMedia(attach) {
+            BasicTextField(shown, { next ->
+                val left = ComposerStyles.blockLeft(composer.styles, composer.typing, shown.text, next.text, shown.selection.min)
+                    .takeIf { shown.selection.collapsed && onFormat != null }
+                if (left != null) {
+                    onFormat?.invoke(shown.selection.min, shown.selection.min, left, null)
+                    return@BasicTextField
                 }
-            })
+                field = next
+                pending = null
+                val changed = next.text != lastText
+                lastText = next.text
+                if (changed) onDraft(next.text)
+            }, enabled = !composer.loading,
+                modifier = Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium)
+                    .semantics { contentDescription = placeholder },
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
+                visualTransformation = remember(composer.styles, composer.mentions, composer.typing, colors) {
+                    ComposerVisual(composer.styles, composer.mentions, composer.typing?.takeIf { it.position == 0 }?.kinds?.firstOrNull { it.block }, colors)
+                },
+                cursorBrush = SolidColor(colors.accent), maxLines = 5,
+                decorationBox = { inner ->
+                    Box(Modifier.padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.CenterStart) {
+                        if (composer.text.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge,
+                            color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        inner()
+                    }
+                })
+        }
         Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
-            if (!formatting) actions.onAttach?.takeIf { !editing }?.let { AttachButton(it) }
+            if (!formatting) attach?.let { AttachButton(it) }
             if (onFormat != null) FormattingToggle(formatting, !composer.loading) { formatting = !formatting }
             if (formatting && onFormat != null) {
                 val selection = shown.selection
@@ -233,6 +237,7 @@ private fun AttachButton(onAttach: (List<Uri>) -> Unit) {
     var choosing by remember { mutableStateOf(false) }
     val media = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { if (it.isNotEmpty()) onAttach(it) }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) onAttach(it) }
+    val camera = rememberCamera { onAttach(listOf(it)) }
     IconButton(onClick = { choosing = true }, colors = IconButtonDefaults.iconButtonColors(containerColor = colors.raised)) {
         Icon(Icons.Outlined.Add, "Attachments", tint = colors.textPrimary)
     }
@@ -243,6 +248,7 @@ private fun AttachButton(onAttach: (List<Uri>) -> Unit) {
                 choosing = false
                 media.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             }
+            camera?.let { AttachChoice(Icons.Outlined.PhotoCamera, "Camera") { choosing = false; it() } }
             AttachChoice(Icons.Outlined.Description, "Files") { choosing = false; files.launch(arrayOf("*/*")) }
         }
     }
