@@ -502,6 +502,20 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.keep-position
+    @Test fun comingBackToAKeptConversationLeavesLastVisitsJumpUnreadStartAndHoldBehind() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("a", "\$a", "Hello"), conversationItem("b", "\$b", "World")))
+        val conversation = MatrixConversation(backgroundScope, JumpRoom(live, ConversationTimeline(emptyList())), at = "\$a")
+        assertEquals("\$a", conversation.state.first { !it.loading }.highlight)
+        conversation.markUnread()
+
+        conversation.revisit()
+        val back = conversation.state.first { it.highlight == null }
+        assertFalse(back.startsAtUnread)
+        assertTrue("Reading works again", conversation.markRead("\$b"))
+        conversation.close()
+    }
+
     // capability: conversation.read
     @Test fun onlyVisibleLatestMessagesAreReadAndClosedTimelinesRejectLateUpdates() = runTest {
         val divider = object : TimelineItem(NoHandle) {
