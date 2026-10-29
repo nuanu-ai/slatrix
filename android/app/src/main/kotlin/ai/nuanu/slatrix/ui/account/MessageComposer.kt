@@ -278,7 +278,7 @@ private fun MentionList(candidates: List<MentionCandidate>, onPick: (MentionCand
                     when (candidate) {
                         is MentionCandidate.Member -> {
                             LiveAvatar(AvatarPlaceholder.initials(candidate.person.name), AvatarPlaceholder.colorIndex(candidate.person.name),
-                                UiMetrics.CompactAvatar)
+                                UiMetrics.CompactAvatar, candidate.person.avatarUrl)
                             Text(candidate.person.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(candidate.person.id.removePrefix("@").substringBefore(':'), style = MaterialTheme.typography.bodyMedium,

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Photos the system camera takes for the composer, which it writes through a content URI. -->
+<!-- Downloaded attachments another app opens, and photos the system camera takes for the composer, through content URIs. -->
 <paths>
+    <cache-path name="media" path="media/" />
     <cache-path name="camera" path="camera/" />
 </paths>

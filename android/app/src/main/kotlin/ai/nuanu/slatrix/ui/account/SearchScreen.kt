@@ -162,7 +162,7 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<St
             item { SearchSection("People") }
             items(people, key = { it.id }) { room ->
                 SearchRow({ onRoom(room.id) }) {
-                    LiveAvatar(room.initials, room.colorIndex, UiMetrics.CompactAvatar)
+                    LiveAvatar(room.initials, room.colorIndex, UiMetrics.CompactAvatar, room.avatarUrl)
                     Spacer(Modifier.width(UiMetrics.GapMedium))
                     RowTitle(room.name)
                 }
@@ -207,7 +207,8 @@ private fun MessageHit(hit: SearchHit, room: RoomSummary?, query: MessageSearchQ
     Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-        LiveAvatar(AvatarPlaceholder.initials(hit.senderName), AvatarPlaceholder.colorIndex(hit.senderName), UiMetrics.ListAvatar)
+        LiveAvatar(AvatarPlaceholder.initials(hit.senderName), AvatarPlaceholder.colorIndex(hit.senderName), UiMetrics.ListAvatar,
+            hit.senderAvatarUrl)
         Column(Modifier.weight(1f)) {
             Text(room?.let { if (it.direct) it.name else "#${it.name}" }.orEmpty(), style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)

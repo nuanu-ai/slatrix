@@ -100,6 +100,7 @@ data class ConversationMessage(
     val thread: MessageThread? = null,
     /** The message this one replies to, quoted above it. */
     val replyTo: ReplyPreview? = null,
+    val attachment: MessageAttachment? = null,
     /** How much of an attachment you're sending has gone up, from 0 to 1. */
     val uploadProgress: Float? = null,
 ) : ConversationRow {
@@ -134,6 +135,13 @@ data class ConversationState(
     val highlight: String? = null,
     /** Loaded around an older message rather than live, until the reader reaches the newest and it turns live. */
     val focused: Boolean = false,
+    /** The first message after the read marker, which Slack's New line goes above; a thread has none, as on the Mac. */
+    val firstUnread: String? = null,
+    /**
+     * Opened where its unread messages start, so it shows the New line at the top. The SDK's marker alone doesn't say
+     * so: m.fully_read can trail a read receipt.
+     */
+    val startsAtUnread: Boolean = false,
 )
 
 /** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
@@ -164,6 +172,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val at: String? = null,
     /** The thread's root as its channel shows it, on screen at once while the thread loads, as on the Mac. */
     root: ConversationMessage? = null,
+    /** [at] is where the unread messages start, so it opens there without a highlight. */
+    private val resume: Boolean = false,
     private val view: ConversationView = ConversationView.Timeline) {
     // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
     private val root = root?.copy(id = ROOT_KEY, grouped = false)
@@ -171,7 +181,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
     private val ownUserId = room.ownUserId()
     private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null,
-        ownUserId = ownUserId))
+        ownUserId = ownUserId, startsAtUnread = resume))
     val state: StateFlow<ConversationState> = mutableState.asStateFlow()
     private val ready = CompletableDeferred<Unit>()
     private val updates = Channel<Update>(Channel.UNLIMITED)
@@ -200,7 +210,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     }
 
     private inner class Source(val timeline: Timeline, val focused: Boolean) {
-        val items = mutableListOf<ConversationRow?>()
+        /** The read marker sits among the rows, since where it falls is where the New line goes. */
+        val items = mutableListOf<Any?>()
         var handle: TaskHandle? = null
 
         fun holds(eventId: String?) = eventId != null && items.any { (it as? ConversationMessage)?.eventId == eventId }
@@ -228,7 +239,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val (source, batch) = update as Update.Batch
                 if (source !== shown && source !== pending) continue
                 // asEvent blocks on the SDK, so a batch is mapped off the main thread.
-                val rows = withContext(Dispatchers.Default) { batch.forEach { source.apply(it) }; source.rows() }
+                val (rows, unread) = withContext(Dispatchers.Default) {
+                    batch.forEach { source.apply(it) }
+                    source.rows() to source.unread().takeIf { threadRoot == null }
+                }
                 var swapped = false
                 if (source === pending) {
                     if (pendingAnchor != null && !source.holds(pendingAnchor)) continue
@@ -239,7 +253,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     swapped = true
                 } else if (deciding) {
                     deciding = false
-                    if (!source.holds(at)) try {
+                    // Around a thread reply the SDK shows only its thread, so a read marker on one opens live, as on the Mac.
+                    val around = !source.holds(at) &&
+                        !(resume && quietly { room.loadOrFetchEvent(checkNotNull(at)).use { it.threadRootEventId() } } != null)
+                    if (around) try {
                         open(TimelineFocus.Event(checkNotNull(at), 30u, TimelineEventFocusThreadMode.Automatic(true))) {
                             pending = it
                             pendingAnchor = null
@@ -259,7 +276,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 if (first != oldest) { oldest = first; blankPages = 0 }
                 mutableState.update {
                     it.copy(rows = withRoot(rows), loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
-                        highlight = it.highlight ?: at?.takeIf { id -> source.holds(id) })
+                        highlight = it.highlight ?: at?.takeIf { id -> !resume && source.holds(id) }, firstUnread = unread)
                 }
             }
         } catch (cancelled: CancellationException) {
@@ -633,7 +650,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         var previous: ConversationMessage? = null
         var divider: ConversationRow? = null
         for (index in items.indices) {
-            val row = items[index] ?: continue
+            val row = items[index] as? ConversationRow ?: continue
             if (row !is ConversationMessage) {
                 divider = row
                 previous = null
@@ -650,7 +667,18 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return rows
     }
 
-    private data class Shown(val kind: MessageKind, val body: String, val html: String? = null)
+    private fun Source.unread(): String? = UnreadLine.first(items.map {
+        when (it) {
+            ReadMarker -> UnreadLine.Mark(readMarker = true)
+            is ConversationMessage -> UnreadLine.Mark(shown = it.eventId)
+            else -> UnreadLine.Mark()
+        }
+    })
+
+    private object ReadMarker
+
+    private data class Shown(val kind: MessageKind, val body: String, val html: String? = null,
+        val attachment: MessageAttachment? = null)
 
     private fun shown(kind: MsgLikeKind): Shown = when (kind) {
         is MsgLikeKind.Message -> {
@@ -659,8 +687,18 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 is MessageType.Text -> Shown(MessageKind.Text, kind.content.body, html(type.content.formatted))
                 is MessageType.Notice -> Shown(MessageKind.Notice, kind.content.body, html(type.content.formatted))
                 is MessageType.Emote -> Shown(MessageKind.Emote, kind.content.body, html(type.content.formatted))
-                is MessageType.Image, is MessageType.Audio, is MessageType.Video,
-                is MessageType.File, is MessageType.Gallery -> Shown(MessageKind.Attachment, kind.content.body)
+                // A caption is the attachment's text; without one the text is its name, which the row doesn't repeat.
+                is MessageType.Image -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                    MessageAttachment.Kind.Image, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
+                    source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long)) }
+                is MessageType.Video -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                    MessageAttachment.Kind.Video, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
+                    source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long)) }
+                is MessageType.Audio -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                    MessageAttachment.Kind.Audio, filename, info?.mimetype, info?.size?.long, null, null, source)) }
+                is MessageType.File -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                    MessageAttachment.Kind.File, filename, info?.mimetype, info?.size?.long, null, null, source)) }
+                is MessageType.Gallery -> Shown(MessageKind.Attachment, kind.content.body)
                 else -> Shown(MessageKind.Unsupported, kind.content.body)
             }
         }
@@ -670,6 +708,12 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         is MsgLikeKind.Poll -> Shown(MessageKind.Unsupported, kind.question)
         else -> Shown(MessageKind.Unsupported, "Unsupported message")
     }
+
+    private fun attached(text: String, html: String?, attachment: MessageAttachment) =
+        Shown(MessageKind.Attachment, text, html, attachment)
+
+    private val ULong.long get() = coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
+    private val ULong.int get() = coerceAtMost(Int.MAX_VALUE.toULong()).toInt()
 
     private fun name(profile: ProfileDetails, sender: String) =
         (profile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: sender
@@ -704,20 +748,22 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
-    private fun row(item: TimelineItem): ConversationRow? {
-        val event = item.asEvent() ?: return (item.asVirtual() as? VirtualTimelineItem.DateDivider)?.let {
-            DayDivider(item.uniqueId().id, it.ts.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
+    private fun row(item: TimelineItem): Any? {
+        val event = item.asEvent() ?: return when (val virtual = item.asVirtual()) {
+            is VirtualTimelineItem.DateDivider -> DayDivider(item.uniqueId().id, virtual.ts.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
+            VirtualTimelineItem.ReadMarker -> ReadMarker
+            else -> null
         }
         val content = (event.content as? TimelineItemContent.MsgLike)?.content ?: return null
         val senderName = name(event.senderProfile, event.sender)
-        val (kind, body, html) = shown(content.kind)
+        val shown = shown(content.kind)
         val failure = event.localSendState as? EventSendState.SendingFailed
         return ConversationMessage(
             id = item.uniqueId().id,
             eventId = if (event.isRemote) (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId else null,
-            senderId = event.sender, senderName = senderName, body = body,
-            formattedBody = html,
-            timestamp = event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong(), kind = kind,
+            senderId = event.sender, senderName = senderName, body = shown.body,
+            formattedBody = shown.html,
+            timestamp = event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong(), kind = shown.kind,
             sendState = when (event.localSendState) {
                 is EventSendState.NotSentYet -> MessageSendState.Sending
                 is EventSendState.SendingFailed -> MessageSendState.Failed
@@ -732,7 +778,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             uploadProgress = (event.localSendState as? EventSendState.NotSentYet)?.progress?.progress
                 ?.takeIf { it.total > 0u }?.let { it.current.toFloat() / it.total.toFloat() },
             // An edit goes out as text, so only a text message keeps its kind.
-            editable = event.isEditable && kind == MessageKind.Text,
+            editable = event.isEditable && shown.kind == MessageKind.Text,
             edited = (content.kind as? MsgLikeKind.Message)?.content?.isEdited == true,
             reactions = event.reactions.map { reaction ->
                 MessageReaction(reaction.key, reaction.senders.size, reaction.senders.any { it.senderId == ownUserId },
@@ -745,6 +791,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong())
             }?.takeIf { it.replies > 0 },
             replyTo = content.inReplyTo?.let(::replyPreview),
+            attachment = shown.attachment,
         ).also { it.runs }
     }
 }

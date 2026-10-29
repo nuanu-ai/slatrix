@@ -7,6 +7,8 @@ import ai.nuanu.slatrix.core.AttachmentImport
 import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
+import ai.nuanu.slatrix.core.MatrixMedia
+import java.io.File
 import ai.nuanu.slatrix.core.MatrixChannel
 import ai.nuanu.slatrix.core.MatrixForward
 import org.matrix.rustcomponents.sdk.MessageType
@@ -15,6 +17,7 @@ import org.matrix.rustcomponents.sdk.Client
 import ai.nuanu.slatrix.core.ConversationView
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityVerification
+import ai.nuanu.slatrix.core.MatrixAvatars
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.MatrixSearch
 import ai.nuanu.slatrix.core.MessageSearchState
@@ -40,10 +43,13 @@ import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.CancellationException
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -107,10 +113,16 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
         when {
             state is AccountState.Connected -> {
                 val userId = (state as AccountState.Connected).userId
+                val client = (state as AccountState.Connected).client
+                val media = remember(client) { MatrixMedia(client, File(context.cacheDir, "media")) }
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
                 var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
+                val avatars = remember(client) { SessionAvatars(MatrixAvatars(client)) }
+                val userAvatarUrl by produceState<String?>(null, client) {
+                    value = try { client.avatarUrl() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+                }
                 // Read inside derivedStateOf, so room list updates recompose the app only when the workspace changes.
                 // Only a pick is saved: a fallback while spaces still load must not replace what the person chose.
                 val roomList = rooms?.state?.collectAsState()
@@ -155,7 +167,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         onNotificationHandled(target)
                     }
                 }
-                Box(Modifier.fillMaxSize()) {
+                CompositionLocalProvider(LocalAvatarLoader provides avatars) { Box(Modifier.fillMaxSize()) {
                     ConnectedAccountScreen(identityState,
                         { identity?.requestVerification() }, { identity?.acceptVerification() },
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
@@ -172,15 +184,16 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
                                     openChannel, { notice = it }) { channels = null }
                             } }
-                            you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
-                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms) } } }
+                            you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut,
+                                onBack = { you = false }, avatarUrl = userAvatarUrl) } }
+                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms, media) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace, jump, rooms) { root, row -> threads?.open(selected.room, root, root = row) }
+                                LiveConversation(selected, workspace, workspace, jump, rooms, media) { root, row -> threads?.open(selected.room, root, root = row) }
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it }) {
+                            LiveHome(userId, userAvatarUrl, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
@@ -192,7 +205,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                     (notice ?: (state as AccountState.Connected).warning)?.let { text ->
                         Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(text) }
                     }
-                }
+                } }
             }
             state is AccountState.BrowserSignIn -> {
                 val browser = state as AccountState.BrowserSignIn
@@ -221,7 +234,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
 private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
-    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?,
+    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?, media: MatrixMedia,
     onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     // The room as the list follows it, so a change of name, topic or permissions shows while it's open; read only
@@ -248,7 +261,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                     if (conversation?.markRead(event) == true && open.threadRoot == null) PushNotifications(context).clear(open.room.id)
                 }
             },
-            { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
+            { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at.takeUnless { open.resume }) },
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
             { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
             open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { actions ->
@@ -266,7 +279,9 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 onFormat = { start, end, kind, href -> composer?.format(start, end, kind, href) },
                 onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
             // A quote doesn't know its parent's thread, so it asks before jumping.
-            { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } }, { details = true },
+            { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } },
+            { attachment, width, height, full -> media.picture(attachment, width, height, full) },
+            { openAttachment(context, media, it) }, { details = true },
             typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty())
         val actions = remember(rooms, open.room.id, conversation) {
             rooms?.client?.let { client ->
@@ -319,7 +334,7 @@ private fun rememberConversation(client: Client, roomId: String, view: Conversat
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
 @Composable
-private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
+private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
     selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit,
     activity: @Composable () -> Unit) {
@@ -353,7 +368,7 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
                         scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
                 }, recents, { recents = recentStore.add(it) }, open)
-        }, activity = activity)
+        }, userAvatarUrl = userAvatarUrl, activity = activity)
 }
 
 /** Collects Activity here, so a new item recomposes only its tab. An item opens at its message. */

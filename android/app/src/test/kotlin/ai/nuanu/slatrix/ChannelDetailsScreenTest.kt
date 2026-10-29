@@ -5,6 +5,9 @@ import ai.nuanu.slatrix.core.ChannelMember
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.MessageKind
+import org.matrix.rustcomponents.sdk.NoHandle
+import org.matrix.rustcomponents.sdk.MediaSource
+import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.NotificationChoice
@@ -55,7 +58,7 @@ class ChannelDetailsScreenTest {
         memberCount = 3, canEditName = true, canEditTopic = true)
 
     // capability: channel.details
-    @Test fun theHeaderPillOpensTheDetails() {
+    @Test fun theHeaderPillNamesTheChannelAndItsMembersAndOpensTheDetails() {
         var opened = false
         compose.setContent {
             SlatrixTheme {
@@ -63,7 +66,8 @@ class ChannelDetailsScreenTest {
                     {}, {}, {}, {}, {}, {}, {}, {}, onOpenDetails = { opened = true })
             }
         }
-        compose.onNodeWithText("Launch reviews").performClick()
+        compose.onNodeWithText("Launch reviews").assertDoesNotExist()
+        compose.onNodeWithText("3 members").performClick()
         compose.runOnIdle { assertTrue(opened) }
     }
 
@@ -270,6 +274,18 @@ class ChannelDetailsScreenTest {
             assertEquals(listOf("https://example.org/notes"), links)
             assertTrue(older)
         }
+    }
+
+    // capability: conversation.files
+    @Test fun filesNameAnAttachmentByItsFileAndTypeNotItsCaption() {
+        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office" }
+        val photo = pinned("Our new office").copy(kind = MessageKind.Attachment,
+            attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, source))
+        details(room, ChannelDetailsActions(files = { SharedFiles(ConversationState(listOf(photo), loading = false)) }))
+        compose.onNodeWithText("Files").performClick()
+        compose.onNodeWithText("office.jpg").assertIsDisplayed()
+        compose.onNodeWithText("Our new office").assertDoesNotExist()
+        compose.onNodeWithText("JPG", substring = true).assertIsDisplayed()
     }
 
     @Test fun loadMoreHoldsItsPlaceWhileLoadingAndAFailedPageTriesAgain() {
