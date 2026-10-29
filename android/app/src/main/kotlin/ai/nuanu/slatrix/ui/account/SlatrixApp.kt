@@ -7,6 +7,7 @@ import ai.nuanu.slatrix.core.AttachmentImport
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.MatrixChannel
+import ai.nuanu.slatrix.core.MatrixConversation
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityVerification
 import ai.nuanu.slatrix.core.MatrixRooms
@@ -225,21 +226,37 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
             { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
-            open.threadRoot, rememberMessageActions(conversation, composer, main),
+            open.threadRoot, rememberMessageActions(conversation, composer, main, room),
             ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
                 onNeedPeople = { composer?.loadPeople() },
                 onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
                 onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
             // A quote doesn't know its parent's thread, so it asks before jumping.
             { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } }, { details = true })
-        val actions = remember(rooms, open.room.id) {
-            rooms?.client?.let { MatrixChannel(it, open.room.id) }?.let {
-                ChannelDetailsActions(it::members, it::save, it::leave, it::invite, it::notifications, it::setNotifications)
+        val actions = remember(rooms, open.room.id, conversation) {
+            rooms?.client?.let { client ->
+                val channel = MatrixChannel(client, open.room.id)
+                ChannelDetailsActions(channel::members, channel::save, channel::leave, channel::invite, channel::notifications,
+                    channel::setNotifications) {
+                    // A conversation of the room's pins, open while its page shows: leaving it cancels the scope, which closes it.
+                    val pinScope = rememberCoroutineScope()
+                    val pins = remember {
+                        runCatching { client.getRoom(open.room.id) }.getOrNull()?.let { MatrixConversation(pinScope, it, pinned = true) }
+                    }
+                    // Unpins through the conversation, which outlives the page, so going back doesn't cancel it.
+                    PinnedMessages(pins?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load pins")) {
+                        conversation?.pin(it, false)
+                    }
+                }
             }
         }
         // Over the conversation, so Back finds it where it was.
         if (details && actions != null) {
-            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }) { details = false }
+            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }, onOpenMessage = { id ->
+                details = false
+                // A pin doesn't know its thread, so it asks before jumping.
+                scope.launch { jump(open.room, id, main?.threadRootOf(open.room.id, id)) }
+            }) { details = false }
         }
     }
 }

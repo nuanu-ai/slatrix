@@ -157,7 +157,9 @@ internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } c
 class MatrixConversation(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null,
     private val at: String? = null,
     /** The thread's root as its channel shows it, on screen at once while the thread loads, as on the Mac. */
-    root: ConversationMessage? = null) {
+    root: ConversationMessage? = null,
+    /** Shows the room's pinned messages, which the SDK fetches itself, instead of its timeline. */
+    private val pinned: Boolean = false) {
     // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
     private val root = root?.copy(id = ROOT_KEY, grouped = false)
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
@@ -204,7 +206,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     private val updating = operations.launch {
         try {
-            open(threadRoot?.let(TimelineFocus::Thread) ?: TimelineFocus.Live(hideThreadedEvents = true)) { shown = it }
+            open(if (pinned) TimelineFocus.PinnedEvents
+                else threadRoot?.let(TimelineFocus::Thread) ?: TimelineFocus.Live(hideThreadedEvents = true)) { shown = it }
             currentCoroutineContext().ensureActive()
             ready.complete(Unit)
             // A thread shows its reply wherever it is; a channel first checks whether its live timeline holds it.
@@ -456,6 +459,17 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 true -> onAdded()
                 false -> Unit
                 null -> announce("Couldn’t update your reaction.")
+            }
+        }
+    }
+
+    /** Pins the message to the room, or with [pin] false unpins it. */
+    fun pin(message: ConversationMessage, pin: Boolean) {
+        val id = message.eventId ?: return
+        operations.launch {
+            val timeline = quietly { timeline() } ?: return@launch
+            if (quietly { if (pin) timeline.pinEvent(id) else timeline.unpinEvent(id) } == null) {
+                announce(if (pin) "Couldn’t pin this message." else "Couldn’t unpin this message.")
             }
         }
     }
