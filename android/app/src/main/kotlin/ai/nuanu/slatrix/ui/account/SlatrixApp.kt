@@ -11,6 +11,7 @@ import ai.nuanu.slatrix.core.MatrixMedia
 import java.io.File
 import ai.nuanu.slatrix.core.MatrixChannel
 import ai.nuanu.slatrix.core.MatrixForward
+import ai.nuanu.slatrix.core.MatrixLinks
 import org.matrix.rustcomponents.sdk.MessageType
 import ai.nuanu.slatrix.core.MatrixSaved
 import ai.nuanu.slatrix.core.SavedMessage
@@ -307,9 +308,15 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     val profile = { id: String -> onPerson(id, timeline.rows.firstNotNullOfOrNull { (it as? ConversationMessage)?.takeIf { row -> row.senderId == id }?.senderName }) }
     // The message and the copy read when Forward was tapped, so the copy is the message the page shows.
     var forwarding by remember { mutableStateOf<Pair<ConversationMessage, MessageType>?>(null) }
-    var forwarded by remember { mutableStateOf<String?>(null) }
-    forwarded?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); forwarded = null } }
+    var notice by remember { mutableStateOf<String?>(null) }
+    notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
     Box(Modifier.fillMaxSize()) {
+        // A Matrix link in a message opens here; a message in a thread opens in its thread, so it is looked up first.
+        ProvideMatrixLinks({ roomList?.value?.rooms.orEmpty() }, { alias -> rooms?.client?.let { MatrixLinks.roomIdOf(it, alias) } },
+            { target, event ->
+                if (event != null) scope.launch { jump(target, event, main?.threadRootOf(target.id, event)) }
+                else { if (open.threadRoot != null) owner?.back(); main?.open(target) }
+            }, profile, { notice = it }) {
         LiveChannelScreen(room, timeline, draft, { composer?.edit(it); if (draft.target !is ComposerTarget.Edit) open.typing?.changed(it) }, { composer?.send(); open.typing?.stopped() },
             { owner?.back() }, { conversation?.loadOlder() },
             { event ->
@@ -328,7 +335,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                     actions.copy(saved = savedHere, onSave = { message, save ->
                         message.eventId?.takeIf { (it in savedHere) != save }?.let { onToggleSaved(open.room.id, it) }
                     }, onForward = { m ->
-                        scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { forwarded = "This message can’t be forwarded." } }
+                        scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { notice = "This message can’t be forwarded." } }
                     }, onMarkUnread = markUnread.takeIf { open.threadRoot == null })
                 }
             },
@@ -342,6 +349,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { attachment, width, height, full -> media.picture(attachment, width, height, full) },
             { openAttachment(context, media, it) }, { media.file(it) }, { counterpart?.let { onPerson(it.id, it.name) } ?: run { details = true } },
             typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty(), onPerson = profile)
+        }
         val actions = remember(rooms, open.room.id, conversation) {
             rooms?.client?.let { client ->
                 val channel = MatrixChannel(client, open.room.id)
@@ -377,10 +385,10 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 rooms?.client?.let { MatrixForward(it).forward(content, open.room.id, destination.id) } ?: "Couldn’t forward this message."
             }, { destination ->
                 forwarding = null
-                forwarded = if (destination.direct) "Forwarded to ${destination.name}." else "Forwarded to #${destination.name}."
+                notice = if (destination.direct) "Forwarded to ${destination.name}." else "Forwarded to #${destination.name}."
             }) { forwarding = null }
         }
-        forwarded?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
+        notice?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
     }
 }
 

@@ -61,7 +61,7 @@
 
     {"id": "message.rich-text", "what": "Formatted messages show bold, italic, code, lists, quotes, links and spoilers.", "mac": "done", "android": "done"},
     {"id": "message.mention-pills", "what": "Mentions show as names in pills, with yours highlighted.", "mac": "done", "android": "done"},
-    {"id": "message.matrix-links", "what": "Links to Matrix rooms, messages and people open in the app.", "mac": "done", "android": "missing"},
+    {"id": "message.matrix-links", "what": "Links to Matrix rooms, messages and people open in the app.", "mac": "done", "android": "done"},
     {"id": "message.reply-preview", "what": "A reply shows the message it quotes.", "mac": "done", "android": "done"},
     {"id": "message.edited", "what": "An edited message shows its new text, marked (edited).", "mac": "done", "android": "done"},
     {"id": "message.deleted", "what": "A deleted message shows as deleted and keeps nothing it said.", "mac": "done", "android": "done"},
