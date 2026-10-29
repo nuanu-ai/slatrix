@@ -37,49 +37,68 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     var query by rememberSaveable { mutableStateOf("") }
     val colors = SlatrixTheme.colors
     val visible = state.rooms.filter { (!directOnly || it.direct) && it.name.contains(query, ignoreCase = true) }
-    Column(Modifier.fillMaxSize().background(colors.frame)) {
-        Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.RootHeaderHeight)
-            .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (directOnly) "Direct messages" else userId.substringAfter(':', "Home"), Modifier.weight(1f),
-                style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
-                .clickable(role = Role.Button, onClick = onYou).semantics { contentDescription = "You" }, contentAlignment = Alignment.Center) {
-                LiveAvatar(AvatarPlaceholder.initials(userId.substringBefore(':')), AvatarPlaceholder.colorIndex(userId), compact = true)
-            }
-        }
-        Surface(Modifier.weight(1f).fillMaxWidth(), shape = SlatrixTheme.topPanelShape, color = colors.canvas) {
-            Box(Modifier.fillMaxSize()) {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    item {
-                        OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(UiMetrics.GapLarge),
-                            placeholder = { Text(if (directOnly) "Find a conversation" else "Find a channel or conversation") },
-                            leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = MaterialTheme.shapes.large)
-                    }
-                    if (!directOnly) {
-                        item { RoomSection("Channels") }
-                        items(visible.filterNot { it.direct }, key = { it.id }) { LiveRoomRow(it, onRoom) }
-                        item { HorizontalDivider(Modifier.padding(top = UiMetrics.GapSmall), color = colors.border) }
-                        item { RoomSection("Direct messages") }
-                    }
-                    items(visible.filter { it.direct }, key = { it.id }) { LiveRoomRow(it, onRoom) }
-                    if (state.loading) item { ConnectionIndicator(true, null) }
-                    else if (visible.isEmpty()) item {
-                        Text(if (query.isNotEmpty()) "No results" else if (directOnly) "No direct messages" else "Your conversations will appear here.",
-                            Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
-                    }
-                    item { Spacer(Modifier.height(UiMetrics.GapSection)) }
-                }
-                state.error?.let { message ->
-                    Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
-                        action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
+    BoxWithConstraints(Modifier.fillMaxSize().background(colors.frame)) {
+        val expanded = maxWidth >= UiMetrics.ExpandedWidth
+        Row(Modifier.fillMaxSize()) {
+            if (expanded) {
+                NavigationRail(containerColor = colors.raised) {
+                    val navigationColors = NavigationRailItemDefaults.colors(
+                        selectedIconColor = colors.textPrimary, selectedTextColor = colors.textPrimary,
+                        indicatorColor = colors.selection, unselectedIconColor = colors.textSecondary,
+                        unselectedTextColor = colors.textSecondary,
+                    )
+                    NavigationRailItem(selected = !directOnly, onClick = { directOnly = false }, icon = { Icon(Icons.Outlined.Home, null) }, label = { Text("Home") }, colors = navigationColors)
+                    NavigationRailItem(selected = directOnly, onClick = { directOnly = true }, icon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) }, label = { Text("DMs") }, colors = navigationColors)
+                    NavigationRailItem(selected = false, onClick = onYou, icon = { Icon(Icons.Outlined.PersonOutline, null) }, label = { Text("You") }, colors = navigationColors)
                 }
             }
-        }
-        NavigationBar(containerColor = colors.canvas) {
-            NavigationBarItem(selected = !directOnly, onClick = { directOnly = false }, icon = { Icon(Icons.Outlined.Home, null) }, label = { Text("Home") })
-            NavigationBarItem(selected = directOnly, onClick = { directOnly = true }, icon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) }, label = { Text("DMs") })
-            NavigationBarItem(selected = false, onClick = onYou, icon = { Icon(Icons.Outlined.PersonOutline, null) }, label = { Text("You") })
+            Column(Modifier.weight(1f)) {
+                Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.RootHeaderHeight)
+                    .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (directOnly) "Direct messages" else userId.substringAfter(':', "Home"), Modifier.weight(1f),
+                        style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
+                        .clickable(role = Role.Button, onClick = onYou).semantics { contentDescription = "You" }, contentAlignment = Alignment.Center) {
+                        LiveAvatar(AvatarPlaceholder.initials(userId.substringBefore(':')), AvatarPlaceholder.colorIndex(userId), compact = true)
+                    }
+                }
+                Surface(Modifier.weight(1f).fillMaxWidth(), shape = SlatrixTheme.topPanelShape, color = colors.canvas) {
+                    Box(Modifier.fillMaxSize()) {
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            item {
+                                OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(UiMetrics.GapLarge),
+                                    placeholder = { Text(if (directOnly) "Find a conversation" else "Find a channel or conversation") },
+                                    leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = MaterialTheme.shapes.large)
+                            }
+                            if (!directOnly) {
+                                item { RoomSection("Channels") }
+                                items(visible.filterNot { it.direct }, key = { it.id }) { LiveRoomRow(it, onRoom) }
+                                item { HorizontalDivider(Modifier.padding(top = UiMetrics.GapSmall), color = colors.border) }
+                                item { RoomSection("Direct messages") }
+                            }
+                            items(visible.filter { it.direct }, key = { it.id }) { LiveRoomRow(it, onRoom) }
+                            if (state.loading) item { ConnectionIndicator(true, null) }
+                            else if (visible.isEmpty()) item {
+                                Text(if (query.isNotEmpty()) "No results" else if (directOnly) "No direct messages" else "Your conversations will appear here.",
+                                    Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
+                            }
+                            item { Spacer(Modifier.height(UiMetrics.GapSection)) }
+                        }
+                        state.error?.let { message ->
+                            Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
+                                action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
+                        }
+                    }
+                }
+                if (!expanded) {
+                    NavigationBar(containerColor = colors.canvas) {
+                        NavigationBarItem(selected = !directOnly, onClick = { directOnly = false }, icon = { Icon(Icons.Outlined.Home, null) }, label = { Text("Home") })
+                        NavigationBarItem(selected = directOnly, onClick = { directOnly = true }, icon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) }, label = { Text("DMs") })
+                        NavigationBarItem(selected = false, onClick = onYou, icon = { Icon(Icons.Outlined.PersonOutline, null) }, label = { Text("You") })
+                    }
+                }
+            }
         }
     }
 }
