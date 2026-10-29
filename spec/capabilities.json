@@ -49,7 +49,7 @@
     {"id": "channel.invite", "what": "Invite people to a channel or workspace.", "mac": "done", "android": "missing"},
     {"id": "channel.link-workspace", "what": "Add a channel to another workspace, or take it out.", "mac": "done", "android": "missing"},
     {"id": "channel.leave", "what": "Leave a channel.", "mac": "done", "android": "missing"},
-    {"id": "channel.read-only", "what": "A channel you can't post in says so in place of the composer.", "mac": "done", "android": "missing"},
+    {"id": "channel.read-only", "what": "A channel you can't post in says so in place of the composer.", "mac": "done", "android": "done"},
 
     {"id": "composer.send", "what": "Send a text message.", "mac": "done", "android": "done"},
     {"id": "composer.formatting", "what": "Format a message with bold, italic, strikethrough, code, lists, quotes and links.", "mac": "done", "android": "missing"},

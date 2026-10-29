@@ -12,6 +12,7 @@ import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import android.content.ClipData
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -46,6 +47,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -251,7 +253,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             else -> "Message #${room.name}"
         }
         val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
-        MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders)
+        if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders) else CannotPost()
     }
 }
 
@@ -264,6 +266,16 @@ private fun NewLine() {
         HorizontalDivider(Modifier.weight(1f), color = colors.destructive)
         Text("New", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = colors.destructive)
     }
+}
+
+/** The Mac's line in place of the composer, in a panel like the composer's. */
+@Composable
+private fun CannotPost() {
+    val colors = SlatrixTheme.colors
+    Text("You don’t have permission to post in this channel.", Modifier.fillMaxWidth()
+        .border(UiMetrics.Divider, colors.border, SlatrixTheme.topPanelShape).background(colors.canvas, SlatrixTheme.topPanelShape)
+        .heightIn(min = UiMetrics.ComposerMinHeight).wrapContentHeight().padding(horizontal = UiMetrics.GapLarge),
+        style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, textAlign = TextAlign.Center)
 }
 
 /** Slack's bar between a thread's root and its replies. */
