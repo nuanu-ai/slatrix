@@ -45,7 +45,7 @@ class PushNotificationWorker(context: Context, parameters: WorkerParameters) : C
                         null
                     }
                     if ((runtime.account.state.value as? AccountState.Connected)?.client === account.client) {
-                        notifications.show(account.userId, roomId, eventId, status, runtime.identity.value?.state?.value)
+                        notifications.deliver(account.client, account.userId, roomId, eventId, status, runtime.identity.value?.state?.value)
                     }
                 } finally {
                     status?.destroy()

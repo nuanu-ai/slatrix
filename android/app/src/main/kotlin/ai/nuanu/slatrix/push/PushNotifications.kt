@@ -17,6 +17,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import java.security.MessageDigest
+import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.Membership
 import org.matrix.rustcomponents.sdk.MessageLikeEventContent
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.NotificationEvent
@@ -28,6 +30,13 @@ class PushNotifications(private val context: Context) {
     private val preferences = context.getSharedPreferences("push-delivery", Context.MODE_PRIVATE)
     val enabled: Boolean get() = manager.areNotificationsEnabled() && (Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+
+    fun deliver(client: Client, userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState?) {
+        // Anyone holding the push token can name any event; only a joined room earns an alert we can't resolve.
+        if (status !is NotificationStatus.Event &&
+            runCatching { client.getRoom(roomId)?.membership() }.getOrNull() != Membership.JOINED) return
+        show(userId, roomId, eventId, status, identity)
+    }
 
     @SuppressLint("UseKtx") // KTX edit discards the commit result.
     fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState? = null) = synchronized(deliveryLock) {
