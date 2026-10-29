@@ -92,6 +92,21 @@ class SearchScreenTest {
         compose.runOnIdle { assertEquals(listOf("!design:example.org"), opened) }
     }
 
+    @Test fun aSearchWhosePageHasNoHitsHereAsksForTheNextInsteadOfSayingNoResults() {
+        var more = 0
+        val elsewhere = SearchHit("!elsewhere:example.org", "\$1", "@sam:example.org", "Sam", "budget elsewhere", 1_000)
+        compose.setContent {
+            SlatrixTheme {
+                SearchScreen(rooms, "@alex:example.org", MessageSearchState(MessageSearchQuery("budget"), listOf(elsewhere), endReached = false),
+                    {}, { more++ }, {})
+            }
+        }
+        compose.onNode(hasSetTextAction()).performTextInput("budget")
+        compose.onNode(hasSetTextAction()).performImeAction()
+        compose.runOnIdle { assertTrue("The next page is asked for", more > 0) }
+        compose.onNodeWithText("No results for “budget”").assertDoesNotExist()
+    }
+
     @Test fun aSearchWithNoHitsSaysSo() {
         compose.setContent {
             SlatrixTheme { SearchScreen(rooms, "@alex:example.org", MessageSearchState(MessageSearchQuery("zebra")), {}, {}, {}) }
