@@ -66,7 +66,9 @@ internal fun ThreadReplies(thread: MessageThread, onOpen: (() -> Unit)?) {
     Row(Modifier.padding(top = UiMetrics.GapTiny).heightIn(min = UiMetrics.ChipHeight)
         .then(if (onOpen != null) Modifier.clickable(onClickLabel = "View thread", onClick = onOpen) else Modifier),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
-        thread.lastReplier?.let { LiveAvatar(AvatarPlaceholder.initials(it), AvatarPlaceholder.colorIndex(it), UiMetrics.CompactAvatar) }
+        thread.lastReplier?.let {
+            LiveAvatar(AvatarPlaceholder.initials(it), AvatarPlaceholder.colorIndex(it), UiMetrics.CompactAvatar, thread.lastReplierAvatarUrl)
+        }
         Text("${thread.replies} ${if (thread.replies == 1) "reply" else "replies"}", style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold, color = colors.accent, maxLines = 1)
         thread.lastReplyAt?.let { at ->

@@ -36,6 +36,7 @@ class MatrixActivityTest {
         assertEquals(ActivityKind.Mention, mention.kind)
         assertEquals("Team", mention.roomName)
         assertEquals("Sam", mention.senderName)
+        assertEquals("mxc://example.org/sam", mention.avatarUrl)
         assertEquals("Can you review?", mention.body)
     }
 
@@ -87,7 +88,7 @@ private fun item(eventId: String, at: ULong, sender: String, content: TimelineEv
         override fun timestamp(): ULong = at
         override fun threadRootEventId(): String? = thread
     }),
-    rawEvent = raw, senderInfo = NotificationSenderInfo("Sam", null, false),
+    rawEvent = raw, senderInfo = NotificationSenderInfo("Sam", "mxc://example.org/sam", false),
     roomInfo = NotificationRoomInfo(if (direct) "Sam" else "Team", null, null, null, null, 2u, 0u, emptyList(), true, direct, false, direct),
     isNoisy = true, hasMention = mention, threadId = thread, actions = null,
 )

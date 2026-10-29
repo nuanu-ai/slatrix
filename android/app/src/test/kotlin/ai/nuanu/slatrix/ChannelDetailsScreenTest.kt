@@ -233,6 +233,15 @@ class ChannelDetailsScreenTest {
         compose.onNodeWithText("No pinned messages").assertDoesNotExist()
     }
 
+    @Test fun aRoomPastTheSdksLimitSaysHowManyOfItsPinsShow() {
+        details(room.copy(pinned = (1..140).map { "\$pin-$it" } + "\$Ship it"), ChannelDetailsActions(pins = {
+            PinnedMessages(ConversationState(listOf(pinned("Ship it")), loading = false)) {}
+        }))
+        compose.onNodeWithText("Pinned messages").performClick()
+        compose.onNodeWithText("Ship it").assertIsDisplayed()
+        compose.onNodeWithText("Showing the 128 most recent of 141 pinned messages.").assertIsDisplayed()
+    }
+
     @Test fun withoutThePowerToPinPinsCantBeUnpinned() {
         details(room.copy(pinned = listOf("\$Ship it")), ChannelDetailsActions(pins = {
             PinnedMessages(ConversationState(listOf(pinned("Ship it")), loading = false)) {}

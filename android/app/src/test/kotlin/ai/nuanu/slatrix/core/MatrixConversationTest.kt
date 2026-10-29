@@ -27,6 +27,7 @@ class MatrixConversationTest {
         assertEquals("Hello", message.body)
         assertEquals("Mira Chen", message.senderName)
         assertEquals("MC", message.initials)
+        assertEquals("The sender's picture comes with the message", "mxc://example.org/mira", message.avatarUrl)
         conversation.close()
     }
 
@@ -246,14 +247,14 @@ class MatrixConversationTest {
         val summary = object : ThreadSummary(NoHandle) {
             override fun numReplies(): ULong = 3u
             override fun latestEvent(): EmbeddedEventDetails = EmbeddedEventDetails.Ready(reply, "@sam:example.org",
-                ProfileDetails.Ready("Sam Okafor", false, null, null, null), 1_700_000_600_000u, EventOrTransactionId.EventId("\$r"))
+                ProfileDetails.Ready("Sam Okafor", false, "mxc://example.org/sam", null, null), 1_700_000_600_000u, EventOrTransactionId.EventId("\$r"))
         }
         val root = TimelineItemContent.MsgLike(MsgLikeContent(
             MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Plan?", null)), "Plan?", false, null)), null, null, summary))
         val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Plan?", content = root), conversationItem("b", "\$b", "Solo")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
         val messages = conversation.state.first { it.rows.isNotEmpty() }.rows.messages
-        assertEquals(listOf(MessageThread(3, "Sam Okafor", 1_700_000_600_000L), null), messages.map { it.thread })
+        assertEquals(listOf(MessageThread(3, "Sam Okafor", 1_700_000_600_000L, "mxc://example.org/sam"), null), messages.map { it.thread })
         conversation.close()
     }
 
@@ -826,7 +827,8 @@ private fun conversationItem(
         isRemote = !local,
         eventOrTransactionId = if (local) EventOrTransactionId.TransactionId(eventId) else EventOrTransactionId.EventId(eventId),
         sender = sender,
-        senderProfile = ProfileDetails.Ready(if (sender == "@mira:example.org") "Mira Chen" else "Sam Okafor", false, null, null, null),
+        senderProfile = ProfileDetails.Ready(if (sender == "@mira:example.org") "Mira Chen" else "Sam Okafor", false,
+            "mxc://example.org/" + sender.drop(1).substringBefore(':'), null, null),
         forwarder = null, forwarderProfile = null, isOwn = editable, isEditable = editable,
         content = content ?: TimelineItemContent.MsgLike(MsgLikeContent(
             MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)),

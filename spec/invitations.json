@@ -1,0 +1,11 @@
+{
+  "about": "Where a room goes in the conversation lists by its membership. An invitation, to a workspace too, is listed with the conversations, where it can be accepted or declined; only a joined workspace joins the workspace picker; a room you left or were banned from is not listed. space says whether the room is a workspace.",
+  "placement": [
+    { "name": "An invitation to a workspace stays an invitation", "space": true, "membership": "invited", "expected": "conversation" },
+    { "name": "A joined workspace joins the picker", "space": true, "membership": "joined", "expected": "workspace" },
+    { "name": "An invitation to a conversation is listed", "space": false, "membership": "invited", "expected": "conversation" },
+    { "name": "A joined conversation is listed", "space": false, "membership": "joined", "expected": "conversation" },
+    { "name": "A workspace you left is not listed", "space": true, "membership": "left", "expected": "ignored" },
+    { "name": "A conversation you were banned from is not listed", "space": false, "membership": "banned", "expected": "ignored" }
+  ]
+}

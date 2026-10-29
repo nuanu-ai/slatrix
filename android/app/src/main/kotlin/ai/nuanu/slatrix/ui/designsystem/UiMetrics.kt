@@ -10,6 +10,8 @@ object UiMetrics {
     val GapSection = 24.dp
     val Avatar = 40.dp
     val ProfileAvatar = 56.dp
+    /** A profile page's picture. */
+    val ProfilePhoto = 120.dp
     val Touch = 48.dp
     /** Slack's conversation list row. */
     val ListRow = 44.dp
@@ -32,6 +34,8 @@ object UiMetrics {
     val RootHeaderHeight = 60.dp
     val ComposerMinHeight = 64.dp
     val FormWidth = 480.dp
+    /** Slack's cards at the top of Home, such as Later. */
+    val HomeCard = 100.dp
     const val ProgressDelayMillis = 400L
     const val NoticeMillis = 4_000L
     /** How long a message jumped to stays highlighted, as on the Mac. */
