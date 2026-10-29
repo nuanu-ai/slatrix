@@ -112,10 +112,11 @@ fun BrowserSignInScreen(provider: String, error: String?, onOpen: () -> Unit, on
 }
 
 @Composable
-fun RestoreSessionScreen(connecting: Boolean, error: String?, onRetry: () -> Unit, onCancel: () -> Unit) {
+fun RestoreSessionScreen(connecting: Boolean, error: String?, onRetry: () -> Unit, onSignInAgain: () -> Unit) {
     AccountLayout("Restore your session", error = error) {
         AccountAction("Try again", !connecting, onRetry)
-        ConnectionIndicator(connecting, onCancel)
+        TextButton(onClick = onSignInAgain, enabled = !connecting, shape = MaterialTheme.shapes.small) { Text("Sign in again") }
+        ConnectionIndicator(connecting, null)
     }
 }
 

@@ -4,7 +4,18 @@ import android.app.Application
 import ai.nuanu.slatrix.ui.account.SignInMethodsScreen
 import ai.nuanu.slatrix.core.SignInOptions
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.core.MatrixAccount
+import ai.nuanu.slatrix.core.SessionStore
+import ai.nuanu.slatrix.ui.account.SlatrixApp
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.test.core.app.ApplicationProvider
+import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import org.junit.Assert.assertFalse
+import org.matrix.rustcomponents.sdk.OAuthConfiguration
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -39,5 +50,22 @@ class SignInScreenTest {
         compose.onNodeWithText("Password").performTextInput("  secret  ")
         compose.onNode(hasText("Sign in") and hasClickAction()).performClick()
         compose.runOnIdle { assertEquals(listOf("alice", "  secret  "), submitted) }
+    }
+
+    @Test fun signingInAgainAfterAFailedRestoreForgetsTheSavedSession() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val saved = File(context.noBackupFilesDir, "session.enc").apply { writeBytes("unreadable-session-fixture".toByteArray()) }
+        val scope = CoroutineScope(SupervisorJob())
+        val account = MatrixAccount(scope, SessionStore(context), File(context.noBackupFilesDir, "matrix"),
+            OAuthConfiguration("Slatrix", "com.github.nuanu-ai.slatrix.dev:/oauth/callback", "https://github.com/nuanu-ai/slatrix",
+                null, null, null, emptyMap()))
+        compose.setContent { SlatrixApp(account, null, null, null) }
+        account.restore()
+
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Sign in again").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Sign in again").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Homeserver").fetchSemanticsNodes().isNotEmpty() }
+        assertFalse(saved.exists())
+        scope.cancel()
     }
 }

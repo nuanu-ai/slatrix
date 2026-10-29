@@ -26,6 +26,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.ClientDelegate
+import org.matrix.rustcomponents.sdk.TaskHandle
 import org.matrix.rustcomponents.sdk.ClientSessionDelegate
 import org.matrix.rustcomponents.sdk.HomeserverLoginDetails
 import org.matrix.rustcomponents.sdk.OAuthPrompt
@@ -350,6 +352,100 @@ class MatrixAccountDeviceTest {
         assertTrue(unreadable.contentEquals(File(directory, "session.enc").readBytes()))
     }
 
+    @Test fun signingOutReturnsToSignInAtOnceAndCleansUpBehindANewSignIn() = runBlocking {
+        val client = AuthClient()
+        val clients = ArrayDeque(listOf(client, AuthClient()))
+        val directories = mutableListOf<File>()
+        var cleanedUp: Client? = null
+        val releaseCleanup = CompletableDeferred<Unit>()
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration, onSignOut = {
+            check(!client.loggedOut)
+            cleanedUp = it
+            releaseCleanup.await()
+        }) { _, storeId, _, _, _ ->
+            directories += File(directory, "matrix/$storeId").apply { mkdirs(); File(this, "keys").writeText("encrypted-fixture") }
+            clients.removeFirst()
+        }
+        store.save(StoredSession(client.authenticatedSession, "9de7b914-3890-4354-b3bb-8f4f53f0ee63",
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="))
+        account.restore()
+        withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
+
+        account.signOut()
+        withTimeout(5_000) { account.state.first { it is AccountState.SignedOut } }
+        assertNull(store.load())
+        discoverServer(account)
+        releaseCleanup.complete(Unit)
+        withTimeout(5_000) { scope.coroutineContext[Job]!!.children.toList().joinAll() }
+
+        assertEquals("Push and notification cleanup gets the live client before logout", client, cleanedUp)
+        assertTrue(client.loggedOut)
+        assertTrue("The auth error subscription keeps the closed client alive", client.subscriptionCancelled)
+        assertFalse(directories.first().exists())
+        assertTrue("A sign-in started during cleanup keeps its store", directories.last().exists())
+    }
+
+    @Test fun aSessionThatCannotBeForgottenStaysSavedAndSignedInOnTheServer() = runBlocking {
+        val client = AuthClient()
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> client }
+        discoverServer(account)
+        account.signIn("alice", "password")
+        withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
+        val retainedDirectory = File(target.cacheDir, "${directory.name}-retained")
+        check(directory.renameTo(retainedDirectory))
+        try {
+            check(directory.createNewFile())
+            account.signOut()
+            val failed = withTimeout(5_000) { account.state.first { it is AccountState.Failed } } as AccountState.Failed
+            withTimeout(5_000) { scope.coroutineContext[Job]!!.children.toList().joinAll() }
+
+            assertTrue(failed.canRetryRestore)
+            assertFalse(client.loggedOut)
+        } finally {
+            directory.delete()
+            check(retainedDirectory.renameTo(directory))
+        }
+        assertEquals(client.authenticatedSession, store.load()?.session)
+    }
+
+    @Test fun aRevokedSessionSignsOutWhileSoftLogoutAndStaleClientsKeepTheSession() = runBlocking {
+        val revoked = AuthClient()
+        val next = AuthClient()
+        val clients = ArrayDeque(listOf(revoked, next))
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> clients.removeFirst() }
+        discoverServer(account)
+        account.signIn("alice", "password")
+        withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
+
+        revoked.delegate!!.didReceiveAuthError(isSoftLogout = true)
+        assertTrue(account.state.value is AccountState.Connected)
+        revoked.delegate!!.didReceiveAuthError(isSoftLogout = false)
+        withTimeout(5_000) { account.state.first { it is AccountState.SignedOut } }
+        assertNull(store.load())
+
+        discoverServer(account)
+        account.signIn("alice", "password")
+        withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
+        revoked.delegate!!.didReceiveAuthError(isSoftLogout = false)
+        assertEquals(next, (account.state.value as AccountState.Connected).client)
+        assertEquals(next.authenticatedSession, store.load()?.session)
+    }
+
+    @Test fun aTokenRefreshedWhileSignInFinishesIsTheOneSaved() = runBlocking {
+        var delegate: ClientSessionDelegate? = null
+        val refreshed = AuthClient().authenticatedSession.copy(accessToken = "refreshed-access", refreshToken = "refreshed-refresh")
+        val client = AuthClient(beforeSession = { delegate!!.saveSessionInKeychain(refreshed) })
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, persistence ->
+            delegate = persistence
+            client
+        }
+        discoverServer(account)
+        account.signIn("alice", "password")
+        withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
+
+        assertEquals(refreshed, SessionStore(context).load()?.session)
+    }
+
     private suspend fun discoverServer(account: MatrixAccount, homeserver: String = "https://matrix.example.org") {
         account.selectHomeserver(homeserver)
         withTimeout(5_000) { account.state.first { it is AccountState.ChooseMethod } }
@@ -368,6 +464,7 @@ class MatrixAccountDeviceTest {
 
     private class AuthClient(
         private val details: LoginDetails = LoginDetails(),
+        private val beforeSession: () -> Unit = {},
         private val beforeLogin: suspend () -> Unit = {},
     ) : Client(NoHandle) {
         val authenticatedSession = Session(
@@ -375,6 +472,9 @@ class MatrixAccountDeviceTest {
             "https://matrix.example.org", null, SlidingSyncVersion.NATIVE,
         )
         var credentials: Pair<String, String>? = null
+        var loggedOut = false
+        var delegate: ClientDelegate? = null
+        var subscriptionCancelled = false
         var restoredSession: Session? = null
         var oauthConfig: OAuthConfiguration? = null
         var oauthCallback: String? = null
@@ -411,6 +511,15 @@ class MatrixAccountDeviceTest {
         }
         override suspend fun homeserverLoginDetails(): HomeserverLoginDetails = details
         override suspend fun restoreSession(session: Session) { restoredSession = session }
-        override fun session() = authenticatedSession
+        override fun session(): Session {
+            val current = authenticatedSession
+            beforeSession()
+            return current
+        }
+        override suspend fun logout() { loggedOut = true }
+        override fun setDelegate(delegate: ClientDelegate?): TaskHandle {
+            this.delegate = delegate
+            return object : TaskHandle(NoHandle) { override fun cancel() { subscriptionCancelled = true } }
+        }
     }
 }

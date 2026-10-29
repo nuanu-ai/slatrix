@@ -28,23 +28,21 @@ class PushRegistration(context: Context) {
     }
 
     suspend fun register(client: Client, userId: String, gateway: String) = registrationLock.withLock {
-        val owner = MessageDigest.getInstance("SHA-256").digest(userId.toByteArray()).joinToString("") { "%02x".format(it) }
+        val owner = owner(userId)
         while (true) {
             currentCoroutineContext().ensureActive()
             val token = synchronized(tokenLock) { preferences.getString("token", null) } ?: return@withLock
             val previous = preferences.getString("$owner.current", null)
             val stale = preferences.getStringSet("$owner.stale", emptySet())!!.toMutableSet()
-            if (previous != token || preferences.getString("$owner.gateway", null) != gateway) {
-                client.setPusher(
-                    PusherIdentifiers(token, appId), PusherKind.Http(HttpPusherData(gateway, PushFormat.EVENT_ID_ONLY, null)),
-                    appDisplayName = "Slatrix", deviceDisplayName = "Android", profileTag = null,
-                    lang = Locale.getDefault().toLanguageTag(), append = false,
-                )
-                if (previous != null && previous != token) stale.add(previous)
-                stale.remove(token)
-                check(preferences.edit().putString("$owner.current", token).putString("$owner.gateway", gateway)
-                    .putStringSet("$owner.stale", stale).commit())
-            }
+            // The server may have dropped the pusher, and setting it again is idempotent.
+            client.setPusher(
+                PusherIdentifiers(token, appId), PusherKind.Http(HttpPusherData(gateway, PushFormat.EVENT_ID_ONLY, null)),
+                appDisplayName = "Slatrix", deviceDisplayName = "Android", profileTag = null,
+                lang = Locale.getDefault().toLanguageTag(), append = false,
+            )
+            if (previous != null && previous != token) stale.add(previous)
+            stale.remove(token)
+            check(preferences.edit().putString("$owner.current", token).putStringSet("$owner.stale", stale).commit())
             for (old in stale.toList()) {
                 client.deletePusher(PusherIdentifiers(old, appId))
                 stale.remove(old)
@@ -53,6 +51,16 @@ class PushRegistration(context: Context) {
             if (synchronized(tokenLock) { preferences.getString("token", null) } == token) return@withLock
         }
     }
+
+    /** Best effort: a revoked session can't delete its pushers, and the server drops them with the device. */
+    suspend fun unregister(client: Client, userId: String) = registrationLock.withLock {
+        val owner = owner(userId)
+        val tokens = preferences.getStringSet("$owner.stale", emptySet())!! + listOfNotNull(preferences.getString("$owner.current", null))
+        for (token in tokens) runCatching { client.deletePusher(PusherIdentifiers(token, appId)) }
+        check(preferences.edit().remove("$owner.current").remove("$owner.stale").commit())
+    }
+
+    private fun owner(userId: String) = MessageDigest.getInstance("SHA-256").digest(userId.toByteArray()).joinToString("") { "%02x".format(it) }
 
     companion object {
         private val tokenLock = Any()
