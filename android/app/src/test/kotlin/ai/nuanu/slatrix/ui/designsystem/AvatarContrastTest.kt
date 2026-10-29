@@ -6,9 +6,7 @@ import org.junit.Test
 
 class AvatarContrastTest {
     @Test fun initialsMeetTheContrastRequirementAcrossEveryAvatarColor() {
-        val style = AvatarStyle.label
-        val largeBoldText = style.fontSize.value >= 18.667f && (style.fontWeight?.weight ?: 400) >= 700
-        val minimum = if (largeBoldText) 3f else 4.5f
+        val minimum = 4.5f
         val foreground = DesignTokens.colors(false, SidebarPalette.Aubergine).getValue("onAccent").luminance()
         for (background in DesignTokens.avatarColors) {
             val luminance = background.luminance()
