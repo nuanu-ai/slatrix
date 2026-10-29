@@ -1,7 +1,7 @@
 {
   "about": "What a person can do in Slatrix, and whether each app does it. AGENTS.md says how to keep it current.",
   "capabilities": [
-    {"id": "app.icon", "what": "The app has its own icon in the Dock or launcher.", "mac": "done", "android": "missing"},
+    {"id": "app.icon", "what": "The app has its own icon in the Dock or launcher.", "mac": "done", "android": "done"},
     {"id": "app.appearance", "what": "Choose light, dark or the system's appearance, and a sidebar theme.", "mac": "done", "android": "done"},
     {"id": "app.zoom", "what": "Zoom the whole interface from 80% to 200% with ⌘= and ⌘-.", "mac": "done", "android": "n/a: Android scales with the system font size instead"},
     {"id": "app.updates", "what": "The app updates itself to new releases.", "mac": "done", "android": "n/a: an Android app updates through the store or installer it came from"},
