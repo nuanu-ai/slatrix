@@ -1,4 +1,5 @@
 import Foundation
+import MatrixRustSDK
 import Testing
 
 @testable import Slatrix
@@ -48,5 +49,63 @@ struct SendToChannelTests {
     func copy(spec: Send) throws {
         let content = try ChannelCopy.content(ComposerFormat.message(draft: spec.draft), replyTo: spec.replyTo)
         #expect(try JSONDecoder().decode(JSON.self, from: Data(content.utf8)) == spec.content)
+    }
+}
+
+private final class CopyRoom: Room, @unchecked Sendable {
+    /// Raw events sent to the room, as their type and JSON content.
+    let raw = Recorder<(type: String, content: String)>()
+    override func membership() -> Membership { .joined }
+    override func sendRaw(eventType: String, content: String) async throws -> String {
+        raw.append((eventType, content))
+        return "$copy"
+    }
+}
+
+private final class CopyClient: Client, @unchecked Sendable {
+    let room = CopyRoom(noHandle: .init())
+    override func getRoom(roomId: String) throws -> Room? { room }
+}
+
+/// The reader's own text message in a timeline, still sending under a transaction ID or sent under an event ID.
+private func own(_ id: EventOrTransactionId, body: String) -> FakeTimelineItem {
+    var event = textEvent("$unused", body: body, sender: "@sender:example.org")
+    event.eventOrTransactionId = id
+    if case .transactionId = id { event.isRemote = false }
+    event.isOwn = true
+    // The SDK keeps an item's unique ID when its local echo turns remote.
+    return FakeTimelineItem(event, uniqueID: body)
+}
+
+@MainActor
+struct SendToChannelServiceTests {
+    // capability: thread.send-to-channel
+    @Test("A reply also sent to the channel goes to its thread, then to the channel as a reply to it once it's sent")
+    func copiesOnceSent() async throws {
+        let service = MatrixService()
+        let client = CopyClient(noHandle: .init())
+        // An earlier reply still sending, which the copy must not mistake for this one.
+        let thread = FakeLiveTimeline([own(.transactionId(transactionId: "earlier"), body: "First")])
+        service.user = ChatUser(id: "@sender:example.org", name: "Sender")
+        service.selectedRoomID = "!room:example.org"
+        service.configureMessageActionsForChecks(
+            client: client, main: nil, thread: thread, rootID: "$root", sessionID: UUID(), selectionID: UUID(),
+            threadID: UUID())
+
+        try await service.sendMessage("On it", threadRootID: "$root", roomID: "!room:example.org", alsoToChannel: true)
+        thread.emit([.pushBack(value: own(.transactionId(transactionId: "this"), body: "On it"))])
+        thread.emit([.set(index: 0, value: own(.eventId(eventId: "$earlier"), body: "First"))])
+        thread.emit([.set(index: 1, value: own(.eventId(eventId: "$reply"), body: "On it"))])
+
+        #expect(thread.sent.all.count == 1)
+        #expect(await eventually { client.room.raw.all.count == 1 })
+        let copy = try #require(client.room.raw.all.first)
+        let content = try JSONDecoder().decode(JSON.self, from: Data(copy.content.utf8))
+        guard case .object(let fields) = content, case .object(let relation) = fields["m.relates_to"] else {
+            Issue.record("the copy isn't a reply: \(copy.content)")
+            return
+        }
+        #expect(copy.type == "m.room.message" && fields["body"] == .string("On it"))
+        #expect(relation["m.in_reply_to"] == .object(["event_id": .string("$reply")]))
     }
 }
