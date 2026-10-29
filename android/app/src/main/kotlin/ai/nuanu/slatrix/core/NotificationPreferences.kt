@@ -10,29 +10,31 @@ import org.matrix.rustcomponents.sdk.RoomNotificationMode.MENTIONS_AND_KEYWORDS_
 enum class NotifyAbout(val label: String) {
     All("All new messages"),
     DirectAndMentions("Direct messages, mentions & keywords"),
-    Nothing("Nothing"),
+    None("Nothing"),
 }
 
 /**
  * What notifies on this phone. All and DirectAndMentions are the account's default push rules, shared with the Mac;
- * Nothing silences only this phone, since the SDK can't mute an account's defaults.
+ * None silences only this phone, since the SDK can't mute an account's defaults.
  */
-class NotificationPreferences(private val context: Context) {
+class NotificationPreferences(private val context: Context, userId: String) {
     private val values = context.getSharedPreferences("notifications", Context.MODE_PRIVATE)
+    private val pausedKey = "paused:$userId"
+    private val previewsKey = "previews:$userId"
 
-    val paused: Boolean get() = values.getBoolean("paused", false)
+    val paused: Boolean get() = values.getBoolean(pausedKey, false)
 
     var previews: Boolean
-        get() = values.getBoolean("previews", true)
+        get() = values.getBoolean(previewsKey, true)
         set(value) {
-            values.edit(commit = true) { putBoolean("previews", value) }
+            values.edit(commit = true) { putBoolean(previewsKey, value) }
             // Alerts already up still show the text.
             if (!value) context.getSystemService(NotificationManager::class.java).cancelAll()
         }
 
     /** Null when the account's rules, set elsewhere, match none of the choices. */
     suspend fun notifyAbout(settings: NotificationSettings): NotifyAbout? {
-        if (paused) return NotifyAbout.Nothing
+        if (paused) return NotifyAbout.None
         val direct = listOf(true, false).map { settings.getDefaultRoomNotificationMode(it, true) }
         val groups = listOf(true, false).map { settings.getDefaultRoomNotificationMode(it, false) }
         return when {
@@ -44,13 +46,13 @@ class NotificationPreferences(private val context: Context) {
     }
 
     suspend fun setNotifyAbout(settings: NotificationSettings, choice: NotifyAbout) {
-        if (choice != NotifyAbout.Nothing) {
+        if (choice != NotifyAbout.None) {
             val groups = if (choice == NotifyAbout.All) ALL_MESSAGES else MENTIONS_AND_KEYWORDS_ONLY
             for (encrypted in listOf(true, false)) {
                 settings.setDefaultRoomNotificationMode(encrypted, true, ALL_MESSAGES)
                 settings.setDefaultRoomNotificationMode(encrypted, false, groups)
             }
         }
-        values.edit(commit = true) { putBoolean("paused", choice == NotifyAbout.Nothing) }
+        values.edit(commit = true) { putBoolean(pausedKey, choice == NotifyAbout.None) }
     }
 }

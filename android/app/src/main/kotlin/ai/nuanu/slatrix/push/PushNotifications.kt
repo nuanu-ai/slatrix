@@ -50,8 +50,8 @@ class PushNotifications(private val context: Context) {
 
     @SuppressLint("UseKtx") // KTX edit discards the commit result.
     fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState? = null) = synchronized(deliveryLock) {
-        val chosen = NotificationPreferences(context)
-        if (!enabled || chosen.paused || status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted || roomId == openRoom) return@synchronized
+        val settings = NotificationPreferences(context, userId)
+        if (!enabled || settings.paused || status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted || roomId == openRoom) return@synchronized
         val key = pushKey(userId, roomId, eventId)
         val delivered = preferences.getString("delivered", "").orEmpty().split('\n').filter { it.isNotEmpty() }
         if (key in delivered) return@synchronized
@@ -66,7 +66,7 @@ class PushNotifications(private val context: Context) {
             is MessageType.Notice -> message.content.body
             is MessageType.Emote -> message.content.body
             else -> null
-        }?.takeIf { chosen.previews && it.isNotBlank() }?.take(512)
+        }?.takeIf { settings.previews && it.isNotBlank() }?.take(512)
         val title = if (body != null) item?.roomInfo?.displayName?.takeIf { it.isNotBlank() } ?: "Slatrix" else "Slatrix"
         val sender = if (body != null) item?.senderInfo?.displayName?.takeIf { it.isNotBlank() } ?: event?.senderId() else null
         val text = if (body == null) "New message" else if (item?.roomInfo?.isDirect == true || sender == null) body else "$sender: $body"

@@ -27,26 +27,25 @@ import org.matrix.rustcomponents.sdk.NotificationSettings
 
 /** Preferences' Notifications section, reading and saving through [settings] and this phone's preferences. */
 @Composable
-fun LiveNotificationSettings(settings: suspend () -> NotificationSettings) {
-    val preferences = NotificationPreferences(LocalContext.current)
-    var notifyAbout by remember { mutableStateOf<NotifyAbout?>(null) }
+fun LiveNotificationSettings(userId: String, settings: suspend () -> NotificationSettings) {
+    val context = LocalContext.current
+    val preferences = remember(context, userId) { NotificationPreferences(context, userId) }
+    // A phone set to Nothing knows it without the server.
+    var notifyAbout by remember { mutableStateOf(NotifyAbout.None.takeIf { preferences.paused }) }
     var previews by remember { mutableStateOf(preferences.previews) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    suspend fun read() = try { notifyAbout = preferences.notifyAbout(settings()) } catch (cancelled: CancellationException) {
+    suspend fun attempt(failure: String, work: suspend () -> Unit) = try { work() } catch (cancelled: CancellationException) {
         throw cancelled
-    } catch (_: Exception) { }
-    LaunchedEffect(Unit) { read() }
+    } catch (_: Exception) { error = failure }
+    LaunchedEffect(preferences) { if (!preferences.paused) attempt("Couldn't load your settings.") { notifyAbout = preferences.notifyAbout(settings()) } }
     NotificationRows(notifyAbout, previews, error, { choice ->
-        val before = notifyAbout
         notifyAbout = choice
         error = null
         scope.launch {
-            try { preferences.setNotifyAbout(settings(), choice) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) {
-                notifyAbout = before
-                error = "Couldn't save. Try again."
-                read()
-            }
+            attempt("Couldn't save. Try again.") { preferences.setNotifyAbout(settings(), choice) }
+            // Shows what the account has now, which a failure partway may have left between choices.
+            if (error != null) attempt("Couldn't save. Try again.") { notifyAbout = preferences.notifyAbout(settings()) }
         }
     }) { previews = it; preferences.previews = it }
 }
