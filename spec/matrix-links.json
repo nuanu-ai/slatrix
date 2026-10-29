@@ -1,40 +1,223 @@
 {
   "about": "Which links in a message open inside the app, and where. A matrix.to link or a matrix: URI names a person, a conversation by ID or alias, or a message in one, with optional via routing hints. A target's kind is user, room or alias, with event set for a message. Links on other hosts, including look-alikes, are not Matrix links and open in the browser; a Matrix link that is malformed, carries credentials, a port, an unexpected query or fragment, control characters, an oversized length or a via that isn't a server name is refused.",
   "open": [
-    { "name": "A matrix.to person", "link": "https://matrix.to/#/%40alice%3Aexample.org", "target": { "kind": "user", "id": "@alice:example.org" } },
-    { "name": "A matrix.to conversation by ID", "link": "https://matrix.to/#/!room:example.org", "target": { "kind": "room", "id": "!room:example.org" } },
-    { "name": "A matrix.to conversation by alias", "link": "https://matrix.to/#/%23design%3Aexample.org", "target": { "kind": "alias", "id": "#design:example.org" } },
-    { "name": "A matrix.to message by conversation ID", "link": "https://matrix.to/#/!room:example.org/$event", "target": { "kind": "room", "id": "!room:example.org", "event": "$event" } },
-    { "name": "A matrix.to message by alias", "link": "https://matrix.to/#/%23design:example.org/$event", "target": { "kind": "alias", "id": "#design:example.org", "event": "$event" } },
-    { "name": "A matrix: person, asking to chat", "link": "matrix:u/alice:example.org?action=chat", "target": { "kind": "user", "id": "@alice:example.org" } },
-    { "name": "A matrix: message by conversation ID", "link": "matrix:roomid/room:example.org/e/event", "target": { "kind": "room", "id": "!room:example.org", "event": "$event" } },
-    { "name": "Routing hints keep their order, repeats included", "link": "https://matrix.to/#/!room:example.org/$event?via=one.example.org&via=two.example.org&via=one.example.org", "target": { "kind": "room", "id": "!room:example.org", "event": "$event", "via": ["one.example.org", "two.example.org", "one.example.org"] } }
+    {
+      "name": "A matrix.to person",
+      "link": "https://matrix.to/#/%40alice%3Aexample.org",
+      "target": {
+        "kind": "user",
+        "id": "@alice:example.org"
+      }
+    },
+    {
+      "name": "A matrix.to conversation by ID",
+      "link": "https://matrix.to/#/!room:example.org",
+      "target": {
+        "kind": "room",
+        "id": "!room:example.org"
+      }
+    },
+    {
+      "name": "A matrix.to conversation by alias",
+      "link": "https://matrix.to/#/%23design%3Aexample.org",
+      "target": {
+        "kind": "alias",
+        "id": "#design:example.org"
+      }
+    },
+    {
+      "name": "A matrix.to message by conversation ID",
+      "link": "https://matrix.to/#/!room:example.org/$event",
+      "target": {
+        "kind": "room",
+        "id": "!room:example.org",
+        "event": "$event"
+      }
+    },
+    {
+      "name": "A matrix.to message by alias",
+      "link": "https://matrix.to/#/%23design:example.org/$event",
+      "target": {
+        "kind": "alias",
+        "id": "#design:example.org",
+        "event": "$event"
+      }
+    },
+    {
+      "name": "A matrix: person, asking to chat",
+      "link": "matrix:u/alice:example.org?action=chat",
+      "target": {
+        "kind": "user",
+        "id": "@alice:example.org"
+      }
+    },
+    {
+      "name": "A matrix: message by conversation ID",
+      "link": "matrix:roomid/room:example.org/e/event",
+      "target": {
+        "kind": "room",
+        "id": "!room:example.org",
+        "event": "$event"
+      }
+    },
+    {
+      "name": "Routing hints keep their order, repeats included",
+      "link": "https://matrix.to/#/!room:example.org/$event?via=one.example.org&via=two.example.org&via=one.example.org",
+      "target": {
+        "kind": "room",
+        "id": "!room:example.org",
+        "event": "$event",
+        "via": [
+          "one.example.org",
+          "two.example.org",
+          "one.example.org"
+        ]
+      }
+    },
+    {
+      "name": "An alias written with its # as is, as Element writes it",
+      "link": "https://matrix.to/#/#design:example.org",
+      "target": {
+        "kind": "alias",
+        "id": "#design:example.org"
+      }
+    },
+    {
+      "name": "A trailing slash",
+      "link": "https://matrix.to/#/!room:example.org/",
+      "target": {
+        "kind": "room",
+        "id": "!room:example.org"
+      }
+    },
+    {
+      "name": "A room ID with no server, as room version 12 writes them",
+      "link": "https://matrix.to/#/!31hneApxJ_1o-63DmFrpeqnkFfWppnzWso1JvH3ogLM",
+      "target": {
+        "kind": "room",
+        "id": "!31hneApxJ_1o-63DmFrpeqnkFfWppnzWso1JvH3ogLM"
+      }
+    },
+    {
+      "name": "A matrix: URI with the long type names",
+      "link": "matrix:room/design:example.org/event/event",
+      "target": {
+        "kind": "alias",
+        "id": "#design:example.org",
+        "event": "$event"
+      }
+    },
+    {
+      "name": "Any action",
+      "link": "matrix:u/alice:example.org?action=foo",
+      "target": {
+        "kind": "user",
+        "id": "@alice:example.org"
+      }
+    }
   ],
   "ignore": [
-    { "name": "An ordinary host", "link": "https://example.org/#/!room:example.org" },
-    { "name": "A look-alike host", "link": "https://matrix.to.evil/#/!room:example.org" },
-    { "name": "A look-alike host behind credentials", "link": "https://matrix.to@evil.example/#/!room:example.org" }
+    {
+      "name": "An ordinary host",
+      "link": "https://example.org/#/!room:example.org"
+    },
+    {
+      "name": "A look-alike host",
+      "link": "https://matrix.to.evil/#/!room:example.org"
+    },
+    {
+      "name": "A look-alike host behind credentials",
+      "link": "https://matrix.to@evil.example/#/!room:example.org"
+    }
   ],
   "reject": [
-    { "name": "An empty conversation before a message", "link": "https://matrix.to/#///$event" },
-    { "name": "Empty segments after a conversation", "link": "https://matrix.to/#/!room:example.org///" },
-    { "name": "Only an empty segment", "link": "https://matrix.to/#//" },
-    { "name": "No fragment", "link": "https://matrix.to/" },
-    { "name": "The ID in the path", "link": "https://matrix.to/!room:example.org" },
-    { "name": "A query instead of a fragment", "link": "https://matrix.to/?via=server.org" },
-    { "name": "An ID without a sigil", "link": "https://matrix.to/#/invalid" },
-    { "name": "Plain http", "link": "http://matrix.to/#/!room:example.org" },
-    { "name": "A port", "link": "https://matrix.to:443/#/!room:example.org" },
-    { "name": "Credentials", "link": "https://alice:secret@matrix.to/#/!room:example.org" },
-    { "name": "Another path", "link": "https://matrix.to/other#/!room:example.org" },
-    { "name": "A matrix: URI with a host", "link": "matrix://evil.example/u/alice:example.org" },
-    { "name": "A matrix: URI with credentials", "link": "matrix://alice:secret@evil.example/u/alice:example.org" },
-    { "name": "A matrix: URI with a fragment", "link": "matrix:u/alice:example.org#fragment" },
-    { "name": "A null character in an ID", "link": "https://matrix.to/#/@ali%00ce:example.org" },
-    { "name": "A line break in an ID", "link": "matrix:u/ali%0Ace:example.org" },
-    { "name": "A line break in a route", "link": "matrix:u/alice:example.org?via=server%0A.example.org" },
-    { "name": "A URL as a route", "link": "matrix:roomid/room:example.org?via=https%3A%2F%2Fevil.example" },
-    { "name": "Credentials as a route", "link": "matrix:roomid/room:example.org?via=user%40evil.example" },
-    { "name": "An unexpected query", "link": "https://matrix.to/#/!room:example.org?unexpected=value" }
+    {
+      "name": "An empty conversation before a message",
+      "link": "https://matrix.to/#///$event"
+    },
+    {
+      "name": "Empty segments after a conversation",
+      "link": "https://matrix.to/#/!room:example.org///"
+    },
+    {
+      "name": "Only an empty segment",
+      "link": "https://matrix.to/#//"
+    },
+    {
+      "name": "No fragment",
+      "link": "https://matrix.to/"
+    },
+    {
+      "name": "The ID in the path",
+      "link": "https://matrix.to/!room:example.org"
+    },
+    {
+      "name": "A query instead of a fragment",
+      "link": "https://matrix.to/?via=server.org"
+    },
+    {
+      "name": "An ID without a sigil",
+      "link": "https://matrix.to/#/invalid"
+    },
+    {
+      "name": "Plain http",
+      "link": "http://matrix.to/#/!room:example.org"
+    },
+    {
+      "name": "A port",
+      "link": "https://matrix.to:443/#/!room:example.org"
+    },
+    {
+      "name": "Credentials",
+      "link": "https://alice:secret@matrix.to/#/!room:example.org"
+    },
+    {
+      "name": "Another path",
+      "link": "https://matrix.to/other#/!room:example.org"
+    },
+    {
+      "name": "A matrix: URI with a host",
+      "link": "matrix://evil.example/u/alice:example.org"
+    },
+    {
+      "name": "A matrix: URI with credentials",
+      "link": "matrix://alice:secret@evil.example/u/alice:example.org"
+    },
+    {
+      "name": "A matrix: URI with a fragment",
+      "link": "matrix:u/alice:example.org#fragment"
+    },
+    {
+      "name": "A null character in an ID",
+      "link": "https://matrix.to/#/@ali%00ce:example.org"
+    },
+    {
+      "name": "A line break in an ID",
+      "link": "matrix:u/ali%0Ace:example.org"
+    },
+    {
+      "name": "A line break in a route",
+      "link": "matrix:u/alice:example.org?via=server%0A.example.org"
+    },
+    {
+      "name": "A URL as a route",
+      "link": "matrix:roomid/room:example.org?via=https%3A%2F%2Fevil.example"
+    },
+    {
+      "name": "Credentials as a route",
+      "link": "matrix:roomid/room:example.org?via=user%40evil.example"
+    },
+    {
+      "name": "An unexpected query",
+      "link": "https://matrix.to/#/!room:example.org?unexpected=value"
+    },
+    {
+      "name": "A port past 65535",
+      "link": "https://matrix.to/#/@alice:example.org:70000"
+    },
+    {
+      "name": "The same action twice",
+      "link": "matrix:r/design:example.org?action=join&action=join"
+    }
   ]
 }

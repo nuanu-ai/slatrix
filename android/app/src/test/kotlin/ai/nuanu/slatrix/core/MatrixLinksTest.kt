@@ -41,6 +41,9 @@ class MatrixLinksTest {
 
     @Test fun `percent sequences in an id are decoded once`() {
         assertEquals(MatrixLink(MatrixLink.Target.User("@ali%0Ace:example.org")), MatrixLinks.parse("https://matrix.to/#/@ali%250Ace:example.org"))
+        assertEquals("Emoji keep their whole code point", MatrixLink(MatrixLink.Target.Alias("#😀:example.org")),
+            MatrixLinks.parse("matrix:r/😀:example.org"))
+        assertNull("Bytes that aren't UTF-8 are refused, not replaced", MatrixLinks.parse("https://matrix.to/#/%23de%FFsign:example.org"))
     }
 
     private fun JsonObject.name() = this["name"].asString

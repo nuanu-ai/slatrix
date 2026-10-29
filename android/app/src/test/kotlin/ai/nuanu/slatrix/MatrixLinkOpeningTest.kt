@@ -33,11 +33,12 @@ class MatrixLinkOpeningTest {
         val browsed = mutableListOf<String>()
         val notices = mutableListOf<String>()
         val links = listOf("https://matrix.to/#/!design:example.org/\$event", "matrix:r/design:example.org",
-            "https://matrix.to/#/!elsewhere:example.org", "https://example.org/page", "https://matrix.to/#/invalid")
+            "https://matrix.to/#/!elsewhere:example.org", "https://example.org/page", "https://matrix.to/#/invalid",
+            "matrix:roomid/elsewhere:example.org")
         compose.setContent {
             SlatrixTheme {
                 CompositionLocalProvider(LocalUriHandler provides object : UriHandler { override fun openUri(uri: String) { browsed += uri } }) {
-                    ProvideMatrixLinks(listOf(design), { alias -> "!design:example.org".takeIf { alias == "#design:example.org" } },
+                    ProvideMatrixLinks({ listOf(design) }, { alias -> "!design:example.org".takeIf { alias == "#design:example.org" } },
                         { room, event -> opened += room.id to event }, { notices += it }) {
                         val handler = LocalUriHandler.current
                         Column { links.forEach { link -> TextButton({ handler.openUri(link) }) { Text(link) } } }
@@ -50,7 +51,9 @@ class MatrixLinkOpeningTest {
         compose.runOnIdle {
             assertEquals(listOf("!design:example.org" to "\$event", "!design:example.org" to null), opened)
             assertEquals("A conversation you're not in, and other sites, open in the browser",
-                listOf("https://matrix.to/#/!elsewhere:example.org", "https://example.org/page"), browsed)
+                // A browser can't open a matrix: URI, so it gets the matrix.to link instead.
+                listOf("https://matrix.to/#/!elsewhere:example.org", "https://example.org/page", "https://matrix.to/#/!elsewhere:example.org"),
+                browsed)
             assertEquals(listOf("Slatrix can’t open this link."), notices)
         }
     }
