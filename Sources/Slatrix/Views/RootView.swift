@@ -1316,7 +1316,7 @@ struct RootView: View {
             matrix: matrix, saved: matrix.savedMessages.list.saved,
             onOpen: { item in selectRoom(item.roomID, record: true, eventID: item.eventID) },
             onRemove: { item in
-                matrix.savedMessages.toggle(roomID: item.roomID, eventID: item.eventID)
+                matrix.savedMessages.set(roomID: item.roomID, eventID: item.eventID, saved: false)
                 toasts.show("Removed from Later")
             }, onOpenProfile: openProfile
         ).id(composerGeneration)
@@ -2281,9 +2281,9 @@ struct RootView: View {
             matrix.errorMessage = "Wait for the message to send, then save it."
             return
         }
-        let wasSaved = savedIDs.contains(SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id)
-        matrix.savedMessages.toggle(roomID: message.roomID, eventID: message.eventID)
-        toasts.show(wasSaved ? "Removed from Later" : "Message saved for later")
+        let save = !savedIDs.contains(SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id)
+        matrix.savedMessages.set(roomID: message.roomID, eventID: message.eventID, saved: save)
+        toasts.show(save ? "Message saved for later" : "Removed from Later")
     }
     private func run(_ action: @escaping () async throws -> Void) {
         let session = matrix.notificationSessionID

@@ -7,6 +7,11 @@ struct SavedMessageReference: Codable, Hashable, Identifiable {
     var eventID: String
     var savedAt: Date
     var id: String { "\(roomID.utf8.count):\(roomID)\(eventID)" }
+    /// A room (!) and an event ($), as untrusted IDs must be.
+    var hasValidIDs: Bool {
+        ProtectedLocalState.validID(roomID) && roomID.hasPrefix("!") && ProtectedLocalState.validID(eventID)
+            && eventID.hasPrefix("$")
+    }
     init(roomID: String, eventID: String, savedAt: Date = Date()) {
         self.roomID = roomID
         self.eventID = eventID
@@ -46,9 +51,7 @@ struct ProtectedLocalState: Codable, Equatable {
         for list in [saved, savedRemovals ?? []] {
             var seen = Set<String>()
             for item in list {
-                guard Self.validID(item.roomID), item.roomID.hasPrefix("!"),
-                    Self.validID(item.eventID), item.eventID.hasPrefix("$"),
-                    item.savedAt.timeIntervalSince1970.isFinite, seen.insert(item.id).inserted
+                guard item.hasValidIDs, item.savedAt.timeIntervalSince1970.isFinite, seen.insert(item.id).inserted
                 else { throw ProtectedLocalStateError.invalidData }
             }
         }

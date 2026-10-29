@@ -5,20 +5,27 @@ import Observation
 /// Later, one list per account that every device shares through account data, by the rules in
 /// `spec/saved-messages.json`. A message keeps only its latest entry, saved or removed, so merging two devices' lists
 /// never loses a save and never brings back a removal. Only IDs and times, since the homeserver reads account data.
-struct SavedMessages: Equatable {
+struct SavedMessages: Equatable, Sendable {
     static let eventType = "ai.nuanu.slatrix.later"
     /// Newest first.
     private(set) var saved: [SavedMessageReference] = []
     /// When each message left Later, newest first, so a device that still has it saved learns it went.
     private(set) var removed: [SavedMessageReference] = []
 
+    private struct Key: Hashable {
+        var roomID: String
+        var eventID: String
+    }
     private struct Entry {
         var reference: SavedMessageReference
         var isSaved: Bool
         var ts: Int64
+        var key: Key { Key(roomID: reference.roomID, eventID: reference.eventID) }
     }
-    private static let removalMemory: Int64 = 90 * 86_400_000
-    private static let limit = 10_000
+    private static let savedLimit = 10_000
+    private static let removedLimit = 1_000
+    /// The largest integer JSON numbers hold exactly.
+    private static let maxTimestamp: Int64 = 9_007_199_254_740_991
 
     init(saved: [SavedMessageReference] = [], removed: [SavedMessageReference] = []) {
         self.init(saved.map { Self.entry($0, saved: true) } + removed.map { Self.entry($0, saved: false) })
@@ -50,36 +57,28 @@ struct SavedMessages: Equatable {
         }
         func entries(_ items: [Lenient]?, saved: Bool) -> [Entry] {
             (items ?? []).compactMap(\.item).compactMap { item in
-                guard ProtectedLocalState.validID(item.roomID), item.roomID.hasPrefix("!"),
-                    ProtectedLocalState.validID(item.eventID), item.eventID.hasPrefix("$"),
-                    (0...9_007_199_254_740_991).contains(item.ts)
-                else { return nil }
-                return Entry(
-                    reference: SavedMessageReference(
-                        roomID: item.roomID, eventID: item.eventID, savedAt: Self.date(item.ts)),
-                    isSaved: saved, ts: item.ts)
+                let reference = SavedMessageReference(
+                    roomID: item.roomID, eventID: item.eventID, savedAt: Self.date(item.ts))
+                guard reference.hasValidIDs, (0...Self.maxTimestamp).contains(item.ts) else { return nil }
+                return Entry(reference: reference, isSaved: saved, ts: item.ts)
             }
         }
         self.init(entries(content.saved, saved: true) + entries(content.removed, saved: false))
     }
 
     private init(_ entries: [Entry]) {
-        var latest: [String: Entry] = [:]
+        var latest: [Key: Entry] = [:]
         for entry in entries {
-            if let kept = latest[entry.reference.id], kept.ts > entry.ts || (kept.ts == entry.ts && !entry.isSaved) {
-                continue
-            }
-            latest[entry.reference.id] = entry
+            if let kept = latest[entry.key], kept.ts > entry.ts || (kept.ts == entry.ts && !entry.isSaved) { continue }
+            latest[entry.key] = entry
         }
-        let newest = latest.values.map(\.ts).max() ?? 0
         let ordered = latest.values.sorted { a, b in
             if a.ts != b.ts { return a.ts > b.ts }
             if a.reference.roomID != b.reference.roomID { return a.reference.roomID < b.reference.roomID }
             return a.reference.eventID < b.reference.eventID
         }
-        saved = Array(ordered.filter(\.isSaved).map(\.reference).prefix(Self.limit))
-        removed = Array(
-            ordered.filter { !$0.isSaved && newest - $0.ts <= Self.removalMemory }.map(\.reference).prefix(Self.limit))
+        saved = Array(ordered.filter(\.isSaved).map(\.reference).prefix(Self.savedLimit))
+        removed = Array(ordered.filter { !$0.isSaved }.map(\.reference).prefix(Self.removedLimit))
     }
 
     /// What this device and the account know between them.
@@ -87,18 +86,22 @@ struct SavedMessages: Equatable {
         SavedMessages(saved: saved + other.saved, removed: removed + other.removed)
     }
 
-    /// Saves the message, or removes it when it's saved, stamped after any entry it has so a slow clock can't lose it.
-    func toggled(roomID: String, eventID: String, at now: Date) -> SavedMessages {
-        let reference = SavedMessageReference(roomID: roomID, eventID: eventID)
-        let isSaved = saved.contains { $0.id == reference.id }
-        let previous = (saved + removed).filter { $0.id == reference.id }.map { Self.milliseconds($0.savedAt) }.max()
+    /// Saves or removes the message, stamped after any entry it has so a slow clock can't lose the change; a message
+    /// already as asked stays as it is.
+    func setting(roomID: String, eventID: String, saved isSaved: Bool, at now: Date) -> SavedMessages {
+        let same = { (item: SavedMessageReference) in item.roomID == roomID && item.eventID == eventID }
+        guard saved.contains(where: same) != isSaved else { return self }
+        let previous = (saved + removed).filter(same).map { Self.milliseconds($0.savedAt) }.max()
         let ts = max(Self.milliseconds(now), previous.map { $0 + 1 } ?? 0)
         let entry = SavedMessageReference(roomID: roomID, eventID: eventID, savedAt: Self.date(ts))
-        if isSaved { return SavedMessages(saved: saved, removed: removed + [entry]) }
-        return SavedMessages(saved: saved + [entry], removed: removed)
+        if isSaved { return SavedMessages(saved: saved + [entry], removed: removed) }
+        return SavedMessages(saved: saved, removed: removed + [entry])
     }
 
-    /// The content to write: both lists, newest first.
+    /// The content to write over the account's list, or nil when it already says the same.
+    func content(over account: SavedMessages) -> String? { self == account ? nil : json }
+
+    /// Both lists, newest first, as the account data event holds them.
     var json: String {
         func items(_ list: [SavedMessageReference]) -> [[String: Any]] {
             list.map { ["room_id": $0.roomID, "event_id": $0.eventID, "ts": Self.milliseconds($0.savedAt)] }
@@ -114,9 +117,9 @@ struct SavedMessages: Equatable {
             reference: SavedMessageReference(roomID: reference.roomID, eventID: reference.eventID, savedAt: date(ts)),
             isSaved: saved, ts: ts)
     }
-    /// Within what JSON holds exactly; the vault only holds finite dates.
+    /// The vault only holds finite dates.
     private static func milliseconds(_ date: Date) -> Int64 {
-        Int64(min(max((date.timeIntervalSince1970 * 1_000).rounded(), 0), 9_007_199_254_740_991))
+        Int64(min(max((date.timeIntervalSince1970 * 1_000).rounded(), 0), Double(maxTimestamp)))
     }
     private static func date(_ milliseconds: Int64) -> Date {
         Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
@@ -178,10 +181,12 @@ private final class AccountDataObserver: RawAccountDataListener {
         self.changes = changes
         writer = Task { [weak self] in
             for await _ in stream {
-                guard let self, let published = self.published, self.list != published else { continue }
+                guard let self, let published = self.published, let content = self.list.content(over: published) else {
+                    continue
+                }
                 let next = self.list
                 let heard = self.heard
-                guard (try? await client.setAccountData(eventType: SavedMessages.eventType, content: next.json)) != nil,
+                guard (try? await client.setAccountData(eventType: SavedMessages.eventType, content: content)) != nil,
                     self.session == session
                 else { continue }
                 // A list heard meanwhile may have landed after this write, so it stands for the account's.
@@ -196,8 +201,8 @@ private final class AccountDataObserver: RawAccountDataListener {
         update(list.merged(with: local))
     }
 
-    func toggle(roomID: String, eventID: String) {
-        update(list.toggled(roomID: roomID, eventID: eventID, at: Date()))
+    func set(roomID: String, eventID: String, saved: Bool) {
+        update(list.setting(roomID: roomID, eventID: eventID, saved: saved, at: Date()))
     }
 
     /// Writes what an earlier attempt couldn't, now the connection is back.

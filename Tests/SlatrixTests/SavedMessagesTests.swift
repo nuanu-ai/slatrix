@@ -245,7 +245,7 @@ struct SavedMessagesServiceTests {
         matrix.savedMessages.attach(client, accountID: owner)
         #expect(await eventually { matrix.savedMessages.list.saved.map(\.eventID) == ["$one"] })
         client.failsWrites = true
-        matrix.savedMessages.toggle(roomID: "!general:example.org", eventID: "$two")
+        matrix.savedMessages.set(roomID: "!general:example.org", eventID: "$two", saved: true)
         #expect(await eventually { !client.attempts.all.isEmpty })
         #expect(matrix.savedMessages.list.saved.map(\.eventID) == ["$two", "$one"])
 
@@ -261,7 +261,7 @@ struct SavedMessagesServiceTests {
         let later = SavedMessagesService()
         later.attach(client, accountID: owner)
         #expect(await eventually { later.list.saved.map(\.eventID) == ["$one"] })
-        later.toggle(roomID: "!general:example.org", eventID: "$two")
+        later.set(roomID: "!general:example.org", eventID: "$two", saved: true)
         #expect(await eventually { client.server.map(savedIDs) == ["$two", "$one"] })
 
         // Written by a device that hadn't seen $two yet, after this one wrote.
@@ -276,7 +276,7 @@ struct SavedMessagesServiceTests {
         later.attach(client, accountID: owner)
         #expect(await eventually { later.list.saved.map(\.eventID) == ["$one"] })
         client.replies.arm()
-        later.toggle(roomID: "!general:example.org", eventID: "$two")
+        later.set(roomID: "!general:example.org", eventID: "$two", saved: true)
         #expect(await eventually { client.server.map(savedIDs) == ["$two", "$one"] })
 
         // Written by a device that hadn't seen $two yet, after this one's write landed.
