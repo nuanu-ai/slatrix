@@ -28,18 +28,19 @@ class MatrixLinkOpeningTest {
     private val design = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
 
     // capability: message.matrix-links
-    @Test fun aLinkToAConversationOrMessageYouAreInOpensItHereAndAnythingElseGoesOn() {
+    @Test fun aLinkToAPersonOrToAConversationOrMessageYouAreInOpensHereAndAnythingElseGoesOn() {
         val opened = mutableListOf<Pair<String, String?>>()
         val browsed = mutableListOf<String>()
         val notices = mutableListOf<String>()
+        val people = mutableListOf<String>()
         val links = listOf("https://matrix.to/#/!design:example.org/\$event", "matrix:r/design:example.org",
             "https://matrix.to/#/!elsewhere:example.org", "https://example.org/page", "https://matrix.to/#/invalid",
-            "matrix:roomid/elsewhere:example.org")
+            "matrix:roomid/elsewhere:example.org", "https://matrix.to/#/%40sam%3Aexample.org", "matrix:u/quinn:example.org")
         compose.setContent {
             SlatrixTheme {
                 CompositionLocalProvider(LocalUriHandler provides object : UriHandler { override fun openUri(uri: String) { browsed += uri } }) {
                     ProvideMatrixLinks({ listOf(design) }, { alias -> "!design:example.org".takeIf { alias == "#design:example.org" } },
-                        { room, event -> opened += room.id to event }, { notices += it }) {
+                        { room, event -> opened += room.id to event }, { people += it }, { notices += it }) {
                         val handler = LocalUriHandler.current
                         Column { links.forEach { link -> TextButton({ handler.openUri(link) }) { Text(link) } } }
                     }
@@ -55,6 +56,7 @@ class MatrixLinkOpeningTest {
                 listOf("https://matrix.to/#/!elsewhere:example.org", "https://example.org/page", "https://matrix.to/#/!elsewhere:example.org"),
                 browsed)
             assertEquals(listOf("Slatrix can’t open this link."), notices)
+            assertEquals("A person opens their profile here", listOf("@sam:example.org", "@quinn:example.org"), people)
         }
     }
 }
