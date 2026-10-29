@@ -7,6 +7,7 @@ import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageReaction
 import ai.nuanu.slatrix.core.MessageThread
+import ai.nuanu.slatrix.core.ReplyPreview
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
@@ -48,7 +49,8 @@ class MessageContentScreenshots(private val dark: Boolean) {
                 MessageReaction("👀", 1, false, listOf("@sam:example.org")))),
             message("b", "Jordan", "", "<blockquote>Can we ship the empty states first?</blockquote>Yes, and the " +
                 "<code>onboarding</code> copy is in <a href=\"https://example.org/docs\">the doc</a>.", 6)
-                .copy(thread = MessageThread(3, "Sam", today + 40 * minute)),
+                .copy(thread = MessageThread(3, "Sam", today + 40 * minute),
+                    replyTo = ReplyPreview("\$a", ReplyPreview.State.Ready, "Mira", "@Jordan Lee @Sam I set up a short call today")),
             message("c", "Jordan", "", "<p>Plan:</p><ol><li>Fix the <del>banner</del> header</li><li>Ship</li></ol>" +
                 "<pre><code>./gradlew assembleRelease</code></pre>", 7).copy(grouped = true, edited = true),
             message("d", "Sam", "This message was deleted", null, 12).copy(kind = MessageKind.Deleted),

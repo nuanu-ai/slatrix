@@ -34,6 +34,7 @@ import org.matrix.rustcomponents.sdk.EmbeddedEventDetails
 import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.EventSendState
 import org.matrix.rustcomponents.sdk.FormattedBody
+import org.matrix.rustcomponents.sdk.InReplyToDetails
 import org.matrix.rustcomponents.sdk.Mentions
 import org.matrix.rustcomponents.sdk.MessageFormat
 import org.matrix.rustcomponents.sdk.MessageType
@@ -91,6 +92,8 @@ data class ConversationMessage(
     val reactions: List<MessageReaction> = emptyList(),
     /** Set on a thread's root: the summary under it. */
     val thread: MessageThread? = null,
+    /** The message this one replies to, quoted above it. */
+    val replyTo: ReplyPreview? = null,
     /** How much of an attachment you're sending has gone up, from 0 to 1. */
     val uploadProgress: Float? = null,
 ) : ConversationRow {
@@ -100,6 +103,11 @@ data class ConversationMessage(
 
 /** One emoji's reactions: how many, whether one is yours, and who, as user IDs in the order they reacted. */
 data class MessageReaction(val key: String, val count: Int, val mine: Boolean, val senders: List<String>)
+
+/** The quoted parent above a reply; until it loads, or when it can't, only its event ID is known. */
+data class ReplyPreview(val eventId: String, val state: State, val senderName: String = "", val body: String = "") {
+    enum class State { Loading, Ready, Unavailable }
+}
 
 /** Slack's "N replies" line under a thread's root. */
 data class MessageThread(val replies: Int, val lastReplier: String?, val lastReplyAt: Long?)
@@ -586,8 +594,59 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return rows
     }
 
+    private data class Shown(val kind: MessageKind, val body: String, val html: String? = null)
+
+    private fun shown(kind: MsgLikeKind): Shown = when (kind) {
+        is MsgLikeKind.Message -> {
+            fun html(formatted: FormattedBody?) = formatted?.takeIf { it.format is MessageFormat.Html }?.body
+            when (val type = kind.content.msgType) {
+                is MessageType.Text -> Shown(MessageKind.Text, kind.content.body, html(type.content.formatted))
+                is MessageType.Notice -> Shown(MessageKind.Notice, kind.content.body, html(type.content.formatted))
+                is MessageType.Emote -> Shown(MessageKind.Emote, kind.content.body, html(type.content.formatted))
+                is MessageType.Image, is MessageType.Audio, is MessageType.Video,
+                is MessageType.File, is MessageType.Gallery -> Shown(MessageKind.Attachment, kind.content.body)
+                else -> Shown(MessageKind.Unsupported, kind.content.body)
+            }
+        }
+        is MsgLikeKind.UnableToDecrypt -> Shown(MessageKind.Encrypted, "Waiting for this message")
+        is MsgLikeKind.Redacted -> Shown(MessageKind.Deleted, "This message was deleted")
+        is MsgLikeKind.Sticker -> Shown(MessageKind.Attachment, kind.body)
+        is MsgLikeKind.Poll -> Shown(MessageKind.Unsupported, kind.question)
+        else -> Shown(MessageKind.Unsupported, "Unsupported message")
+    }
+
     private fun name(profile: ProfileDetails, sender: String) =
         (profile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: sender
+
+    /** Parents asked for once each, since the SDK updates every reply that quotes one when it arrives. */
+    private val askedFor = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    private fun replyPreview(reply: InReplyToDetails): ReplyPreview {
+        val id = reply.eventId()
+        return when (val parent = reply.event()) {
+            is EmbeddedEventDetails.Ready -> {
+                val shown = (parent.content as? TimelineItemContent.MsgLike)?.content?.kind?.let(::shown)
+                    ?: Shown(MessageKind.Unsupported, "Unsupported message")
+                val text = if (shown.kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)) {
+                    MessageBodyRenderer.render(shown.body, shown.html).joinToString("") { it.text }
+                } else shown.body
+                ReplyPreview(id, ReplyPreview.State.Ready, name(parent.senderProfile, parent.sender), text.replace('\n', ' '))
+            }
+            is EmbeddedEventDetails.Error -> ReplyPreview(id, ReplyPreview.State.Unavailable)
+            is EmbeddedEventDetails.Pending -> ReplyPreview(id, ReplyPreview.State.Loading)
+            is EmbeddedEventDetails.Unavailable -> {
+                // The SDK answers with the parent or an error in a later update of the reply. A request that failed, say
+                // offline, is made again the next time the reply updates.
+                if (askedFor.add(id)) operations.launch {
+                    runCatching { timeline().fetchDetailsForEvent(id) }.onFailure {
+                        if (it is CancellationException) throw it
+                        askedFor.remove(id)
+                    }
+                }
+                ReplyPreview(id, ReplyPreview.State.Loading)
+            }
+        }
+    }
 
     private fun row(item: TimelineItem): ConversationRow? {
         val event = item.asEvent() ?: return (item.asVirtual() as? VirtualTimelineItem.DateDivider)?.let {
@@ -595,33 +654,13 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
         val content = (event.content as? TimelineItemContent.MsgLike)?.content ?: return null
         val senderName = name(event.senderProfile, event.sender)
-        var formatted: FormattedBody? = null
-        val kind: MessageKind
-        val body: String
-        when (val value = content.kind) {
-            is MsgLikeKind.Message -> {
-                body = value.content.body
-                kind = when (val type = value.content.msgType) {
-                    is MessageType.Text -> { formatted = type.content.formatted; MessageKind.Text }
-                    is MessageType.Notice -> { formatted = type.content.formatted; MessageKind.Notice }
-                    is MessageType.Emote -> { formatted = type.content.formatted; MessageKind.Emote }
-                    is MessageType.Image, is MessageType.Audio, is MessageType.Video,
-                    is MessageType.File, is MessageType.Gallery -> MessageKind.Attachment
-                    else -> MessageKind.Unsupported
-                }
-            }
-            is MsgLikeKind.UnableToDecrypt -> { body = "Waiting for this message"; kind = MessageKind.Encrypted }
-            is MsgLikeKind.Redacted -> { body = "This message was deleted"; kind = MessageKind.Deleted }
-            is MsgLikeKind.Sticker -> { body = value.body; kind = MessageKind.Attachment }
-            is MsgLikeKind.Poll -> { body = value.question; kind = MessageKind.Unsupported }
-            else -> { body = "Unsupported message"; kind = MessageKind.Unsupported }
-        }
+        val (kind, body, html) = shown(content.kind)
         val failure = event.localSendState as? EventSendState.SendingFailed
         return ConversationMessage(
             id = item.uniqueId().id,
             eventId = if (event.isRemote) (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId else null,
             senderId = event.sender, senderName = senderName, body = body,
-            formattedBody = formatted?.takeIf { it.format is MessageFormat.Html }?.body,
+            formattedBody = html,
             timestamp = event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong(), kind = kind,
             sendState = when (event.localSendState) {
                 is EventSendState.NotSentYet -> MessageSendState.Sending
@@ -649,6 +688,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     latest?.let { name(it.senderProfile, it.sender) },
                     latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong())
             }?.takeIf { it.replies > 0 },
+            replyTo = content.inReplyTo?.let(::replyPreview),
         ).also { it.runs }
     }
 }
