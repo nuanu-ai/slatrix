@@ -37,9 +37,17 @@ class SessionAvatars(private val avatars: MatrixAvatars) : AvatarLoader {
     override fun cached(url: String, sizePx: Int): ImageBitmap? = pictures["$url@$sizePx"]
 
     override suspend fun load(url: String, sizePx: Int): ImageBitmap? = cached(url, sizePx)
-        ?: avatars.thumbnail(url, sizePx)?.let { bytes ->
-            withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
-        }?.also { pictures.put("$url@$sizePx", it) }
+        ?: avatars.thumbnail(url, sizePx)?.let { bytes -> withContext(Dispatchers.Default) { decode(bytes, sizePx) } }
+            ?.also { pictures.put("$url@$sizePx", it) }
+
+    /** A server may send the original for a thumbnail, so it is decoded at the power-of-two scale nearest the tile. */
+    private fun decode(bytes: ByteArray, sizePx: Int): ImageBitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= sizePx && bounds.outHeight / (sample * 2) >= sizePx) sample *= 2
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+    }
 }
 
 private const val AvatarCacheBytes = 8 * 1024 * 1024
@@ -49,8 +57,9 @@ private const val AvatarCacheBytes = 8 * 1024 * 1024
 internal fun rememberAvatar(url: String?, size: Dp): ImageBitmap? {
     val loader = LocalAvatarLoader.current
     val pixels = with(LocalDensity.current) { size.roundToPx() }
+    // The state outlives a change of URL, so every change sets it, to the new picture or to none.
     val picture by produceState(url?.let { loader.cached(it, pixels) }, url, pixels, loader) {
-        if (value == null) value = url?.let { loader.load(it, pixels) }
+        value = url?.let { loader.cached(it, pixels) ?: loader.load(it, pixels) }
     }
     return picture
 }
