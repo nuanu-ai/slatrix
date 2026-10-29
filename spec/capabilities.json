@@ -5,7 +5,7 @@
     {"id": "app.appearance", "what": "Choose light, dark or the system's appearance, and a sidebar theme.", "mac": "done", "android": "done"},
     {"id": "app.zoom", "what": "Zoom the whole interface from 80% to 200% with ⌘= and ⌘-.", "mac": "done", "android": "n/a: Android scales with the system font size instead"},
     {"id": "app.updates", "what": "The app updates itself to new releases.", "mac": "done", "android": "n/a: an Android app updates through the store or installer it came from"},
-    {"id": "app.offline-banner", "what": "A banner says when you're offline and leaves when the connection returns.", "mac": "done", "android": "missing"},
+    {"id": "app.offline-banner", "what": "A banner says when you're offline and leaves when the connection returns.", "mac": "done", "android": "done"},
     {"id": "app.narrow-window", "what": "In a narrow window the sidebar becomes a drawer and side panes cover the conversation.", "mac": "done", "android": "n/a: a phone shows one screen at a time"},
     {"id": "app.resize-panes", "what": "Drag the edges of the sidebar and the thread pane to resize them.", "mac": "done", "android": "n/a: Android screens fill the window"},
 

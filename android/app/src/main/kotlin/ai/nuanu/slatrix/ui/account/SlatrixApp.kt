@@ -194,7 +194,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                     }
                 }
                 CompositionLocalProvider(LocalAvatarLoader provides avatars) { Box(Modifier.fillMaxSize()) {
-                    ConnectedAccountScreen(identityState,
+                    ProvideOffline(rooms?.offline) { ConnectedAccountScreen(identityState,
                         { identity?.requestVerification() }, { identity?.acceptVerification() },
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {
@@ -258,7 +258,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 }
                             }
                         }
-                    }
+                    } }
                     notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
                     // One place for both, so a notice never sits on top of the account's warning.
                     (notice ?: (state as AccountState.Connected).warning)?.let { text ->

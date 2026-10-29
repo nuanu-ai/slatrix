@@ -295,6 +295,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     }
                 }
             }
+            OfflineBanner()
             state.notice?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
                 Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
