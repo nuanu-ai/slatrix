@@ -14,7 +14,13 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.semantics.SemanticsActions
 import org.junit.Rule
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -41,5 +47,22 @@ class IdentityScreenTest {
         compose.onNodeWithText("Team").assertDoesNotExist()
         compose.runOnIdle { identity.value = identity.value.copy(status = IdentityStatus.Verified) }
         compose.onNodeWithText("Team").assertExists()
+    }
+
+    @Test fun aRecoveryKeyScrollsHorizontallyWithoutWrapping() {
+        compose.setContent {
+            SlatrixTheme {
+                ConnectedAccountScreen(IdentityState(phase = IdentityPhase.ChooseMethod, recoveryAvailable = true),
+                    {}, {}, {}, {}, {}, {}, {}) {}
+            }
+        }
+        compose.onNodeWithText("Use recovery key").performClick()
+        val field = compose.onNode(hasSetTextAction())
+        field.performTextInput("EsT1 abcd efgh ijkm nopq rstu vwxy z123 4567 89AB CDEF GHJK")
+        field.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action ->
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            action(layouts)
+            assertEquals("A recovery key is one horizontally scrolling line", 1, layouts.single().lineCount)
+        }
     }
 }
