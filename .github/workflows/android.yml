@@ -60,8 +60,8 @@ jobs:
       - name: Test, lint and build
         working-directory: android
         run: ./gradlew :lint-rules:test :app:recordRoborazziDebug :app:lintDebug :app:assembleDebug :app:assembleRelease --console=plain
-      - name: Check push build configuration
-        run: python3 -m unittest discover -s android/tests -p test_push_configuration.py
+      - name: Check build configuration and the release APK
+        run: python3 -m unittest discover -s android/tests -p 'test_*.py'
       - name: Enable hardware acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
