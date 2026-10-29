@@ -227,6 +227,7 @@ struct MatrixLinkResolutionTests {
             roomID: "!direct:example.org", via: ["route.example.org"], eventID: "$event", isSpaceHint: false)
     }
 
+    // capability: message.matrix-links
     @Test("A link to a message in a joined room opens that message for the same account and session")
     func joinedRoomMessage() async throws {
         client.add(LinkRoom("!room:example.org"))
@@ -235,6 +236,7 @@ struct MatrixLinkResolutionTests {
         #expect(resolution.sessionID == session && resolution.accountID == client.ownID)
     }
 
+    // capability: message.matrix-links
     @Test("A user link, even with action=chat, opens the profile and changes nothing")
     func userLinkOpensProfile() async throws {
         let resolution = try await resolve("matrix:u/alice:example.org?action=chat")

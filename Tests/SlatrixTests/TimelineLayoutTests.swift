@@ -33,6 +33,7 @@ struct TimelineLayoutTests {
         }.map { $0.replacingOccurrences(of: "\u{202F}", with: " ") }
     }
 
+    // capability: conversation.grouping
     @Test("Messages from one person within five minutes group under one header")
     func groupsBySenderAndTime() {
         let rows = layout([
@@ -55,6 +56,7 @@ struct TimelineLayoutTests {
 
     struct GroupingSpec: Decodable { var cases: [GroupingCase] }
 
+    // capability: conversation.grouping
     @Test(
         "Grouping matches the shared cases",
         arguments: try SharedSpec.decode("spec/message-grouping.json", as: GroupingSpec.self).cases)
@@ -79,6 +81,7 @@ struct TimelineLayoutTests {
         #expect(rows == ["day Today", "a 11:57 AM", "b 11:58 AM"])
     }
 
+    // capability: conversation.day-dividers
     @Test("Day dividers follow the calendar's time zone and name today and yesterday")
     func dayDividers() {
         let rows = layout([
@@ -94,6 +97,7 @@ struct TimelineLayoutTests {
             ])
     }
 
+    // capability: conversation.unread-line
     @Test("The unread line goes above its event and starts a new group")
     func unreadBoundary() {
         var local = message("txn", "@alice", at: 1)

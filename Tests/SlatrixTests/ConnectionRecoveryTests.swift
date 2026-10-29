@@ -14,6 +14,7 @@ private final class SendQueueClient: Client, @unchecked Sendable {
 
 @MainActor
 struct ConnectionRecoveryTests {
+    // capability: message.send-offline
     @Test("Messages the SDK paused while offline go out when the connection returns, without a click")
     func reconnectResumesSending() async throws {
         let recovery = ConnectionRecovery()

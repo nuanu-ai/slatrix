@@ -125,6 +125,7 @@ struct RoomManagementTests {
         #expect(client.creations.all.isEmpty)
     }
 
+    // capability: home.create-channel
     @Test("Creating a channel in a workspace creates one encrypted private room and links that room")
     func createsAndLinks() async throws {
         let client = ManagingClient()

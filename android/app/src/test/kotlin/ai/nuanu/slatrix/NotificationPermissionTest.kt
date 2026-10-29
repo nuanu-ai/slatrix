@@ -34,6 +34,7 @@ class NotificationPermissionTest {
         compose.runOnIdle { assertNull(shadowOf(compose.activity).lastRequestedPermission) }
     }
 
+    // capability: notifications.permission
     @Test fun notificationPermissionWaitsUntilTheUserHasSignedIn() {
         val application = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(application).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)

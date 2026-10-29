@@ -78,6 +78,7 @@ struct SendQueueTests {
         #expect(verification.shown(offline: true) == verification)
     }
 
+    // capability: message.retry-failed
     @Test("Retrying a recoverable failure resumes the room's queue without re-sending anything")
     func recoverableRetryResumesQueue() async throws {
         let recoverable = try failure(.genericApiError(msg: "x"), recoverable: true)
@@ -148,6 +149,7 @@ struct SendQueueTests {
         #expect(room.enabled.all.isEmpty && timeline.aborted.all.isEmpty)
     }
 
+    // capability: message.retry-failed
     @Test("Cancelling aborts the original local transaction")
     func cancelAborts() async throws {
         #expect(try await SendQueueActions.cancel(itemID: local, timeline: timeline))

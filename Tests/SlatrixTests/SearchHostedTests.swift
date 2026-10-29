@@ -89,6 +89,7 @@ struct SearchHostedTests {
         static func views(in view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
     }
 
+    // capability: search.rooms
     @Test("⌘K opens Jump to with the cursor in its field, and ↓ and Return open the conversation picked")
     func switcherOpensConversation() async throws {
         let harness = Harness()

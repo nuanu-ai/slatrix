@@ -14,6 +14,7 @@ struct WorkspaceMembershipTests {
 
     struct Spec: Decodable { var cases: [Case] }
 
+    // capability: home.conversations
     @Test(
         "Workspace scope matches shared cases",
         arguments: try SharedSpec.decode("spec/workspace-membership.json", as: Spec.self).cases)

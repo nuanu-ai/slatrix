@@ -49,6 +49,7 @@ private func ready(_ content: MsgLikeContent, id: String = "$quoted") -> Embedde
 private let redactedContent = MsgLikeContent(kind: .redacted, inReplyTo: nil, threadRoot: nil, threadSummary: nil)
 
 struct MatrixMappingTests {
+    // capability: message.edited
     @Test("A message shows the SDK's edited body, its thread, sender name and time")
     func projectsEditedThreadReply() {
         let message = MatrixMapping.project(
@@ -60,6 +61,7 @@ struct MatrixMappingTests {
         #expect(message.senderName == "Alice")
     }
 
+    // capability: message.deleted
     @Test("A deleted message keeps none of its original body, formatting or attachment")
     func redaction() {
         let message = project(redactedContent)
@@ -76,6 +78,7 @@ struct MatrixMappingTests {
                 fallback: "@alice:example.org") == "Alice")
     }
 
+    // capability: message.reactions.show
     @Test("A queued local echo shows as sending, with reactions counted and mine marked")
     func queuedEchoAndReactions() {
         let item = EventTimelineItem(
@@ -122,6 +125,7 @@ struct MatrixMappingTests {
 }
 
 struct ReplyPreviewMappingTests {
+    // capability: message.reply-preview
     @Test("A reply shows its quoted sender and literal body, without reading the quote's own reply")
     func leafReply() {
         let nested = ReplyDetails(id: "$nested", details: .pending)

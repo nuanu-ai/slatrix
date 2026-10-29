@@ -50,6 +50,7 @@ struct UnreadBadgeTests {
         }
     }
 
+    // capability: home.unread-badges
     @Test("A conversation's row", arguments: try SharedSpec.decode("spec/unread-badge.json", as: Spec.self).badge)
     func badge(spec: One) {
         #expect(Self.label(UnreadBadge(spec.room.chatRoom)) == spec.badge)

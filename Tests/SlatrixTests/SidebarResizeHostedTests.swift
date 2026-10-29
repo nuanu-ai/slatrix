@@ -111,6 +111,7 @@ struct SidebarResizeHostedTests {
             clickCount: clicks, pressure: 1)
     }
 
+    // capability: app.resize-panes
     @Test("Dragging the thread pane divider widens the pane, keeps the conversation usable, and remembers the width")
     func paneDivider() async throws {
         _ = NSApplication.shared

@@ -111,6 +111,7 @@ class MatrixWorkspaceTest {
         workspace.close()
     }
 
+    // capability: composer.drafts
     @Test fun navigationRestoresEachRoomsDraftAndBackReleasesItsSdkResources() = runTest {
         val client = WorkspaceClient()
         val workspace = MatrixWorkspace(backgroundScope, client)

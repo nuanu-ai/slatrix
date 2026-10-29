@@ -82,6 +82,7 @@ struct CredentialEnvelopeTests {
 }
 
 struct ProtectedLocalStateCodecTests {
+    // capability: message.save
     @Test("Sealed state opens with its key and account and never contains the plaintext")
     func sealsPrivately() throws {
         let sealed = try ProtectedLocalStateCodec.seal(original, key: vaultKey, accountID: account)
@@ -167,6 +168,7 @@ struct ProtectedLocalStateStoreTests {
         #expect(throws: (any Error).self) { try ProtectedLocalStateCodec.read(url, key: vaultKey, accountID: account) }
     }
 
+    // capability: search.recent
     @Test("Recent searches are kept with the account's other private state")
     func recentSearchesPersist() async throws {
         let access = try await store.open(accountID: account)

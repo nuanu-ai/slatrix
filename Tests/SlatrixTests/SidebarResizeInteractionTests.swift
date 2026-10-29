@@ -24,6 +24,7 @@ struct SidebarResizeInteractionTests {
         #expect(interaction.end(x: 510) == nil)
     }
 
+    // capability: app.resize-panes
     @Test("A drag keeps its original anchor and commits the final width once")
     func dragAnchorsAndCommitsFinalWidth() {
         var interaction = SidebarResizeInteraction()

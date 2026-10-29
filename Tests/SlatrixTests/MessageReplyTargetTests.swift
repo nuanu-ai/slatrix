@@ -23,6 +23,7 @@ struct MessageReplyTargetTests {
         { $0.isRedacted = true }, { $0.sendState = "sending" }, { $0.id = "transaction" },
     ]
 
+    // capability: message.reply
     @Test("A room quote goes only to its own room composer")
     func roomQuoteScope() throws {
         let quote = try #require(MessageReplyTarget(message: Self.message(), surface: .conversation, owner: Self.owner))

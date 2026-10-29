@@ -106,6 +106,7 @@ struct ProfileEditingTests {
         #expect(smallest.minY == square.minY)
     }
 
+    // capability: profile.edit-photo
     @Test("A new photo becomes yours once the server has it")
     func uploadPhoto() async throws {
         let folder = try TemporaryDirectory()
@@ -122,6 +123,19 @@ struct ProfileEditingTests {
         #expect(matrix.user?.avatarURL != nil)
     }
 
+    // capability: profile.edit-name
+    @Test("A new name becomes yours once the server has it")
+    func rename() async throws {
+        let client = ProfileClient()
+        let matrix = signedIn(client)
+
+        try await matrix.setProfile(name: "Ana Souza")
+
+        #expect(client.name == "Ana Souza")
+        #expect(matrix.user?.name == "Ana Souza")
+    }
+
+    // capability: profile.edit-photo
     @Test("Removing your photo leaves your initials")
     func removePhoto() async throws {
         let client = ProfileClient()
@@ -164,6 +178,7 @@ struct ProfileEditingTests {
         #expect(matrix.user?.avatarURL == nil)
     }
 
+    // capability: profile.own
     @Test("Your own profile shows your latest name and photo, not a room's older copy")
     func ownProfileIsCurrent() {
         let me = ChatUser(id: "@ana:example.org", name: "Ana Lima")
@@ -238,6 +253,7 @@ private final class ProfileClient: Client, @unchecked Sendable {
         get { lock.withLock { stored.name } }
         set { lock.withLock { stored.name = newValue } }
     }
+    override func setDisplayName(name: String) async throws { self.name = name }
     override func getProfile(userId: String) async throws -> UserProfile {
         let profile = UserProfile(userId: userId, displayName: name, avatarUrl: avatar, status: nil, call: nil)
         await profiles.wait()

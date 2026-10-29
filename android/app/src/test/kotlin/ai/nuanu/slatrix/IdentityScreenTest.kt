@@ -33,6 +33,7 @@ import org.robolectric.annotation.GraphicsMode
 class IdentityScreenTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    // capability: verify.gate
     @Test fun conversationsStayHiddenUntilIdentityIsConfirmed() {
         val identity = mutableStateOf(IdentityState(status = IdentityStatus.Unverified, phase = IdentityPhase.ChooseMethod))
         val rooms = RoomListState(listOf(RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)), loading = false)
@@ -72,6 +73,7 @@ class IdentityScreenTest {
         compose.onNodeWithText("Confirm it’s you").assertExists()
     }
 
+    // capability: verify.recovery-key
     @Test fun aRecoveryKeyScrollsHorizontallyWithoutWrapping() {
         compose.setContent {
             SlatrixTheme {

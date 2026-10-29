@@ -159,6 +159,7 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: home.dms
     @Test fun directMessagesLeadWithTheNewestAndPreviewIt() = runTest {
         val older = TestRoom(roomInfo("!avery:example.org", "Avery", direct = true), latest(1_000u, "See you at noon", own = false))
         val newer = TestRoom(roomInfo("!blake:example.org", "Blake", direct = true), latest(2_000u, "Shipped it", own = true))
@@ -292,6 +293,7 @@ class MatrixRoomsTest {
         assertEquals(beforeClose, rooms.state.value)
     }
 
+    // capability: message.send-offline
     @Test fun aSyncThatRunsAgainResumesSendQueuesTheSdkPaused() = runTest {
         val client = RoomsClient(emptyList())
         val sync = RoomsSync()
