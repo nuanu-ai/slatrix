@@ -39,7 +39,7 @@ class UnreadLineScreenshots(private val dark: Boolean) {
         }
         compose.setContent {
             SlatrixTheme(dark = dark) {
-                LiveChannelScreen(room, ConversationState(rows, loading = false, unread = "\$m19"),
+                LiveChannelScreen(room, ConversationState(rows, loading = false, firstUnread = "\$m19", startsAtUnread = true),
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
             }
         }

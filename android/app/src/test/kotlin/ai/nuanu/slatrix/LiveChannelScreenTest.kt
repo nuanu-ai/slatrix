@@ -258,7 +258,7 @@ class LiveChannelScreenTest {
     // capability: conversation.unread-line
     @Test fun anUnreadConversationOpensWithItsNewLineAtTheTopAndKeepsItOnceRead() {
         val many = (1..200).map { message("Message $it", minutes = it) }
-        val state = mutableStateOf(ConversationState(many, loading = false, unread = "\$Message 185"))
+        val state = mutableStateOf(ConversationState(many, loading = false, firstUnread = "\$Message 185", startsAtUnread = true))
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
@@ -270,8 +270,20 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Message 200").assertIsNotDisplayed()
 
         // Reading moves the SDK's marker after the newest message; the line stays until the reader leaves.
-        compose.runOnIdle { state.value = state.value.copy(unread = null) }
+        compose.runOnIdle { state.value = state.value.copy(firstUnread = null) }
         compose.onNodeWithText("New").assertIsDisplayed()
+    }
+
+    @Test fun aConversationWithNothingToResumeOpensAtItsNewestEvenWithAReadMarkerBehind() {
+        // The fully-read marker can trail the read receipt, so the SDK's marker alone doesn't make a conversation unread.
+        val many = (1..200).map { message("Message $it", minutes = it) }
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(many, loading = false, firstUnread = "\$Message 185"),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("Message 200").assertIsDisplayed()
     }
 
     private fun message(body: String, minutes: Int, sender: String = "Mira", state: MessageSendState = MessageSendState.Sent) =

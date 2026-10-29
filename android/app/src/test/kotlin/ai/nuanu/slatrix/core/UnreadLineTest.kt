@@ -38,5 +38,9 @@ class UnreadLineTest {
         }
     }
 
+    @Test fun `an anchor too long to be an event ID is never resumed`() {
+        assertEquals(null, UnreadLine.resumeAt(RoomUnread(messages = 4), "$".repeat(2_049)))
+    }
+
     private fun JsonElement?.orNull(): String? = this?.takeUnless { it.isJsonNull }?.asString
 }
