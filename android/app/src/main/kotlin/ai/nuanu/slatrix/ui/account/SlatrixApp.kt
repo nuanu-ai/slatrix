@@ -8,6 +8,8 @@ import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityVerification
 import ai.nuanu.slatrix.core.MatrixRooms
+import ai.nuanu.slatrix.core.MatrixSearch
+import ai.nuanu.slatrix.core.MessageSearchState
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.ConversationState
@@ -61,7 +63,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: MatrixRooms?, workspace: MatrixWorkspace?,
     notification: NotificationTarget? = null, threads: MatrixWorkspace? = null, activity: MatrixActivity? = null,
-    onNotificationHandled: (NotificationTarget) -> Unit = {}) {
+    search: MatrixSearch? = null, onNotificationHandled: (NotificationTarget) -> Unit = {}) {
     val state by account.state.collectAsState()
     RequestNotificationPermission(signedIn = state is AccountState.Connected, configured = BuildConfig.PUSH_GATEWAY.isNotEmpty())
     val context = LocalContext.current
@@ -155,7 +157,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, rooms, workspace, { you = true }, selectedSpaceId, chooseSpace) {
+                            LiveHome(userId, rooms, workspace, search, { you = true }, selectedSpaceId, chooseSpace) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
@@ -217,14 +219,22 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
 @Composable
-private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, onYou: () -> Unit,
+private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?, onYou: () -> Unit,
     selectedSpaceId: String?, onSpace: (String?) -> Unit, activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val open: (String) -> Unit = remember(rooms, workspace) {
         { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
     }
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
-        onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false }, activity = activity)
+        onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
+        search = {
+            val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()
+            val inScope = remember(state.rooms, selectedSpaceId) {
+                state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
+            }
+            SearchScreen(inScope, userId, messages, { query -> if (query == null) search?.clear() else search?.search(query) },
+                { search?.loadMore() }, open)
+        }, activity = activity)
 }
 
 /** Collects Activity here, so a new item recomposes only its tab. An item opens at its message. */

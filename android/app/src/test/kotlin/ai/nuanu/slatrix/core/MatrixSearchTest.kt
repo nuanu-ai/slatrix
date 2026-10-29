@@ -1,6 +1,8 @@
 package ai.nuanu.slatrix.core
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -100,7 +102,8 @@ private class SearchFake(private val hold: CompletableDeferred<Unit>? = null, pr
     override suspend fun setQuery(query: String) {
         this.query.complete(query)
         if (fail) throw IllegalStateException("Index busy")
-        hold?.await()
+        // An FFI call runs on after its coroutine is cancelled, and its listener still fires.
+        hold?.let { withContext(NonCancellable) { it.await() } }
         listener?.onUpdate(listOf(SearchServiceResultsUpdate.Reset(results())))
         emitted.complete(Unit)
     }

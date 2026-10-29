@@ -54,6 +54,7 @@ private enum class HomeTab(val label: String, val icon: ImageVector, val selecte
     Home("Home", SlackIcons.Home, SlackIcons.HomeFilled),
     Dms("DMs", SlackIcons.Messages, SlackIcons.MessagesFilled),
     Activity("Activity", SlackIcons.Bell, SlackIcons.BellFilled),
+    Search("Search", SlackIcons.Search, SlackIcons.SearchSelected),
 }
 
 /** Shows [cover], such as a conversation, in Home's place, and gives Home back its tab, search and scroll position after. */
@@ -108,6 +109,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                             HomeTab.Home -> HomeList(homeList, shown, selectedSpaceId, onRoom) { actions = it.id }
                             HomeTab.Dms -> DirectList(directList, shown, onRoom) { actions = it.id }
                             HomeTab.Activity -> activity()
+                            HomeTab.Search -> search()
                         }
                         val failure = notice
                         if (failure != null) {
@@ -177,6 +179,7 @@ private fun HomeHeader(tab: HomeTab, userId: String, state: RoomListState, selec
                     }
                     HomeTab.Dms -> HeaderTitle("Direct messages")
                     HomeTab.Activity -> HeaderTitle("Activity")
+                    HomeTab.Search -> HeaderTitle("Search")
                 }
             }
             Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)

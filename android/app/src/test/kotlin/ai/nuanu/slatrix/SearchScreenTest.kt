@@ -87,7 +87,7 @@ class SearchScreenTest {
         }
         compose.onNodeWithText("The budget is ready for review").assertIsDisplayed()
         compose.onNodeWithText("Sam").assertIsDisplayed()
-        compose.onNodeWithText("#design", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("#design").assertIsDisplayed()
         compose.onNodeWithText("The budget is ready for review").performClick()
         compose.runOnIdle { assertEquals(listOf("!design:example.org"), opened) }
     }
