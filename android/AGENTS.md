@@ -13,6 +13,7 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 - Product rules pass every case in `spec/`, with a unit test per file that reads it.
 - Notifications arrive through Firebase Cloud Messaging. The Matrix push gateway is a small Cloud Function in the app's own Firebase project, so there is no server to run and no Firebase key to keep anywhere else.
 - Element X Android is AGPL: read it to see how the SDK is used, never copy from it. Slatrix is Apache 2.0.
+- Android builds and ships on its own track, so its CI job is not a required check and auto-merge won't wait for it. Turn on auto-merge for a pull request that touches Android only after its Android job passes.
 
 ## Tests
 
