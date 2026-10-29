@@ -32,7 +32,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -341,12 +340,20 @@ private fun ConversationIntro(room: RoomSummary) {
         verticalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         Box(Modifier.size(UiMetrics.ProfileAvatar).background(colors.raised, MaterialTheme.shapes.extraLarge),
             contentAlignment = Alignment.Center) {
-            Icon(if (room.direct) Icons.Outlined.Person else Icons.Outlined.Tag, null, Modifier.size(UiMetrics.HeaderAvatar))
+            // A private channel shows its lock, as the header and the Mac do, and its name without a hash.
+            when {
+                room.direct -> Icon(Icons.Outlined.Person, null, Modifier.size(UiMetrics.HeaderAvatar))
+                room.isPrivate -> Icon(SlackIcons.Lock, "Private channel", Modifier.size(UiMetrics.HeaderAvatar))
+                else -> Icon(SlackIcons.Hash, null, Modifier.size(UiMetrics.HeaderAvatar))
+            }
         }
-        Text(if (room.direct) room.name else "# ${room.name}", style = MaterialTheme.typography.headlineSmall,
+        Text(if (room.direct || room.isPrivate) room.name else "# ${room.name}", style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold, color = colors.textPrimary)
-        Text(if (room.direct) "This conversation is just between ${room.name} and you."
-            else "This is the very beginning of the #${room.name} channel.",
+        Text(when {
+            room.direct -> "This conversation is just between ${room.name} and you."
+            room.isPrivate -> "This is the very beginning of the ${room.name} channel."
+            else -> "This is the very beginning of the #${room.name} channel."
+        },
             style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
     }
 }
