@@ -15,6 +15,7 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_base.EncryptionState
@@ -304,6 +305,23 @@ class MatrixRoomsTest {
         sync.emitState(SyncServiceState.RUNNING)
         runCurrent()
         assertTrue(client.sendQueuesEnabled)
+        rooms.close()
+    }
+
+    @Test fun syncRunsOnlyInTheForegroundWhileAPushStillResolvesItsEvent() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val foreground = MutableStateFlow(false)
+        val rooms = MatrixRooms(backgroundScope, client, foreground)
+
+        assertSame(NotificationStatus.EventNotFound, rooms.notification("!team:example.org", "\$event"))
+        assertSame(sync, (client.notificationSetup as NotificationProcessSetup.SingleProcess).syncService)
+        assertFalse(sync.started.isCompleted)
+        foreground.value = true
+        sync.started.await()
+        foreground.value = false
+        sync.stopped.await()
         rooms.close()
     }
 }
