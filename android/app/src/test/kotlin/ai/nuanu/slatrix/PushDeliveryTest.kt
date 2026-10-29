@@ -56,7 +56,7 @@ class PushDeliveryTest {
         val delivered = shadowOf(manager.activeNotifications.single().notification.contentIntent).savedIntent
         val forged = Intent(delivered).putExtra(PushNotifications.EVENT_ID, "\$never-delivered")
 
-        for ((intent, expected) in listOf(forged to null, delivered to NotificationTarget("@alex:example.org", "!team:example.org"))) {
+        for ((intent, expected) in listOf(forged to null, delivered to NotificationTarget("@alex:example.org", "!team:example.org", "\$delivered"))) {
             ActivityScenario.launch<MainActivity>(intent).use { scenario ->
                 scenario.onActivity { activity ->
                     assertEquals(expected, ViewModelProvider(activity)[AccountViewModel::class.java].notificationTarget.value)
@@ -85,7 +85,7 @@ class PushDeliveryTest {
 
         ActivityScenario.launch<MainActivity>(tap).use { scenario ->
             scenario.onActivity { activity ->
-                assertEquals(NotificationTarget("@alex:example.org", "!team:example.org", threadRoot = "\$root"),
+                assertEquals(NotificationTarget("@alex:example.org", "!team:example.org", "\$reply", threadRoot = "\$root"),
                     ViewModelProvider(activity)[AccountViewModel::class.java].notificationTarget.value)
             }
         }

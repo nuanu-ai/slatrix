@@ -14,6 +14,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
+import uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode
 
 class MatrixConversationTest {
     // capability: conversation.history
@@ -350,6 +351,68 @@ class MatrixConversationTest {
         assertTrue("Reading a thread must not clear the channel's unread mark", room.markedUnread)
         conversation.close()
     }
+
+    // capability: conversation.jump-to-message
+    @Test fun aMessageTheLiveTimelineHoldsOpensLiveAndHighlighted() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("a", "\$a", "Hello"), conversationItem("b", "\$b", "World")))
+        val room = JumpRoom(live, ConversationTimeline(emptyList()))
+        val conversation = MatrixConversation(backgroundScope, room, at = "\$b")
+
+        val opened = conversation.state.first { !it.loading }
+        assertEquals("\$b", opened.highlight)
+        assertFalse(opened.focused)
+        assertEquals(listOf<TimelineFocus>(TimelineFocus.Live(true)), room.focuses)
+        assertTrue(conversation.markRead("\$b"))
+        conversation.close()
+    }
+
+    // capability: conversation.jump-to-message
+    @Test fun anOlderMessageOpensAroundItAndTurnsLiveOnceTheReaderReachesTheNewest() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
+        val around = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier")))
+        val room = JumpRoom(live, around)
+        val conversation = MatrixConversation(backgroundScope, room, at = "\$old")
+
+        val opened = conversation.state.first { !it.loading }
+        assertEquals("The live rows that don't reach it never show", listOf("Earlier"), opened.rows.messages.map { it.body })
+        assertEquals("\$old", opened.highlight)
+        assertTrue(opened.focused)
+        assertEquals(TimelineFocus.Event("\$old", 30u, TimelineEventFocusThreadMode.Automatic(true)), room.focuses.last())
+        assertFalse("Opening at an old message doesn't mean the newest was read", conversation.markRead("\$old"))
+
+        conversation.loadNewer("\$old")
+        live.pageStarted.await()
+        live.emit(listOf(TimelineDiff.PushFront(conversationItem("old-live", "\$old", "Earlier"))))
+        live.page.complete(false)
+        val joined = conversation.state.first { !it.focused }
+        assertEquals(listOf("Earlier", "Latest"), joined.rows.messages.map { it.body })
+        assertTrue(conversation.markRead("\$new"))
+        conversation.close()
+    }
+
+    // capability: conversation.jump-to-message
+    @Test fun aMessageWhoseSurroundingsCantLoadStillOpensTheConversationLive() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
+        val room = JumpRoom(live, ConversationTimeline(emptyList())).apply { aroundFailure = IllegalStateException("Offline") }
+        val conversation = MatrixConversation(backgroundScope, room, at = "\$old")
+
+        val opened = conversation.state.first { !it.loading }
+        assertEquals(listOf("Latest"), opened.rows.messages.map { it.body })
+        assertNull(opened.error)
+        assertFalse(opened.focused)
+        conversation.close()
+    }
+}
+
+private class JumpRoom(private val live: Timeline, private val around: Timeline) : Room(NoHandle) {
+    val focuses = mutableListOf<TimelineFocus>()
+    var aroundFailure: Exception? = null
+    override suspend fun setUnreadFlag(newValue: Boolean) = Unit
+    override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline {
+        focuses += configuration.focus
+        if (configuration.focus is TimelineFocus.Event) aroundFailure?.let { throw it }
+        return if (configuration.focus is TimelineFocus.Event) around else live
+    }
 }
 
 private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
@@ -397,6 +460,7 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     }
     var pageFailure: Exception? = null
     var pages = 0
+    override suspend fun paginateForwards(numEvents: UShort): Boolean = true
     override suspend fun paginateBackwards(numEvents: UShort): Boolean {
         pages++
         pageStarted.complete(Unit)

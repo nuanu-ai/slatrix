@@ -68,7 +68,7 @@ class MainActivity : ComponentActivity() {
             // The launcher activity is exported, so only a notification this app posted may open a room.
             if (userId != null && roomId != null && eventId != null && PushNotifications(this).delivered(userId, roomId, eventId)) {
                 val thread = intent.getStringExtra(PushNotifications.THREAD_ID)?.takeIf { it.startsWith('$') }
-                accountModel.openNotification(NotificationTarget(userId, roomId, thread))
+                accountModel.openNotification(NotificationTarget(userId, roomId, eventId, thread))
             }
         }
         intent.data = null
