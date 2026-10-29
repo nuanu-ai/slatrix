@@ -34,17 +34,15 @@ class PushRegistration(context: Context) {
             val token = synchronized(tokenLock) { preferences.getString("token", null) } ?: return@withLock
             val previous = preferences.getString("$owner.current", null)
             val stale = preferences.getStringSet("$owner.stale", emptySet())!!.toMutableSet()
-            if (previous != token || preferences.getString("$owner.gateway", null) != gateway) {
-                client.setPusher(
-                    PusherIdentifiers(token, appId), PusherKind.Http(HttpPusherData(gateway, PushFormat.EVENT_ID_ONLY, null)),
-                    appDisplayName = "Slatrix", deviceDisplayName = "Android", profileTag = null,
-                    lang = Locale.getDefault().toLanguageTag(), append = false,
-                )
-                if (previous != null && previous != token) stale.add(previous)
-                stale.remove(token)
-                check(preferences.edit().putString("$owner.current", token).putString("$owner.gateway", gateway)
-                    .putStringSet("$owner.stale", stale).commit())
-            }
+            // The server may have dropped the pusher, and setting it again is idempotent.
+            client.setPusher(
+                PusherIdentifiers(token, appId), PusherKind.Http(HttpPusherData(gateway, PushFormat.EVENT_ID_ONLY, null)),
+                appDisplayName = "Slatrix", deviceDisplayName = "Android", profileTag = null,
+                lang = Locale.getDefault().toLanguageTag(), append = false,
+            )
+            if (previous != null && previous != token) stale.add(previous)
+            stale.remove(token)
+            check(preferences.edit().putString("$owner.current", token).putStringSet("$owner.stale", stale).commit())
             for (old in stale.toList()) {
                 client.deletePusher(PusherIdentifiers(old, appId))
                 stale.remove(old)
