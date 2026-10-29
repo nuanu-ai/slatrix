@@ -223,6 +223,17 @@ class MatrixWorkspaceTest {
         assertNull(workspace.selected.value?.at)
         workspace.close()
     }
+
+    // capability: composer.typing
+    @Test fun aChannelSaysWhoIsTypingButAThreadDoesNotSinceTypingIsRoomWide() = runTest {
+        val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+        workspace.open(alpha)
+        assertNotNull(workspace.selected.first { it?.conversation != null }?.typing)
+        workspace.open(alpha, threadRoot = "\$root")
+        assertNull(workspace.selected.first { it?.threadRoot != null && it.conversation != null }?.typing)
+        workspace.close()
+    }
 }
 
 private class WorkspaceClient(private val threadRoots: Map<String, String> = emptyMap(),

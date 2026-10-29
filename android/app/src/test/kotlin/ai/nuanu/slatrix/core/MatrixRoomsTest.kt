@@ -157,6 +157,19 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: conversation.pins
+    @Test fun aSummaryCarriesItsPinsInTheOrderPinnedAndWhetherYouMayPin() = runTest {
+        val design = TestRoom(roomInfo("!design:example.org", "design").copy(pinnedEventIds = listOf("\$old", "\$new")))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(design)))
+        val unknown = rooms.state.first { !it.loading }.rooms.single()
+        assertEquals(listOf("\$old", "\$new"), unknown.pinned)
+        assertFalse("Unknown power levels offer no pinning", unknown.canPin)
+
+        design.emit(design.info.copy(powerLevels = TestPowers()))
+        rooms.state.first { state -> state.rooms.single().canPin }
+        rooms.close()
+    }
+
     // capability: home.star-toggle
     @Test fun starringAConversationTagsItAsAFavourite() = runTest {
         val alpha = TestRoom(roomInfo("!a:example.org", "Alpha"))
@@ -495,7 +508,7 @@ private class RoomsSync : SyncService(NoHandle) {
 
 /** What you may do in a room; the event type objects compare through the SDK, so they're told apart by type. */
 internal class TestPowers(private val post: Boolean = true, private val name: Boolean = true, private val topic: Boolean = true,
-    private val invite: Boolean = true) : RoomPowerLevels(NoHandle) {
+    private val invite: Boolean = true, private val pin: Boolean = true) : RoomPowerLevels(NoHandle) {
     override fun canOwnUserSendMessage(message: MessageLikeEventType): Boolean = post || message !is MessageLikeEventType.RoomMessage
     override fun canOwnUserSendState(stateEvent: StateEventType): Boolean = when (stateEvent) {
         is StateEventType.RoomName -> name
@@ -503,6 +516,7 @@ internal class TestPowers(private val post: Boolean = true, private val name: Bo
         else -> true
     }
     override fun canOwnUserInvite(): Boolean = invite
+    override fun canOwnUserPinUnpin(): Boolean = pin
 }
 
 private class RoomsHandle : TaskHandle(NoHandle) {

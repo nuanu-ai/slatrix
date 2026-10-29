@@ -30,6 +30,8 @@ data class OpenChannel(
     val root: ConversationMessage? = null,
     /** [at] is where its unread messages start, which it opens at without a highlight. */
     val resume: Boolean = false,
+    /** Who else is typing here, and telling them you are. */
+    val typing: MatrixTyping? = null,
 )
 
 class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
@@ -66,7 +68,9 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
                     if (generation.get() == token) {
-                        current = requested.copy(conversation = timeline, composer = composer)
+                        current = requested.copy(conversation = timeline, composer = composer,
+                            // Matrix typing is room-wide, so a thread keeps out of it, as on the Mac.
+                            typing = MatrixTyping(scope, client, requested.room.id).takeIf { requested.threadRoot == null })
                         mutableSelected.value = current
                     } else release()
                 } catch (cancelled: CancellationException) {
@@ -125,6 +129,8 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
     }
 
     private suspend fun release() = withContext(NonCancellable) {
+        // Leaving says you stopped typing, as on the Mac.
+        current?.typing?.stopped()
         runCatching { composer?.close() }
         composer = null
         runCatching { composerRoom?.close() }

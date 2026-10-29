@@ -76,7 +76,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Opens a message where it is, highlighted, as a tap on a reply's quote does. */
     onOpenMessage: (eventId: String) -> Unit = {},
     /** Opens the conversation's details, as a tap on Slack's header pill does. */
-    onOpenDetails: () -> Unit = {}) {
+    onOpenDetails: () -> Unit = {},
+    /** Who else is typing, by name. */
+    typing: List<String> = emptyList()) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -255,6 +257,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             else -> "Message #${room.name}"
         }
         val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
+        TypingLine(typing)
         if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders) else CannotPost()
     }
 }

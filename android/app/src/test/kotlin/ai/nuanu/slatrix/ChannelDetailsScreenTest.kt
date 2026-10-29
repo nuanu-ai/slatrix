@@ -3,6 +3,9 @@ package ai.nuanu.slatrix
 import ai.nuanu.slatrix.core.ChannelActionFailure
 import ai.nuanu.slatrix.core.ChannelMember
 import ai.nuanu.slatrix.core.ComposerState
+import ai.nuanu.slatrix.core.ConversationMessage
+import ai.nuanu.slatrix.core.MessageKind
+import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.NotificationChoice
 import ai.nuanu.slatrix.core.NotificationSetting
@@ -11,11 +14,19 @@ import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.ChannelDetailsActions
 import ai.nuanu.slatrix.ui.account.ChannelDetailsScreen
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
+import ai.nuanu.slatrix.ui.account.PinnedMessages
+import ai.nuanu.slatrix.ui.account.SharedFiles
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -184,8 +195,102 @@ class ChannelDetailsScreenTest {
         compose.onNodeWithText("Add people").assertDoesNotExist()
     }
 
+    // capability: conversation.pins
+    @Test fun pinnedMessagesListTheNewestPinFirstOpenWhereTheyAreAndUnpin() {
+        val unpinned = mutableListOf<String>()
+        var opened: String? = null
+        details(room.copy(pinned = listOf("\$Ship it", "\$Launch at noon"), canPin = true), ChannelDetailsActions(pins = {
+            PinnedMessages(ConversationState(listOf(pinned("Ship it"), pinned("Launch at noon")), loading = false)) { unpinned += it.body }
+        }), onOpenMessage = { opened = it })
+        compose.onNodeWithText("2").assertIsDisplayed()
+        compose.onNodeWithText("Pinned messages").performClick()
+        val newest = compose.onNodeWithText("Launch at noon").fetchSemanticsNode().boundsInRoot
+        val oldest = compose.onNodeWithText("Ship it").fetchSemanticsNode().boundsInRoot
+        assertTrue("The newest pin comes first", newest.bottom <= oldest.top)
+
+        compose.onAllNodesWithContentDescription("Unpin")[1].performClick()
+        compose.onNodeWithText("Ship it").performClick()
+        compose.runOnIdle {
+            assertEquals(listOf("Ship it"), unpinned)
+            assertEquals("\$Ship it", opened)
+        }
+    }
+
+    @Test fun pinsThatDidNotLoadSaySoRatherThanNone() {
+        details(room.copy(pinned = listOf("\$Ship it")), ChannelDetailsActions(pins = {
+            PinnedMessages(ConversationState(loading = false)) {}
+        }))
+        compose.onNodeWithText("Pinned messages").performClick()
+        compose.onNodeWithText("Couldn’t load pins").assertIsDisplayed()
+        compose.onNodeWithText("No pinned messages").assertDoesNotExist()
+    }
+
+    @Test fun withoutThePowerToPinPinsCantBeUnpinned() {
+        details(room.copy(pinned = listOf("\$Ship it")), ChannelDetailsActions(pins = {
+            PinnedMessages(ConversationState(listOf(pinned("Ship it")), loading = false)) {}
+        }))
+        compose.onNodeWithText("Pinned messages").performClick()
+        compose.onNodeWithText("Ship it").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Unpin").assertDoesNotExist()
+    }
+
+    // capability: conversation.files
+    @Test fun filesListWhatWasSharedNewestFirstAndOpenIt() {
+        val links = mutableListOf<String>()
+        var opened: String? = null
+        var older = false
+        val rows = listOf(pinned("spec.pdf").copy(kind = MessageKind.Attachment), pinned("Morning all"),
+            pinned("Notes at https://example.org/notes").copy(timestamp = 1_700_000_600_000L))
+        compose.setContent {
+            SlatrixTheme {
+                CompositionLocalProvider(LocalUriHandler provides object : UriHandler {
+                    override fun openUri(uri: String) { links += uri }
+                }) {
+                    ChannelDetailsScreen(room, null, ChannelDetailsActions(files = {
+                        SharedFiles(ConversationState(rows, loading = false)) { older = true }
+                    }), {}, { opened = it }) {}
+                }
+            }
+        }
+        compose.onNodeWithText("Files").performClick()
+        val link = compose.onNodeWithText("https://example.org/notes").fetchSemanticsNode().boundsInRoot
+        val file = compose.onNodeWithText("spec.pdf").fetchSemanticsNode().boundsInRoot
+        assertTrue("The newest comes first", link.bottom <= file.top)
+        compose.onNodeWithText("Morning all").assertDoesNotExist()
+
+        compose.onNodeWithText("spec.pdf").performClick()
+        compose.onNodeWithText("https://example.org/notes").performClick()
+        compose.onNodeWithText("Load more").performClick()
+        compose.runOnIdle {
+            assertEquals("\$spec.pdf", opened)
+            assertEquals(listOf("https://example.org/notes"), links)
+            assertTrue(older)
+        }
+    }
+
+    @Test fun loadMoreHoldsItsPlaceWhileLoadingAndAFailedPageTriesAgain() {
+        val files = mutableStateOf(SharedFiles(ConversationState(listOf(pinned("spec.pdf").copy(kind = MessageKind.Attachment)),
+            loading = false, loadingHistory = true)))
+        var asked = false
+        details(room, ChannelDetailsActions(files = { files.value }))
+        compose.onNodeWithText("Files").performClick()
+        compose.onNodeWithText("Load more").assertIsNotEnabled()
+
+        compose.runOnIdle {
+            files.value = SharedFiles(files.value.state.copy(loadingHistory = false, error = "Couldn’t load this conversation.")) {
+                asked = true
+            }
+        }
+        compose.onNodeWithText("Couldn’t load this conversation.").assertIsDisplayed()
+        compose.onNodeWithText("Try again").performClick()
+        compose.runOnIdle { assertTrue(asked) }
+    }
+
+    private fun pinned(body: String) = ConversationMessage(body, "\$$body", "@mira:example.org", "Mira", body, null,
+        1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "M", 0)
+
     private fun details(room: RoomSummary, actions: ChannelDetailsActions = ChannelDetailsActions(), me: String? = null,
-        onLeft: () -> Unit = {}) {
-        compose.setContent { SlatrixTheme { ChannelDetailsScreen(room, me, actions, onLeft) {} } }
+        onLeft: () -> Unit = {}, onOpenMessage: (String) -> Unit = {}) {
+        compose.setContent { SlatrixTheme { ChannelDetailsScreen(room, me, actions, onLeft, onOpenMessage) {} } }
     }
 }

@@ -105,7 +105,7 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
 }
 
 @Composable
-private fun SearchField(text: String, onText: (String) -> Unit, onSubmit: () -> Unit, modifier: Modifier) {
+internal fun SearchField(text: String, onText: (String) -> Unit, onSubmit: () -> Unit, modifier: Modifier, placeholder: String = "Search") {
     val colors = SlatrixTheme.colors
     BasicTextField(text, onText, modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
         singleLine = true, textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textPrimary),
@@ -118,7 +118,7 @@ private fun SearchField(text: String, onText: (String) -> Unit, onSubmit: () -> 
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Icon(SlackIcons.Search, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
                 Box(Modifier.weight(1f)) {
-                    if (text.isEmpty()) Text("Search", style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
+                    if (text.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
                     field()
                 }
                 if (text.isNotEmpty()) {

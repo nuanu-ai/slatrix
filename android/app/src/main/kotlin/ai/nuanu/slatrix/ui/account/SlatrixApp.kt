@@ -4,9 +4,13 @@ import android.content.ActivityNotFoundException
 import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountState
 import ai.nuanu.slatrix.core.AttachmentImport
+import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.MatrixChannel
+import ai.nuanu.slatrix.core.MatrixConversation
+import org.matrix.rustcomponents.sdk.Client
+import ai.nuanu.slatrix.core.ConversationView
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityVerification
 import ai.nuanu.slatrix.core.MatrixRooms
@@ -59,6 +63,7 @@ import androidx.compose.ui.Alignment
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
@@ -77,6 +82,9 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
     var preferences by rememberSaveable { mutableStateOf(false) }
+    // Browse channels or Create a channel, pushed over Home; null while neither is open.
+    var channels by rememberSaveable { mutableStateOf<ChannelPage?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
     // Back during a restore leaves the app; cancelling would show sign-in with the session still saved.
     BackHandler(enabled = (state as? AccountState.Connecting)?.restoring == false || state is AccountState.ChooseMethod ||
         state is AccountState.BrowserSignIn || (state as? AccountState.Failed)?.let { it.options != null && !it.canRetryRestore } == true) {
@@ -139,6 +147,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         val room = rooms.state.mapNotNull { target.roomFor(userId, it.rooms) }.first()
                         you = false
                         preferences = false
+                        channels = null
                         jump(room, target.eventId, target.threadRoot)
                         onNotificationHandled(target)
                     }
@@ -152,6 +161,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             preferences -> { { LivePreferencesScreen(dark, darkOverride, palette,
                                 { darkOverride = it; appearance.darkMode = it },
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
+                            channels != null -> { {
+                                val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
+                                if (channels == ChannelPage.Browse) LiveBrowseChannels(rooms, selectedSpaceId, openChannel) { channels = null }
+                                else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
+                                    openChannel, { notice = it }) { channels = null }
+                            } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
                             thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
@@ -160,15 +175,17 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace) {
+                            LiveHome(userId, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
                             }
                         }
                     }
-                    (state as AccountState.Connected).warning?.let { warning ->
-                        Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(warning) }
+                    notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
+                    // One place for both, so a notice never sits on top of the account's warning.
+                    (notice ?: (state as AccountState.Connected).warning)?.let { text ->
+                        Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(text) }
                     }
                 }
             }
@@ -215,7 +232,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     val scope = rememberCoroutineScope()
     var details by rememberSaveable(open.room.id) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
-        LiveChannelScreen(room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
+        LiveChannelScreen(room, timeline, draft, { composer?.edit(it); if (draft.target !is ComposerTarget.Edit) open.typing?.changed(it) }, { composer?.send(); open.typing?.stopped() },
             { owner?.back() }, { conversation?.loadOlder() },
             { event ->
                 scope.launch {
@@ -225,30 +242,56 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at.takeUnless { open.resume }) },
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
             { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
-            open.threadRoot, rememberMessageActions(conversation, composer, main),
+            open.threadRoot, rememberMessageActions(conversation, composer, main, room),
             ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
                 onNeedPeople = { composer?.loadPeople() },
                 onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
                 onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
             // A quote doesn't know its parent's thread, so it asks before jumping.
-            { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } }, { details = true })
-        val actions = remember(rooms, open.room.id) {
-            rooms?.client?.let { MatrixChannel(it, open.room.id) }?.let {
-                ChannelDetailsActions(it::members, it::save, it::leave, it::invite, it::notifications, it::setNotifications)
+            { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } }, { details = true },
+            typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty())
+        val actions = remember(rooms, open.room.id, conversation) {
+            rooms?.client?.let { client ->
+                val channel = MatrixChannel(client, open.room.id)
+                ChannelDetailsActions(channel::members, channel::save, channel::leave, channel::invite, channel::notifications,
+                    channel::setNotifications, pins = {
+                    val pins = rememberConversation(client, open.room.id, ConversationView.Pins)
+                    // Unpins through the conversation, which outlives the page, so going back doesn't cancel it.
+                    PinnedMessages(pins?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load pins")) {
+                        conversation?.pin(it, false)
+                    }
+                }, files = {
+                    val files = rememberConversation(client, open.room.id, ConversationView.Files)
+                    val state = files?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load files")
+                    // Asks for the next page, which after a failed one is that page again.
+                    SharedFiles(state) { files?.loadOlder() }
+                })
             }
         }
         // Over the conversation, so Back finds it where it was.
         if (details && actions != null) {
-            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }) { details = false }
+            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }, onOpenMessage = { id ->
+                details = false
+                // A pin doesn't know its thread, so it asks before jumping.
+                scope.launch { jump(open.room, id, main?.threadRootOf(open.room.id, id)) }
+            }) { details = false }
         }
     }
+}
+
+/** The room in [view], open while its caller shows: leaving cancels the scope, which closes it. */
+@Composable
+private fun rememberConversation(client: Client, roomId: String, view: ConversationView): MatrixConversation? {
+    val scope = rememberCoroutineScope()
+    return remember { runCatching { client.getRoom(roomId) }.getOrNull()?.let { MatrixConversation(scope, it, view = view) } }
 }
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
 @Composable
 private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit, activity: @Composable () -> Unit) {
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit,
+    activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
     val open: (String) -> Unit = remember(rooms, workspace) {
@@ -256,6 +299,7 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
     }
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
+        onBrowseChannels = { onChannels(ChannelPage.Browse) }, onCreateChannel = { onChannels(ChannelPage.Create) },
         search = {
             val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()
             val inScope = remember(state.rooms, selectedSpaceId) {
@@ -291,3 +335,5 @@ private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads
         ThreadsFeed(threadFeed, it)
     }
 }
+
+private enum class ChannelPage { Browse, Create }
