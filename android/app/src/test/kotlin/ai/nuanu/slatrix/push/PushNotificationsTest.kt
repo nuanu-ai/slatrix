@@ -123,7 +123,7 @@ class PushNotificationsTest {
         val verified = IdentityState(status = IdentityStatus.Verified)
         PushNotifications(context).show("@alex:example.org", "!team:example.org", "\$shown", notificationMessage(), verified)
 
-        NotificationPreferences(context).previews = false
+        NotificationPreferences(context, "@alex:example.org").previews = false
         assertTrue("Alerts already showing text come down", manager.activeNotifications.isEmpty())
         PushNotifications(context).show("@alex:example.org", "!team:example.org", "\$hidden", notificationMessage(), verified)
         val notification = manager.activeNotifications.single().notification
@@ -139,11 +139,15 @@ class PushNotificationsTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         val manager = context.getSystemService(NotificationManager::class.java)
-        NotificationPreferences(context).setNotifyAbout(object : NotificationSettings(NoHandle) {}, NotifyAbout.Nothing)
+        NotificationPreferences(context, "@alex:example.org").setNotifyAbout(object : NotificationSettings(NoHandle) {}, NotifyAbout.None)
 
         PushNotifications(context).show("@alex:example.org", "!team:example.org", "\$quiet", notificationMessage(),
             IdentityState(status = IdentityStatus.Verified))
         assertTrue(manager.activeNotifications.isEmpty())
+
+        PushNotifications(context).show("@sam:example.org", "!team:example.org", "\$for-sam", notificationMessage(),
+            IdentityState(status = IdentityStatus.Verified))
+        assertEquals("Sam: Review budget?", manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
 
     @Test fun aColdStartWaitsBrieflyForTheIdentityBeforeChoosingWhatToShow() = runTest {

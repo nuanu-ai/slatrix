@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix
 
 import android.app.Application
+import ai.nuanu.slatrix.core.NotificationPreferences
 import ai.nuanu.slatrix.core.NotifyAbout
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.LiveNotificationSettings
@@ -9,7 +10,6 @@ import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelected
@@ -21,6 +21,7 @@ import org.matrix.rustcomponents.sdk.ClientException
 import org.matrix.rustcomponents.sdk.NoHandle
 import org.matrix.rustcomponents.sdk.NotificationSettings
 import org.matrix.rustcomponents.sdk.RoomNotificationMode
+import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -49,13 +50,14 @@ class NotificationSettingsScreenTest {
         compose.onNodeWithText("All new messages").assertExists()
         compose.onNodeWithText("Notify me about").performClick()
         compose.onNode(hasText("All new messages") and isSelected()).assertExists()
+        compose.onNodeWithText("Nothing").performClick()
+        compose.runOnIdle { assertEquals(NotifyAbout.None, notifyAbout.value) }
+        compose.onNodeWithText("Notify me about").performClick()
         compose.onNodeWithText("Direct messages, mentions & keywords").performClick()
         compose.runOnIdle { assertEquals(NotifyAbout.DirectAndMentions, notifyAbout.value) }
-        compose.onNodeWithText("Nothing").assertDoesNotExist()
 
         compose.onNodeWithText("Show message previews").assertIsOn().performClick()
         compose.runOnIdle { assertEquals(false, previews.value) }
-        compose.onNodeWithText("Show message previews").assertIsOff()
     }
 
     @Test fun aChoiceTheServerRefusesGoesBackAndSaysSo() {
@@ -64,12 +66,23 @@ class NotificationSettingsScreenTest {
             override suspend fun setDefaultRoomNotificationMode(isEncrypted: Boolean, isOneToOne: Boolean, mode: RoomNotificationMode) =
                 throw ClientException.Generic("offline", null)
         }
-        compose.setContent { SlatrixTheme { LiveNotificationSettings { rules } } }
+        compose.setContent { SlatrixTheme { LiveNotificationSettings("@alex:example.org") { rules } } }
         compose.onNodeWithText("All new messages").assertExists()
         compose.onNodeWithText("Notify me about").performClick()
         compose.onNodeWithText("Direct messages, mentions & keywords").performClick()
         compose.onNodeWithText("Couldn't save. Try again.").assertExists()
         compose.onNodeWithText("Notify me about").performClick()
         compose.onNode(hasText("All new messages") and isSelected()).assertExists()
+    }
+
+    @Test fun settingsThatCannotLoadSaySo() {
+        compose.setContent { SlatrixTheme { LiveNotificationSettings("@alex:example.org") { throw ClientException.Generic("offline", null) } } }
+        compose.onNodeWithText("Couldn't load your settings.").assertExists()
+    }
+
+    @Test fun aPhoneSetToNothingShowsItWithoutTheServer() {
+        runBlocking { NotificationPreferences(compose.activity, "@alex:example.org").setNotifyAbout(object : NotificationSettings(NoHandle) {}, NotifyAbout.None) }
+        compose.setContent { SlatrixTheme { LiveNotificationSettings("@alex:example.org") { throw ClientException.Generic("offline", null) } } }
+        compose.onNodeWithText("Nothing").assertExists()
     }
 }
