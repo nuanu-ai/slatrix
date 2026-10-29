@@ -232,7 +232,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
             // A quote doesn't know its parent's thread, so it asks before jumping.
             { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } }, { details = true })
-        val actions = remember(rooms, open.room.id) {
+        val actions = remember(rooms, open.room.id, conversation) {
             rooms?.client?.let { client ->
                 val channel = MatrixChannel(client, open.room.id)
                 ChannelDetailsActions(channel::members, channel::save, channel::leave, channel::invite, channel::notifications,
@@ -242,7 +242,10 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                     val pins = remember {
                         runCatching { client.getRoom(open.room.id) }.getOrNull()?.let { MatrixConversation(pinScope, it, pinned = true) }
                     }
-                    PinnedMessages(pins?.state?.collectAsState()?.value ?: ConversationState(loading = false)) { pins?.pin(it, false) }
+                    // Unpins through the conversation, which outlives the page, so going back doesn't cancel it.
+                    PinnedMessages(pins?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load pins")) {
+                        conversation?.pin(it, false)
+                    }
                 }
             }
         }

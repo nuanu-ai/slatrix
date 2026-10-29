@@ -305,7 +305,9 @@ private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpe
         when {
             messages.isNotEmpty() -> Unit
             pins.state.loading && room.pinned.isNotEmpty() -> item { DelayedProgress() }
-            else -> item { ErrorLine(pins.state.error ?: "No pinned messages", colors.textSecondary) }
+            else -> item {
+                ErrorLine(pins.state.error ?: if (room.pinned.isEmpty()) "No pinned messages" else "Couldn’t load pins", colors.textSecondary)
+            }
         }
     }
 }
