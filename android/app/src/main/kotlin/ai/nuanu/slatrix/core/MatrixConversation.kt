@@ -556,7 +556,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
         val type = ((event.content as? TimelineItemContent.MsgLike)?.content?.kind as? MsgLikeKind.Message)?.content?.msgType
         return type?.takeIf {
-            it is MessageType.Text || it is MessageType.Notice || it is MessageType.Emote || it is MessageType.Image || it is MessageType.File
+            it is MessageType.Text || it is MessageType.Notice || it is MessageType.Emote || it is MessageType.Image ||
+                it is MessageType.File || it is MessageType.Video || it is MessageType.Audio
         }
     }
 

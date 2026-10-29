@@ -90,7 +90,7 @@ private const val QUICK_REACTIONS = 5
 
 private val textKinds = setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)
 
-/** What a forward can copy. A row doesn't know an attachment's kind, so a video or audio one says it can't go once tapped. */
+/** What a forward can copy: text, and any attachment, which goes as the same media. */
 private val forwardKinds = textKinds + MessageKind.Attachment
 
 /** Slack's long-press sheet, the emoji picker it opens and the delete confirmation, one after another. */
