@@ -30,6 +30,11 @@ object SlackIcons {
     val ChevronRight = outline("chevron-right", "M9.5 6.5 L15 12 L9.5 17.5", width = 2f)
     val ChevronUp = outline("chevron-up", "M6.5 14.75 L12 9.25 L17.5 14.75", width = 2f)
     val ChevronDown = outline("chevron-down", "M6.5 9.25 L12 14.75 L17.5 9.25", width = 2f)
+    val Preferences = outline("preferences", "M4 7.5 H8.5 M12.5 7.5 H20 M4 12 H14 M18 12 H20 M4 16.5 H6.5 M10.5 16.5 H20 " +
+        "M10.5 5.5 A2 2 0 1 1 10.5 9.5 A2 2 0 1 1 10.5 5.5 Z M16 10 A2 2 0 1 1 16 14 A2 2 0 1 1 16 10 Z " +
+        "M8.5 14.5 A2 2 0 1 1 8.5 18.5 A2 2 0 1 1 8.5 14.5 Z")
+    val SignOut = outline("sign-out", "M10 4.5 H6.5 A1.5 1.5 0 0 0 5 6 V18 A1.5 1.5 0 0 0 6.5 19.5 H10 M14.5 8 L18.5 12 L14.5 16 " +
+        "M18.5 12 H9.5")
     val Close = outline("close", "M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5")
     val Check = outline("check", "M5 12.5 L10 17.5 L19 7", width = 2f)
     val Tray = outline("tray", "M4 13 H8.5 L9.5 15.5 H14.5 L15.5 13 H20 M4 13 V18.5 A1.5 1.5 0 0 0 5.5 20 H18.5 " +
