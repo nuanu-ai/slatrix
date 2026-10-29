@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Checks that every capability spec/capabilities.json marks done on a platform has a test there that says
-`capability: <id>`, that no test names an id the ledger lacks, and prints what each platform is missing."""
+"""Checks spec/capabilities.json against the tests that tag its ids, and prints what each app is missing."""
 import json
 import re
 import sys
@@ -43,7 +42,7 @@ for platform in TEST_FOLDERS:
     missing = [entry for entry in capabilities if entry.get(platform) == "missing"]
     print(f"{platform} is missing {len(missing)}:")
     for entry in missing:
-        print(f"  {entry['id']}  {entry.get('what')}")
+        print(f"  {entry.get('id')}  {entry.get('what')}")
 for error in errors:
     print(f"error: {error}")
 sys.exit(1 if errors else 0)

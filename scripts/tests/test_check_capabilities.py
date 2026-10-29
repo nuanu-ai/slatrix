@@ -69,9 +69,12 @@ class CheckCapabilitiesTests(unittest.TestCase):
             {"id": "app.zoom", "what": "Zoom.", "mac": "missing"},
         ):
             with self.subTest(entry=entry):
-                self.assertNotEqual(self.check([entry], {}).returncode, 0)
+                result = self.check([entry], {})
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("error: ", result.stdout)
         duplicate = {"id": "app.zoom", "what": "Zoom.", "mac": "missing", "android": "missing"}
-        self.assertNotEqual(self.check([duplicate, duplicate], {}).returncode, 0)
+        result = self.check([duplicate, duplicate], {})
+        self.assertIn("error: app.zoom is listed more than once", result.stdout)
 
 
 if __name__ == "__main__":

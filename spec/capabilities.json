@@ -1,5 +1,5 @@
 {
-  "about": "What a person can do in Slatrix, and whether each app does it. done means a test in that app says capability: <id>; missing is that app's to-do list; n/a: <reason> is for what the platform can't or shouldn't have. scripts/check-capabilities.py checks the tags and prints each app's gaps.",
+  "about": "What a person can do in Slatrix, and whether each app does it. AGENTS.md says how to keep it current.",
   "capabilities": [
     {"id": "app.icon", "what": "The app has its own icon in the Dock or launcher.", "mac": "done", "android": "missing"},
     {"id": "app.appearance", "what": "Choose light, dark or the system's appearance, and a sidebar theme.", "mac": "done", "android": "done"},
@@ -100,6 +100,7 @@
     {"id": "people.start-dm", "what": "Message someone from their profile, reusing your direct message with them.", "mac": "done", "android": "missing"},
     {"id": "people.avatars", "what": "People and conversations show a photo, or initials on a color.", "mac": "done", "android": "done"},
     {"id": "profile.own", "what": "See your own profile.", "mac": "done", "android": "done"},
+    {"id": "profile.edit-name", "what": "Change your display name.", "mac": "done", "android": "missing"},
     {"id": "profile.edit-photo", "what": "Change or remove your profile photo, cropped to a square.", "mac": "done", "android": "missing"},
 
     {"id": "notifications.alert", "what": "A new message that should notify you raises a notification.", "mac": "done", "android": "done"},

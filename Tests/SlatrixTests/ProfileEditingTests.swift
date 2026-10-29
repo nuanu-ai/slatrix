@@ -123,6 +123,18 @@ struct ProfileEditingTests {
         #expect(matrix.user?.avatarURL != nil)
     }
 
+    // capability: profile.edit-name
+    @Test("A new name becomes yours once the server has it")
+    func rename() async throws {
+        let client = ProfileClient()
+        let matrix = signedIn(client)
+
+        try await matrix.setProfile(name: "Ana Souza")
+
+        #expect(client.name == "Ana Souza")
+        #expect(matrix.user?.name == "Ana Souza")
+    }
+
     // capability: profile.edit-photo
     @Test("Removing your photo leaves your initials")
     func removePhoto() async throws {
@@ -241,6 +253,7 @@ private final class ProfileClient: Client, @unchecked Sendable {
         get { lock.withLock { stored.name } }
         set { lock.withLock { stored.name = newValue } }
     }
+    override func setDisplayName(name: String) async throws { self.name = name }
     override func getProfile(userId: String) async throws -> UserProfile {
         let profile = UserProfile(userId: userId, displayName: name, avatarUrl: avatar, status: nil, call: nil)
         await profiles.wait()
