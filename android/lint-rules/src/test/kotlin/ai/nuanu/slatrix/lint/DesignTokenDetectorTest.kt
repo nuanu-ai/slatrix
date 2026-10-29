@@ -30,12 +30,48 @@ class DesignTokenDetectorTest : LintDetectorTest() {
         ).run().expectErrorCount(5)
     }
 
+    @Test
+    fun testResolvesComposeFactoriesAndAliasesWithoutMatchingUnrelatedSymbols() {
+        lint().files(
+            colorStub,
+            unitStub,
+            kotlin(
+                """
+                package example
+                class Color(value: Int) {
+                    companion object { val White: Color get() = TODO() }
+                }
+                val Int.dp: Int get() = this
+                """,
+            ),
+            kotlin(
+                """
+                package ai.nuanu.slatrix.ui.chat
+                import androidx.compose.ui.graphics.Color as Ink
+                import androidx.compose.ui.graphics.Color.Companion.White as Paper
+                import androidx.compose.ui.unit.dp as gap
+                import example.Color
+                import example.dp
+
+                val background = Ink(0x112233)
+                val foreground = Paper
+                val spacing = 8.gap
+                val unrelatedColor = Color(42)
+                val unrelatedWhite = Color.White
+                val unrelatedSize = 5.dp
+                val retryCount = 3
+                """,
+            ),
+        ).run().expectErrorCount(3)
+    }
+
     private val colorStub = kotlin(
         """
         package androidx.compose.ui.graphics
         class Color(value: Long) {
             companion object { val White: Color get() = TODO() }
         }
+        fun Color(value: Int): Color = TODO()
         """,
     )
 
