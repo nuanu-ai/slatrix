@@ -11,8 +11,12 @@ const boundedText = (value, bytes) => typeof value === 'string' && value.length 
 
 function validNotification(value) {
   return isObject(value)
-    && boundedText(value.event_id, 255) && value.event_id.startsWith('$')
-    && boundedText(value.room_id, 255) && value.room_id.startsWith('!')
+    && ((value.event_id === undefined && value.room_id === undefined && isObject(value.counts))
+      || (boundedText(value.event_id, 255) && value.event_id.startsWith('$')
+        && boundedText(value.room_id, 255) && value.room_id.startsWith('!')))
+    && (value.counts === undefined || (isObject(value.counts)
+      && ['unread', 'missed_calls'].every((key) => value.counts[key] === undefined
+        || (Number.isSafeInteger(value.counts[key]) && value.counts[key] >= 0))))
     && (value.prio === undefined || value.prio === 'high' || value.prio === 'low')
     && Array.isArray(value.devices) && value.devices.length <= 100
     && value.devices.every((device) => isObject(device) && allowedApps.has(device.app_id)
@@ -35,6 +39,10 @@ export const matrixPush = onRequest({
     return;
   }
   const notification = request.body.notification;
+  if (notification.event_id === undefined) {
+    response.status(200).json({ rejected: [] });
+    return;
+  }
   await Promise.all(notification.devices.map((device) => getMessaging().send({
     token: device.pushkey,
     data: { event_id: notification.event_id, room_id: notification.room_id },
