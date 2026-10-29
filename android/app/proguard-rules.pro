@@ -1,0 +1,6 @@
+-keep,includedescriptorclasses class org.rustls.platformverifier.** { *; }
+-keep class org.matrix.rustsdk.Android { *; }
+-keep class com.sun.jna.** { *; }
+-keep class * extends com.sun.jna.Structure { *; }
+-keep class * implements com.sun.jna.Callback { *; }
+-dontwarn java.awt.**
