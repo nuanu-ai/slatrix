@@ -12,6 +12,7 @@ import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.WorkspacePreferences
+import ai.nuanu.slatrix.push.NotificationTarget
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.compose.BackHandler
@@ -40,7 +41,8 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.launch
 
 @Composable
-fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: MatrixRooms?, workspace: MatrixWorkspace?) {
+fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: MatrixRooms?, workspace: MatrixWorkspace?,
+    notification: NotificationTarget? = null, onNotificationOpened: (NotificationTarget) -> Unit = {}) {
     val state by account.state.collectAsState()
     val context = LocalContext.current
     val appearance = remember(context) { AppearancePreferences(context) }
@@ -67,6 +69,18 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val roomState = rooms?.state?.collectAsState()?.value ?: RoomListState()
                 val selected = workspace?.selected?.collectAsState()?.value
+                LaunchedEffect(notification, userId, roomState.rooms, workspace) {
+                    val target = notification ?: return@LaunchedEffect
+                    if (target.userId != userId) {
+                        onNotificationOpened(target)
+                    } else if (workspace != null) {
+                        target.roomFor(userId, roomState.rooms)?.let { room ->
+                            you = false
+                            workspace.open(room)
+                            onNotificationOpened(target)
+                        }
+                    }
+                }
                 Box(Modifier.fillMaxSize()) {
                     ConnectedAccountScreen(identityState,
                         { identity?.requestVerification() }, { identity?.acceptVerification() },

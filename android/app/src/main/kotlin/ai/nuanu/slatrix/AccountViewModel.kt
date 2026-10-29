@@ -4,6 +4,7 @@ import android.app.Application
 import ai.nuanu.slatrix.core.AccountRuntime
 import ai.nuanu.slatrix.core.AccountState
 import ai.nuanu.slatrix.core.MatrixWorkspace
+import ai.nuanu.slatrix.push.NotificationTarget
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.NonCancellable
@@ -21,6 +22,14 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     val rooms = runtime.rooms
     private val mutableWorkspace = MutableStateFlow<MatrixWorkspace?>(null)
     val workspace = mutableWorkspace.asStateFlow()
+    private val mutableNotificationTarget = MutableStateFlow<NotificationTarget?>(null)
+    val notificationTarget = mutableNotificationTarget.asStateFlow()
+
+    fun openNotification(target: NotificationTarget) { mutableNotificationTarget.value = target }
+
+    fun notificationOpened(target: NotificationTarget) {
+        if (mutableNotificationTarget.value == target) mutableNotificationTarget.value = null
+    }
 
     init {
         viewModelScope.launch {
