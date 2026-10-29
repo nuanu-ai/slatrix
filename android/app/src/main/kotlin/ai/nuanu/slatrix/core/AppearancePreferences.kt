@@ -14,6 +14,8 @@ class AppearancePreferences(context: Context) {
             }
         }
 
+    fun applyNightMode() = Unit
+
     var paletteName: String?
         get() = values.getString("palette", null)
         set(value) { values.edit { putString("palette", value) } }

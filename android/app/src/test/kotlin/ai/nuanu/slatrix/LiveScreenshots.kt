@@ -5,6 +5,7 @@ import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
+import ai.nuanu.slatrix.ui.account.LiveYouScreen
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
@@ -23,7 +24,7 @@ import org.robolectric.ParameterizedRobolectricTestRunner.Parameters
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Renders the connected Home, DMs and You tabs with fictional rooms for visual review. */
+/** Renders the connected Home and DMs tabs and the You page with fictional rooms for visual review. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(application = Application::class, sdk = [35], qualifiers = "w412dp-h892dp-420dpi")
@@ -45,10 +46,11 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
         )
         compose.setContent {
             SlatrixTheme(dark = dark, palette = palette) {
-                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {})
+                if (tab == "You") LiveYouScreen("@alex:example.org", {}, {}, {})
+                else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {})
             }
         }
-        if (tab != "Home") compose.onNode(hasText(tab) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
+        if (tab == "DMs") compose.onNode(hasText(tab) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
         val theme = if (dark) "dark" else "light"
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/Live-$tab-$theme-${palette.tokenName}.png")
     }

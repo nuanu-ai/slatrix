@@ -30,6 +30,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 
+@Composable
+fun LiveYouScreen(userId: String, onPreferences: () -> Unit, onSignOut: () -> Unit, @Suppress("UNUSED_PARAMETER") onBack: () -> Unit) =
+    LiveYouTab(userId, onPreferences, onSignOut)
+
 /** The You tab's content: who is signed in, Preferences, and signing out. */
 @Composable
 internal fun LiveYouTab(userId: String, onPreferences: () -> Unit, onSignOut: () -> Unit) {

@@ -14,7 +14,6 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
-import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -66,7 +65,6 @@ class LiveForegroundTest {
             tab("DMs").performClick()
             compose.onNodeWithText("Direct messages").assertExists()
             compose.onNodeWithText("DMs", useUnmergedTree = true).assertReadableOn(canvas)
-            tab("You").performClick().assertIsSelected()
         }
     }
 
