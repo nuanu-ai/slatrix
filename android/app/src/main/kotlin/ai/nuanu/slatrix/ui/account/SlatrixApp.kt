@@ -55,6 +55,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     val dark = darkOverride ?: isSystemInDarkTheme()
     var palette by rememberSaveable { mutableStateOf(SidebarPalette.entries.firstOrNull { it.name == appearance.paletteName } ?: SidebarPalette.Aubergine) }
     var server by rememberSaveable { mutableStateOf("") }
+    var you by rememberSaveable { mutableStateOf(false) }
     var preferences by rememberSaveable { mutableStateOf(false) }
     // Back during a restore leaves the app; cancelling would show sign-in with the session still saved.
     BackHandler(enabled = (state as? AccountState.Connecting)?.restoring == false || state is AccountState.ChooseMethod ||
@@ -85,6 +86,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         onNotificationHandled(target)
                     } else if (workspace != null && rooms != null) {
                         val room = rooms.state.mapNotNull { target.roomFor(userId, it.rooms) }.first()
+                        you = false
                         preferences = false
                         workspace.open(room)
                         onNotificationHandled(target)
@@ -99,6 +101,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             preferences -> { { LivePreferencesScreen(dark, darkOverride, palette,
                                 { darkOverride = it; appearance.darkMode = it },
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
+                            you -> { { LiveYouScreen(userId, { preferences = true }, account::signOut) { you = false } } }
                             selected != null -> { { key(selected.room.id) {
                                 val conversation = selected.conversation
                                 val composer = selected.composer
@@ -113,8 +116,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } } }
                             else -> null
                         }) {
-                            LiveHome(userId, rooms, workspace, { preferences = true }, selectedSpaceId,
-                                { selectedSpaceId = it; workspacePreferences.selectedSpaceId = it }, account::signOut)
+                            LiveHome(userId, rooms, workspace, { you = true }, selectedSpaceId,
+                                { selectedSpaceId = it; workspacePreferences.selectedSpaceId = it })
                         }
                     }
                     (state as AccountState.Connected).warning?.let { warning ->
@@ -148,11 +151,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
 @Composable
-private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, onPreferences: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit, onSignOut: () -> Unit) {
+private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, onYou: () -> Unit,
+    selectedSpaceId: String?, onSpace: (String?) -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val open: (String) -> Unit = remember(rooms, workspace) {
         { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
     }
-    LiveHomeScreen(userId, state, open, onPreferences, { rooms?.retry() }, selectedSpaceId, onSpace, onSignOut)
+    LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace)
 }
