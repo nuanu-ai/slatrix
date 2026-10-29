@@ -8,21 +8,26 @@ enum PinnedMessagesMapping {
     static let sdkLimit = 128
     static let pageSize = 30
 
-    static func arrange<Item>(_ items: [Item], pinned: [String], id: (Item) -> String) -> [Item] { items }
-
-    static func limitNote(total: Int) -> String? { nil }
-
-    static func messages(_ items: [TimelineItem], roomID: String, pinnedIDs: Set<String>, ownID: String?)
-        -> [ChatMessage]
-    {
+    /// The items the room still pins, each once, the most recently pinned first, as Slack lists them; one pinned twice
+    /// counts where it was pinned last. The cases are in spec/pinned-messages.json.
+    static func arrange<Item>(_ items: [Item], pinned: [String], id: (Item) -> String) -> [Item] {
+        var place: [String: Int] = [:]
+        for (index, event) in pinned.enumerated() { place[event] = index }
         var seen = Set<String>()
-        return items.compactMap { item in
-            guard let event = item.asEvent(), event.isRemote,
-                let message = MatrixMapping.message(event, roomID: roomID, ownUserID: ownID),
-                pinnedIDs.contains(message.eventID), seen.insert(message.eventID).inserted
-            else { return nil }
-            return message
+        return items.filter { place[id($0)] != nil && seen.insert(id($0)).inserted }
+            .sorted { place[id($0)]! > place[id($1)]! }
+    }
+
+    static func limitNote(total: Int) -> String? {
+        total > sdkLimit ? "Showing the \(sdkLimit) most recent of \(total) pinned messages." : nil
+    }
+
+    static func messages(_ items: [TimelineItem], roomID: String, pinned: [String], ownID: String?) -> [ChatMessage] {
+        let messages = items.compactMap { item -> ChatMessage? in
+            guard let event = item.asEvent(), event.isRemote else { return nil }
+            return MatrixMapping.message(event, roomID: roomID, ownUserID: ownID)
         }
+        return arrange(messages, pinned: pinned) { $0.eventID }
     }
 }
 
@@ -70,6 +75,8 @@ private final class PinnedRoomObserver: RoomInfoListener, @unchecked Sendable {
     private(set) var hasMore = false
     private(set) var coverageMessage: String?
     private(set) var pinnedEventIDs = Set<String>()
+    /// The room's pinned events in the order they were pinned.
+    private var pinnedOrder: [String] = []
 
     private var client: Client?
     private var session = UUID()
@@ -106,6 +113,7 @@ private final class PinnedRoomObserver: RoomInfoListener, @unchecked Sendable {
         roomID = nil
         messages = []
         pinnedEventIDs = []
+        pinnedOrder = []
         totalLoaded = 0
         totalPinned = 0
         canPinUnpin = false
@@ -320,7 +328,8 @@ private final class PinnedRoomObserver: RoomInfoListener, @unchecked Sendable {
     }
 
     private func accept(_ info: RoomInfo) {
-        pinnedEventIDs = Set(info.pinnedEventIds)
+        pinnedOrder = info.pinnedEventIds
+        pinnedEventIDs = Set(pinnedOrder)
         totalPinned = pinnedEventIDs.count
         publish()
     }
@@ -328,12 +337,12 @@ private final class PinnedRoomObserver: RoomInfoListener, @unchecked Sendable {
     private func publish() {
         guard let id = roomID else { return }
         let all = PinnedMessagesMapping.messages(
-            timelineItems, roomID: id, pinnedIDs: pinnedEventIDs, ownID: try? client?.userId())
+            timelineItems, roomID: id, pinned: pinnedOrder, ownID: try? client?.userId())
         totalLoaded = all.count
         messages = Array(all.prefix(visibleCount))
         hasMore = all.count > messages.count
-        if totalPinned > PinnedMessagesMapping.sdkLimit {
-            coverageMessage = "Showing the 128 most recent of \(totalPinned) pinned messages."
+        if let note = PinnedMessagesMapping.limitNote(total: totalPinned) {
+            coverageMessage = note
         } else if totalLoaded < totalPinned {
             coverageMessage =
                 "\(totalLoaded) of \(totalPinned) pinned messages are available. Others may still be loading or unavailable."

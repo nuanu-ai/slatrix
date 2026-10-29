@@ -7,6 +7,7 @@ import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.NotificationChoice
 import ai.nuanu.slatrix.core.NotificationSetting
+import ai.nuanu.slatrix.core.PinOrder
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
@@ -296,8 +297,7 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
 private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpenMessage: (String) -> Unit, onBack: () -> Unit) {
     val colors = SlatrixTheme.colors
     val messages = remember(pins.state.rows, room.pinned) {
-        pins.state.rows.filterIsInstance<ConversationMessage>().filter { it.eventId in room.pinned }
-            .sortedByDescending { room.pinned.indexOf(it.eventId) }
+        PinOrder.arrange(room.pinned, pins.state.rows.filterIsInstance<ConversationMessage>()) { it.eventId }
     }
     PushedPage("Pinned messages", onBack) {
         items(messages, key = { it.id }) { message ->
@@ -329,6 +329,7 @@ private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpe
                 ErrorLine(pins.state.error ?: if (room.pinned.isEmpty()) "No pinned messages" else "Couldn’t load pins", colors.textSecondary)
             }
         }
+        PinOrder.note(room.pinned.size)?.let { item { ErrorLine(it, colors.textSecondary) } }
     }
 }
 
