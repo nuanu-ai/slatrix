@@ -85,9 +85,11 @@ class MatrixConversationTest {
 
         assertFalse(conversation.markRead("\$old"))
         assertTrue(timeline.receipts.tryReceive().isFailure)
+        assertTrue(room.markedUnread)
         assertTrue(conversation.markRead("\$new"))
         assertEquals(ReceiptType.READ to "\$new", timeline.receipts.receive())
         assertEquals(ReceiptType.FULLY_READ to "\$new", timeline.receipts.receive())
+        assertFalse(room.markedUnread)
         assertTrue(conversation.markRead("\$new"))
         assertTrue(timeline.receipts.tryReceive().isFailure)
         assertEquals(TimelineFocus.Live(true), room.configuration?.focus)
@@ -104,6 +106,8 @@ class MatrixConversationTest {
 
 private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
     var configuration: TimelineConfiguration? = null
+    var markedUnread = true
+    override suspend fun setUnreadFlag(newValue: Boolean) { markedUnread = newValue }
     override suspend fun timeline(): Timeline = value
     override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline {
         this.configuration = configuration
