@@ -108,6 +108,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-process:2.9.4")
     implementation("androidx.browser:browser:1.10.0")
     implementation("org.jsoup:jsoup:1.23.2")
+    implementation("androidx.media3:media3-exoplayer:1.8.0")
+    implementation("androidx.media3:media3-ui:1.8.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

@@ -91,18 +91,36 @@ private final class Spaces: SpaceService, @unchecked Sendable {
     }
 }
 
+/// Where a room is listed by its membership, from the shared cases in `spec/invitations.json`.
+struct InvitationPlacementTests {
+    struct Case: Decodable, CustomTestStringConvertible {
+        var name: String
+        var space: Bool
+        var membership: String
+        var expected: String
+        var testDescription: String { name }
+    }
+
+    struct Spec: Decodable { var placement: [Case] }
+
+    @Test(
+        "Rooms are placed as in every shared case",
+        arguments: try SharedSpec.decode("spec/invitations.json", as: Spec.self).placement)
+    func placement(spec: Case) throws {
+        let memberships: [String: Membership] = [
+            "invited": .invited, "joined": .joined, "left": .left, "banned": .banned,
+        ]
+        let placements: [String: InvitationRoomPlacement] = [
+            "conversation": .conversation, "workspace": .workspace, "ignored": .ignored,
+        ]
+        let membership = try #require(memberships[spec.membership])
+        #expect(
+            InvitationRoomPlacement.classify(isSpace: spec.space, membership: membership) == placements[spec.expected])
+    }
+}
+
 @MainActor
 struct InvitationActionTests {
-    @Test(
-        "Invited workspaces stay invitations; only joined workspaces enter the workspace picker",
-        arguments: [
-            (true, Membership.invited, InvitationRoomPlacement.conversation), (true, .joined, .workspace),
-            (false, .invited, .conversation), (false, .joined, .conversation), (true, .left, .ignored),
-            (false, .banned, .ignored),
-        ])
-    func placement(isSpace: Bool, membership: Membership, expected: InvitationRoomPlacement) {
-        #expect(InvitationRoomPlacement.classify(isSpace: isSpace, membership: membership) == expected)
-    }
 
     // capability: home.invitations
     @Test("A second Accept while the first is in flight shares its join and its destination")
