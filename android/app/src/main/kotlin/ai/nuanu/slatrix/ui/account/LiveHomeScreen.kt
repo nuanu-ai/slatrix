@@ -142,7 +142,7 @@ private fun LiveRoomRow(room: RoomSummary, onRoom: (String) -> Unit) {
             fontWeight = if (room.unread == UnreadBadge.None) FontWeight.Normal else FontWeight.Bold,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
         (room.unread as? UnreadBadge.Count)?.let { badge ->
-            Surface(color = SlatrixTheme.colors.mention, contentColor = SlatrixTheme.colors.mentionText, shape = MaterialTheme.shapes.large) {
+            Surface(color = SlatrixTheme.colors.mention, contentColor = SlatrixTheme.colors.onAccent, shape = MaterialTheme.shapes.large) {
                 Text(badge.label, Modifier.padding(horizontal = UiMetrics.GapSmall, vertical = UiMetrics.GapTiny),
                     style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
             }

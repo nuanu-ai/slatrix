@@ -41,6 +41,8 @@ class MatrixWorkspace(scope: CoroutineScope, client: Client) {
                     if (generation.get() == token) mutableSelected.value = current
                     continue
                 }
+                if (generation.get() != token) continue
+                mutableSelected.value = requested
                 release()
                 currentCoroutineContext().ensureActive()
                 if (requested == null || generation.get() != token) continue
@@ -79,7 +81,7 @@ class MatrixWorkspace(scope: CoroutineScope, client: Client) {
         if (!worker.isActive) return
         val token = generation.incrementAndGet()
         val requested = room?.let(::OpenChannel)
-        mutableSelected.value = requested
+        if (current == null) mutableSelected.value = requested
         requests.trySend(token to requested)
     }
 
