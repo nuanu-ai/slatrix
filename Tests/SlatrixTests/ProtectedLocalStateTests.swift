@@ -178,7 +178,7 @@ struct ProtectedLocalStateStoreTests {
         #expect(try await store.open(accountID: account).state.recentSearches == ["budget", "launch plan"])
     }
 
-    // capability: message.save
+    // capability: message.save.sync
     @Test("Messages taken out of Later are kept with the account's other private state, so the removal can still sync")
     func savedRemovalsPersist() async throws {
         let access = try await store.open(accountID: account)

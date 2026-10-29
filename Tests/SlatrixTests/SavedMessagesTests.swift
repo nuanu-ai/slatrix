@@ -6,8 +6,13 @@ import Testing
 
 /// Any JSON value, so a case hands the app content exactly as the spec writes it and compares what the app writes.
 enum JSONValue: Codable, Equatable, Sendable {
-    case null, bool(Bool), int(Int64), double(Double), string(String)
-    case array([JSONValue]), object([String: JSONValue])
+    case null
+    case bool(Bool)
+    case int(Int64)
+    case double(Double)
+    case string(String)
+    case array([JSONValue])
+    case object([String: JSONValue])
 
     init(from decoder: Decoder) throws {
         let value = try decoder.singleValueContainer()
@@ -67,11 +72,16 @@ struct SavedMessagesRuleTests {
     struct Toggling: Decodable, Sendable, CustomTestStringConvertible {
         var name: String
         var list: JSONValue
-        var room_id: String
-        var event_id: String
+        var roomID: String
+        var eventID: String
         var now: Int64
         var expected: JSONValue
         var testDescription: String { name }
+        enum CodingKeys: String, CodingKey {
+            case name, list, now, expected
+            case roomID = "room_id"
+            case eventID = "event_id"
+        }
     }
 
     struct Spec: Decodable {
@@ -88,7 +98,7 @@ struct SavedMessagesRuleTests {
         #expect(try JSONValue(json: SavedMessages(json: spec.content.text).json) == spec.expected)
     }
 
-    // capability: message.save
+    // capability: message.save.sync
     @Test("A device's Later merges with the account's as in every shared case", arguments: try spec.get().merging)
     func merging(spec: Merging) throws {
         let remote = SavedMessages(json: spec.remote == .null ? nil : spec.remote.text)
@@ -100,7 +110,7 @@ struct SavedMessagesRuleTests {
     @Test("Saving and removing change Later as in every shared case", arguments: try spec.get().toggling)
     func toggling(spec: Toggling) throws {
         let toggled = SavedMessages(json: spec.list.text).toggled(
-            roomID: spec.room_id, eventID: spec.event_id, at: Date(timeIntervalSince1970: Double(spec.now) / 1_000))
+            roomID: spec.roomID, eventID: spec.eventID, at: Date(timeIntervalSince1970: Double(spec.now) / 1_000))
         #expect(try JSONValue(json: toggled.json) == spec.expected)
     }
 
@@ -185,7 +195,7 @@ struct SavedMessagesServiceTests {
     private let one = #"{"room_id":"!design:example.org","event_id":"$one","ts":1761955200000}"#
     private let three = #"{"room_id":"!general:example.org","event_id":"$three","ts":1761955400000}"#
 
-    // capability: message.save
+    // capability: message.save.sync
     @Test("Saves and removals made on another device show in Later after their sync")
     func otherDevice() async {
         let client = LaterClient(stored: #"{"saved":[\#(one)],"removed":[]}"#)

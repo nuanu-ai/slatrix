@@ -27,9 +27,14 @@ struct SavedMessages: Equatable {
     /// The content of the account data event; nil, or anything that breaks the rules, reads as nothing saved.
     init(json: String?) {
         struct Item: Decodable {
-            var room_id: String
-            var event_id: String
+            var roomID: String
+            var eventID: String
             var ts: Int64
+            enum CodingKeys: String, CodingKey {
+                case roomID = "room_id"
+                case eventID = "event_id"
+                case ts
+            }
         }
         struct Lenient: Decodable {
             var item: Item?
@@ -45,13 +50,13 @@ struct SavedMessages: Equatable {
         }
         func entries(_ items: [Lenient]?, saved: Bool) -> [Entry] {
             (items ?? []).compactMap(\.item).compactMap { item in
-                guard ProtectedLocalState.validID(item.room_id), item.room_id.hasPrefix("!"),
-                    ProtectedLocalState.validID(item.event_id), item.event_id.hasPrefix("$"),
+                guard ProtectedLocalState.validID(item.roomID), item.roomID.hasPrefix("!"),
+                    ProtectedLocalState.validID(item.eventID), item.eventID.hasPrefix("$"),
                     (0...9_007_199_254_740_991).contains(item.ts)
                 else { return nil }
                 return Entry(
                     reference: SavedMessageReference(
-                        roomID: item.room_id, eventID: item.event_id, savedAt: Self.date(item.ts)),
+                        roomID: item.roomID, eventID: item.eventID, savedAt: Self.date(item.ts)),
                     isSaved: saved, ts: item.ts)
             }
         }
@@ -89,8 +94,8 @@ struct SavedMessages: Equatable {
         let previous = (saved + removed).filter { $0.id == reference.id }.map { Self.milliseconds($0.savedAt) }.max()
         let ts = max(Self.milliseconds(now), previous.map { $0 + 1 } ?? 0)
         let entry = SavedMessageReference(roomID: roomID, eventID: eventID, savedAt: Self.date(ts))
-        return isSaved ? SavedMessages(saved: saved, removed: removed + [entry]) : SavedMessages(
-            saved: saved + [entry], removed: removed)
+        if isSaved { return SavedMessages(saved: saved, removed: removed + [entry]) }
+        return SavedMessages(saved: saved + [entry], removed: removed)
     }
 
     /// The content to write: both lists, newest first.
@@ -113,7 +118,9 @@ struct SavedMessages: Equatable {
     private static func milliseconds(_ date: Date) -> Int64 {
         Int64(min(max((date.timeIntervalSince1970 * 1_000).rounded(), 0), 9_007_199_254_740_991))
     }
-    private static func date(_ milliseconds: Int64) -> Date { Date(timeIntervalSince1970: Double(milliseconds) / 1_000) }
+    private static func date(_ milliseconds: Int64) -> Date {
+        Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
+    }
 }
 
 private final class AccountDataObserver: RawAccountDataListener {
@@ -138,8 +145,8 @@ private final class AccountDataObserver: RawAccountDataListener {
     /// Lists heard from the account, so a write knows whether one landed while it was out.
     @ObservationIgnored private var heard = 0
 
-    /// The signed-in account's client, or nil on sign-out. The list stays with its account until another's arrives,
-    /// so the last save to the device's vault still has it.
+    /// The signed-in account's client, or nil on sign-out. The list stays with its account until another account, or
+    /// the preview, takes over, so the last save to the device's vault still has it.
     func attach(_ client: Client?, accountID: String?) {
         handle?.cancel()
         handle = nil
@@ -148,8 +155,8 @@ private final class AccountDataObserver: RawAccountDataListener {
         changes = nil
         published = nil
         session = UUID()
-        guard let client, let accountID else { return }
-        own(accountID)
+        if let accountID { own(accountID) }
+        guard let client else { return }
         let session = session
         handle = client.observeRawAccountDataEvent(
             eventType: SavedMessages.eventType,

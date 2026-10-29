@@ -20,9 +20,12 @@ struct ProtectedLocalState: Codable, Equatable {
     var saved: [SavedMessageReference] = []
     /// Optional, so a vault written before it existed still opens.
     var recentSearches: [String]?
+    /// When each message left Later, so a removal made offline still reaches the account; optional, as above.
+    var savedRemovals: [SavedMessageReference]?
 
     func validate() throws {
         guard drafts.count <= 4_096, threadDrafts.count <= 4_096, saved.count <= 10_000,
+            (savedRemovals ?? []).count <= 10_000,
             (recentSearches ?? []).count <= RecentSearches.limit,
             (recentSearches ?? []).allSatisfy({ $0.utf8.count <= 1_024 })
         else { throw ProtectedLocalStateError.invalidData }
@@ -40,12 +43,14 @@ struct ProtectedLocalState: Codable, Equatable {
         guard textBytes <= ProtectedLocalStateCodec.maximumPlaintextBytes else {
             throw ProtectedLocalStateError.invalidData
         }
-        var seen = Set<String>()
-        for item in saved {
-            guard Self.validID(item.roomID), item.roomID.hasPrefix("!"),
-                Self.validID(item.eventID), item.eventID.hasPrefix("$"),
-                item.savedAt.timeIntervalSince1970.isFinite, seen.insert(item.id).inserted
-            else { throw ProtectedLocalStateError.invalidData }
+        for list in [saved, savedRemovals ?? []] {
+            var seen = Set<String>()
+            for item in list {
+                guard Self.validID(item.roomID), item.roomID.hasPrefix("!"),
+                    Self.validID(item.eventID), item.eventID.hasPrefix("$"),
+                    item.savedAt.timeIntervalSince1970.isFinite, seen.insert(item.id).inserted
+                else { throw ProtectedLocalStateError.invalidData }
+            }
         }
         guard try JSONEncoder().encode(self).count <= ProtectedLocalStateCodec.maximumPlaintextBytes - 128 else {
             throw ProtectedLocalStateError.invalidData

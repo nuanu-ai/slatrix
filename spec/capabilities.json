@@ -85,6 +85,7 @@
     {"id": "message.forward", "what": "Forward a message to another conversation.", "mac": "done", "android": "done"},
     {"id": "message.pin", "what": "Pin or unpin a message.", "mac": "done", "android": "done"},
     {"id": "message.save", "what": "Save a message for later and find it again in Later.", "mac": "done", "android": "done"},
+    {"id": "message.save.sync", "what": "Later is one list on every device signed in to your account.", "mac": "done", "android": "missing"},
     {"id": "message.edit-caption", "what": "Change the caption of an image or file you sent.", "mac": "done", "android": "missing"},
 
     {"id": "thread.open", "what": "Open a message's thread.", "mac": "done", "android": "done"},
