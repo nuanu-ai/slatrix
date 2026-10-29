@@ -5,6 +5,8 @@ import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageKind
+import ai.nuanu.slatrix.core.MessageReaction
+import ai.nuanu.slatrix.core.MessageThread
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
@@ -41,16 +43,19 @@ class MessageContentScreenshots(private val dark: Boolean) {
             DayDivider("today", today),
             message("a", "Mira", "", "<a href=\"https://matrix.to/#/@jordan:example.org\">Jordan Lee</a> " +
                 "<a href=\"https://matrix.to/#/@sam:example.org\">Sam</a> I set up a short call today to settle " +
-                "<b>priorities</b> for the <i>launch</i>, 14:00 CET.", 0),
+                "<b>priorities</b> for the <i>launch</i>, 14:00 CET.", 0).copy(reactions = listOf(
+                MessageReaction("👍", 2, true, listOf("@jordan:example.org", "@sam:example.org")),
+                MessageReaction("👀", 1, false, listOf("@sam:example.org")))),
             message("b", "Jordan", "", "<blockquote>Can we ship the empty states first?</blockquote>Yes, and the " +
-                "<code>onboarding</code> copy is in <a href=\"https://example.org/docs\">the doc</a>.", 6),
+                "<code>onboarding</code> copy is in <a href=\"https://example.org/docs\">the doc</a>.", 6)
+                .copy(thread = MessageThread(3, "Sam", today + 40 * minute)),
             message("c", "Jordan", "", "<p>Plan:</p><ol><li>Fix the <del>banner</del> header</li><li>Ship</li></ol>" +
                 "<pre><code>./gradlew assembleRelease</code></pre>", 7).copy(grouped = true, edited = true),
             message("d", "Sam", "This message was deleted", null, 12).copy(kind = MessageKind.Deleted),
         )
         compose.setContent {
             SlatrixTheme(dark = dark) {
-                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false),
+                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false, ownUserId = "@jordan:example.org"),
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
             }
         }

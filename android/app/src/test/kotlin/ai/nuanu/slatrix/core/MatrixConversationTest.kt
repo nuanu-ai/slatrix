@@ -222,6 +222,41 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.reactions.show
+    @Test fun reactionsCountTheirSendersAndMarkYours() = runTest {
+        fun sent(id: String) = ReactionSenderData(id, 1_700_000_000_000u, null)
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Ship it", reactions = listOf(
+            Reaction("👍", listOf(sent("@mira:example.org"), sent("@me:example.org"))),
+            Reaction("🎉", listOf(sent("@sam:example.org"))),
+        ))))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val state = conversation.state.first { it.rows.isNotEmpty() }
+        assertEquals(listOf(
+            MessageReaction("👍", 2, true, listOf("@mira:example.org", "@me:example.org")),
+            MessageReaction("🎉", 1, false, listOf("@sam:example.org")),
+        ), state.rows.messages.single().reactions)
+        assertEquals("@me:example.org", state.ownUserId)
+        conversation.close()
+    }
+
+    // capability: message.thread-summary
+    @Test fun aThreadRootCountsItsRepliesAndKnowsTheLastOne() = runTest {
+        val reply = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Done", null)), "Done", false, null)), null, null, null))
+        val summary = object : ThreadSummary(NoHandle) {
+            override fun numReplies(): ULong = 3u
+            override fun latestEvent(): EmbeddedEventDetails = EmbeddedEventDetails.Ready(reply, "@sam:example.org",
+                ProfileDetails.Ready("Sam Okafor", false, null, null, null), 1_700_000_600_000u, EventOrTransactionId.EventId("\$r"))
+        }
+        val root = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Plan?", null)), "Plan?", false, null)), null, null, summary))
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Plan?", content = root), conversationItem("b", "\$b", "Solo")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val messages = conversation.state.first { it.rows.isNotEmpty() }.rows.messages
+        assertEquals(listOf(MessageThread(3, "Sam Okafor", 1_700_000_600_000L), null), messages.map { it.thread })
+        conversation.close()
+    }
+
     // capability: message.edited
     @Test fun anEditedMessageSaysSo() = runTest {
         val edited = TimelineItemContent.MsgLike(MsgLikeContent(
@@ -453,6 +488,7 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
     var markedUnread = true
     val sendQueueEnabled = CompletableDeferred<Boolean>()
     override fun enableSendQueue(enable: Boolean) { sendQueueEnabled.complete(enable) }
+    override fun ownUserId(): String = "@me:example.org"
     override suspend fun setUnreadFlag(newValue: Boolean) { markedUnread = newValue }
     override suspend fun timeline(): Timeline = value
     override suspend fun matrixToEventPermalink(eventId: String): String = "https://matrix.to/#/!design:example.org/$eventId"
@@ -537,6 +573,7 @@ private fun conversationItem(
     local: Boolean = false,
     sendState: EventSendState? = if (local) EventSendState.NotSentYet(null) else null,
     content: TimelineItemContent? = null,
+    reactions: List<Reaction> = emptyList(),
     sender: String = "@mira:example.org",
     timestamp: ULong = 1_700_000_000_000u,
     editable: Boolean = false,
@@ -552,7 +589,7 @@ private fun conversationItem(
             MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)),
             null, null, null,
         )),
-        reactions = emptyList(), eventTypeRaw = "m.room.message", timestamp = timestamp,
+        reactions = reactions, eventTypeRaw = "m.room.message", timestamp = timestamp,
         localSendState = sendState, editSendState = null, redactionSendState = null, localCreatedAt = null,
         readReceipts = emptyMap(), origin = null, canBeRepliedTo = true,
         lazyProvider = object : LazyTimelineItemProvider(NoHandle) {},
