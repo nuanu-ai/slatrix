@@ -110,9 +110,11 @@ class MatrixRoomsTest {
 
     // capability: home.starred
     @Test fun starredAndPrivateChannelsFollowTheirTagAndJoinRule() = runTest {
-        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha").copy(isFavourite = true, isPublic = false))
-        val client = RoomsClient(listOf(alpha, TestRoom(roomInfo("!b:example.org", "Beta").copy(isPublic = true)),
-            TestRoom(roomInfo("!c:example.org", "Gamma"))))
+        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha").copy(isFavourite = true, isPublic = false, joinRule = JoinRule.Invite))
+        val client = RoomsClient(listOf(alpha, TestRoom(roomInfo("!b:example.org", "Beta").copy(isPublic = true, joinRule = JoinRule.Public)),
+            // Slack's public channel: anyone in the workspace can join.
+            TestRoom(roomInfo("!c:example.org", "Gamma").copy(isPublic = false, joinRule = JoinRule.Restricted(emptyList()))),
+            TestRoom(roomInfo("!d:example.org", "Delta"))))
         val rooms = MatrixRooms(backgroundScope, client)
         val state = rooms.state.first { !it.loading }
 
