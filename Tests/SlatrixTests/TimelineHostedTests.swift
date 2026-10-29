@@ -436,47 +436,52 @@ struct TimelineHostedTests {
         "Scrolled to its newest, a conversation opened at an older message turns live if the live one fills the screen",
         arguments: zip([10, 35], [true, false]))
     func turnsLiveAtNewest(cachedFrom: Int, turnsLive: Bool) async throws {
-        // Like the SDK's, each timeline numbers its own items, so one ID names different messages in each.
-        func items(_ range: Range<Int>) -> [TimelineItem] {
+        // Like the SDK's, each timeline numbers its own items in the order it loads them, so one ID names different
+        // messages in each.
+        // Older messages run over several lines, so a row given another message's height shows.
+        func body(_ index: Int) -> String {
+            "Message \(index)" + String(repeating: " and more", count: index < 20 ? 40 : 0)
+        }
+        func items(_ range: Range<Int>, id: (Int) -> Int = { $0 }) -> [TimelineItem] {
             range.enumerated().map { offset, index in
                 FakeTimelineItem(
                     textEvent(
-                        "$m\(index)", body: "Message \(index)",
-                        sender: index % 3 == 0 ? Self.user : "@other:example.org"),
-                    uniqueID: "\(offset)")
+                        "$m\(index)", body: body(index), sender: index % 3 == 0 ? Self.user : "@other:example.org"),
+                    uniqueID: "\(id(offset))")
             }
         }
         let room = FakeOpenRoom(Self.room.id, cached: items(cachedFrom..<40))
-        room.context = items(0..<40)
+        // Loaded around the message, then a page before it.
+        room.focusedItems = items(0..<40) { ($0 + 21) % 40 }
         let harness = Harness(opening: room)
         defer { harness.close() }
         await harness.service.jumpToMessage(roomID: Self.room.id, eventID: "$m5")
-        await settle(harness) { harness.top(of: "Message 5") != nil }
+        await settle(harness) { harness.top(of: body(5)) != nil }
         // The live timeline waits here, so the screen can be read before it takes over.
         room.buildGate.arm()
         harness.scroll(toTop: harness.clip.bounds.minY + 10_000)
         await settle(harness) { room.buildGate.isWaiting }
         #expect(harness.service.focusedEventID == "$m5" && !harness.service.hasMoreForwardHistory)
         let screen = harness.clip.convert(harness.clip.bounds, to: nil)
-        let shown = (0..<40).map { "Message \($0)" }.filter { body in
+        let shown = (0..<40).map(body).filter { body in
             harness.top(of: body).map { $0 > screen.minY && $0 <= screen.maxY } ?? false
         }
-        let before = shown.map { harness.top(of: $0) }
-        #expect(shown.contains("Message 39"))
+        let before = shown.map { harness.top(of: $0) ?? -1 }
+        #expect(shown.contains(body(39)))
         room.buildGate.release()
         // The first layout with the live timeline's rows already shows every row where it was. A live timeline that
         // doesn't reach the screen is closed, the conversation left as it was.
-        var after: [CGFloat?] = []
+        var after: [CGFloat] = []
         _ = await eventually {
             harness.layout()
-            let closed = room.timelines.all.count == 3 && room.timelines.all[2].allListenersCancelled
+            let closed = room.timelines.all.last?.allListenersCancelled == true
             guard turnsLive ? harness.service.focusedEventID == nil : closed else { return false }
-            after = shown.map { harness.top(of: $0) }
+            after = shown.map { harness.top(of: $0) ?? -1 }
             return true
         }
         #expect(harness.service.focusedEventID == (turnsLive ? nil : "$m5"))
-        #expect(harness.service.messages.first?.body == "Message \(turnsLive ? cachedFrom : 0)")
-        #expect(after == before)
+        #expect(harness.service.messages.first?.body == body(turnsLive ? cachedFrom : 0))
+        #expect(zip(after, before).allSatisfy { abs($0 - $1) < 0.5 } && after.count == before.count)
     }
 
     @Test("Jumping to a loaded message scrolls it into view in the same table and highlights it at its own height")
