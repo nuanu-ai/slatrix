@@ -7,6 +7,8 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -98,6 +100,19 @@ class MockNavigationTest {
         compose.onNodeWithText("Cancel").performClick()
         compose.onNodeWithText("Reviewing designs").assertIsDisplayed()
         compose.onNodeWithText("Unsaved change").assertDoesNotExist()
+    }
+    @Test fun reactionToAParentMessageIsSharedWithItsThread() {
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent { SlatrixMockups() }
+        compose.onNodeWithText("design").performClick()
+        compose.onNode(hasText("4") and hasContentDescription("Add thumbs up reaction")).performScrollTo().performClick()
+        compose.onNodeWithText("5").assertIsDisplayed()
+        compose.onNodeWithText("3 replies").performClick()
+        compose.onNodeWithText("5").assertIsDisplayed()
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithContentDescription("Remove thumbs up reaction").performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("4").assertIsDisplayed()
     }
     @Test fun appearanceSettingsOpenFromYouAndBackReturnsToProfile() {
         compose.setContent { SlatrixMockups() }
