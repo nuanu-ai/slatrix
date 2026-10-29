@@ -45,6 +45,7 @@ import org.matrix.rustcomponents.sdk.SyncServiceStateObserver
 import org.matrix.rustcomponents.sdk.TaskHandle
 import org.matrix.rustcomponents.sdk.TimelineItemContent
 import uniffi.ruma_events.MessageLikeEventType
+import uniffi.ruma_events.StateEventType
 
 data class RoomSummary(
     val id: String,
@@ -62,6 +63,11 @@ data class RoomSummary(
     val resumeAt: String? = null,
     /** False where the room's power levels keep you from posting; unknown ones leave the composer. */
     val canPost: Boolean = true,
+    val memberCount: Int = 0,
+    /** What the room's power levels let you change; unknown ones offer nothing, and inviting is checked when you do. */
+    val canEditName: Boolean = false,
+    val canEditTopic: Boolean = false,
+    val canInvite: Boolean = true,
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
@@ -257,6 +263,10 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             isPrivate = info.joinRule.let { it is JoinRule.Invite || it is JoinRule.Knock || it is JoinRule.Private },
             resumeAt = UnreadLine.resumeAt(unread, info.fullyReadEventId),
             canPost = info.powerLevels?.canOwnUserSendMessage(MessageLikeEventType.RoomMessage) ?: true,
+            memberCount = info.joinedMembersCount.coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
+            canEditName = info.powerLevels?.canOwnUserSendState(StateEventType.RoomName) ?: false,
+            canEditTopic = info.powerLevels?.canOwnUserSendState(StateEventType.RoomTopic) ?: false,
+            canInvite = info.powerLevels?.canOwnUserInvite() ?: true,
         )
         // An unchanged room keeps its instance, so its row skips recomposition.
         if (summaries[info.id] != summary) summaries[info.id] = summary
