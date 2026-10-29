@@ -59,6 +59,23 @@ class LiveProfileScreenTest {
         compose.runOnIdle { assertEquals(true, returned) }
     }
 
+    // capability: app.appearance
+    @Test fun everyThemeTheMacOffersCanBeChosen() {
+        val palette = mutableStateOf(SidebarPalette.Aubergine)
+        compose.setContent {
+            SlatrixTheme(palette = palette.value) {
+                LivePreferencesScreen(false, null, palette.value, {}, { palette.value = it }, {})
+            }
+        }
+        listOf("Aubergine" to SidebarPalette.Aubergine, "Clementine" to SidebarPalette.Clementine,
+            "Banana" to SidebarPalette.Banana, "Jade" to SidebarPalette.Jade, "Lagoon" to SidebarPalette.Lagoon,
+            "Barbra" to SidebarPalette.Barbra, "Gray" to SidebarPalette.Gray, "Mood Indigo" to SidebarPalette.MoodIndigo,
+        ).forEach { (name, choice) ->
+            compose.onNodeWithText(name).performScrollTo().performClick().assertIsSelected()
+            compose.runOnIdle { assertEquals(choice, palette.value) }
+        }
+    }
+
     @Test @Config(qualifiers = "w840dp-h900dp-420dpi")
     fun expandedHomePlacesItsDestinationsInAWorkingRail() {
         compose.setContent {

@@ -95,7 +95,7 @@ Use the Material 3 type ramp supplied by `SlatrixTheme`, set in Lato (Slack's ty
 
 ## Layout
 
-Use `UiMetrics`: the spacing steps are in the frontmatter. Lists use large horizontal gutters and small vertical row padding. Interactive rows have a minimum touch height (48dp), with content allowed to grow for larger text. Root headers have a minimum height (72dp) and sit on the palette's dark frame color with white text in both modes, as Slack's do. Account forms are centered with a maximum width (480dp).
+Use `UiMetrics`: the spacing steps are in the frontmatter. Lists use large horizontal gutters and small vertical row padding. Interactive rows have a minimum touch height (48dp), and conversation list rows and section headers Slack's (44dp), with content allowed to grow for larger text. Root headers have a minimum height (60dp) and sit on the palette's dark frame color with white text in both modes, as Slack's do. Account forms are centered with a maximum width (480dp).
 
 Below the expanded threshold (600dp), Home and DMs use bottom navigation. At the threshold, navigation moves into a rail. You opens from the header avatar as a page with Back, as Slack's does. Honor status bars, navigation bars and the keyboard. Keep conversation identity stable as content changes.
 
@@ -113,7 +113,7 @@ Account actions are full-width green buttons with white labels. Browser alternat
 
 Search uses an outlined field with a leading search icon. The composer is a rounded raised field on a bar under a hairline, with an accent cursor and the send icon inside the field; it expands to five text lines. Keep its keyboard semantics and accessible label.
 
-Conversation rows pair a channel icon or initials tile with a single-line title and optional unread count. Rows in the DMs tab add the time and up to two lines of the latest message. Unread titles are bold, and unread state is announced as a state description. Initials tiles have a fixed size; the initials shrink to fit. Message rows align an initials tile with sender, timestamp and body text; a sender's run within five minutes drops the tile and name. Day dividers read Today, Yesterday or the date. A long press opens the message sheet with Copy message, and Retry and Delete message for a failed send. Preserve stable message keys.
+The Home header shows the open workspace's rounded-square icon (its initials on the palette's strong selection color), its name in black weight and a chevron; they open the workspace switcher, a sheet of the top-level workspaces, plus All conversations while a channel has no workspace. Home groups conversations under Starred (only while something is starred), Channels and Direct messages. Each section header pairs a thin icon and a bold 14 sp title with a small chevron after it, and a chevron at the end that collapses it; a collapsed section still shows its unread conversations. Conversation rows pair a channel icon (a lock for a private channel) or initials tile with a single-line title and optional unread count; read titles use the body color, unread ones bold primary. A long press opens a sheet to star or unstar the conversation. The bottom bar sits on the raised surface under a hairline, with a pill behind the selected tab's filled icon and a bold label. Rows in the DMs tab add the time and up to two lines of the latest message. Unread titles are bold, and unread state is announced as a state description. Initials tiles have a fixed size; the initials shrink to fit. Message rows align an initials tile with sender, timestamp and body text; a sender's run within five minutes drops the tile and name. Day dividers read Today, Yesterday or the date. A long press opens the message sheet with Copy message, and Retry and Delete message for a failed send. Preserve stable message keys.
 
 Preferences uses full-row selection with radio semantics for color mode and palette. Errors appear as snackbars over the content. Connection progress waits (400ms); its reserved space prevents the account form from moving.
 
@@ -130,4 +130,5 @@ Preferences uses full-row selection with radio semantics for color mode and pale
 
 - Don't expose controls without a working action.
 - Don't replace native icons with text glyphs.
+- Draw Slack's thin outlined icons from `SlackIcons`; Material's outlined set reads heavier than Slack's.
 - Don't cover visible content with loading UI or add loading explanations.

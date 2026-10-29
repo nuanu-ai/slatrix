@@ -14,6 +14,7 @@ import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.WorkspacePreferences
+import ai.nuanu.slatrix.core.WorkspaceRail
 import ai.nuanu.slatrix.push.NotificationTarget
 import ai.nuanu.slatrix.push.PushNotifications
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
@@ -31,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
 import ai.nuanu.slatrix.core.OpenChannel
+import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.MatrixActivity
 import ai.nuanu.slatrix.core.inWorkspace
 import ai.nuanu.slatrix.core.MatrixThreadFeed
@@ -89,11 +92,34 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
             state is AccountState.Connected -> {
                 val userId = (state as AccountState.Connected).userId
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
-                var selectedSpaceId by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
+                var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
+                // Read inside derivedStateOf, so room list updates recompose the app only when the workspace changes.
+                val roomList = rooms?.state?.collectAsState()
+                val choice by remember(roomList) {
+                    derivedStateOf {
+                        val list = roomList?.value
+                        if (list?.spacesKnown == true) WorkspaceRail.choose(remembered, null, list.spaces, list.rooms) to true
+                        else remembered?.takeUnless { it == WorkspaceRail.AllToken } to false
+                    }
+                }
+                val selectedSpaceId = choice.first
+                val chooseSpace: (String?) -> Unit = { id ->
+                    (id ?: WorkspaceRail.AllToken).let { remembered = it; workspacePreferences.selectedSpaceId = it }
+                }
+                // Keeps what opened, so a first launch's pick holds as channel counts change.
+                LaunchedEffect(choice) { if (choice.second && (choice.first ?: WorkspaceRail.AllToken) != remembered) chooseSpace(choice.first) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
                 val thread = threads?.selected?.collectAsState()?.value
                 val covered = rememberSaveableStateHolder()
+                // Opens a message highlighted in its conversation and a thread reply in its thread too: for notifications
+                // and Activity, and next for search results and reply quotes.
+                val jump: (RoomSummary, String, String?) -> Unit = remember(workspace, threads) {
+                    { room, eventId, threadRoot ->
+                        workspace?.jumpTo(room, eventId, threadRoot)
+                        if (threadRoot != null) threads?.open(room, threadRoot, at = eventId) else threads?.back()
+                    }
+                }
                 // The Threads filter's feed lives here, under the covers, so coming back from a thread finds it as it was.
                 var threadRooms by remember(userId) { mutableStateOf<List<RoomSummary>?>(null) }
                 var threadFeed by remember(userId) { mutableStateOf(ThreadFeedState()) }
@@ -109,8 +135,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         val room = rooms.state.mapNotNull { target.roomFor(userId, it.rooms) }.first()
                         you = false
                         preferences = false
-                        workspace.open(room)
-                        if (target.threadRoot != null) threads?.open(room, target.threadRoot) else threads?.back()
+                        jump(room, target.eventId, target.threadRoot)
                         onNotificationHandled(target)
                     }
                 }
@@ -127,13 +152,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace) { root -> threads?.open(selected.room, root) }
+                                LiveConversation(selected, workspace, workspace) { root, row -> threads?.open(selected.room, root, root = row) }
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, rooms, workspace, { you = true }, selectedSpaceId,
-                                { selectedSpaceId = it; workspacePreferences.selectedSpaceId = it }) {
-                                LiveActivity(activity, rooms, workspace, threads, selectedSpaceId, threadFeed) { list ->
+                            LiveHome(userId, rooms, workspace, { you = true }, selectedSpaceId, chooseSpace) {
+                                LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
                             }
@@ -170,7 +194,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
-private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?, onOpenThread: (String) -> Unit = {}) {
+private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
+    onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     val conversation = open.conversation
     val composer = open.composer
@@ -184,13 +209,14 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 if (conversation?.markRead(event) == true && open.threadRoot == null) PushNotifications(context).clear(open.room.id)
             }
         },
-        { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot) },
-        { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) }, onOpenThread, open.threadRoot,
-        rememberMessageActions(conversation, composer, main),
+        { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
+        { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
+        { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
+        open.threadRoot, rememberMessageActions(conversation, composer, main),
         ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
             onNeedPeople = { composer?.loadPeople() },
             onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
-            onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }))
+            onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) })
 }
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
@@ -201,18 +227,21 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
     val open: (String) -> Unit = remember(rooms, workspace) {
         { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
     }
-    LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace, activity)
+    LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
+        onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false }, activity = activity)
 }
 
-/** Collects Activity here, so a new item recomposes only its tab. A thread reply opens its thread over Activity. */
+/** Collects Activity here, so a new item recomposes only its tab. An item opens at its message. */
 @Composable
-private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, threads: MatrixWorkspace?,
-    selectedSpaceId: String?, threadFeed: ThreadFeedState, onThreadRooms: (List<RoomSummary>) -> Unit) {
+private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads: MatrixWorkspace?,
+    selectedSpaceId: String?, threadFeed: ThreadFeedState, jump: (RoomSummary, String, String?) -> Unit,
+    onThreadRooms: (List<RoomSummary>) -> Unit) {
     val all = activity?.items?.collectAsState()?.value.orEmpty()
     val known = rooms?.state?.collectAsState()?.value?.rooms.orEmpty()
     fun room(id: String) = known.firstOrNull { it.id == id }
     val items = remember(all, known, selectedSpaceId) { all.inWorkspace(known, selectedSpaceId) }
-    ActivityScreen(items, { id -> room(id)?.let { workspace?.open(it) } }, { id, root -> room(id)?.let { threads?.open(it, root) } }) {
+    ActivityScreen(items, { item -> activity?.markRead(item.id); room(item.roomId)?.let { jump(it, item.eventId, item.threadRoot) } },
+        { id, root -> room(id)?.let { threads?.open(it, root) } }) {
         val inScope = remember(known, selectedSpaceId) { known.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) } }
         // Asks for the feed only while the Threads filter shows, and again only when the set of conversations changes.
         LaunchedEffect(inScope) { onThreadRooms(inScope) }

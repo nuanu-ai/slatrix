@@ -1,5 +1,7 @@
 package ai.nuanu.slatrix.core
 
+import java.time.Instant
+import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +53,7 @@ import org.matrix.rustcomponents.sdk.TimelineItem
 import org.matrix.rustcomponents.sdk.TimelineItemContent
 import org.matrix.rustcomponents.sdk.TimelineListener
 import org.matrix.rustcomponents.sdk.VirtualTimelineItem
+import uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode
 import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
 
 enum class MessageKind { Text, Notice, Emote, Attachment, Encrypted, Deleted, Unsupported }
@@ -97,6 +100,10 @@ data class ConversationState(
     val sendError: String? = null,
     /** Says for a moment that an action on a message failed. */
     val notice: String? = null,
+    /** The message it opened at, to show and highlight. */
+    val highlight: String? = null,
+    /** Loaded around an older message rather than live, until the reader reaches the newest and it turns live. */
+    val focused: Boolean = false,
 )
 
 /** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
@@ -104,6 +111,7 @@ fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Bo
     previous.senderId == message.senderId && message.timestamp - previous.timestamp < 5 * 60_000L
 
 private const val MAX_BLANK_PAGES = 5
+private const val ROOT_KEY = "thread-root"
 private const val NOTICE_MILLIS = 4_000L
 
 /** The relation that puts an attachment in a thread, as the Mac sends it. */
@@ -117,50 +125,103 @@ internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } c
     throw cancelled
 } catch (_: Exception) { null }
 
-/** The room's main timeline, or with [threadRoot] the thread that message starts. */
-class MatrixConversation(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null) {
+/**
+ * The room's main timeline, or with [threadRoot] the thread that message starts. With [at] it opens at that message,
+ * highlighted: live when the live timeline holds it, as Slack stays live, else loaded around it until the reader reaches
+ * the newest message and it turns live, as on the Mac.
+ */
+class MatrixConversation(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null,
+    private val at: String? = null,
+    /** The thread's root as its channel shows it, on screen at once while the thread loads, as on the Mac. */
+    root: ConversationMessage? = null) {
+    // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
+    private val root = root?.copy(id = ROOT_KEY, grouped = false)
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
-    private val mutableState = MutableStateFlow(ConversationState())
+    private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null))
     val state: StateFlow<ConversationState> = mutableState.asStateFlow()
-    private val ready = CompletableDeferred<Timeline>()
-    private val updates = Channel<List<TimelineDiff>>(Channel.UNLIMITED)
+    private val ready = CompletableDeferred<Unit>()
+    private val updates = Channel<Update>(Channel.UNLIMITED)
     private val pageLock = Mutex()
     private val sendLock = Mutex()
     private val readLock = Mutex()
     private var lastRead: String? = null
-    private val items = mutableListOf<ConversationRow?>()
+    /** The timeline on screen; it and [pending] change only on [operations], which runs on one thread. */
+    private var shown: Source? = null
+    /** A timeline that replaces [shown] once it holds [pendingAnchor], or with none at its first update. */
+    private var pending: Source? = null
+    private var pendingAnchor: String? = null
+    /** Each timeline numbers its rows from zero, so each gets its own prefix and a swap never reuses a row's key. */
+    private var opened = 0
     /**
      * Pages asked for since an older message last showed. Joins, topic changes and other hidden events can fill page
      * after page, so history stops loading on its own after a few of those, as on the Mac.
      */
     @Volatile private var blankPages = 0
 
+    private sealed interface Update {
+        data class Batch(val source: Source, val diff: List<TimelineDiff>) : Update
+        class CaughtUp(val done: CompletableDeferred<Unit>) : Update
+    }
+
+    private inner class Source(val timeline: Timeline, val focused: Boolean) {
+        val items = mutableListOf<ConversationRow?>()
+        var handle: TaskHandle? = null
+
+        fun holds(eventId: String?) = eventId != null && items.any { (it as? ConversationMessage)?.eventId == eventId }
+
+        fun close() {
+            handle?.let { runCatching { it.cancel() }; it.close() }
+            timeline.close()
+        }
+    }
+
     private val updating = operations.launch {
-        var timeline: Timeline? = null
-        var listener: TaskHandle? = null
         try {
-            timeline = room.timelineWithConfiguration(TimelineConfiguration(
-                focus = threadRoot?.let(TimelineFocus::Thread) ?: TimelineFocus.Live(hideThreadedEvents = true), filter = TimelineFilter.All,
-                internalIdPrefix = null, dateDividerMode = DateDividerMode.DAILY,
-                trackReadReceipts = TimelineReadReceiptTracking.MESSAGE_LIKE_EVENTS, reportUtds = false,
-            ))
+            open(threadRoot?.let(TimelineFocus::Thread) ?: TimelineFocus.Live(hideThreadedEvents = true)) { shown = it }
             currentCoroutineContext().ensureActive()
-            listener = timeline.addListener(object : TimelineListener {
-                override fun onUpdate(diff: List<TimelineDiff>) { updates.trySend(diff) }
-            })
-            currentCoroutineContext().ensureActive()
-            // Still loading until the listener's first batch, the cached items, is published.
-            ready.complete(timeline)
+            ready.complete(Unit)
+            // A thread shows its reply wherever it is; a channel first checks whether its live timeline holds it.
+            var deciding = at != null && threadRoot == null
             var oldest: String? = null
-            for (batch in updates) {
+            for (update in updates) {
+                if (update is Update.CaughtUp) { update.done.complete(Unit); continue }
+                val (source, batch) = update as Update.Batch
+                if (source !== shown && source !== pending) continue
                 // asEvent blocks on the SDK, so a batch is mapped off the main thread.
-                val rows = withContext(Dispatchers.Default) { batch.forEach(::apply); rows() }
+                val rows = withContext(Dispatchers.Default) { batch.forEach { source.apply(it) }; source.rows() }
+                var swapped = false
+                if (source === pending) {
+                    if (pendingAnchor != null && !source.holds(pendingAnchor)) continue
+                    shown?.close()
+                    shown = source
+                    pending = null
+                    // The timeline taking over may reach back less far, so it may have history to load again.
+                    swapped = true
+                } else if (deciding) {
+                    deciding = false
+                    if (!source.holds(at)) try {
+                        open(TimelineFocus.Event(checkNotNull(at), 30u, TimelineEventFocusThreadMode.Automatic(true))) {
+                            pending = it
+                            pendingAnchor = null
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // Without the history around it, the conversation still opens, live.
+                        pending = null
+                    }
+                }
+                // The live rows wait while the timeline around the message loads, so they never flash.
+                if (pending?.focused == true) continue
                 // A cleared or reset timeline starts over from the live end.
                 val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
                 val first = rows.firstOrNull { it is ConversationMessage }?.id
                 if (first != oldest) { oldest = first; blankPages = 0 }
-                mutableState.update { it.copy(rows = rows, loading = false, hasMore = it.hasMore || reset) }
+                mutableState.update {
+                    it.copy(rows = withRoot(rows), loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
+                        highlight = it.highlight ?: at?.takeIf { id -> source.holds(id) })
+                }
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -170,11 +231,37 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             mutableState.update { it.copy(loading = false, error = "Couldn’t load this conversation.") }
         } finally {
             ready.completeExceptionally(CancellationException())
-            listener?.let { runCatching { it.cancel() }; it.close() }
-            timeline?.close()
+            shown?.close()
+            pending?.close()
             room.close()
             updates.close()
         }
+    }
+
+    /** [role] places the timeline before it can send its first update, which the SDK may do at once. */
+    private suspend fun open(focus: TimelineFocus, role: (Source) -> Unit): Source {
+        val timeline = room.timelineWithConfiguration(TimelineConfiguration(
+            focus = focus, filter = TimelineFilter.All, internalIdPrefix = "${++opened}-", dateDividerMode = DateDividerMode.DAILY,
+            trackReadReceipts = TimelineReadReceiptTracking.MESSAGE_LIKE_EVENTS, reportUtds = false,
+        ))
+        val source = Source(timeline, focus is TimelineFocus.Event)
+        try {
+            currentCoroutineContext().ensureActive()
+            role(source)
+            source.handle = timeline.addListener(object : TimelineListener {
+                override fun onUpdate(diff: List<TimelineDiff>) { updates.trySend(Update.Batch(source, diff)) }
+            })
+            currentCoroutineContext().ensureActive()
+        } catch (failure: Throwable) {
+            source.close()
+            throw failure
+        }
+        return source
+    }
+
+    private suspend fun timeline(): Timeline {
+        ready.await()
+        return checkNotNull(shown).timeline
     }
 
     fun loadOlder() {
@@ -183,8 +270,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             try {
                 if (!mutableState.value.hasMore || blankPages >= MAX_BLANK_PAGES) return@launch
                 mutableState.update { it.copy(loadingHistory = true, error = null) }
-                val timeline = ready.await()
-                val endReached = timeline.paginateBackwards(50u)
+                val endReached = timeline().paginateBackwards(50u)
                 currentCoroutineContext().ensureActive()
                 // Counted once it went through: a failed request says nothing about what the room holds.
                 blankPages++
@@ -201,6 +287,80 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
+    /**
+     * For a conversation opened at an older message, once the reader reaches its newest: loads newer messages, and
+     * with none left turns live where the reader is, as Slack's does, so new messages arrive and it can be read again.
+     * [anchor] is the oldest message on screen, which the live timeline must hold for the screen to stay put.
+     */
+    fun loadNewer(anchor: String?) {
+        operations.launch {
+            if (!pageLock.tryLock()) return@launch
+            try {
+                val focused = shown?.takeIf { it.focused } ?: return@launch
+                if (pending != null) return@launch
+                if (!focused.timeline.paginateForwards(50u)) return@launch
+                currentCoroutineContext().ensureActive()
+                goLive(anchor ?: newestEvent())
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The reader reaching the newest message asks again.
+            } finally {
+                pageLock.unlock()
+            }
+        }
+    }
+
+    /** Opens the live timeline and shows it once it holds [anchor]; at once, with none. */
+    private suspend fun goLive(anchor: String?) {
+        var next: Source? = null
+        try {
+            open(TimelineFocus.Live(hideThreadedEvents = true)) {
+                next = it
+                pending = it
+                pendingAnchor = anchor
+            }
+            // The reader is at the newest message, so a page or two back reaches the screen unless they're offline.
+            var end = false
+            for (attempt in 0..3) {
+                caughtUp()
+                if (pending !== next) return
+                if (end || attempt == 3) break
+                end = checkNotNull(next).timeline.paginateBackwards(100u)
+            }
+        } finally {
+            // Given up or failed, it stays where it is and the reader reaching the newest message asks again.
+            next?.takeIf { pending === it }?.let { pending = null; it.close() }
+        }
+    }
+
+    /** Waits until every update already sent has been applied, so [pending] says whether the live timeline took over. */
+    private suspend fun caughtUp() {
+        val done = CompletableDeferred<Unit>()
+        updates.send(Update.CaughtUp(done))
+        done.await()
+    }
+
+    /** The thread's rows topped by its root, which keeps the channel's row so it never redraws when the thread loads it. */
+    private fun withRoot(rows: List<ConversationRow>): List<ConversationRow> {
+        val root = root ?: return rows
+        val index = rows.indexOfFirst { (it as? ConversationMessage)?.eventId == root.eventId }
+        val shown = (rows.getOrNull(index) as? ConversationMessage)?.copy(id = ROOT_KEY) ?: root
+        // Nothing sits above the root, as in Slack, and a reply on the root's day needs no divider under it either, so
+        // the root never moves when the thread loads it.
+        val rest = rows.drop(index + 1)
+        val sameDay = (rest.firstOrNull() as? DayDivider)?.let { sameDay(it.timestamp, shown.timestamp) } == true
+        return listOf(shown) + if (sameDay) rest.drop(1) else rest
+    }
+
+    private fun sameDay(a: Long, b: Long): Boolean {
+        val zone = ZoneId.systemDefault()
+        return Instant.ofEpochMilli(a).atZone(zone).toLocalDate() == Instant.ofEpochMilli(b).atZone(zone).toLocalDate()
+    }
+
+    private fun newestEvent(): String? =
+        mutableState.value.rows.asReversed().firstNotNullOfOrNull { (it as? ConversationMessage)?.eventId }
+
     /** False once the timeline failed to open or stopped updating, so only reopening the room can help. */
     fun retry(): Boolean {
         if (!updating.isActive) return false
@@ -214,7 +374,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             if (!sendLock.tryLock()) return@async false
             try {
                 mutableState.update { it.copy(sending = true, sendError = null) }
-                val timeline = ready.await()
+                val timeline = timeline()
                 val formatted = message.html?.let { FormattedBody(MessageFormat.Html, it) }
                 val content = checkNotNull(timeline.createMessageContent(MessageType.Text(TextMessageContent(message.body, formatted))))
                 content.use { raw ->
@@ -228,6 +388,18 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     }
                 }
                 currentCoroutineContext().ensureActive()
+                // A message sent from an older place goes to the present, as sending in Slack takes you there.
+                if (shown?.focused == true) operations.launch {
+                    pageLock.withLock {
+                        try {
+                            if (shown?.focused == true && pending == null) goLive(null)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // The message is queued either way; reaching the newest one turns live later.
+                        }
+                    }
+                }
                 true
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -254,7 +426,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     fun react(message: ConversationMessage, key: String, onAdded: () -> Unit) {
         val id = EventOrTransactionId.EventId(message.eventId ?: return)
         operations.launch {
-            when (quietly { ready.await().toggleReaction(id, key) }) {
+            when (quietly { timeline().toggleReaction(id, key) }) {
                 true -> onAdded()
                 false -> Unit
                 null -> announce("Couldn’t update your reaction.")
@@ -266,7 +438,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         val id = EventOrTransactionId.EventId(message.eventId ?: return)
         operations.launch {
             // A failed redaction leaves the message, so its sheet offers Delete again.
-            if (quietly { ready.await().redactEvent(id, null) } == null) announce("Couldn’t delete this message.")
+            if (quietly { timeline().redactEvent(id, null) } == null) announce("Couldn’t delete this message.")
         }
     }
 
@@ -312,7 +484,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         val id = EventOrTransactionId.TransactionId(message.transactionId ?: return)
         operations.launch {
             // A failed attempt leaves the row failed, so its menu offers the action again.
-            runCatching { action(ready.await(), id) }.onFailure { if (it is CancellationException) throw it }
+            runCatching { action(timeline(), id) }.onFailure { if (it is CancellationException) throw it }
         }
     }
 
@@ -321,7 +493,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         val task = operations.async {
             readLock.withLock {
                 try {
-                    val timeline = ready.await()
+                    val timeline = timeline()
                     if (!isLatestRemote(eventId)) return@withLock false
                     if (lastRead == eventId) return@withLock true
                     // A thread's timeline sends this for the thread; the channel's marker and unread flag stay.
@@ -348,12 +520,13 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return try { task.await() } finally { task.cancel() }
     }
 
+    /** A timeline opened at an older message isn't the newest, so reading it waits until it turns live. */
     private fun isLatestRemote(eventId: String): Boolean =
-        lifetime.isActive && mutableState.value.rows.asReversed().firstNotNullOfOrNull { (it as? ConversationMessage)?.eventId } == eventId
+        lifetime.isActive && shown?.focused != true && newestEvent() == eventId
 
     suspend fun close() { lifetime.cancelAndJoin() }
 
-    private fun apply(diff: TimelineDiff) {
+    private fun Source.apply(diff: TimelineDiff) {
         when (diff) {
             is TimelineDiff.Append -> items.addAll(diff.values.map(::row))
             is TimelineDiff.Clear -> items.clear()
@@ -373,7 +546,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      * The visible rows, each message grouped under the one before it when the same sender sent it soon after. A day
      * divider shows only above a message, as on the Mac, since the SDK also starts days that hold only hidden events.
      */
-    private fun rows(): List<ConversationRow> {
+    private fun Source.rows(): List<ConversationRow> {
         val rows = ArrayList<ConversationRow>(items.size)
         var previous: ConversationMessage? = null
         var divider: ConversationRow? = null

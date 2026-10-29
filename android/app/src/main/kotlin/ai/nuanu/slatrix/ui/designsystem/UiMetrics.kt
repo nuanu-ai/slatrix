@@ -11,15 +11,23 @@ object UiMetrics {
     val Avatar = 40.dp
     val ProfileAvatar = 56.dp
     val Touch = 48.dp
+    /** Slack's conversation list row. */
+    val ListRow = 44.dp
+    val WorkspaceRow = 56.dp
+    val SmallIcon = 16.dp
     val Icon = 20.dp
+    val LargeIcon = 24.dp
     val Divider = 1.dp
     val CompactAvatar = 24.dp
     val ListAvatar = 36.dp
     val HeaderAvatar = 32.dp
-    val RootHeaderHeight = 72.dp
+    val RootHeaderHeight = 60.dp
     val ComposerMinHeight = 64.dp
     val FormWidth = 480.dp
     const val ProgressDelayMillis = 400L
+    const val NoticeMillis = 4_000L
+    /** How long a message jumped to stays highlighted, as on the Mac. */
+    const val HighlightMillis = 1_500L
     val ExpandedWidth = 600.dp
     /** Slack's message sheet: its icons and its Reply tile. */
     val SheetIcon = 24.dp

@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.core
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
@@ -23,9 +24,13 @@ data class OpenChannel(
     val error: String? = null,
     /** The thread this shows instead of the channel's main timeline. */
     val threadRoot: String? = null,
+    /** The message it opens at, highlighted. */
+    val at: String? = null,
+    /** A thread's root as the channel showed it, so it shows at once. */
+    val root: ConversationMessage? = null,
 )
 
-class MatrixWorkspace(scope: CoroutineScope, client: Client) {
+class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
     /** Read once a conversation needs it; the thread workspace shares the main one's. */
     val emojiHistory by lazy { EmojiHistory(scope, client) }
     private val mutableSelected = MutableStateFlow<OpenChannel?>(null)
@@ -54,7 +59,7 @@ class MatrixWorkspace(scope: CoroutineScope, client: Client) {
                     conversationRoom = checkNotNull(client.getRoom(requested.room.id))
                     composerRoom = checkNotNull(client.getRoom(requested.room.id))
                     currentCoroutineContext().ensureActive()
-                    val timeline = MatrixConversation(scope, checkNotNull(conversationRoom), requested.threadRoot)
+                    val timeline = MatrixConversation(scope, checkNotNull(conversationRoom), requested.threadRoot, requested.at, requested.root)
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
                     if (generation.get() == token) {
@@ -77,7 +82,26 @@ class MatrixWorkspace(scope: CoroutineScope, client: Client) {
         }
     }
 
-    fun open(room: RoomSummary, threadRoot: String? = null) = select(OpenChannel(room, threadRoot = threadRoot))
+    fun open(room: RoomSummary, threadRoot: String? = null, at: String? = null, root: ConversationMessage? = null) =
+        select(OpenChannel(room, threadRoot = threadRoot, at = at, root = root))
+
+    /**
+     * Opens [room] at [eventId], highlighted; a reply in the thread [threadRoot] opens the channel at the root, for the
+     * thread to open over it at the reply, as on the Mac.
+     */
+    fun jumpTo(room: RoomSummary, eventId: String, threadRoot: String?) = open(room, at = threadRoot ?: eventId)
+
+    /** The thread [eventId] replies in, for a caller that doesn't know, such as a search result; it may ask the server. */
+    suspend fun threadRootOf(roomId: String, eventId: String): String? = withContext(Dispatchers.Default) {
+        try {
+            client.getRoom(roomId)?.use { room -> room.loadOrFetchEvent(eventId).use { it.threadRootEventId() } }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Unknown, it opens where the message is; the live timeline then simply doesn't hold a reply.
+            null
+        }
+    }
 
     fun back() = select(null)
 

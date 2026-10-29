@@ -22,6 +22,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.JoinRule
 import org.matrix.rustcomponents.sdk.LatestEventValue
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.NotificationProcessSetup
@@ -54,6 +55,8 @@ data class RoomSummary(
     val colorIndex: Int,
     val spaceIds: Set<String> = emptySet(),
     val latest: LatestMessage? = null,
+    val starred: Boolean = false,
+    val isPrivate: Boolean = false,
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
@@ -121,6 +124,17 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     fun retry() { retries.trySend(Unit); spaceRequests.trySend(SpaceRequest.Rebuild) }
 
     suspend fun close() { worker.cancelAndJoin() }
+
+    /** Stars or unstars a conversation with Matrix's favourite tag, which the account's other clients show as starred too. */
+    suspend fun setStarred(roomId: String, starred: Boolean): Boolean = withContext(Dispatchers.Default) {
+        try {
+            client.getRoom(roomId)?.use { it.setIsFavourite(starred, null) } != null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     suspend fun notification(roomId: String, eventId: String): NotificationStatus? = withTimeoutOrNull(15_000) {
         val service = activeSync.filterNotNull().first()
@@ -232,6 +246,9 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             initials = AvatarPlaceholder.initials(name), colorIndex = AvatarPlaceholder.colorIndex(name),
             spaceIds = ancestors(info.id),
             latest = if (info.isDirect) followed[info.id]?.let { latest(it.room) } else null,
+            starred = info.isFavourite,
+            // Slack's private channel: only an invitation lets someone in. A restricted room is open to its space, a public channel.
+            isPrivate = info.joinRule.let { it is JoinRule.Invite || it is JoinRule.Knock || it is JoinRule.Private },
         )
         // An unchanged room keeps its instance, so its row skips recomposition.
         if (summaries[info.id] != summary) summaries[info.id] = summary
