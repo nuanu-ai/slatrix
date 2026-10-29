@@ -10,6 +10,7 @@ import ai.nuanu.slatrix.core.WorkspaceRail
 import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.StatusBarOverWorkspaceBar
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -254,14 +255,10 @@ private fun HomeHeader(tab: HomeTab, userId: String, userAvatarUrl: String?, sta
 }
 
 /** Slack's workspace switcher: each workspace's icon and name, the open one checked. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, onSpace: (String?) -> Unit, onDismiss: () -> Unit) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
     val entries = remember(state.spaces, state.rooms) { WorkspaceRail.entries(state.spaces, state.rooms) }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, shape = SlatrixTheme.topPanelShape,
-        containerColor = SlatrixTheme.colors.overlay) {
+    BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             Text("Workspaces", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
                 style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -270,7 +267,7 @@ private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, on
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow)
                     .selectable(selected, role = Role.RadioButton) {
                         onSpace(space?.id)
-                        scope.launch { sheet.hide() }.invokeOnCompletion { onDismiss() }
+                        onDismiss()
                     }.padding(horizontal = UiMetrics.GapLarge),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
                     WorkspaceIcon(space, UiMetrics.ListAvatar)
@@ -466,17 +463,13 @@ private fun LiveDirectRow(room: RoomSummary, onRoom: (String) -> Unit, onActions
 }
 
 /** Slack's long-press sheet for a conversation: its name, then what can be done with it. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConversationActions(room: RoomSummary, anyUnread: Boolean, onStar: (Boolean) -> Unit, onMarkUnread: (Boolean) -> Unit,
     onMarkAllRead: () -> Unit, onDismiss: () -> Unit) {
     val noun = if (room.direct) "conversation" else "channel"
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
-    // Applied once the sheet is gone, so its labels don't flip while it eases out.
-    fun afterHiding(action: () -> Unit) { scope.launch { sheet.hide() }.invokeOnCompletion { action(); onDismiss() } }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, shape = SlatrixTheme.topPanelShape,
-        containerColor = SlatrixTheme.colors.overlay) {
+    // The sheet closes at once, so an action applies as it goes.
+    fun afterHiding(action: () -> Unit) { action(); onDismiss() }
+    BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             Text(room.name, Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
                 style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)

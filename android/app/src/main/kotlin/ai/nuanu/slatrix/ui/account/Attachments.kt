@@ -16,7 +16,7 @@ import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -110,7 +110,7 @@ private val pictures = object : LruCache<String, ImageBitmap>((Runtime.getRuntim
  * full screen. Null while it loads or when there's none.
  */
 @Composable
-private fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): ImageBitmap? {
+internal fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): ImageBitmap? {
     val key = "${attachment.source.url()}@${width}x$height${if (full) " full" else ""}"
     val picture by produceState(pictures[key], key) {
         if (value != null) return@produceState
@@ -149,7 +149,7 @@ internal fun decode(bytes: ByteArray, width: Int, height: Int, fit: Boolean): Im
 }
 
 /** The box an inline image takes, decided before it loads: its shape within the bounds, never enlarged, as on the Mac. */
-private fun box(width: Int?, height: Int?, maxWidth: Dp, maxHeight: Dp): Pair<Dp, Dp> {
+internal fun box(width: Int?, height: Int?, maxWidth: Dp, maxHeight: Dp): Pair<Dp, Dp> {
     if (width == null || height == null || width <= 0 || height <= 0) {
         val boxHeight = maxHeight * 3 / 4
         return min(maxWidth, boxHeight * 4 / 3) to boxHeight
@@ -161,15 +161,19 @@ private fun box(width: Int?, height: Int?, maxWidth: Dp, maxHeight: Dp): Pair<Dp
     else maxHeight * width / height to maxHeight
 }
 
-/** An attachment under its message: an image inline, anything else as Slack's file row. */
+/** An attachment under its message: an image or video inline, anything else as Slack's file row. A long press opens the message's sheet. */
 @Composable
-internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, opening: Boolean, onOpenFile: () -> Unit,
-    onView: (ImageBitmap?) -> Unit) {
-    if (attachment.kind == MessageAttachment.Kind.Image) InlineImage(attachment, load, onView) else FileRow(attachment, opening, onOpenFile)
+internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, videos: VideoPlayback, opening: Boolean,
+    onOpenFile: () -> Unit, onLongPress: () -> Unit, onView: (ImageBitmap?) -> Unit) {
+    when (attachment.kind) {
+        MessageAttachment.Kind.Image -> InlineImage(attachment, load, onLongPress, onView)
+        MessageAttachment.Kind.Video -> InlineVideo(attachment, load, videos, onLongPress)
+        else -> FileRow(attachment, opening, onLongPress, onOpenFile)
+    }
 }
 
 @Composable
-private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onView: (ImageBitmap?) -> Unit) {
+private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onLongPress: () -> Unit, onView: (ImageBitmap?) -> Unit) {
     val colors = SlatrixTheme.colors
     val shape = MaterialTheme.shapes.large
     BoxWithConstraints(Modifier.padding(top = UiMetrics.GapTiny).fillMaxWidth()) {
@@ -177,7 +181,8 @@ private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onVi
         val pixels = with(LocalDensity.current) { width.roundToPx() to height.roundToPx() }
         val shown = picture(attachment, pixels.first, pixels.second, false, load)
         Box(Modifier.size(width, height).clip(shape).background(colors.sunken).border(UiMetrics.Divider, colors.border, shape)
-            .semantics { contentDescription = attachment.name }.clickable(onClickLabel = "View image") { onView(shown) }) {
+            .semantics { contentDescription = attachment.name }
+            .combinedClickable(onClickLabel = "View image", onLongClickLabel = "Message actions", onLongClick = onLongPress) { onView(shown) }) {
             shown?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
         }
     }
@@ -185,7 +190,7 @@ private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onVi
 
 /** Slack's file row: a tile colored by the file's kind, its name and its type and size. A tap downloads and opens it. */
 @Composable
-private fun FileRow(attachment: MessageAttachment, opening: Boolean, onOpen: () -> Unit) {
+private fun FileRow(attachment: MessageAttachment, opening: Boolean, onLongPress: () -> Unit, onOpen: () -> Unit) {
     val colors = SlatrixTheme.colors
     val context = LocalContext.current
     val kind = remember(attachment) { FileKind.of(attachment.name, attachment.mimeType) }
@@ -194,7 +199,8 @@ private fun FileRow(attachment: MessageAttachment, opening: Boolean, onOpen: () 
     }
     val shape = MaterialTheme.shapes.large
     Row(Modifier.padding(top = UiMetrics.GapTiny).fillMaxWidth().clip(shape).border(UiMetrics.Divider, colors.border, shape)
-        .clickable(enabled = !opening, onClickLabel = "Open file", onClick = onOpen).padding(UiMetrics.GapMedium),
+        .combinedClickable(onClickLabel = "Open file", onLongClickLabel = "Message actions", onLongClick = onLongPress) { if (!opening) onOpen() }
+        .padding(UiMetrics.GapMedium),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
         FileTile(kind)
         Column(Modifier.weight(1f)) {
