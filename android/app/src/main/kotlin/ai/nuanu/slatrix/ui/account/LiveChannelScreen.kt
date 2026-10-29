@@ -7,6 +7,7 @@ import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.compose.BackHandler
@@ -173,12 +174,18 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             } else Surface(onOpenDetails, Modifier.weight(1f), shape = MaterialTheme.shapes.extraLarge, color = colors.raised, contentColor = colors.textPrimary) {
                 Row(Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapTiny),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                    if (!room.direct) Icon(Icons.Outlined.Tag, null, Modifier.size(UiMetrics.Icon))
+                    if (!room.direct) Icon(if (room.isPrivate) SlackIcons.Lock else SlackIcons.Hash, null, Modifier.size(UiMetrics.Icon))
                     Column {
                         Text(room.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (room.topic.isNotBlank()) Text(room.topic, style = MaterialTheme.typography.bodyMedium,
-                            color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // Slack's member line, as the Mac's facepile, except for a direct message with one person. Held empty
+                        // until the count is known, so the pill keeps its height.
+                        if (!room.direct || room.memberCount > 2) Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(when (room.memberCount) { 0 -> ""; 1 -> "1 member"; else -> "${room.memberCount} members" },
+                                style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1)
+                            if (room.memberCount > 0) Icon(SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.SmallIcon),
+                                tint = colors.textSecondary)
+                        }
                     }
                 }
             }

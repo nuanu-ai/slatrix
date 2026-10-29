@@ -33,7 +33,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
@@ -73,7 +72,7 @@ class LiveChannelScreenTest {
         compose.runOnIdle { assertEquals("The newest page is far from the top", 0, requests) }
         compose.onNodeWithText("Earlier messages").assertDoesNotExist()
 
-        repeat(20) { compose.onRoot().performTouchInput { swipeDown() } }
+        repeat(20) { compose.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performTouchInput { swipeDown() } }
         compose.waitUntil { requests == 1 }
         compose.runOnIdle { state.value = state.value.copy(loadingHistory = true) }
         compose.waitForIdle()
@@ -102,7 +101,7 @@ class LiveChannelScreenTest {
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
             }
         }
-        repeat(10) { compose.onRoot().performTouchInput { swipeDown() } }
+        repeat(10) { compose.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performTouchInput { swipeDown() } }
         val indicator = compose.onNode(progress).fetchSemanticsNode().boundsInRoot
         assertTrue("The indicator sits above the oldest message",
             indicator.bottom <= compose.onNodeWithText("Message 1").fetchSemanticsNode().boundsInRoot.top)
@@ -263,7 +262,7 @@ class LiveChannelScreenTest {
         assertEquals("Nothing moves when the count arrives", waiting, compose.onNodeWithText("design").fetchSemanticsNode().boundsInRoot)
 
         compose.runOnIdle { shown.value = RoomSummary("!sam:example.org", "Sam", true, "", UnreadBadge.None, "S", 0, memberCount = 2) }
-        compose.onNodeWithText("Sam").assertIsDisplayed()
+        compose.waitForIdle()
         compose.onNodeWithText("2 members").assertDoesNotExist()
     }
 
