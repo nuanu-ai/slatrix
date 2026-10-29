@@ -88,6 +88,7 @@ data class ConversationMessage(
     val thread: MessageThread? = null,
     /** The message this one replies to, quoted above it. */
     val replyTo: ReplyPreview? = null,
+    val attachment: MessageAttachment? = null,
 ) : ConversationRow {
     /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
     val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }

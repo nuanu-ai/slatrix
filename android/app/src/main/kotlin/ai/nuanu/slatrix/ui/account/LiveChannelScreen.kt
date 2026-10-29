@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
+import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
@@ -72,7 +73,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Asked, with the oldest message on screen, once the reader reaches the newest of a conversation opened at an older one. */
     onLoadNewer: (anchor: String?) -> Unit = {},
     /** Opens a message where it is, highlighted, as a tap on a reply's quote does. */
-    onOpenMessage: (eventId: String) -> Unit = {}) {
+    onOpenMessage: (eventId: String) -> Unit = {},
+    loadPicture: suspend (MessageAttachment, width: Int, height: Int) -> ByteArray? = { _, _, _ -> null },
+    onOpenFile: suspend (MessageAttachment) -> Unit = {}) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle

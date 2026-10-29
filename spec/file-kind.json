@@ -1,0 +1,23 @@
+{
+  "about": "What kind of file an attachment is, for its colored tile, and the type its card shows. The extension decides, since senders often label files application/octet-stream; the MIME type is the fallback. kind names a color in design/tokens.json's fileColors. label is \"PDF\" for a PDF, else the extension in capitals, else the kind's name.",
+  "cases": [
+    { "name": "Q3 report.pdf", "mime": "application/octet-stream", "kind": "pdf", "label": "PDF" },
+    { "name": "scan", "mime": "application/pdf", "kind": "pdf", "label": "PDF" },
+    { "name": "notes.docx", "mime": null, "kind": "document", "label": "DOCX" },
+    { "name": "readme.txt", "mime": "text/plain", "kind": "document", "label": "TXT" },
+    { "name": "budget.xlsx", "mime": null, "kind": "spreadsheet", "label": "XLSX" },
+    { "name": "export.csv", "mime": "text/plain", "kind": "spreadsheet", "label": "CSV" },
+    { "name": "pitch.key", "mime": null, "kind": "presentation", "label": "KEY" },
+    { "name": "deck", "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "kind": "presentation", "label": "Presentation" },
+    { "name": "assets.zip", "mime": "application/zip", "kind": "archive", "label": "ZIP" },
+    { "name": "backup.tar.gz", "mime": null, "kind": "archive", "label": "GZ" },
+    { "name": "main.swift", "mime": "text/plain", "kind": "code", "label": "SWIFT" },
+    { "name": "config.json", "mime": "application/json", "kind": "code", "label": "JSON" },
+    { "name": "memo.m4a", "mime": null, "kind": "audio", "label": "M4A" },
+    { "name": "voice", "mime": "audio/ogg", "kind": "audio", "label": "Audio" },
+    { "name": "clip.mov", "mime": null, "kind": "video", "label": "MOV" },
+    { "name": "photo.heic", "mime": null, "kind": "image", "label": "HEIC" },
+    { "name": "data.bin", "mime": "application/octet-stream", "kind": "generic", "label": "BIN" },
+    { "name": "unknown", "mime": null, "kind": "generic", "label": "File" }
+  ]
+}
