@@ -37,6 +37,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
 import ai.nuanu.slatrix.core.OpenChannel
+import ai.nuanu.slatrix.core.MatrixActivity
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
@@ -50,7 +51,8 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: MatrixRooms?, workspace: MatrixWorkspace?,
-    notification: NotificationTarget? = null, threads: MatrixWorkspace? = null, onNotificationHandled: (NotificationTarget) -> Unit = {}) {
+    notification: NotificationTarget? = null, threads: MatrixWorkspace? = null, activity: MatrixActivity? = null,
+    onNotificationHandled: (NotificationTarget) -> Unit = {}) {
     val state by account.state.collectAsState()
     RequestNotificationPermission(signedIn = state is AccountState.Connected, configured = BuildConfig.PUSH_GATEWAY.isNotEmpty())
     val context = LocalContext.current
@@ -117,7 +119,9 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             else -> null
                         }) {
                             LiveHome(userId, rooms, workspace, { you = true }, selectedSpaceId,
-                                { selectedSpaceId = it; workspacePreferences.selectedSpaceId = it })
+                                { selectedSpaceId = it; workspacePreferences.selectedSpaceId = it }) {
+                                LiveActivity(activity, rooms, workspace, threads)
+                            }
                         }
                     }
                     (state as AccountState.Connected).warning?.let { warning ->
@@ -172,10 +176,18 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, onOpenT
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
 @Composable
 private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, onYou: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit) {
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val open: (String) -> Unit = remember(rooms, workspace) {
         { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
     }
-    LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace)
+    LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace, activity)
+}
+
+/** Collects Activity here, so a new item recomposes only its tab. A thread reply opens its thread over Activity. */
+@Composable
+private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, threads: MatrixWorkspace?) {
+    val items = activity?.items?.collectAsState()?.value.orEmpty()
+    fun room(id: String) = rooms?.state?.value?.rooms?.firstOrNull { it.id == id }
+    ActivityScreen(items, { id -> room(id)?.let { workspace?.open(it) } }, { id, root -> room(id)?.let { threads?.open(it, root) } })
 }

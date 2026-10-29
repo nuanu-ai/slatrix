@@ -36,6 +36,8 @@ class AccountRuntime private constructor(application: Application) {
     val identity = mutableIdentity.asStateFlow()
     private val mutableRooms = MutableStateFlow<MatrixRooms?>(null)
     val rooms = mutableRooms.asStateFlow()
+    private val mutableActivity = MutableStateFlow<MatrixActivity?>(null)
+    val activity = mutableActivity.asStateFlow()
 
     // A push wakes the process without the UI; sync and push registration wait until the app is visible.
     private val foreground = ProcessLifecycleOwner.get().lifecycle.currentStateFlow
@@ -57,6 +59,11 @@ class AccountRuntime private constructor(application: Application) {
                     // One sync service per client: a second would run a second encryption sync.
                     mutableRooms.value = next?.let { MatrixRooms(scope, it, foreground) }
                     mutableIdentity.value = next?.let { IdentityVerification(scope, it) }
+                    mutableActivity.value = next?.let { client ->
+                        MatrixActivity((state as AccountState.Connected).userId).also {
+                            scope.launch { runCatching { client.registerNotificationHandler(it.listener) } }
+                        }
+                    }
                 }
                 if (next != null && visible && !registered) {
                     registered = true

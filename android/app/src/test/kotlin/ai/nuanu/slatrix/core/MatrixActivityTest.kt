@@ -2,8 +2,14 @@ package ai.nuanu.slatrix.core
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.matrix.rustcomponents.sdk.*
 
+// Robolectric, for the platform JSON parser that reads a reaction's key.
+@RunWith(RobolectricTestRunner::class)
+@Config(application = android.app.Application::class, sdk = [35])
 class MatrixActivityTest {
     // capability: activity.feed
     @Test fun syncNotificationsBecomeTheNewestFirstFeedWithoutOwnOrRepeatedEvents() {
