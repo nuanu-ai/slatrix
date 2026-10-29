@@ -35,6 +35,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -57,25 +58,31 @@ private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeopl
 @Composable
 fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetailsActions, onLeft: () -> Unit, onBack: () -> Unit) {
     var page by rememberSaveable { mutableStateOf(DetailsPage.Details) }
-    var notifications by remember { mutableStateOf<NotificationSetting?>(null) }
-    LaunchedEffect(room.id) { notifications = attempt { actions.notifications() }.getOrNull() }
+    // Where Add people goes back to: the page it was opened from.
+    var opener by rememberSaveable { mutableStateOf(DetailsPage.Details) }
+    var loads by remember { mutableIntStateOf(0) }
+    var notifications by remember { mutableStateOf<Result<NotificationSetting>?>(null) }
+    LaunchedEffect(room.id, loads) { notifications = attempt { actions.notifications() } }
+    // Outlives the pages, so going back doesn't cancel a change on its way.
+    val scope = rememberCoroutineScope()
+    val open = { next: DetailsPage -> opener = page; page = next }
     val details = { page = DetailsPage.Details }
     when (page) {
-        DetailsPage.Details -> DetailsPage(room, notifications, actions, onLeft, onBack) { page = it }
-        DetailsPage.Members -> MembersPage(room, me, actions, { page = DetailsPage.AddPeople }, details)
-        DetailsPage.Edit -> EditPage(room, actions, details)
-        DetailsPage.Notifications -> NotificationsPage(notifications, actions, { notifications = it }, details)
-        DetailsPage.AddPeople -> AddPeoplePage(actions, details)
+        DetailsPage.Details -> DetailsPage(room, notifications?.getOrNull(), actions, scope, onLeft, onBack, open)
+        DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, details)
+        DetailsPage.Edit -> EditPage(room, actions, scope, details)
+        DetailsPage.Notifications -> NotificationsPage(notifications, actions, scope, { notifications = Result.success(it) },
+            { loads++ }, details)
+        DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener }
     }
 }
 
 private fun noun(room: RoomSummary) = if (room.direct) "conversation" else "channel"
 
 @Composable
-private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, actions: ChannelDetailsActions, onLeft: () -> Unit,
-    onBack: () -> Unit, onPage: (DetailsPage) -> Unit) {
+private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, actions: ChannelDetailsActions, scope: CoroutineScope,
+    onLeft: () -> Unit, onBack: () -> Unit, onPage: (DetailsPage) -> Unit) {
     val colors = SlatrixTheme.colors
-    val scope = rememberCoroutineScope()
     var confirmLeave by rememberSaveable { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -93,7 +100,8 @@ private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, 
         },
         dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text("Cancel") } }, containerColor = colors.overlay)
     Box(Modifier.fillMaxSize()) {
-        PushedPage(if (room.direct) "Conversation details" else "Channel details", onBack, action = {
+        // While leaving, Back waits for the answer, so a leave the server took always closes the conversation.
+        PushedPage(if (room.direct) "Conversation details" else "Channel details", { if (!leaving) onBack() }, action = {
             if (room.canEditName || room.canEditTopic) TextButton(onClick = { onPage(DetailsPage.Edit) }) { Text("Edit") }
         }) {
             item {
@@ -160,9 +168,9 @@ private fun label(choice: NotificationChoice, default: NotificationChoice) =
     if (choice == NotificationChoice.Default) "Default (${title(default)})" else title(choice)
 
 @Composable
-private fun NotificationsPage(setting: NotificationSetting?, actions: ChannelDetailsActions, onChange: (NotificationSetting) -> Unit,
-    onBack: () -> Unit) {
-    val scope = rememberCoroutineScope()
+private fun NotificationsPage(loaded: Result<NotificationSetting>?, actions: ChannelDetailsActions, scope: CoroutineScope,
+    onChange: (NotificationSetting) -> Unit, onRetry: () -> Unit, onBack: () -> Unit) {
+    val setting = loaded?.getOrNull()
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     PushedPage("Notifications", onBack) {
@@ -188,6 +196,10 @@ private fun NotificationsPage(setting: NotificationSetting?, actions: ChannelDet
                 }
             }
             error?.let { ErrorLine(it) }
+            loaded?.exceptionOrNull()?.let { failure ->
+                ErrorLine(failure.message.orEmpty())
+                TextButton(onClick = onRetry, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
+            }
         }
     }
 }
@@ -246,19 +258,20 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
 }
 
 @Composable
-private fun EditPage(room: RoomSummary, actions: ChannelDetailsActions, onBack: () -> Unit) {
-    val scope = rememberCoroutineScope()
+private fun EditPage(room: RoomSummary, actions: ChannelDetailsActions, scope: CoroutineScope, onBack: () -> Unit) {
     var name by rememberSaveable { mutableStateOf(room.name) }
     var topic by rememberSaveable { mutableStateOf(room.topic) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val changed = name != room.name || topic != room.topic
+    // Only what changed is sent, so a description alone never fixes a computed name, such as a direct message's.
+    val newName = name.trim().takeIf { it != room.name }
+    val newTopic = topic.takeIf { it != room.topic }
     PushedPage(if (room.direct) "Edit conversation" else "Edit channel", onBack, action = {
-        TextButton(enabled = changed && name.isNotBlank() && !saving, onClick = {
+        TextButton(enabled = (newName != null || newTopic != null) && name.isNotBlank() && !saving, onClick = {
             saving = true
             error = null
             scope.launch {
-                attempt { actions.save(name, topic) }.onSuccess { onBack() }.onFailure { error = it.message }
+                attempt { actions.save(newName, newTopic) }.onSuccess { onBack() }.onFailure { error = it.message }
                 saving = false
             }
         }) { Text("Save") }
@@ -276,8 +289,7 @@ private fun EditPage(room: RoomSummary, actions: ChannelDetailsActions, onBack: 
 }
 
 @Composable
-private fun AddPeoplePage(actions: ChannelDetailsActions, onBack: () -> Unit) {
-    val scope = rememberCoroutineScope()
+private fun AddPeoplePage(actions: ChannelDetailsActions, scope: CoroutineScope, onBack: () -> Unit) {
     var id by rememberSaveable { mutableStateOf("") }
     var inviting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }

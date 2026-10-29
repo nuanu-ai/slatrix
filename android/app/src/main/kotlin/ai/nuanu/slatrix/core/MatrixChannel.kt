@@ -45,23 +45,26 @@ class MatrixChannel(private val client: Client, private val roomId: String) {
         members.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, ChannelMember::name).thenBy { it.id })
     }
 
-    /** Saves the name and description that changed; a description saved before the name failed still counts. */
+    /**
+     * Saves the [name] and [topic] given, null leaving one as it is, and only where they differ from the room's own; a name
+     * saved before the description failed still counts.
+     */
     suspend fun save(name: String?, topic: String?) = joined("Join this conversation before editing its details.") { room ->
         val info = room.roomInfo()
-        val renaming = name != null && name != info.rawName.orEmpty()
-        val retopic = topic != null && topic != info.topic.orEmpty()
-        if (renaming && name!!.isBlank()) throw ChannelActionFailure("Enter a name.")
+        val newName = name?.trim()?.takeIf { it != info.rawName.orEmpty() }
+        val newTopic = topic?.takeIf { it != info.topic.orEmpty() }
+        if (newName?.isEmpty() == true) throw ChannelActionFailure("Enter a name.")
         room.getPowerLevels().use { powers ->
-            if (renaming && !powers.canOwnUserSendState(StateEventType.RoomName) ||
-                retopic && !powers.canOwnUserSendState(StateEventType.RoomTopic)) {
+            if (newName != null && !powers.canOwnUserSendState(StateEventType.RoomName) ||
+                newTopic != null && !powers.canOwnUserSendState(StateEventType.RoomTopic)) {
                 throw ChannelActionFailure("You don’t have permission to change this conversation’s details.")
             }
         }
-        if (renaming) room.setName(name!!)
+        newName?.let { room.setName(it) }
         try {
-            if (retopic) room.setTopic(topic!!)
+            newTopic?.let { room.setTopic(it) }
         } catch (failure: Exception) {
-            if (failure is CancellationException || !renaming) throw failure
+            if (failure is CancellationException || newName == null) throw failure
             throw ChannelActionFailure("The name was saved. The description couldn’t be saved.")
         }
     }

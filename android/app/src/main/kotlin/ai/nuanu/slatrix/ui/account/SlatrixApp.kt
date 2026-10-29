@@ -231,13 +231,13 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
             // A quote doesn't know its parent's thread, so it asks before jumping.
             { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } }, { details = true })
-        // Over the conversation, so Back finds it where it was.
-        if (details) {
-            val actions = remember(rooms, open.room.id) {
-                rooms?.client?.let { MatrixChannel(it, open.room.id) }?.let {
-                    ChannelDetailsActions(it::members, it::save, it::leave, it::invite, it::notifications, it::setNotifications)
-                } ?: ChannelDetailsActions()
+        val actions = remember(rooms, open.room.id) {
+            rooms?.client?.let { MatrixChannel(it, open.room.id) }?.let {
+                ChannelDetailsActions(it::members, it::save, it::leave, it::invite, it::notifications, it::setNotifications)
             }
+        }
+        // Over the conversation, so Back finds it where it was.
+        if (details && actions != null) {
             ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }) { details = false }
         }
     }
