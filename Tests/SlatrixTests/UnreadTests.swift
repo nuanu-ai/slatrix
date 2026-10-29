@@ -75,7 +75,9 @@ struct UnreadMappingTests {
         #expect(UnreadMapping.firstUnreadEventID(in: items, roomID: roomID, ownUserID: nil) == "$first")
     }
 
-    @Test("Where the New line goes", arguments: try SharedSpec.decode("spec/unread-line.json", as: UnreadLineSpec.self).line)
+    @Test(
+        "Where the New line goes",
+        arguments: try SharedSpec.decode("spec/unread-line.json", as: UnreadLineSpec.self).line)
     func line(spec: UnreadLineSpec.Line) {
         let marks = spec.items.map { item in
             switch item {
@@ -104,7 +106,9 @@ struct UnreadNavigationTests {
             for: room, selectedRoomID: selected, explicitEventID: explicit, opensThread: thread)
     }
 
-    @Test("Where an unread conversation opens", arguments: try SharedSpec.decode("spec/unread-line.json", as: UnreadLineSpec.self).resume)
+    @Test(
+        "Where an unread conversation opens",
+        arguments: try SharedSpec.decode("spec/unread-line.json", as: UnreadLineSpec.self).resume)
     func resume(spec: UnreadLineSpec.Resume) {
         var room = ChatRoom(id: roomID, name: "Room")
         room.unreadMessages = spec.room.messages ?? 0

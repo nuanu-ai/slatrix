@@ -57,6 +57,8 @@ data class RoomSummary(
     val latest: LatestMessage? = null,
     val starred: Boolean = false,
     val isPrivate: Boolean = false,
+    /** Where its unread messages start, which it opens at; null when it has none to resume. */
+    val resumeAt: String? = null,
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
@@ -236,19 +238,21 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             return
         }
         spaces.remove(info.id)
+        val unread = RoomUnread(
+            direct = info.isDirect, muted = info.cachedUserDefinedNotificationMode == RoomNotificationMode.MUTE,
+            markedUnread = info.isMarkedUnread, messages = info.numUnreadMessages.clampedLong(),
+            notifications = info.numUnreadNotifications.clampedLong(), mentions = info.numUnreadMentions.clampedLong(),
+        )
         val summary = RoomSummary(
             id = info.id, name = name, direct = info.isDirect, topic = info.topic.orEmpty(),
-            unread = UnreadBadge.forRoom(RoomUnread(
-                direct = info.isDirect, muted = info.cachedUserDefinedNotificationMode == RoomNotificationMode.MUTE,
-                markedUnread = info.isMarkedUnread, messages = info.numUnreadMessages.clampedLong(),
-                notifications = info.numUnreadNotifications.clampedLong(), mentions = info.numUnreadMentions.clampedLong(),
-            )),
+            unread = UnreadBadge.forRoom(unread),
             initials = AvatarPlaceholder.initials(name), colorIndex = AvatarPlaceholder.colorIndex(name),
             spaceIds = ancestors(info.id),
             latest = if (info.isDirect) followed[info.id]?.let { latest(it.room) } else null,
             starred = info.isFavourite,
             // Slack's private channel: only an invitation lets someone in. A restricted room is open to its space, a public channel.
             isPrivate = info.joinRule.let { it is JoinRule.Invite || it is JoinRule.Knock || it is JoinRule.Private },
+            resumeAt = UnreadLine.resumeAt(unread, info.fullyReadEventId),
         )
         // An unchanged room keeps its instance, so its row skips recomposition.
         if (summaries[info.id] != summary) summaries[info.id] = summary

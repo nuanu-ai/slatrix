@@ -128,6 +128,8 @@ data class ConversationState(
     val highlight: String? = null,
     /** Loaded around an older message rather than live, until the reader reaches the newest and it turns live. */
     val focused: Boolean = false,
+    /** The first message after the read marker, which Slack's New line goes above; a thread has none, as on the Mac. */
+    val unread: String? = null,
 )
 
 /** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
@@ -157,7 +159,9 @@ internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } c
 class MatrixConversation(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null,
     private val at: String? = null,
     /** The thread's root as its channel shows it, on screen at once while the thread loads, as on the Mac. */
-    root: ConversationMessage? = null) {
+    root: ConversationMessage? = null,
+    /** [at] is where the unread messages start, so it opens there without a highlight. */
+    private val resume: Boolean = false) {
     // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
     private val root = root?.copy(id = ROOT_KEY, grouped = false)
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
@@ -191,7 +195,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     }
 
     private inner class Source(val timeline: Timeline, val focused: Boolean) {
-        val items = mutableListOf<ConversationRow?>()
+        /** Rows, the read marker, or null for an item the conversation doesn't show. */
+        val items = mutableListOf<Any?>()
         var handle: TaskHandle? = null
 
         fun holds(eventId: String?) = eventId != null && items.any { (it as? ConversationMessage)?.eventId == eventId }
@@ -215,7 +220,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val (source, batch) = update as Update.Batch
                 if (source !== shown && source !== pending) continue
                 // asEvent blocks on the SDK, so a batch is mapped off the main thread.
-                val rows = withContext(Dispatchers.Default) { batch.forEach { source.apply(it) }; source.rows() }
+                val (rows, unread) = withContext(Dispatchers.Default) {
+                    batch.forEach { source.apply(it) }
+                    source.rows() to source.unread().takeIf { threadRoot == null }
+                }
                 var swapped = false
                 if (source === pending) {
                     if (pendingAnchor != null && !source.holds(pendingAnchor)) continue
@@ -246,7 +254,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 if (first != oldest) { oldest = first; blankPages = 0 }
                 mutableState.update {
                     it.copy(rows = withRoot(rows), loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
-                        highlight = it.highlight ?: at?.takeIf { id -> source.holds(id) })
+                        highlight = it.highlight ?: at?.takeIf { id -> !resume && source.holds(id) }, unread = unread)
                 }
             }
         } catch (cancelled: CancellationException) {
@@ -577,7 +585,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         var previous: ConversationMessage? = null
         var divider: ConversationRow? = null
         for (index in items.indices) {
-            val row = items[index] ?: continue
+            val row = items[index] as? ConversationRow ?: continue
             if (row !is ConversationMessage) {
                 divider = row
                 previous = null
@@ -593,6 +601,16 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
         return rows
     }
+
+    private fun Source.unread(): String? = UnreadLine.first(items.map {
+        when (it) {
+            ReadMarker -> UnreadLine.Mark(readMarker = true)
+            is ConversationMessage -> UnreadLine.Mark(shown = it.eventId)
+            else -> UnreadLine.Mark()
+        }
+    })
+
+    private object ReadMarker
 
     private data class Shown(val kind: MessageKind, val body: String, val html: String? = null)
 
@@ -648,9 +666,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
-    private fun row(item: TimelineItem): ConversationRow? {
-        val event = item.asEvent() ?: return (item.asVirtual() as? VirtualTimelineItem.DateDivider)?.let {
-            DayDivider(item.uniqueId().id, it.ts.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
+    private fun row(item: TimelineItem): Any? {
+        val event = item.asEvent() ?: return when (val virtual = item.asVirtual()) {
+            is VirtualTimelineItem.DateDivider -> DayDivider(item.uniqueId().id, virtual.ts.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
+            VirtualTimelineItem.ReadMarker -> ReadMarker
+            else -> null
         }
         val content = (event.content as? TimelineItemContent.MsgLike)?.content ?: return null
         val senderName = name(event.senderProfile, event.sender)
