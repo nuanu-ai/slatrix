@@ -9,6 +9,7 @@ import ai.nuanu.slatrix.core.MentionSearch
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,7 +28,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
@@ -112,7 +113,10 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         replace(selection.min, selection.max, emoji)
     }) { picking = false }
     var height by remember { mutableIntStateOf(0) }
-    Column(Modifier.fillMaxWidth().onSizeChanged { height = it.height }) {
+    // Slack's composer is a panel with rounded top corners over the conversation.
+    Column(Modifier.fillMaxWidth().onSizeChanged { height = it.height }
+        .border(UiMetrics.Divider, colors.border, SlatrixTheme.topPanelShape).background(colors.canvas, SlatrixTheme.topPanelShape)
+        .padding(top = UiMetrics.GapTiny)) {
         if (suggestions != null && !editing) Popup(Alignment.BottomStart, IntOffset(0, -height),
             properties = PopupProperties(focusable = false)) {
             MentionList(suggestions.candidates) { candidate ->
@@ -126,7 +130,6 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                 actions.onMention(suggestions.start, suggestions.end, candidate)
             }
         }
-        HorizontalDivider(color = colors.border)
         composer.target?.let { TargetBar(it, actions.onCancelTarget) }
         BasicTextField(shown, { next ->
             field = next
@@ -148,18 +151,18 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
             })
         Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { picking = true }, enabled = !composer.loading) {
-                Icon(Icons.Outlined.EmojiEmotions, "Emoji", tint = colors.textSecondary)
+                Icon(Icons.Outlined.EmojiEmotions, "Emoji", tint = colors.textPrimary)
             }
             IconButton(onClick = {
                 val selection = shown.selection
                 val before = shown.text.substring(0, selection.min)
                 replace(selection.min, selection.max, if (before.isEmpty() || before.last().isWhitespace()) "@" else " @")
             }, enabled = !composer.loading) {
-                Icon(Icons.Outlined.AlternateEmail, "Mention someone", tint = colors.textSecondary)
+                Icon(Icons.Outlined.AlternateEmail, "Mention someone", tint = colors.textPrimary)
             }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = onSend, enabled = !composer.loading && !composer.sending && composer.text.isNotBlank()) {
-                Icon(if (editing) Icons.Outlined.Check else Icons.AutoMirrored.Outlined.Send,
+                Icon(if (editing) Icons.Outlined.Check else Icons.AutoMirrored.Filled.Send,
                     if (editing) "Save changes" else "Send message",
                     tint = if (composer.text.isNotBlank()) colors.accent else colors.textTertiary)
             }
