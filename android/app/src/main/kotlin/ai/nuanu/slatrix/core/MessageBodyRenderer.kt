@@ -23,7 +23,7 @@ data class MessageRun(
 )
 
 /** Matrix HTML as styled runs, by the rule in spec/message-format.json that the Mac's MessageBodyRenderer follows too. */
-object MessageFormat {
+object MessageBodyRenderer {
     private const val MAX_INPUT_BYTES = 65_536
     private const val MAX_OUTPUT = 65_536
     private const val MAX_NODES = 4_096

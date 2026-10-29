@@ -300,8 +300,7 @@ private fun LiveMessageRow(message: ConversationMessage, onMenu: (ConversationMe
                     MessageSendState.Failed -> "Not sent"
                 }, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = if (failed) colors.destructive else colors.textSecondary)
             }
-            Text(message.body, style = MaterialTheme.typography.bodyLarge,
-                color = if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody)
+            MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody)
         }
     }
 }

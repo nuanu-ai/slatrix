@@ -66,6 +66,11 @@ class AppColors internal constructor(
     val mediaShade = roles.getValue("mediaShade")
     val onMedia = roles.getValue("onMedia")
     val onMediaEdge = roles.getValue("onMediaEdge")
+    // Text tints for message blocks, as the Mac draws them.
+    val inlineCode = textBody.copy(alpha = 0.07f)
+    val codeBlock = textBody.copy(alpha = 0.04f)
+    val codeBlockEdge = textBody.copy(alpha = 0.16f)
+    val quoteBar = textBody.copy(alpha = 0.25f)
 }
 
 private val LocalColors = staticCompositionLocalOf { appColors(false, SidebarPalette.Aubergine) }

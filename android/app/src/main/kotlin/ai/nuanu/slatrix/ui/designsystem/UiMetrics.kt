@@ -24,4 +24,5 @@ object UiMetrics {
     /** Slack's message sheet: its icons and its Reply tile. */
     val SheetIcon = 24.dp
     val ActionTile = 86.dp
+    val QuoteBar = 4.dp
 }

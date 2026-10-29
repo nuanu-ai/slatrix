@@ -75,7 +75,10 @@ data class ConversationMessage(
     /** The failure paused the room's send queue, so retrying resumes the queue, as on the Mac. */
     val queuePaused: Boolean = false,
     val edited: Boolean = false,
-) : ConversationRow
+) : ConversationRow {
+    /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
+    val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
+}
 
 data class ConversationState(
     val rows: List<ConversationRow> = emptyList(),
@@ -393,6 +396,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             canRetry = failure != null && failure.error !is QueueWedgeError.ExpiredAccessToken &&
                 failure.error !is QueueWedgeError.MissingMediaContent && failure.error !is QueueWedgeError.InvalidMimeType,
             queuePaused = failure?.isRecoverable == true,
-        )
+            edited = (content.kind as? MsgLikeKind.Message)?.content?.isEdited == true,
+        ).also { it.runs }
     }
 }
