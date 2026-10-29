@@ -6,6 +6,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import ai.nuanu.slatrix.ui.account.SlatrixApp
@@ -32,6 +37,18 @@ class MainActivity : ComponentActivity() {
             }
         }
         consumeCallback(intent)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                try {
+                    accountModel.workspace.collectLatest { workspace ->
+                        PushNotifications.openRoom = null
+                        workspace?.selected?.collect { PushNotifications.openRoom = it?.room?.id }
+                    }
+                } finally {
+                    PushNotifications.openRoom = null
+                }
+            }
+        }
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)

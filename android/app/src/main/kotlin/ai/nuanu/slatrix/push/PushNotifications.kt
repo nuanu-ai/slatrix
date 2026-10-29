@@ -41,9 +41,11 @@ class PushNotifications(private val context: Context) {
         show(userId, roomId, eventId, status, identity)
     }
 
+    fun clear(roomId: String) = manager.activeNotifications.filter { it.tag == roomId }.forEach { manager.cancel(it.tag, it.id) }
+
     @SuppressLint("UseKtx") // KTX edit discards the commit result.
     fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState? = null) = synchronized(deliveryLock) {
-        if (!enabled || status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted) return@synchronized
+        if (!enabled || status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted || roomId == openRoom) return@synchronized
         val key = pushKey(userId, roomId, eventId)
         val delivered = preferences.getString("delivered", "").orEmpty().split('\n').filter { it.isNotEmpty() }
         if (key in delivered) return@synchronized
@@ -78,13 +80,16 @@ class PushNotifications(private val context: Context) {
             .setOnlyAlertOnce(true).setSilent(resolved?.isNoisy != true).build()
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
                 Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return@synchronized
-        manager.notify(key, 0, notification)
+        manager.notify(roomId, key.hashCode(), notification)
         check(preferences.edit().putString("delivered", (delivered + key).takeLast(512).joinToString("\n")).commit())
     }
 
     companion object {
         const val USER_ID = "push_user_id"
         const val ROOM_ID = "push_room_id"
+
+        /** The conversation on screen while the app is resumed; it needs no alert. */
+        @Volatile var openRoom: String? = null
 
         /** On a cold start the identity is still loading; waiting a moment lets a verified device show the message. */
         suspend fun knownIdentity(identity: StateFlow<IdentityState>?): IdentityState? = identity?.let {
