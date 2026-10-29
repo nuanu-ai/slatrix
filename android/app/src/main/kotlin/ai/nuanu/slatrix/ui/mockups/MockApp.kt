@@ -48,6 +48,10 @@ fun SlatrixMockups(
     val room = MockData.channels.firstOrNull { it.id == roomId } ?: MockData.conversations.first { it.id == roomId }.let {
         MockChannel(it.id, it.name, "Direct message", direct = true)
     }
+    val messages = if (room.direct) {
+        val conversation = MockData.conversations.first { it.id == roomId }
+        listOf(MockMessage("dm-${conversation.id}", conversation.name, conversation.initials, conversation.time, conversation.preview, conversation.colorIndex))
+    } else MockData.messages
     val back: () -> Unit = { screen = if (screen == MockScreen.Thread) MockScreen.Channel else tab }
     BackHandler(enabled = screen !in rootScreens, onBack = back)
 
@@ -75,15 +79,15 @@ fun SlatrixMockups(
                             when (screen) {
                                 MockScreen.Home -> HomeScreen(MockData.channels,
                                     onChannel = { roomId = it; screen = MockScreen.Channel },
-                                    onThread = { screen = MockScreen.Thread },
+                                    onThread = { roomId = "design"; screen = MockScreen.Thread },
                                     onYou = { screen = MockScreen.You })
                                 MockScreen.Dms -> DmsScreen(MockData.conversations,
                                     onOpen = { roomId = it; screen = MockScreen.Channel },
                                     onYou = { screen = MockScreen.You })
                                 MockScreen.Activity -> ActivityScreen(MockData.activity,
-                                    onThread = { screen = MockScreen.Thread },
+                                    onThread = { roomId = "design"; screen = MockScreen.Thread },
                                     onYou = { screen = MockScreen.You })
-                                MockScreen.Channel -> ChannelScreen(room, MockData.messages,
+                                MockScreen.Channel -> ChannelScreen(room, messages,
                                     draft = drafts["channel:$roomId"].orEmpty(),
                                     onDraft = { drafts = drafts + ("channel:$roomId" to it) },
                                     onSend = {}, onThread = { screen = MockScreen.Thread }, onBack = back)

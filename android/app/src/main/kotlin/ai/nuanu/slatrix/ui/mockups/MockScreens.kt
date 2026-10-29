@@ -99,7 +99,36 @@ fun HomeScreen(channels: List<MockChannel>, onChannel: (String) -> Unit, onThrea
 }
 
 @Composable
-fun DmsScreen(conversations: List<MockConversation>, onOpen: (String) -> Unit, onYou: () -> Unit) {}
+fun DmsScreen(conversations: List<MockConversation>, onOpen: (String) -> Unit, onYou: () -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val visible = conversations.filter { it.name.contains(query, ignoreCase = true) || it.preview.contains(query, ignoreCase = true) }
+    Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas)) {
+        ScreenHeader("DMs", onYou = onYou)
+        SearchBox(query, { query = it }, "Search DMs")
+        LazyColumn {
+            items(visible, key = { it.id }) { conversation ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { onOpen(conversation.id) }.padding(UiMetrics.GapLarge),
+                    horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium),
+                ) {
+                    Avatar(conversation.initials, conversation.colorIndex, UiMetrics.LargeAvatar)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                            Text(conversation.name, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text(conversation.time, style = MaterialTheme.typography.labelSmall, color = SlatrixTheme.colors.textSecondary)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
+                            Text(conversation.preview, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = if (conversation.badge == null) SlatrixTheme.colors.textSecondary else SlatrixTheme.colors.textBody, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            conversation.badge?.let { CountBadge(it) }
+                        }
+                    }
+                }
+                HorizontalDivider(color = SlatrixTheme.colors.border, modifier = Modifier.padding(start = UiMetrics.LargeAvatar + UiMetrics.GapLarge + UiMetrics.GapMedium))
+            }
+            if (visible.isEmpty()) item { EmptyResults() }
+        }
+    }
+}
 
 @Composable
 fun ActivityScreen(items: List<MockActivity>, onThread: () -> Unit, onYou: () -> Unit) {}
