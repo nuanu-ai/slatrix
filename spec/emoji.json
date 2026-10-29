@@ -1,0 +1,31 @@
+{
+  "about": "Emoji by Slack's shortcodes, from the catalog in Sources/Slatrix/Core/EmojiData.swift that both apps read. search: what a query finds, best first: exact shortcodes, then shortcodes the query starts, then words that start with it, then anything that contains it, in picker order within each; colons and case never matter. first is the top result, or null when nothing matches; order, when given, lists results that come in that order. shortcode: how a reaction is named, Slack's code with its skin tone, or the key itself when it is no emoji. quick: the one-tap reactions, your recent emoji newest first and then Slack's defaults, count of them. adding: the recent list after using an emoji.",
+  "search": [
+    { "name": "A shortcode in colons", "query": ":+1:", "first": "👍" },
+    { "name": "Another of the emoji's shortcodes", "query": "thumbsup", "first": "👍" },
+    { "name": "Colons around a word", "query": ":heart:", "first": "❤️" },
+    { "name": "A bare shortcode", "query": "tada", "first": "🎉" },
+    { "name": "An exact shortcode wins over longer ones", "query": "smile", "first": "😄" },
+    { "name": "Words of the name", "query": "thumbs up", "first": "👍" },
+    { "name": "An exact shortcode, then one it starts, then a later word", "query": "heart", "first": "❤️", "order": ["😍", "💔"] },
+    { "name": "Nothing matches", "query": "zzzqqq", "first": null },
+    { "name": "Blank finds nothing", "query": "  ", "first": null }
+  ],
+  "shortcode": [
+    { "name": "Slack's own code comes first", "value": "👍", "shortcode": ":+1:" },
+    { "name": "A skin tone, numbered as Slack numbers them", "value": "👍🏽", "shortcode": ":+1::skin-tone-4:" },
+    { "name": "A heart sent without its presentation selector", "value": "❤", "shortcode": ":heart:" },
+    { "name": "A key that is no emoji", "value": "lgtm", "shortcode": "lgtm" }
+  ],
+  "quick": [
+    { "name": "The newest recent emoji", "recent": ["🎉", "👍", "🔥", "🚀"], "count": 3, "quick": ["🎉", "👍", "🔥"] },
+    { "name": "Defaults fill the rest without repeating", "recent": ["👀"], "count": 3, "quick": ["👀", "✅", "🙌"] },
+    { "name": "Slack's defaults before any use", "recent": [], "count": 3, "quick": ["✅", "👀", "🙌"] },
+    { "name": "A longer row takes more defaults", "recent": ["🔥"], "count": 5, "quick": ["🔥", "✅", "👀", "🙌", "👍"] },
+    { "name": "A longer row before any use", "recent": [], "count": 5, "quick": ["✅", "👀", "🙌", "👍", "🎉"] }
+  ],
+  "adding": [
+    { "name": "A used emoji moves to the front without repeating", "emoji": "🎉", "recent": ["👍", "🎉", "🔥"], "after": ["🎉", "👍", "🔥"] },
+    { "name": "A new emoji goes first", "emoji": "🚀", "recent": ["👍"], "after": ["🚀", "👍"] }
+  ]
+}
