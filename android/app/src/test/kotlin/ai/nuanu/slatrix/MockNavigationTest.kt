@@ -27,4 +27,13 @@ class MockNavigationTest {
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Channels").assertIsDisplayed()
     }
+    @Test fun dmsOpenTheSelectedConversation() {
+        compose.setContent { SlatrixMockups() }
+        compose.onNodeWithText("DMs").performClick()
+        compose.onNodeWithText("Ava Patel").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Message Ava Patel").assertIsDisplayed()
+        compose.onNodeWithText("Love this direction.", substring = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Ava Patel").assertIsDisplayed()
+    }
 }
