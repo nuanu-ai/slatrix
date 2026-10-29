@@ -362,6 +362,42 @@ struct WindowHostedTests {
         #expect(card(older) === shown)
     }
 
+    @Test("A save from another device lands above a scrolled Later without moving the cards in view")
+    func laterKeepsItsPlace() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let messages = (1...9).map {
+            ChatMessage(
+                id: "$later\($0)", roomID: "!later:example.org", senderID: "@ana:example.org", senderName: "Ana",
+                body: "Saved message \($0)", timestamp: Date(timeIntervalSince1970: 1_761_955_000))
+        }
+        // Where the preview reads a saved message from.
+        harness.matrix.threadMessages = messages
+        let entry = { (index: Int) in
+            #"{"room_id":"!later:example.org","event_id":"$later\#(index)","ts":\#(1_761_955_200_000 + index)}"#
+        }
+        let client = LaterClient(server: #"{"saved":[\#((1...8).map(entry).joined(separator: ","))],"removed":[]}"#)
+        harness.matrix.savedMessages.attach(client, accountID: "preview.you")
+        harness.menu("later")
+        func card(_ index: Int) -> NSView? {
+            harness.shown().first { ($0 as? MessageTextView)?.string == "Saved message \(index)" }
+        }
+        #expect(await eventually { card(8) != nil })
+        let scroll = try #require(card(8)?.enclosingScrollView)
+        scroll.contentView.setBoundsOrigin(NSPoint(x: 0, y: 500))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        #expect(await eventually { card(4) != nil })
+        let shown = try #require(card(4))
+        let before = shown.convert(shown.bounds, to: nil)
+
+        client.sync(#"{"saved":[\#((1...9).map(entry).joined(separator: ","))],"removed":[]}"#)
+        #expect(await eventually { harness.matrix.savedMessages.list.saved.count == 9 })
+        await drainMainActor()
+        harness.hosting.layoutSubtreeIfNeeded()
+        #expect(abs(shown.convert(shown.bounds, to: nil).minY - before.minY) < 1)
+    }
+
     // capability: app.offline-banner
     @Test("Going offline shows a banner over the conversation, and reconnecting clears it, with the timeline still")
     func offlineBanner() async throws {
