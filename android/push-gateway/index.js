@@ -4,6 +4,9 @@ import { onRequest } from 'firebase-functions/v2/https';
 
 initializeApp();
 
+const invalidTokenCodes = new Set([
+  'messaging/registration-token-not-registered', 'messaging/invalid-registration-token',
+]);
 const allowedApps = new Set(['ai.nuanu.slatrix.dev', 'ai.nuanu.slatrix']);
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const boundedText = (value, bytes) => typeof value === 'string' && value.length > 0
@@ -43,10 +46,16 @@ export const matrixPush = onRequest({
     response.status(200).json({ rejected: [] });
     return;
   }
-  await Promise.all(notification.devices.map((device) => getMessaging().send({
+  const results = await Promise.allSettled(notification.devices.map((device) => getMessaging().send({
     token: device.pushkey,
     data: { event_id: notification.event_id, room_id: notification.room_id },
     android: { priority: 'high', restrictedPackageName: device.app_id },
   })));
-  response.status(200).json({ rejected: [] });
+  if (results.some((result) => result.status === 'rejected' && !invalidTokenCodes.has(result.reason?.code))) {
+    response.set('Retry-After', '60').status(503).json({ errcode: 'M_UNKNOWN', error: 'Push delivery unavailable' });
+    return;
+  }
+  const rejected = notification.devices.filter((_, index) => results[index].status === 'rejected')
+    .map((device) => device.pushkey);
+  response.status(200).json({ rejected });
 });
