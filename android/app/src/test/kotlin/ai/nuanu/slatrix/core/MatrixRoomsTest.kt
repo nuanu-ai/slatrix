@@ -8,6 +8,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -15,6 +17,34 @@ import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_base.EncryptionState
 
 class MatrixRoomsTest {
+    @Test fun retryKeepsTheLiveSyncUntilNotificationLookupCompletes() = runTest {
+        val client = RoomsClient(emptyList())
+        val original = RoomsSync()
+        val replacement = RoomsSync()
+        client.services.trySend(original)
+        client.services.trySend(replacement)
+        val fetching = CompletableDeferred<Pair<String, String>>()
+        val result = CompletableDeferred<NotificationStatus>()
+        client.lookup = { roomId, eventId ->
+            fetching.complete(roomId to eventId)
+            result.await()
+        }
+        val rooms = MatrixRooms(backgroundScope, client)
+        original.started.await()
+
+        val notification = async { rooms.notification("!team:example.org", "\$event") }
+        assertEquals("!team:example.org" to "\$event", fetching.await())
+        assertSame(original, (client.notificationSetup as NotificationProcessSetup.SingleProcess).syncService)
+        rooms.retry()
+        original.teardownStarted.await()
+        assertFalse("A notification lookup still owns the running sync", original.stopped.isCompleted)
+
+        result.complete(NotificationStatus.EventNotFound)
+        assertSame(NotificationStatus.EventNotFound, notification.await())
+        replacement.started.await()
+        rooms.close()
+    }
+
     @Test fun joinedSpacesExposeSeparateWorkspacesAndNestedChannelMembership() = runTest {
         val client = RoomsClient(listOf(
             TestRoom(roomInfo("!nuanu:example.org", "Nuanu", space = true)),
@@ -137,6 +167,14 @@ class MatrixRoomsTest {
 }
 
 private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
+    var notificationSetup: NotificationProcessSetup? = null
+    var lookup: suspend (String, String) -> NotificationStatus = { _, _ -> NotificationStatus.EventNotFound }
+    override suspend fun notificationClient(processSetup: NotificationProcessSetup): NotificationClient {
+        notificationSetup = processSetup
+        return object : NotificationClient(NoHandle) {
+            override suspend fun getNotification(roomId: String, eventId: String): NotificationStatus = lookup(roomId, eventId)
+        }
+    }
     var spaces: SpaceService = RoomsSpaces()
     override suspend fun spaceService(): SpaceService = spaces
     val services = Channel<SyncService>(Channel.UNLIMITED)
@@ -165,11 +203,13 @@ private class TestRoom(var info: RoomInfo) : Room(NoHandle) {
 private class RoomsSync : SyncService(NoHandle) {
     val started = CompletableDeferred<Unit>()
     val stopped = CompletableDeferred<Unit>()
+    val teardownStarted = CompletableDeferred<Unit>()
     private var stateListener: SyncServiceStateObserver? = null
     private var entriesListener: RoomListEntriesListener? = null
     private var activeFilter = false
     override fun roomListService(): RoomListService = object : RoomListService(NoHandle) {
         override suspend fun allRooms(): RoomList = object : RoomList(NoHandle) {
+            override fun close() { super.close(); teardownStarted.complete(Unit) }
             override fun entriesWithDynamicAdapters(pageSize: UInt, listener: RoomListEntriesListener): RoomListEntriesWithDynamicAdaptersResult {
                 entriesListener = listener
                 return object : RoomListEntriesWithDynamicAdaptersResult(NoHandle) {
