@@ -216,7 +216,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     val scope = rememberCoroutineScope()
     var details by rememberSaveable(open.room.id) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
-        LiveChannelScreen(room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
+        LiveChannelScreen(room, timeline, draft, { composer?.edit(it); open.typing?.changed(it) }, { composer?.send(); open.typing?.stopped() },
             { owner?.back() }, { conversation?.loadOlder() },
             { event ->
                 scope.launch {
@@ -232,7 +232,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
                 onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
             // A quote doesn't know its parent's thread, so it asks before jumping.
-            { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } }, { details = true })
+            { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } }, { details = true },
+            typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty())
         val actions = remember(rooms, open.room.id, conversation) {
             rooms?.client?.let { client ->
                 val channel = MatrixChannel(client, open.room.id)

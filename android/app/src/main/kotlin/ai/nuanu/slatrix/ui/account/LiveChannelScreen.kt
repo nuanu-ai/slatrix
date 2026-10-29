@@ -76,7 +76,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Opens a message where it is, highlighted, as a tap on a reply's quote does. */
     onOpenMessage: (eventId: String) -> Unit = {},
     /** Opens the conversation's details, as a tap on Slack's header pill does. */
-    onOpenDetails: () -> Unit = {}) {
+    onOpenDetails: () -> Unit = {},
+    /** Who else is typing, by name. */
+    typing: List<String> = emptyList()) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -196,7 +198,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none { (it as? ConversationMessage)?.eventId == state.highlight }) 1f else 0f),
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
-                contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
+                // The bottom keeps room for who is typing, so the line comes and goes without moving a message.
+                contentPadding = PaddingValues(top = UiMetrics.GapSmall, bottom = UiMetrics.GapSmall + UiMetrics.TypingLine)) {
                 items(rows.asReversed(), key = { it.id }) { row ->
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
@@ -221,6 +224,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     }
                 }
             }
+            TypingLine(typing, Modifier.align(Alignment.BottomStart))
             state.notice?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
                 Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),

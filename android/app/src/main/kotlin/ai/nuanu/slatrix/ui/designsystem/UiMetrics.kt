@@ -24,6 +24,8 @@ object UiMetrics {
     val HeaderAvatar = 32.dp
     val RootHeaderHeight = 60.dp
     val ComposerMinHeight = 64.dp
+    /** The line under a conversation that says who is typing. */
+    val TypingLine = 20.dp
     val FormWidth = 480.dp
     const val ProgressDelayMillis = 400L
     const val NoticeMillis = 4_000L
