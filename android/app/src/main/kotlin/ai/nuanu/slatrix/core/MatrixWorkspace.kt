@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.core
 
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -25,17 +26,18 @@ data class OpenChannel(
 class MatrixWorkspace(scope: CoroutineScope, client: Client) {
     private val mutableSelected = MutableStateFlow<OpenChannel?>(null)
     val selected: StateFlow<OpenChannel?> = mutableSelected.asStateFlow()
-    private val requests = Channel<OpenChannel?>(Channel.CONFLATED)
+    private val requests = Channel<Pair<Long, OpenChannel?>>(Channel.CONFLATED)
+    private val generation = AtomicLong()
     private var conversationRoom: Room? = null
     private var composerRoom: Room? = null
     private var conversation: MatrixConversation? = null
     private var composer: MatrixComposer? = null
     private val worker = scope.launch {
         try {
-            for (requested in requests) {
+            for ((token, requested) in requests) {
                 release()
                 currentCoroutineContext().ensureActive()
-                if (requested == null || mutableSelected.value !== requested) continue
+                if (requested == null || generation.get() != token) continue
                 try {
                     conversationRoom = checkNotNull(client.getRoom(requested.room.id))
                     composerRoom = checkNotNull(client.getRoom(requested.room.id))
@@ -43,14 +45,14 @@ class MatrixWorkspace(scope: CoroutineScope, client: Client) {
                     val timeline = MatrixConversation(scope, checkNotNull(conversationRoom))
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), timeline::send)
-                    if (mutableSelected.value === requested) {
+                    if (generation.get() == token) {
                         mutableSelected.value = requested.copy(conversation = timeline, composer = composer)
                     } else release()
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
                     release()
-                    if (mutableSelected.value === requested) {
+                    if (generation.get() == token) {
                         mutableSelected.value = requested.copy(error = "Couldn’t open this conversation.")
                     }
                 }
@@ -62,19 +64,20 @@ class MatrixWorkspace(scope: CoroutineScope, client: Client) {
         }
     }
 
-    fun open(room: RoomSummary) {
-        if (!worker.isActive) return
-        val requested = OpenChannel(room)
-        mutableSelected.value = requested
-        requests.trySend(requested)
-    }
+    fun open(room: RoomSummary) = select(room)
 
-    fun back() {
-        mutableSelected.value = null
-        requests.trySend(null)
+    fun back() = select(null)
+
+    private fun select(room: RoomSummary?) {
+        if (!worker.isActive) return
+        val token = generation.incrementAndGet()
+        val requested = room?.let(::OpenChannel)
+        mutableSelected.value = requested
+        requests.trySend(token to requested)
     }
 
     suspend fun close() = withContext(NonCancellable) {
+        generation.incrementAndGet()
         mutableSelected.value = null
         worker.cancelAndJoin()
     }
