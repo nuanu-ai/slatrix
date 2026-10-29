@@ -350,6 +350,21 @@ class MatrixAccountDeviceTest {
         assertTrue(unreadable.contentEquals(File(directory, "session.enc").readBytes()))
     }
 
+    @Test fun aTokenRefreshedWhileSignInFinishesIsTheOneSaved() = runBlocking {
+        var delegate: ClientSessionDelegate? = null
+        val refreshed = AuthClient().authenticatedSession.copy(accessToken = "refreshed-access", refreshToken = "refreshed-refresh")
+        val client = AuthClient(beforeSession = { delegate!!.saveSessionInKeychain(refreshed) })
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, persistence ->
+            delegate = persistence
+            client
+        }
+        discoverServer(account)
+        account.signIn("alice", "password")
+        withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
+
+        assertEquals(refreshed, SessionStore(context).load()?.session)
+    }
+
     private suspend fun discoverServer(account: MatrixAccount, homeserver: String = "https://matrix.example.org") {
         account.selectHomeserver(homeserver)
         withTimeout(5_000) { account.state.first { it is AccountState.ChooseMethod } }
@@ -368,6 +383,7 @@ class MatrixAccountDeviceTest {
 
     private class AuthClient(
         private val details: LoginDetails = LoginDetails(),
+        private val beforeSession: () -> Unit = {},
         private val beforeLogin: suspend () -> Unit = {},
     ) : Client(NoHandle) {
         val authenticatedSession = Session(
@@ -411,6 +427,10 @@ class MatrixAccountDeviceTest {
         }
         override suspend fun homeserverLoginDetails(): HomeserverLoginDetails = details
         override suspend fun restoreSession(session: Session) { restoredSession = session }
-        override fun session() = authenticatedSession
+        override fun session(): Session {
+            val current = authenticatedSession
+            beforeSession()
+            return current
+        }
     }
 }
