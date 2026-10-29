@@ -9,6 +9,13 @@ import ai.nuanu.slatrix.ui.account.LiveYouScreen
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasText
@@ -24,10 +31,14 @@ import org.robolectric.ParameterizedRobolectricTestRunner.Parameters
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Renders the connected Home and DMs tabs and the You page with fictional rooms for visual review. */
+/**
+ * Renders the connected Home and DMs tabs and the You page with fictional rooms for visual review, at the size of the
+ * Slack reference captures (1080×2400 at 420 dpi) and between bands the height of that phone's system bars, so each
+ * render can sit next to its reference.
+ */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(application = Application::class, sdk = [35], qualifiers = "w412dp-h892dp-420dpi")
+@Config(application = Application::class, sdk = [35], qualifiers = "w411dp-h914dp-420dpi")
 class LiveScreenshots(private val tab: String, private val dark: Boolean, private val palette: SidebarPalette) {
     @get:Rule val compose = createComposeRule()
 
@@ -43,11 +54,19 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
                 latest = LatestMessage("Photos from the offsite are in the shared folder, have a look when you get a minute", now - 400 * hour, own = false)),
             RoomSummary("!design:example.org", "design", false, "", UnreadBadge.Count("1"), "D", 0),
             RoomSummary("!general:example.org", "general", false, "", UnreadBadge.None, "G", 2),
+            RoomSummary("!plans:example.org", "launch-plans", false, "", UnreadBadge.None, "L", 5, isPrivate = true),
         )
         compose.setContent {
             SlatrixTheme(dark = dark, palette = palette) {
-                if (tab == "You") LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, {})
-                else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {})
+                val colors = SlatrixTheme.colors
+                Column {
+                    Box(Modifier.fillMaxWidth().height(StatusBar).background(if (tab == "You") colors.canvas else colors.workspaceBar))
+                    Box(Modifier.weight(1f)) {
+                        if (tab == "You") LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, {})
+                        else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {})
+                    }
+                    Box(Modifier.fillMaxWidth().height(GestureBar).background(if (tab == "You") colors.canvas else colors.raised))
+                }
             }
         }
         if (tab == "DMs") compose.onNode(hasText(tab) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
@@ -56,6 +75,10 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
     }
 
     companion object {
+        /** The reference phone's bars: 128 px and 63 px at 420 dpi. */
+        private val StatusBar = 48.8.dp
+        private val GestureBar = 24.dp
+
         @JvmStatic @Parameters(name = "{0}-{1}-{2}")
         fun cases(): List<Array<Any>> = buildList {
             for (tab in listOf("Home", "DMs", "You")) for (dark in listOf(false, true)) add(arrayOf(tab, dark, SidebarPalette.Aubergine))

@@ -47,7 +47,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -77,9 +79,16 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}, onStar: suspend (String, Boolean) -> Boolean = { _, _ -> true },
     activity: @Composable () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
-    var actions by remember { mutableStateOf<RoomSummary?>(null) }
+    var actions by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    // A star shows at once, as Slack's does, and holds until the account's tag catches up or the change fails.
+    var starring by remember { mutableStateOf(emptyMap<String, Boolean>()) }
+    LaunchedEffect(state.rooms) { starring = starring.filter { (id, starred) -> state.rooms.none { it.id == id && it.starred == starred } } }
+    val shown = remember(state, starring) {
+        if (starring.isEmpty()) state
+        else state.copy(rooms = state.rooms.map { room -> starring[room.id]?.let { room.copy(starred = it) } ?: room })
+    }
     val homeList = rememberLazyListState()
     val directList = rememberLazyListState()
     val colors = SlatrixTheme.colors
@@ -107,13 +116,14 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                 Surface(Modifier.weight(1f).fillMaxWidth(), shape = SlatrixTheme.topPanelShape, color = colors.canvas) {
                     Box(Modifier.fillMaxSize()) {
                         when (tab) {
-                            HomeTab.Home -> HomeList(homeList, state, selectedSpaceId, onRoom) { actions = it }
-                            HomeTab.Dms -> DirectList(directList, state, onRoom) { actions = it }
+                            HomeTab.Home -> HomeList(homeList, shown, selectedSpaceId, onRoom) { actions = it.id }
+                            HomeTab.Dms -> DirectList(directList, shown, onRoom) { actions = it.id }
                             HomeTab.Activity -> activity()
                         }
                         val failure = notice
                         if (failure != null) {
-                            Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(failure) }
+                            Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)
+                                .semantics { liveRegion = LiveRegionMode.Polite }) { Text(failure) }
                         } else state.error?.let { message ->
                             Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
                                 action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
@@ -139,10 +149,15 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
             }
         }
     }
-    actions?.let { room ->
+    // Looked up on each change, so the sheet follows the room's live name and star, and closes if the room goes.
+    shown.rooms.firstOrNull { it.id == actions }?.let { room ->
         ConversationActions(room, { starred ->
+            starring = starring + (room.id to starred)
             scope.launch {
-                if (!onStar(room.id, starred)) notice = if (starred) "Couldn’t star ${room.name}." else "Couldn’t unstar ${room.name}."
+                if (!onStar(room.id, starred)) {
+                    starring = starring - room.id
+                    notice = if (starred) "Couldn’t star ${room.name}." else "Couldn’t unstar ${room.name}."
+                }
             }
         }) { actions = null }
     }
@@ -237,7 +252,8 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
 
 @Composable
 private fun SectionHeader(section: HomeSection, open: Boolean, onToggle: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button, onClick = onToggle)
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow)
+        .clickable(role = Role.Button, onClickLabel = if (open) "Collapse" else "Expand", onClick = onToggle)
         .semantics(mergeDescendants = true) { stateDescription = if (open) "Expanded" else "Collapsed" }
         .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
@@ -327,11 +343,17 @@ private fun LiveDirectRow(room: RoomSummary, onRoom: (String) -> Unit, onActions
 @Composable
 private fun ConversationActions(room: RoomSummary, onStar: (Boolean) -> Unit, onDismiss: () -> Unit) {
     val noun = if (room.direct) "conversation" else "channel"
-    ModalBottomSheet(onDismissRequest = onDismiss, shape = SlatrixTheme.topPanelShape, containerColor = SlatrixTheme.colors.overlay) {
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, shape = SlatrixTheme.topPanelShape,
+        containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             Text(room.name, Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
                 style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable { onStar(!room.starred); onDismiss() }
+            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) {
+                onStar(!room.starred)
+                scope.launch { sheet.hide() }.invokeOnCompletion { onDismiss() }
+            }
                 .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge),
                 verticalAlignment = Alignment.CenterVertically) {
                 Icon(if (room.starred) Icons.Filled.Star else Icons.Outlined.StarOutline, null, Modifier.size(UiMetrics.Icon))
