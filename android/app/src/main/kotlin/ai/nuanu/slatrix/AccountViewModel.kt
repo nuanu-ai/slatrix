@@ -3,6 +3,7 @@ package ai.nuanu.slatrix
 import android.app.Application
 import ai.nuanu.slatrix.core.AccountRuntime
 import ai.nuanu.slatrix.core.AccountState
+import ai.nuanu.slatrix.core.MatrixSearch
 import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.push.NotificationTarget
 import androidx.lifecycle.AndroidViewModel
@@ -26,6 +27,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     /** The thread pushed over whatever is open, with its own timeline and draft. */
     private val mutableThreads = MutableStateFlow<MatrixWorkspace?>(null)
     val threads = mutableThreads.asStateFlow()
+    private val mutableSearch = MutableStateFlow<MatrixSearch?>(null)
+    val search = mutableSearch.asStateFlow()
     private val mutableNotificationTarget = MutableStateFlow<NotificationTarget?>(null)
     val notificationTarget = mutableNotificationTarget.asStateFlow()
 
@@ -44,13 +47,16 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                     if (next !== client) {
                         mutableThreads.value?.close()
                         mutableWorkspace.value?.close()
+                        mutableSearch.value?.close()
                         client = next
                         mutableWorkspace.value = next?.let { MatrixWorkspace(viewModelScope, it) }
                         mutableThreads.value = next?.let { MatrixWorkspace(viewModelScope, it) }
+                        mutableSearch.value = next?.let { MatrixSearch(viewModelScope, it) }
                     }
                 }
             } finally {
                 withContext(NonCancellable) {
+                    mutableSearch.value?.close()
                     mutableThreads.value?.close()
                     mutableWorkspace.value?.close()
                 }

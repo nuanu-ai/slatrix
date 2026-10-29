@@ -213,6 +213,7 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
     override suspend fun getRecentEmojis(): List<RecentEmoji> = emptyList()
     override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
         override fun id(): String = roomId
+        override fun ownUserId(): String = "@me:example.org"
         override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
             focuses.add(configuration.focus).let { object : Timeline(NoHandle) {
                 override suspend fun addListener(listener: TimelineListener): TaskHandle = object : TaskHandle(NoHandle) {

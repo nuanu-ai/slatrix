@@ -30,6 +30,7 @@ import org.matrix.rustcomponents.sdk.UploadParameters
 import org.matrix.rustcomponents.sdk.UploadSource
 import org.matrix.rustcomponents.sdk.VideoInfo
 import org.matrix.rustcomponents.sdk.EditedContent
+import org.matrix.rustcomponents.sdk.EmbeddedEventDetails
 import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.EventSendState
 import org.matrix.rustcomponents.sdk.FormattedBody
@@ -86,12 +87,27 @@ data class ConversationMessage(
     val queuePaused: Boolean = false,
     /** Your own text message, which you can edit. */
     val editable: Boolean = false,
+    val edited: Boolean = false,
+    val reactions: List<MessageReaction> = emptyList(),
+    /** Set on a thread's root: the summary under it. */
+    val thread: MessageThread? = null,
     /** How much of an attachment you're sending has gone up, from 0 to 1. */
     val uploadProgress: Float? = null,
-) : ConversationRow
+) : ConversationRow {
+    /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
+    val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
+}
+
+/** One emoji's reactions: how many, whether one is yours, and who, as user IDs in the order they reacted. */
+data class MessageReaction(val key: String, val count: Int, val mine: Boolean, val senders: List<String>)
+
+/** Slack's "N replies" line under a thread's root. */
+data class MessageThread(val replies: Int, val lastReplier: String?, val lastReplyAt: Long?)
 
 data class ConversationState(
     val rows: List<ConversationRow> = emptyList(),
+    /** Whose reactions are "yours" and whose mentions stand out. */
+    val ownUserId: String? = null,
     val loading: Boolean = true,
     val loadingHistory: Boolean = false,
     val hasMore: Boolean = true,
@@ -138,7 +154,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val root = root?.copy(id = ROOT_KEY, grouped = false)
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
-    private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null))
+    private val ownUserId = room.ownUserId()
+    private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null,
+        ownUserId = ownUserId))
     val state: StateFlow<ConversationState> = mutableState.asStateFlow()
     private val ready = CompletableDeferred<Unit>()
     private val updates = Channel<Update>(Channel.UNLIMITED)
@@ -568,13 +586,15 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return rows
     }
 
+    private fun name(profile: ProfileDetails, sender: String) =
+        (profile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: sender
+
     private fun row(item: TimelineItem): ConversationRow? {
         val event = item.asEvent() ?: return (item.asVirtual() as? VirtualTimelineItem.DateDivider)?.let {
             DayDivider(item.uniqueId().id, it.ts.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
         }
         val content = (event.content as? TimelineItemContent.MsgLike)?.content ?: return null
-        val senderName = (event.senderProfile as? ProfileDetails.Ready)?.displayName
-            ?.takeIf { it.isNotBlank() } ?: event.sender
+        val senderName = name(event.senderProfile, event.sender)
         var formatted: FormattedBody? = null
         val kind: MessageKind
         val body: String
@@ -618,6 +638,17 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 ?.takeIf { it.total > 0u }?.let { it.current.toFloat() / it.total.toFloat() },
             // An edit goes out as text, so only a text message keeps its kind.
             editable = event.isEditable && kind == MessageKind.Text,
-        )
+            edited = (content.kind as? MsgLikeKind.Message)?.content?.isEdited == true,
+            reactions = event.reactions.map { reaction ->
+                MessageReaction(reaction.key, reaction.senders.size, reaction.senders.any { it.senderId == ownUserId },
+                    reaction.senders.map { it.senderId })
+            },
+            thread = content.threadSummary?.let { summary ->
+                val latest = summary.latestEvent() as? EmbeddedEventDetails.Ready
+                MessageThread(summary.numReplies().coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
+                    latest?.let { name(it.senderProfile, it.sender) },
+                    latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong())
+            }?.takeIf { it.replies > 0 },
+        ).also { it.runs }
     }
 }

@@ -152,6 +152,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     var menu by remember { mutableStateOf<ConversationMessage?>(null) }
     // Inside a thread, Reply has nowhere further to go.
     menu?.let { MessageActionsHost(it, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent) { menu = null } }
+    var reacted by remember { mutableStateOf<ConversationMessage?>(null) }
+    reacted?.let { ReactionsSheet(it.reactions, state.rows, state.ownUserId) { reacted = null } }
     Column(Modifier.fillMaxSize().background(colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(end = UiMetrics.GapLarge,
             top = UiMetrics.GapSmall, bottom = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
@@ -194,11 +196,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Box(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
                             if (threadRoot != null && row.eventId == threadRoot) Column {
-                                LiveMessageRow(row) { menu = it }
+                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null) { menu = it }
                                 // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                                 RepliesBar(replies)
                             // The first reply starts under the replies bar, so it shows its sender again.
-                            } else LiveMessageRow(if (row.id == firstReply) row.copy(grouped = false) else row) { menu = it }
+                            } else LiveMessageRow(if (row.id == firstReply) row.copy(grouped = false) else row, state.ownUserId,
+                                actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }) { menu = it }
                         }
                     }
                 }
@@ -298,7 +301,8 @@ private fun HistoryProgress(loading: Boolean) {
 internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(timestamp))
 
 @Composable
-private fun LiveMessageRow(message: ConversationMessage, onMenu: (ConversationMessage) -> Unit) {
+private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
+    onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
     // A grouped row keeps the gutter, so its body lines up and its height doesn't depend on its send state.
@@ -325,14 +329,19 @@ private fun LiveMessageRow(message: ConversationMessage, onMenu: (ConversationMe
                 }, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = if (failed) colors.destructive else colors.textSecondary)
             }
             Box {
-                Text(message.body, style = MaterialTheme.typography.bodyLarge,
-                    color = if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody)
+                MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me)
                 // In the row's bottom padding, so the bar comes and goes without moving anything.
                 message.uploadProgress?.let {
                     LinearProgressIndicator({ it }, Modifier.align(Alignment.BottomStart).fillMaxWidth().height(UiMetrics.GapTiny)
                         .offset(y = UiMetrics.GapTiny))
                 }
             }
+            if (message.reactions.isNotEmpty()) {
+                Reactions(message.reactions, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
+            }
+            val root = message.eventId
+            // Inside a thread the root's replies bar says it instead.
+            if (message.thread != null && root != null && onOpenThread != null) ThreadReplies(message.thread) { onOpenThread(root) }
         }
     }
 }

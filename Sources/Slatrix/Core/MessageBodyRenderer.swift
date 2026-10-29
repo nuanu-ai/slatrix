@@ -246,6 +246,8 @@ final class MessageBodyRenderer: @unchecked Sendable {
 
         /// A line break belongs to the line it ends, so a quote's or code block's lines stay one block.
         mutating func newline(force: Bool = false) throws {
+            // A paragraph that opens a list item stays on its bullet's line.
+            guard runs.last?.marker != true else { return }
             trimEnd(spacesOnly: true)
             if !runs.isEmpty && (force || lastCharacter != "\n") {
                 try append("\n", context: Context(block: runs.last?.block ?? MessageBlock()), literal: true)

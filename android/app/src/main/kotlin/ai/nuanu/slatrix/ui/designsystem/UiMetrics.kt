@@ -14,6 +14,7 @@ object UiMetrics {
     /** Slack's conversation list row. */
     val ListRow = 44.dp
     val WorkspaceRow = 56.dp
+    val SearchField = 40.dp
     val SmallIcon = 16.dp
     val Icon = 20.dp
     val LargeIcon = 24.dp
@@ -36,4 +37,10 @@ object UiMetrics {
     val QuoteBar = 3.dp
     /** About five @ suggestions before the list scrolls. */
     val MentionListHeight = 240.dp
+    /** Reaction chips and the thread replies line, as tall as Slack Android's. */
+    val ChipHeight = 32.dp
+    /** A list's indent, in multiples of the text size, as on the Mac. */
+    const val ListIndentScale = 1.6f
+    /** Code reads a little smaller than the text around it, as on the Mac. */
+    const val CodeTextScale = 0.9f
 }

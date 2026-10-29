@@ -2,11 +2,15 @@ package ai.nuanu.slatrix
 
 import ai.nuanu.slatrix.core.LatestMessage
 import ai.nuanu.slatrix.core.RoomListState
+import ai.nuanu.slatrix.core.MessageSearchQuery
+import ai.nuanu.slatrix.core.MessageSearchState
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.SearchHit
 import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.account.LiveYouScreen
+import ai.nuanu.slatrix.ui.account.SearchScreen
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
@@ -21,7 +25,10 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -61,6 +68,12 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
             RoomSummary("!plans:example.org", "launch-plans", false, "", UnreadBadge.None, "L", 5, isPrivate = true, spaceIds = setOf(Harbor)),
         )
         val spaces = listOf(SpaceSummary(Harbor, "Harbor"), SpaceSummary("!studio:example.org", "Studio Nine"))
+        val query = MessageSearchQuery("release")
+        val hits = MessageSearchState(query, listOf(
+            SearchHit("!design:example.org", "\$1", "@wanda:example.org", "Wanda Moss", "The release notes are in the doc, comments welcome", now - hour),
+            SearchHit("!wm:example.org", "\$2", "@wanda:example.org", "Wanda Moss", "Can you look at the release notes before lunch?", now - 2 * hour),
+            SearchHit("!general:example.org", "\$3", "@dev:example.org", "Dev Singh", "Release train leaves on Thursday", now - 50 * hour),
+        ))
         compose.setContent {
             SlatrixTheme(dark = dark, palette = palette) {
                 val colors = SlatrixTheme.colors
@@ -69,7 +82,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
                     Box(Modifier.weight(1f)) {
                         if (tab == "You") LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, {})
                         else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spaces = spaces, spacesKnown = true),
-                            {}, {}, {}, Harbor)
+                            {}, {}, {}, Harbor, search = { SearchScreen(rooms, "@alex:example.org", hits, {}, {}, {}, {}) })
                     }
                     Box(Modifier.fillMaxWidth().height(GestureBar).background(if (tab == "You") colors.canvas else colors.raised))
                 }
@@ -79,6 +92,11 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
             "DMs" -> compose.onNode(hasText(tab) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
             "Switcher" -> compose.onNodeWithContentDescription("Switch workspace").performClick()
             "Sheet" -> compose.onNodeWithText("general").performTouchInput { longClick() }
+            "Search", "SearchResults" -> {
+                compose.onNode(hasText("Search") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
+                compose.onNode(hasSetTextAction()).performTextInput(if (tab == "Search") "d" else "release")
+                if (tab == "SearchResults") compose.onNode(hasSetTextAction()).performImeAction()
+            }
         }
         val theme = if (dark) "dark" else "light"
         compose.waitForIdle()
@@ -93,7 +111,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
 
         @JvmStatic @Parameters(name = "{0}-{1}-{2}")
         fun cases(): List<Array<Any>> = buildList {
-            for (tab in listOf("Home", "DMs", "You", "Switcher", "Sheet")) for (dark in listOf(false, true)) add(arrayOf(tab, dark, SidebarPalette.Aubergine))
+            for (tab in listOf("Home", "DMs", "You", "Switcher", "Sheet", "Search", "SearchResults")) for (dark in listOf(false, true)) add(arrayOf(tab, dark, SidebarPalette.Aubergine))
             add(arrayOf("Home", false, SidebarPalette.Lagoon))
         }
     }
