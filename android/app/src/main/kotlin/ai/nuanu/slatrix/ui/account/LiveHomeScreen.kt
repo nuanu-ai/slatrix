@@ -3,10 +3,13 @@ package ai.nuanu.slatrix.ui.account
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.core.WorkspaceMembership
+import ai.nuanu.slatrix.core.WorkspaceRail
 import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
+import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.StatusBarOverWorkspaceBar
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -22,21 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.Forum
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.KeyboardArrowUp
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.StarOutline
-import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -62,9 +51,9 @@ import java.util.Date
 import java.util.Locale
 
 private enum class HomeTab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
-    Home("Home", Icons.Outlined.Home, Icons.Filled.Home),
-    Dms("DMs", Icons.Outlined.Forum, Icons.Filled.Forum),
-    Activity("Activity", Icons.Outlined.Notifications, Icons.Filled.Notifications),
+    Home("Home", SlackIcons.Home, SlackIcons.HomeFilled),
+    Dms("DMs", SlackIcons.Messages, SlackIcons.MessagesFilled),
+    Activity("Activity", SlackIcons.Bell, SlackIcons.BellFilled),
 }
 
 /** Shows [cover], such as a conversation, in Home's place, and gives Home back its tab, search and scroll position after. */
@@ -168,28 +157,20 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
 private fun HomeHeader(tab: HomeTab, userId: String, state: RoomListState, selectedSpaceId: String?, onSpace: (String?) -> Unit, onYou: () -> Unit) {
     var switching by remember { mutableStateOf(false) }
     CompositionLocalProvider(LocalContentColor provides SlatrixTheme.colors.onAccent) {
+        // The avatar's touch target overhangs its tile, so the end gutter is smaller and the tile lines up with Slack's.
         Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.RootHeaderHeight)
-            .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+            .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) {
                 when (tab) {
                     HomeTab.Home -> {
-                        Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) { switching = true }
-                            .semantics { contentDescription = "Switch workspace" }, verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                            HeaderTitle(state.spaces.firstOrNull { it.id == selectedSpaceId }?.name
-                                ?: if (selectedSpaceId == null) "All conversations" else "Home", Modifier.weight(1f, fill = false))
-                            Icon(Icons.Outlined.ExpandMore, null, Modifier.size(UiMetrics.Icon))
-                        }
-                        DropdownMenu(expanded = switching, onDismissRequest = { switching = false }) {
-                            CompositionLocalProvider(LocalContentColor provides SlatrixTheme.colors.textPrimary) {
-                                DropdownMenuItem(text = { Text("All conversations") }, onClick = { switching = false; onSpace(null) },
-                                    trailingIcon = { if (selectedSpaceId == null) Icon(Icons.Outlined.Check, "Selected") })
-                                state.spaces.sortedWith(compareBy({ !it.isTopLevel }, { it.name.lowercase(Locale.ROOT) })).forEach { space ->
-                                    DropdownMenuItem(text = { Text(space.name) }, onClick = { switching = false; onSpace(space.id) },
-                                        leadingIcon = { LiveAvatar(space.initials, space.colorIndex, UiMetrics.CompactAvatar) },
-                                        trailingIcon = { if (selectedSpaceId == space.id) Icon(Icons.Outlined.Check, "Selected") })
-                                }
-                            }
+                        val space = state.spaces.firstOrNull { it.id == selectedSpaceId }
+                        Row(Modifier.heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) { switching = true }
+                            .semantics { contentDescription = "Switch workspace" }, verticalAlignment = Alignment.CenterVertically) {
+                            WorkspaceIcon(space, UiMetrics.HeaderAvatar)
+                            Spacer(Modifier.width(UiMetrics.GapMedium))
+                            HeaderTitle(space?.name ?: "All conversations", Modifier.weight(1f, fill = false))
+                            Spacer(Modifier.width(UiMetrics.GapSmall))
+                            Icon(SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.Icon))
                         }
                     }
                     HomeTab.Dms -> HeaderTitle("Direct messages")
@@ -202,18 +183,60 @@ private fun HomeHeader(tab: HomeTab, userId: String, state: RoomListState, selec
             }
         }
     }
+    if (switching) WorkspaceSwitcher(state, selectedSpaceId, onSpace) { switching = false }
+}
+
+/** Slack's workspace switcher: each workspace's icon and name, the open one checked. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, onSpace: (String?) -> Unit, onDismiss: () -> Unit) {
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val entries = remember(state.spaces, state.rooms) { WorkspaceRail.entries(state.spaces, state.rooms) }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, shape = SlatrixTheme.topPanelShape,
+        containerColor = SlatrixTheme.colors.overlay) {
+        Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
+            Text("Workspaces", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
+                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            for (space in entries) {
+                val selected = space?.id == selectedSpaceId
+                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow)
+                    .selectable(selected, role = Role.RadioButton) {
+                        onSpace(space?.id)
+                        scope.launch { sheet.hide() }.invokeOnCompletion { onDismiss() }
+                    }.padding(horizontal = UiMetrics.GapLarge),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+                    WorkspaceIcon(space, UiMetrics.ListAvatar)
+                    Text(space?.name ?: "All conversations", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (selected) Icon(SlackIcons.Check, null, Modifier.size(UiMetrics.LargeIcon))
+                }
+            }
+        }
+    }
+}
+
+/** A workspace's rounded-square icon: its initials on the palette's color, or a tray for All conversations. */
+@Composable
+private fun WorkspaceIcon(space: SpaceSummary?, size: Dp) {
+    Box(Modifier.size(size).clip(MaterialTheme.shapes.large).background(SlatrixTheme.colors.selectionStrong),
+        contentAlignment = Alignment.Center) {
+        if (space == null) Icon(SlackIcons.Tray, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.onAccent)
+        else Text(space.initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label,
+            color = SlatrixTheme.colors.onAccent, maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
+    }
 }
 
 @Composable
 private fun HeaderTitle(text: String, modifier: Modifier = Modifier) {
-    Text(text, modifier, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
+    Text(text, modifier, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black,
         maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 private enum class HomeSection(val label: String, val icon: ImageVector) {
-    Starred("Starred", Icons.Outlined.StarOutline),
-    Channels("Channels", Icons.Outlined.Tag),
-    Direct("Direct messages", Icons.Outlined.Forum),
+    Starred("Starred", SlackIcons.Star),
+    Channels("Channels", SlackIcons.Hash),
+    Direct("Direct messages", SlackIcons.Messages),
 }
 
 @Composable
@@ -258,9 +281,13 @@ private fun SectionHeader(section: HomeSection, open: Boolean, onToggle: () -> U
         .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
         Icon(section.icon, null, Modifier.size(UiMetrics.Icon))
-        Text(section.label, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Icon(if (open) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown, null, Modifier.size(UiMetrics.LargeIcon))
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            // Slack's section titles are 14 sp, a step under the rows.
+            Text(section.label, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(SlackIcons.ChevronRight, null, Modifier.size(UiMetrics.SmallIcon))
+        }
+        Icon(if (open) SlackIcons.ChevronUp else SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.LargeIcon))
     }
 }
 
@@ -301,7 +328,7 @@ private fun LiveRoomRow(room: RoomSummary, onRoom: (String) -> Unit, onActions: 
             LiveAvatar(room.initials, room.colorIndex, UiMetrics.CompactAvatar)
             Spacer(Modifier.width(UiMetrics.GapMedium))
         } else {
-            Icon(if (room.isPrivate) Icons.Outlined.Lock else Icons.Outlined.Tag, if (room.isPrivate) "Private channel" else null,
+            Icon(if (room.isPrivate) SlackIcons.Lock else SlackIcons.Hash, if (room.isPrivate) "Private channel" else null,
                 Modifier.size(UiMetrics.Icon), tint = color)
             Spacer(Modifier.width(UiMetrics.GapLarge))
         }
@@ -357,7 +384,7 @@ private fun ConversationActions(room: RoomSummary, onStar: (Boolean) -> Unit, on
             }
                 .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge),
                 verticalAlignment = Alignment.CenterVertically) {
-                Icon(if (room.starred) Icons.Filled.Star else Icons.Outlined.StarOutline, null, Modifier.size(UiMetrics.Icon))
+                Icon(if (room.starred) SlackIcons.StarFilled else SlackIcons.Star, null, Modifier.size(UiMetrics.Icon))
                 Text(if (room.starred) "Unstar $noun" else "Star $noun", style = MaterialTheme.typography.bodyLarge)
             }
         }

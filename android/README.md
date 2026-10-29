@@ -23,8 +23,8 @@ Android lint rejects raw Compose colors and literal sizes outside that package.
 
 Choose a homeserver, sign in with the method it offers, and verify the device with
 another device or a recovery key. Home lists starred conversations, channels and direct
-messages. Long-press a conversation to star or unstar it. The workspace menu filters
-channels; direct messages remain available in every workspace.
+messages. Long-press a conversation to star or unstar it. Tap the workspace
+icon or name to switch workspaces; direct messages remain available in every workspace.
 Open You, then Preferences, to change the color mode and sidebar palette.
 Color mode follows the system until you choose Light or Dark.
 

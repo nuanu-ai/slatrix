@@ -13,6 +13,7 @@ import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.WorkspacePreferences
+import ai.nuanu.slatrix.core.WorkspaceRail
 import ai.nuanu.slatrix.push.NotificationTarget
 import ai.nuanu.slatrix.push.PushNotifications
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
@@ -30,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,7 +90,22 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
             state is AccountState.Connected -> {
                 val userId = (state as AccountState.Connected).userId
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
-                var selectedSpaceId by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
+                var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
+                // Read inside derivedStateOf, so room list updates recompose the app only when the workspace changes.
+                val roomList = rooms?.state?.collectAsState()
+                val choice by remember(roomList) {
+                    derivedStateOf {
+                        val list = roomList?.value
+                        if (list?.spacesKnown == true) WorkspaceRail.choose(remembered, null, list.spaces, list.rooms) to true
+                        else remembered?.takeUnless { it == WorkspaceRail.AllToken } to false
+                    }
+                }
+                val selectedSpaceId = choice.first
+                val chooseSpace: (String?) -> Unit = { id ->
+                    (id ?: WorkspaceRail.AllToken).let { remembered = it; workspacePreferences.selectedSpaceId = it }
+                }
+                // Keeps what opened, so a first launch's pick holds as channel counts change.
+                LaunchedEffect(choice) { if (choice.second && (choice.first ?: WorkspaceRail.AllToken) != remembered) chooseSpace(choice.first) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
                 val thread = threads?.selected?.collectAsState()?.value
@@ -130,8 +147,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, rooms, workspace, { you = true }, selectedSpaceId,
-                                { selectedSpaceId = it; workspacePreferences.selectedSpaceId = it }) {
+                            LiveHome(userId, rooms, workspace, { you = true }, selectedSpaceId, chooseSpace) {
                                 LiveActivity(activity, rooms, workspace, threads, selectedSpaceId, threadFeed) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
