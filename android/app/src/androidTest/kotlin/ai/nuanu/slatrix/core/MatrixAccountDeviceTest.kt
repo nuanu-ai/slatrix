@@ -28,6 +28,7 @@ import org.junit.runner.RunWith
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.ClientSessionDelegate
 import org.matrix.rustcomponents.sdk.HomeserverLoginDetails
+import org.matrix.rustcomponents.sdk.OAuthConfiguration
 import org.matrix.rustcomponents.sdk.NoHandle
 import org.matrix.rustcomponents.sdk.Session
 import org.matrix.rustcomponents.sdk.SlidingSyncVersion
@@ -42,6 +43,10 @@ class MatrixAccountDeviceTest {
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     private val store = SessionStore(context)
+    private val oauthConfiguration = OAuthConfiguration(
+        "Slatrix", "com.github.nuanu-ai.slatrix.dev:/oauth/callback", "https://github.com/nuanu-ai/slatrix",
+        null, null, null, emptyMap(),
+    )
 
     @Before fun setUp() { check(directory.mkdirs()) }
     @After fun tearDown() {
@@ -52,7 +57,7 @@ class MatrixAccountDeviceTest {
 
     @Test fun homeserverDiscoveryOnlyOffersAdvertisedMethodsWithoutSigningIn() = runBlocking {
         val client = AuthClient()
-        val account = MatrixAccount(scope, store, File(directory, "matrix")) { _, _, _, _, _ -> client }
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> client }
         account.selectHomeserver("https://matrix.example.org")
         val method = withTimeout(5_000) {
             account.state.first { it is AccountState.ChooseMethod }
@@ -65,11 +70,12 @@ class MatrixAccountDeviceTest {
 
     @Test fun signInPersistsTheAuthenticatedDeviceAndPreservesPasswordWhitespace() = runBlocking {
         val client = AuthClient()
-        val account = MatrixAccount(scope, store, File(directory, "matrix")) { homeserver, _, _, _, _ ->
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { homeserver, _, _, _, _ ->
             assertEquals("https://matrix.example.org", homeserver)
             client
         }
-        account.signIn("  https://matrix.example.org/  ", "  alice  ", " password ")
+        choosePassword(account, "  https://matrix.example.org/  ")
+        account.signIn("  alice  ", " password ")
         val connected = withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
         assertEquals("@alice:example.org", (connected as AccountState.Connected).userId)
         assertEquals("alice" to " password ", client.credentials)
@@ -85,9 +91,10 @@ class MatrixAccountDeviceTest {
                 releaseLogin.await()
             }
         }
-        val account = MatrixAccount(scope, store, File(directory, "matrix")) { _, _, _, _, _ -> client }
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> client }
         try {
-            account.signIn("https://matrix.example.org", "alice", "password")
+            choosePassword(account)
+            account.signIn("alice", "password")
             withTimeout(5_000) { enteredLogin.await() }
             val pendingAuthentication = scope.coroutineContext[Job]!!.children.toList()
             account.cancel()
@@ -101,6 +108,24 @@ class MatrixAccountDeviceTest {
         }
     }
 
+    @Test fun lateDelegateCallbackAfterCancelCannotReplaceTheSavedSession() = runBlocking {
+        val client = AuthClient()
+        var delegate: ClientSessionDelegate? = null
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, persistence ->
+            delegate = persistence
+            client
+        }
+        choosePassword(account)
+        account.signIn("alice", "password")
+        withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
+        val saved = store.load()
+        account.cancel()
+        delegate!!.saveSessionInKeychain(client.authenticatedSession.copy(accessToken = "late-refreshed-token"))
+
+        assertEquals(AccountState.SignedOut, account.state.value)
+        assertEquals(saved, SessionStore(context).load())
+    }
+
     @Test fun restoreReusesTheDeviceStoreAndPersistsRefreshedTokens() = runBlocking {
         val client = AuthClient()
         val saved = StoredSession(
@@ -109,7 +134,7 @@ class MatrixAccountDeviceTest {
         )
         store.save(saved)
         var delegate: ClientSessionDelegate? = null
-        val account = MatrixAccount(scope, store, File(directory, "matrix")) {
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) {
                 homeserver, storeId, storeKey, restoring, persistence ->
             assertEquals("https://matrix.example.org", homeserver)
             assertEquals(saved.storeId, storeId)
@@ -130,11 +155,12 @@ class MatrixAccountDeviceTest {
     @Test fun refreshSaveFailureRetainsTheLiveSessionAndItsLastSavedSnapshot() = runBlocking {
         val client = AuthClient()
         var delegate: ClientSessionDelegate? = null
-        val account = MatrixAccount(scope, store, File(directory, "matrix")) { _, _, _, _, persistence ->
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, persistence ->
             delegate = persistence
             client
         }
-        account.signIn("https://matrix.example.org", "alice", "password")
+        choosePassword(account)
+        account.signIn("alice", "password")
         withTimeout(5_000) { account.state.first { it is AccountState.Connected } }
         val saved = store.load()
         val retainedDirectory = File(target.cacheDir, "${directory.name}-retained")
@@ -159,11 +185,11 @@ class MatrixAccountDeviceTest {
         val unreadable = "unreadable-session-fixture".toByteArray()
         sessionFile.writeBytes(unreadable)
         var builtClient = false
-        val account = MatrixAccount(scope, store, File(directory, "matrix")) { _, _, _, _, _ ->
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ ->
             builtClient = true
             AuthClient()
         }
-        account.signIn("https://matrix.example.org", "alice", "password")
+        account.selectHomeserver("https://matrix.example.org")
         val failed = withTimeout(5_000) { account.state.first { it is AccountState.Failed } } as AccountState.Failed
 
         assertTrue(failed.canRetryRestore)
@@ -173,7 +199,7 @@ class MatrixAccountDeviceTest {
 
     @Test fun unsafeHomeserversCannotReachTheClient() = runBlocking {
         var builtClient = false
-        val account = MatrixAccount(scope, store, File(directory, "matrix")) { _, _, _, _, _ ->
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ ->
             builtClient = true
             AuthClient()
         }
@@ -181,7 +207,7 @@ class MatrixAccountDeviceTest {
             "http://matrix.example.org", "https://alice:password@matrix.example.org",
             "https://matrix.example.org/?access_token=secret", "https://matrix.example.org/#secret",
         )) {
-            account.signIn(homeserver, "alice", "password")
+            account.selectHomeserver(homeserver)
             withTimeout(5_000) { account.state.first { it is AccountState.Failed } }
             account.cancel()
         }
@@ -190,13 +216,19 @@ class MatrixAccountDeviceTest {
 
     @Test fun sdkLoginErrorsDoNotExposeCredentials() = runBlocking {
         val client = AuthClient { error("password=fictional-secret; access_token=fictional-token") }
-        val account = MatrixAccount(scope, store, File(directory, "matrix")) { _, _, _, _, _ -> client }
-        account.signIn("https://matrix.example.org", "alice", "fictional-secret")
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ -> client }
+        choosePassword(account)
+        account.signIn("alice", "fictional-secret")
         val failed = withTimeout(5_000) { account.state.first { it is AccountState.Failed } } as AccountState.Failed
 
         assertEquals("Couldn’t sign in. Check your details and try again.", failed.message)
         assertFalse(failed.canRetryRestore)
         assertNull(SessionStore(context).load())
+    }
+
+    private suspend fun choosePassword(account: MatrixAccount, homeserver: String = "https://matrix.example.org") {
+        account.selectHomeserver(homeserver)
+        withTimeout(5_000) { account.state.first { it is AccountState.ChooseMethod } }
     }
 
     private class LoginDetails : HomeserverLoginDetails(NoHandle) {
