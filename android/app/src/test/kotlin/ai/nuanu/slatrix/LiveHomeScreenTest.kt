@@ -337,6 +337,38 @@ class LiveHomeScreenTest {
         }
     }
 
+    @Test fun switchingToAWorkspaceWithoutAPictureDropsTheLastOnesPicture() {
+        val picture = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.RED) }.asImageBitmap()
+        val spaces = listOf(SpaceSummary("!harbor:example.org", "Harbor", avatarUrl = "mxc://example.org/harbor"),
+            SpaceSummary("!studio:example.org", "Studio"))
+        val selected = mutableStateOf("!harbor:example.org")
+        compose.setContent {
+            CompositionLocalProvider(LocalAvatarLoader provides object : AvatarLoader {
+                override suspend fun load(url: String, sizePx: Int) = picture
+            }) {
+                SlatrixTheme {
+                    LiveHomeScreen("@alex:example.org", RoomListState(loading = false, spaces = spaces, spacesKnown = true), {}, {}, {},
+                        selected.value)
+                }
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(android.graphics.Color.RED, headerIconPixel())
+        compose.runOnIdle { selected.value = "!studio:example.org" }
+        compose.waitForIdle()
+        assertTrue("Studio shows its initials, not Harbor's picture", headerIconPixel() != android.graphics.Color.RED)
+    }
+
+    private fun headerIconPixel(): Int {
+        val header = compose.onNodeWithContentDescription("Switch workspace").fetchSemanticsNode().boundsInWindow
+        return compose.runOnIdle {
+            val window = compose.activity.window.decorView
+            val bitmap = Bitmap.createBitmap(window.width, window.height, Bitmap.Config.ARGB_8888)
+            window.draw(Canvas(bitmap))
+            bitmap.getPixel(header.left.toInt() + 4, header.center.y.toInt())
+        }
+    }
+
     @Test fun allConversationsJoinsTheSwitcherWhileAChannelHasNoWorkspace() {
         val chosen = mutableListOf<String?>()
         val rooms = listOf(channel("!work:example.org", "work").copy(spaceIds = setOf("!harbor:example.org")), channel("!loose:example.org", "loose"))
