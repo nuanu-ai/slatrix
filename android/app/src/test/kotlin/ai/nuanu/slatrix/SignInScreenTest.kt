@@ -32,11 +32,11 @@ class SignInScreenTest {
                     onCancel = {}, onRetryRestore = null)
             }
         }
-        compose.onNodeWithText("Sign in", useUnmergedTree = true).assertIsNotEnabled()
+        compose.onNodeWithText("Sign in").assertIsNotEnabled()
         compose.onNodeWithText("Homeserver").performTextInput("matrix.example.org")
         compose.onNodeWithText("Username").performTextInput("alice")
         compose.onNodeWithText("Password").performTextInput("  secret  ")
-        compose.onNodeWithText("Sign in", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("Sign in").performClick()
         compose.runOnIdle { assertEquals(listOf("matrix.example.org", "alice", "  secret  "), submitted) }
     }
 }
