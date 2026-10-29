@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.ui.account
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -37,7 +38,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import java.text.DateFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Date
+import java.util.Locale
 
 @Composable
 fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: ComposerState,
@@ -107,7 +113,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true,
                 contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
-                items(state.rows.asReversed(), key = { it.id }) { row -> if (row is ConversationMessage) LiveMessageRow(row) }
+                items(state.rows.asReversed(), key = { it.id }) { row ->
+                    when (row) {
+                        is DayDivider -> DayDividerRow(row.timestamp)
+                        is ConversationMessage -> LiveMessageRow(row)
+                    }
+                }
                 // The top of the conversation, which also lets an empty one ask for history.
                 item(key = "top") {
                     if (!state.hasMore && !state.loading) ConversationIntro(room)
@@ -159,6 +170,31 @@ private fun ConversationIntro(room: RoomSummary) {
             else "This is the very beginning of the #${room.name} channel.",
             style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
     }
+}
+
+@Composable
+private fun DayDividerRow(timestamp: Long) {
+    val colors = SlatrixTheme.colors
+    val label = remember(timestamp) { dayLabel(timestamp) }
+    Box(Modifier.fillMaxWidth().padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.Center) {
+        HorizontalDivider(color = colors.border)
+        Surface(shape = MaterialTheme.shapes.extraLarge, color = colors.canvas, border = BorderStroke(UiMetrics.Divider, colors.border)) {
+            Text(label, Modifier.padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapTiny),
+                style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+        }
+    }
+}
+
+/** Slack's day labels: Today, Yesterday, then "Oct 23rd", with the year once it isn't this one. */
+private fun dayLabel(timestamp: Long): String {
+    val today = LocalDate.now()
+    val day = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+    if (day == today) return "Today"
+    if (day == today.minusDays(1)) return "Yesterday"
+    val date = day.dayOfMonth
+    val suffix = if (date in 11..13) "th" else when (date % 10) { 1 -> "st"; 2 -> "nd"; 3 -> "rd"; else -> "th" }
+    val month = day.format(DateTimeFormatter.ofPattern("MMM", Locale.getDefault()))
+    return "$month $date$suffix" + if (day.year == today.year) "" else ", ${day.year}"
 }
 
 @Composable
