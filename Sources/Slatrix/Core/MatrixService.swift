@@ -528,7 +528,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Older pages asked for since an older message last showed. Joins, topic changes and other events the timeline
     /// hides can fill page after page, so a conversation stops loading history on its own after a few of those.
     private var blankPages = 0
-    var loadsMoreHistory: Bool { hasMoreHistory && blankPages < 5 }
+    /// False until the timeline opens: a conversation opened at an older message shows before it does.
+    var loadsMoreHistory: Bool { timeline != nil && hasMoreHistory && blankPages < 5 }
     private(set) var hasMoreForwardHistory = false
     private(set) var isLoadingForwardHistory = false
     private(set) var firstUnreadEventID: String?
@@ -1227,7 +1228,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Opens a conversation with unread messages at its unread line.
     func resumeRoom(_ id: String, at anchor: String) async {
         jump = nil
-        await open(id, at: anchor)
+        await open(id, at: anchor, resuming: true)
     }
 
     /// Opens a conversation scrolled to a message, which it highlights.
@@ -1237,15 +1238,25 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     /// Live, as Slack does, when the live timeline open or in the cache holds `eventID`; else loaded around it.
-    private func open(_ id: String, at eventID: String) async {
+    private func open(_ id: String, at eventID: String, resuming: Bool = false) async {
         guard eventID.hasPrefix("$") else {
             errorMessage = "This message hasn’t been sent yet."
             return
         }
         if showRecentRoom(id, containing: eventID) { return }
         if await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil, containing: eventID) { return }
+        // Opened at a thread reply, the SDK shows only that thread; a read marker on one opens the conversation live.
+        if resuming {
+            let token = selection
+            let reply = (try? await requireRoom(id).loadOrFetchEvent(eventId: eventID))?.threadRootEventId() != nil
+            guard selection == token else { return }
+            if reply {
+                await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil)
+                return
+            }
+        }
         let focus = TimelineFocus.event(
-            eventId: eventID, numContextEvents: 30, threadMode: .automatic(hideThreadedEvents: false))
+            eventId: eventID, numContextEvents: 30, threadMode: .automatic(hideThreadedEvents: true))
         await setupRoom(id, focus: focus, eventID: eventID)
     }
 
@@ -1357,6 +1368,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             showConversation(id, eventID: eventID, token: token)
             timeline = next
             timelineHandle = listenerHandle
+            hasMoreForwardHistory = eventID != nil
             if eventID == nil {
                 liveTimeline = KeptTimeline(
                     roomID: id, token: token, timeline: next, observer: observer, listener: listenerHandle)
@@ -1471,7 +1483,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         lastAutomaticReceipt = nil
         readyThreadReadSelection = nil
         lastThreadReceipt = nil
-        hasMoreForwardHistory = eventID != nil
+        hasMoreForwardHistory = false
         isLoadingForwardHistory = false
         forwardLoadID = nil
         timelineRevision = 0
