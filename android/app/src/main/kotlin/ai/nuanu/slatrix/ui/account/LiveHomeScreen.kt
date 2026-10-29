@@ -25,7 +25,6 @@ import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.*
@@ -51,7 +50,6 @@ import java.util.Locale
 private enum class HomeTab(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Outlined.Home),
     Dms("DMs", Icons.AutoMirrored.Outlined.Chat),
-    You("You", Icons.Outlined.PersonOutline),
 }
 
 /** Shows [cover], such as a conversation, in Home's place, and gives Home back its tab, search and scroll position after. */
@@ -62,8 +60,8 @@ fun LiveWorkspace(cover: (@Composable () -> Unit)?, home: @Composable () -> Unit
 }
 
 @Composable
-fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Unit, onPreferences: () -> Unit, onRetry: () -> Unit,
-    selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}, onSignOut: () -> Unit = {}) {
+fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Unit, onYou: () -> Unit, onRetry: () -> Unit,
+    selectedSpaceId: String? = null, onSpace: (String?) -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     var query by rememberSaveable { mutableStateOf("") }
     val homeList = rememberLazyListState()
@@ -88,15 +86,14 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                 }
             }
             Column(Modifier.weight(1f)) {
-                HomeHeader(tab, userId, state, selectedSpaceId, onSpace) { tab = HomeTab.You }
+                HomeHeader(tab, userId, state, selectedSpaceId, onSpace, onYou)
                 Surface(Modifier.weight(1f).fillMaxWidth(), shape = SlatrixTheme.topPanelShape, color = colors.canvas) {
                     Box(Modifier.fillMaxSize()) {
                         when (tab) {
                             HomeTab.Home -> HomeList(homeList, state, query, { query = it }, selectedSpaceId, onRoom)
                             HomeTab.Dms -> DirectList(directList, state, query, { query = it }, onRoom)
-                            HomeTab.You -> LiveYouTab(userId, onPreferences, onSignOut)
                         }
-                        if (tab != HomeTab.You) state.error?.let { message ->
+                        state.error?.let { message ->
                             Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
                                 action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
                         }
@@ -145,14 +142,11 @@ private fun HomeHeader(tab: HomeTab, userId: String, state: RoomListState, selec
                         }
                     }
                     HomeTab.Dms -> HeaderTitle("Direct messages")
-                    HomeTab.You -> HeaderTitle("You")
                 }
             }
-            if (tab != HomeTab.You) {
-                Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
-                    .clickable(role = Role.Button, onClick = onYou).semantics { contentDescription = "You" }, contentAlignment = Alignment.Center) {
-                    LiveAvatar(AvatarPlaceholder.initials(userId.removePrefix("@").substringBefore(':')), AvatarPlaceholder.colorIndex(userId), UiMetrics.HeaderAvatar)
-                }
+            Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
+                .clickable(role = Role.Button, onClick = onYou).semantics { contentDescription = "You" }, contentAlignment = Alignment.Center) {
+                LiveAvatar(AvatarPlaceholder.initials(userId.removePrefix("@").substringBefore(':')), AvatarPlaceholder.colorIndex(userId), UiMetrics.HeaderAvatar)
             }
         }
     }

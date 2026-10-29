@@ -9,6 +9,7 @@ import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.account.LiveWorkspace
+import ai.nuanu.slatrix.ui.account.LiveYouScreen
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -110,29 +111,35 @@ class LiveHomeScreenTest {
         compose.onNodeWithText("Sam").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Unread"))
     }
 
-    @Test fun youIsATabBesideHomeAndDms() {
-        var preferences = false
-        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(loading = false, spacesKnown = true), {}, { preferences = true }, {}) } }
-        tab("You").performClick()
+    @Test fun theHeaderAvatarOpensYouAndOnlyHomeAndDmsAreTabs() {
+        var openedYou = false
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(loading = false, spacesKnown = true), {}, { openedYou = true }, {}) } }
+        tab("Home").assertIsSelected()
+        tab("DMs").assertIsDisplayed()
+        tab("You").assertDoesNotExist()
 
-        tab("You").assertIsSelected()
-        compose.onNodeWithText("@alex:example.org").assertIsDisplayed()
-        tab("Home").assertIsDisplayed()
-        compose.onNodeWithText("Preferences").performClick()
-        compose.runOnIdle { assertTrue(preferences) }
+        compose.onNodeWithContentDescription("You").performClick()
+        compose.runOnIdle { assertTrue(openedYou) }
     }
 
-    @Test fun signingOutFromYouAsksFirst() {
+    @Test fun youIsAPageWithPreferencesSignOutAndBack() {
+        var preferences = false
         var signedOut = false
+        var back = false
         compose.setContent {
-            SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(loading = false, spacesKnown = true), {}, {}, {}, onSignOut = { signedOut = true }) }
+            SlatrixTheme { LiveYouScreen("@alex:example.org", { preferences = true }, { signedOut = true }, { back = true }) }
         }
-        tab("You").performClick()
+        compose.onNodeWithText("@alex:example.org").assertIsDisplayed()
+        compose.onNodeWithText("Preferences").performClick()
+        compose.runOnIdle { assertTrue(preferences) }
+
         compose.onNodeWithText("Sign out").performClick()
         compose.runOnIdle { assertFalse(signedOut) }
-
         compose.onNode(hasText("Sign out") and hasAnyAncestor(isDialog()) and hasClickAction()).performClick()
         compose.runOnIdle { assertTrue(signedOut) }
+
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.runOnIdle { assertTrue(back) }
     }
 
     @Test fun aSavedWorkspaceShowsItsChannelsAndDirectMessagesTogether() {
