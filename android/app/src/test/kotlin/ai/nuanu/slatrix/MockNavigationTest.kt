@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -83,15 +84,17 @@ class MockNavigationTest {
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Threads").assertIsSelected()
     }
+    // Robolectric text-field dialogs loop with wider window qualifiers: robolectric/robolectric#8460.
+    @Config(qualifiers = "w320dp-h892dp-420dpi")
     @Test fun statusEditingUsesAnOverlayAndCancelKeepsTheSavedStatus() {
         compose.setContent { SlatrixMockups() }
         compose.onNodeWithContentDescription("You").performClick()
         compose.onNodeWithText("Set a status").performClick()
         compose.onNode(isDialog()).assertExists()
-        compose.onNodeWithText("What's your status?").performTextInput("Reviewing designs")
+        compose.onNode(hasSetTextAction()).performTextInput("Reviewing designs")
         compose.onNodeWithText("Save").performClick()
         compose.onNodeWithText("Reviewing designs").performClick()
-        compose.onNodeWithText("Reviewing designs").performTextReplacement("Unsaved change")
+        compose.onNode(hasSetTextAction()).performTextReplacement("Unsaved change")
         compose.onNodeWithText("Cancel").performClick()
         compose.onNodeWithText("Reviewing designs").assertIsDisplayed()
         compose.onNodeWithText("Unsaved change").assertDoesNotExist()

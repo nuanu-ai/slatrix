@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.ThumbUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -220,6 +221,16 @@ fun ThreadScreen(parent: MockMessage, replies: List<MockMessage>, draft: String,
 fun YouScreen(dark: Boolean, palette: SidebarPalette, onDarkToggle: () -> Unit, onPalette: (SidebarPalette) -> Unit, onBack: () -> Unit) {
     var status by rememberSaveable { mutableStateOf("") }
     var editingStatus by rememberSaveable { mutableStateOf(false) }
+    var statusDraft by rememberSaveable { mutableStateOf("") }
+    if (editingStatus) {
+        AlertDialog(
+            onDismissRequest = { editingStatus = false },
+            title = { Text("Set a status") },
+            text = { OutlinedTextField(statusDraft, { statusDraft = it }, label = { Text("What's your status?") }, singleLine = true) },
+            confirmButton = { TextButton(onClick = { status = statusDraft; editingStatus = false }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { editingStatus = false }) { Text("Cancel") } },
+        )
+    }
     Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas)) {
         ScreenHeader("You", onBack = onBack)
         LazyColumn {
@@ -237,12 +248,7 @@ fun YouScreen(dark: Boolean, palette: SidebarPalette, onDarkToggle: () -> Unit, 
                 }
             }
             item {
-                if (editingStatus) {
-                    OutlinedTextField(status, { status = it }, Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge), label = { Text("What's your status?") }, singleLine = true)
-                    TextButton(onClick = { editingStatus = false }, modifier = Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Save status") }
-                } else {
-                    TextButton(onClick = { editingStatus = true }, modifier = Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text(status.ifEmpty { "Set a status" }) }
-                }
+                TextButton(onClick = { statusDraft = status; editingStatus = true }, modifier = Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text(status.ifEmpty { "Set a status" }) }
             }
             item {
                 HorizontalDivider(Modifier.padding(top = UiMetrics.GapLarge), color = SlatrixTheme.colors.border)
