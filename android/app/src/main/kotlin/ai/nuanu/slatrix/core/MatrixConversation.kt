@@ -118,7 +118,7 @@ data class ReplyPreview(val eventId: String, val state: State, val senderName: S
 }
 
 /** Slack's "N replies" line under a thread's root. */
-data class MessageThread(val replies: Int, val lastReplier: String?, val lastReplyAt: Long?)
+data class MessageThread(val replies: Int, val lastReplier: String?, val lastReplyAt: Long?, val lastReplierAvatarUrl: String? = null)
 
 data class ConversationState(
     val rows: List<ConversationRow> = emptyList(),
@@ -758,6 +758,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong())
             }?.takeIf { it.replies > 0 },
             replyTo = content.inReplyTo?.let(::replyPreview),
+            avatarUrl = (event.senderProfile as? ProfileDetails.Ready)?.avatarUrl,
         ).also { it.runs }
     }
 }

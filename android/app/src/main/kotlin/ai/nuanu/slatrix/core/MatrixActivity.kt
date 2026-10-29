@@ -104,6 +104,7 @@ class MatrixActivity(private val userId: String, scope: CoroutineScope,
                     else -> ActivityKind.Message
                 },
                 threadRoot = thread,
+                avatarUrl = notification.senderInfo.avatarUrl,
             )
         }.getOrNull() ?: return
         val message = reactedTo ?: return add(item)

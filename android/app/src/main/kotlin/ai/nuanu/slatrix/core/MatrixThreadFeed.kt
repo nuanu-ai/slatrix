@@ -129,8 +129,10 @@ class MatrixThreadFeed(scope: CoroutineScope, private val client: Client, privat
     }
 
     private fun message(event: ThreadListItemEvent): ThreadFeedMessage {
-        val name = (event.senderProfile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: event.sender
+        val profile = event.senderProfile as? ProfileDetails.Ready
+        val name = profile?.displayName?.takeIf { it.isNotBlank() } ?: event.sender
         return ThreadFeedMessage(name, AvatarPlaceholder.initials(name), AvatarPlaceholder.colorIndex(name),
-            event.content?.let(::previewText).orEmpty(), event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
+            event.content?.let(::previewText).orEmpty(), event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong(),
+            profile?.avatarUrl)
     }
 }

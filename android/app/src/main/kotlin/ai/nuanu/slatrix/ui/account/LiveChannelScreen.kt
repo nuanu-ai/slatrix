@@ -370,7 +370,7 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
         if (message.grouped) Box(Modifier.width(UiMetrics.Avatar), contentAlignment = Alignment.Center) {
             if (failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.size(UiMetrics.Icon), tint = colors.destructive)
-        } else LiveAvatar(message.initials, message.colorIndex)
+        } else LiveAvatar(message.initials, message.colorIndex, url = message.avatarUrl)
         Column(Modifier.weight(1f)) {
             if (!message.grouped) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
