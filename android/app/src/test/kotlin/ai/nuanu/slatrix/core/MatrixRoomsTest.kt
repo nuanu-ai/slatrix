@@ -290,6 +290,22 @@ class MatrixRoomsTest {
         room.emit(room.info.copy(displayName = "Too late"))
         assertEquals(beforeClose, rooms.state.value)
     }
+
+    @Test fun aSyncThatRunsAgainResumesSendQueuesTheSdkPaused() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        sync.started.await()
+        runCurrent()
+        client.sendQueuesEnabled = false
+
+        sync.emitState(SyncServiceState.OFFLINE)
+        sync.emitState(SyncServiceState.RUNNING)
+        runCurrent()
+        assertTrue(client.sendQueuesEnabled)
+        rooms.close()
+    }
 }
 
 // About three times the 14–38 ms measured locally; rebuilding the whole list per message took 400–750 ms.
@@ -304,6 +320,8 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
             override suspend fun getNotification(roomId: String, eventId: String): NotificationStatus = lookup(roomId, eventId)
         }
     }
+    var sendQueuesEnabled = false
+    override suspend fun enableAllSendQueues(enable: Boolean) { sendQueuesEnabled = enable }
     var spaces: SpaceService = RoomsSpaces()
     override suspend fun spaceService(): SpaceService = spaces
     val services = Channel<SyncService>(Channel.UNLIMITED)
