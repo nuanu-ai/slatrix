@@ -88,7 +88,7 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
             if (submitted) { submitted = false; onSearch(null) }
         }, submit, Modifier.focusRequester(focus))
         when {
-            submitted -> MessageResults(text.trim(), rooms, messages, onMore, onRoom)
+            submitted -> MessageResults(text.trim(), rooms, messages, onMore, onMessage)
             text.isNotBlank() -> Suggestions(text, rooms, submit, onRoom)
         }
     }
@@ -161,11 +161,11 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, onSubmit: () -> 
 
 @Composable
 private fun MessageResults(text: String, rooms: List<RoomSummary>, messages: MessageSearchState, onMore: () -> Unit,
-    onRoom: (String) -> Unit) {
+    onMessage: (SearchHit) -> Unit) {
     val hits = remember(messages.hits, rooms) { messages.hits.filter { hit -> rooms.any { it.id == hit.roomId } } }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = UiMetrics.GapSmall)) {
         items(hits, key = { it.roomId + it.eventId }) { hit ->
-            MessageHit(hit, rooms.firstOrNull { it.id == hit.roomId }, messages.query) { onRoom(hit.roomId) }
+            MessageHit(hit, rooms.firstOrNull { it.id == hit.roomId }, messages.query) { onMessage(hit) }
         }
         when {
             messages.error != null -> item { SearchNote(messages.error) }

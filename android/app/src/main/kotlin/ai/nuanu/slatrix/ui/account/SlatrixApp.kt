@@ -157,7 +157,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, rooms, workspace, search, { you = true }, selectedSpaceId, chooseSpace) {
+                            LiveHome(userId, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
@@ -219,9 +219,11 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
 @Composable
-private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?, onYou: () -> Unit,
+private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
+    jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
     selectedSpaceId: String?, onSpace: (String?) -> Unit, activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
+    val scope = rememberCoroutineScope()
     val open: (String) -> Unit = remember(rooms, workspace) {
         { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
     }
@@ -233,7 +235,12 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
                 state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
             }
             SearchScreen(inScope, userId, messages, { query -> if (query == null) search?.clear() else search?.search(query) },
-                { search?.loadMore() }, {}, open)
+                { search?.loadMore() }, { hit ->
+                    // A hit doesn't know its thread, so it is looked up first: a reply opens in its thread.
+                    state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
+                        scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
+                    }
+                }, open)
         }, activity = activity)
 }
 
