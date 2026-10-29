@@ -15,7 +15,7 @@ sealed interface ComposerTarget {
             message.sentEventId?.let { Reply(it, message.senderName, message.body) }
 
         fun edit(message: ConversationMessage): Edit? =
-            message.sentEventId?.takeIf { message.editable }?.let { Edit(it, message.body) }
+            message.sentEventId?.takeIf { message.editable }?.let { Edit(it, message.body, message.formattedBody) }
 
         private val ConversationMessage.sentEventId
             get() = eventId.takeIf { sendState == MessageSendState.Sent && kind != MessageKind.Deleted }
