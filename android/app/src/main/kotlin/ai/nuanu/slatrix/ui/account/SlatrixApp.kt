@@ -13,6 +13,9 @@ import ai.nuanu.slatrix.core.MatrixChannel
 import ai.nuanu.slatrix.core.MatrixForward
 import ai.nuanu.slatrix.core.MatrixLinks
 import org.matrix.rustcomponents.sdk.MessageType
+import ai.nuanu.slatrix.core.MatrixSaved
+import ai.nuanu.slatrix.core.SavedMessage
+import ai.nuanu.slatrix.core.SavedMessageStore
 import ai.nuanu.slatrix.core.MatrixConversation
 import org.matrix.rustcomponents.sdk.Client
 import ai.nuanu.slatrix.core.ConversationView
@@ -117,6 +120,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 val client = (state as AccountState.Connected).client
                 val media = remember(client) { MatrixMedia(client, File(context.cacheDir, "media")) }
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
+                // Later lives on this device, as on the Mac; Home's card, the message sheet and the Later page share it.
+                val savedStore = remember(userId, context) { SavedMessageStore(context, userId) }
+                var saved by remember(savedStore) { mutableStateOf(savedStore.saved) }
+                val toggleSaved: (String, String) -> Unit = { roomId, eventId -> saved = savedStore.toggle(roomId, eventId) }
+                var later by rememberSaveable(userId) { mutableStateOf(false) }
+                val laterScope = rememberCoroutineScope()
                 var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
@@ -164,6 +173,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         you = false
                         preferences = false
                         channels = null
+                        later = false
                         jump(room, target.eventId, target.threadRoot)
                         onNotificationHandled(target)
                     }
@@ -187,14 +197,24 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut,
                                 onBack = { you = false }, avatarUrl = userAvatarUrl) } }
-                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms, media) } } }
+                            later -> { { LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
+                                { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
+                                    // A saved reply opens in its thread, so it is looked up first, with Later still up.
+                                    laterScope.launch {
+                                        val root = workspace?.threadRootOf(room.id, item.eventId)
+                                        later = false
+                                        jump(room, item.eventId, root)
+                                    }
+                                } }, { item -> toggleSaved(item.roomId, item.eventId) }) { later = false } } }
+                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms, media, saved, toggleSaved) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace, jump, rooms, media) { root, row -> threads?.open(selected.room, root, root = row) }
+                                LiveConversation(selected, workspace, workspace, jump, rooms, media, saved, toggleSaved) { root, row -> threads?.open(selected.room, root, root = row) }
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, userAvatarUrl, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it }) {
+                            LiveHome(userId, userAvatarUrl, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it },
+                                saved.size, { later = true }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
@@ -235,7 +255,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
 private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
-    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?, media: MatrixMedia,
+    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?, media: MatrixMedia, saved: List<SavedMessage>, onToggleSaved: (String, String) -> Unit,
     onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     // The room as the list follows it, so a change of name, topic or permissions shows while it's open; read only
@@ -273,10 +293,13 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
             { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
             open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { actions ->
-                remember(actions, open.threadRoot) {
+                val savedHere = remember(saved, open.room.id) { saved.filter { it.roomId == open.room.id }.map { it.eventId }.toSet() }
+                remember(actions, savedHere, open.threadRoot) {
                     // Marking a channel unread leaves it, as in Slack, so it shows unread in the list; a thread has its own read state.
                     val markUnread = fun() { scope.launch { if (conversation?.markUnread() == true) owner?.back() } }
-                    actions.copy(onForward = { m ->
+                    actions.copy(saved = savedHere, onSave = { message, save ->
+                        message.eventId?.takeIf { (it in savedHere) != save }?.let { onToggleSaved(open.room.id, it) }
+                    }, onForward = { m ->
                         scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { notice = "This message can’t be forwarded." } }
                     }, onMarkUnread = markUnread.takeIf { open.threadRoot == null })
                 }
@@ -345,7 +368,7 @@ private fun rememberConversation(client: Client, roomId: String, view: Conversat
 @Composable
 private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit,
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, laterCount: Int, onLater: () -> Unit,
     activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
@@ -362,6 +385,7 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
         onMarkAllRead = { ids ->
             (rooms?.markAllRead(ids) ?: ids).also { failed -> (ids - failed.toSet()).forEach(PushNotifications(context)::clear) }
         },
+        laterCount = laterCount, onLater = onLater,
         search = {
             val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()
             val inScope = remember(state.rooms, selectedSpaceId) {
