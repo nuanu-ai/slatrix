@@ -85,8 +85,10 @@ data class ConversationState(
     val sendError: String? = null,
 )
 
-/** A sender's messages group within this window, as on the Mac and in Slack. */
-private const val GROUPING_MILLIS = 5 * 60_000L
+/** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
+fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Boolean =
+    previous.senderId == message.senderId && message.timestamp - previous.timestamp < 5 * 60_000L
+
 private const val MAX_BLANK_PAGES = 5
 
 class MatrixConversation(scope: CoroutineScope, private val room: Room) {
@@ -286,7 +288,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                 previous = null
                 continue
             }
-            val grouped = previous?.let { it.senderId == row.senderId && row.timestamp - it.timestamp < GROUPING_MILLIS } == true
+            val grouped = previous?.let { groupsUnder(it, row) } == true
             // Stored back, so an unchanged row stays the same object in the next batch.
             val current = if (row.grouped == grouped) row else row.copy(grouped = grouped).also { items[index] = it }
             rows.add(current)

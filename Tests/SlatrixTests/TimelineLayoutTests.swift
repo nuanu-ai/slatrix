@@ -42,6 +42,36 @@ struct TimelineLayoutTests {
         #expect(rows == ["day Today", "a 11:30 AM", "b grouped 11:33 AM", "c 11:34 AM", "d 11:40 AM", "e 11:50 AM"])
     }
 
+    struct GroupingCase: Decodable, CustomTestStringConvertible {
+        struct Message: Decodable {
+            var sender: String
+            var second: Double
+        }
+        var name: String
+        var messages: [Message]
+        var grouped: [Bool]
+        var testDescription: String { name }
+    }
+
+    struct GroupingSpec: Decodable { var cases: [GroupingCase] }
+
+    @Test(
+        "Grouping matches the shared cases",
+        arguments: try SharedSpec.decode("spec/message-grouping.json", as: GroupingSpec.self).cases)
+    func sharedGrouping(spec: GroupingCase) {
+        let messages = spec.messages.enumerated().map { index, message in
+            ChatMessage(
+                id: "m\(index)", roomID: "!room:example.org", senderID: message.sender, senderName: message.sender,
+                body: "", timestamp: Self.now.addingTimeInterval(message.second))
+        }
+        let grouped = TimelineLayout.rows(
+            messages, unreadBoundaryEventID: nil, groups: true, now: Self.now, calendar: Self.calendar, locale: Self.locale
+        ).compactMap { row -> Bool? in
+            if case .message(_, let grouped, _) = row.kind { grouped } else { nil }
+        }
+        #expect(grouped == spec.grouped)
+    }
+
     @Test("Compact density never groups")
     func compactDoesNotGroup() {
         let rows = layout([message("a", "@alice", at: 3), message("b", "@alice", at: 2)], groups: false)
