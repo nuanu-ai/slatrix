@@ -192,5 +192,5 @@ func initials(_ value: String) -> String {
 
 func avatarColor(_ name: String) -> Color {
     let hash = name.utf8.reduce(UInt64(5381)) { ($0 &* 33) &+ UInt64($1) }
-    return Color(hex: [0x78669d, 0x447389, 0x9b6e4d, 0x5e805b, 0xa76b7c, 0x607ba3][Int(hash % 6)])
+    return Color(hex: [0x78669d, 0x447389, 0x9a6d4c, 0x5d7f5a, 0xa16576, 0x5d78a0][Int(hash % 6)])
 }

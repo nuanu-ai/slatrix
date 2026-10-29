@@ -1,6 +1,8 @@
 package ai.nuanu.slatrix.ui.designsystem
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -8,10 +10,12 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 
 class AppColors internal constructor(roles: Map<String, Color>) {
     val textPrimary = roles.getValue("textPrimary")
@@ -60,6 +64,7 @@ class AppColors internal constructor(roles: Map<String, Color>) {
 private val LocalColors = staticCompositionLocalOf { AppColors(DesignTokens.colors(false, SidebarPalette.Aubergine)) }
 
 object SlatrixTheme {
+    val topPanelShape @Composable get() = MaterialTheme.shapes.extraLarge.copy(bottomStart = ZeroCornerSize, bottomEnd = ZeroCornerSize)
     val colors: AppColors @Composable get() = LocalColors.current
 }
 
@@ -69,6 +74,15 @@ fun SlatrixTheme(
     palette: SidebarPalette = SidebarPalette.Aubergine,
     content: @Composable () -> Unit,
 ) {
+    val activity = LocalActivity.current
+    SideEffect {
+        activity?.window?.let { window ->
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
+    }
     val colors = remember(dark, palette) { AppColors(DesignTokens.colors(dark, palette)) }
     val scheme = remember(colors) {
         lightColorScheme(
@@ -120,6 +134,6 @@ fun SlatrixTheme(
         )
     }
     CompositionLocalProvider(LocalColors provides colors) {
-        MaterialTheme(colorScheme = scheme, typography = Typography(), shapes = shapes, content = content)
+        MaterialTheme(colorScheme = scheme, typography = Typography().let { it.copy(titleSmall = it.titleMedium) }, shapes = shapes, content = content)
     }
 }

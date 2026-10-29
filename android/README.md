@@ -18,3 +18,17 @@ including the Android certificate verifier version from the packaged `Cargo.lock
 Colors and radii live in `design/tokens.json` and `DesignTokens.kt`. Change both together.
 Android type and spacing tokens live in the design system. Screens use those roles;
 Android lint rejects raw Compose colors and literal sizes outside that package.
+
+## Screen mockups
+
+The app opens with fictional conversations. Home, DMs and Activity share the tab bar;
+open the profile photo for You. Appearance offers Aubergine and Lagoon in light or dark.
+Messages sent here stay in the local preview.
+
+```sh
+./gradlew :app:recordRoborazziDebug
+```
+
+The PNGs in `app/build/outputs/roborazzi/` cover all six screens, both themes and palettes,
+plus larger text. Android CI attaches them with its test reports and APKs.
+The owner chooses the direction before these screens connect to Matrix.

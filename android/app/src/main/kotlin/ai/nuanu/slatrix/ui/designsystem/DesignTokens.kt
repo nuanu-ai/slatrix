@@ -178,10 +178,10 @@ object DesignTokens {
     val avatarColors: List<Color> = listOf(
         Color(0xff78669d),
         Color(0xff447389),
-        Color(0xff9b6e4d),
-        Color(0xff5e805b),
-        Color(0xffa76b7c),
-        Color(0xff607ba3),
+        Color(0xff9a6d4c),
+        Color(0xff5d7f5a),
+        Color(0xffa16576),
+        Color(0xff5d78a0),
     )
 
     val radii: Map<String, Int> = mapOf(
