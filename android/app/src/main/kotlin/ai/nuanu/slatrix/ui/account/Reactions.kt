@@ -53,8 +53,8 @@ internal fun Reactions(reactions: List<MessageReaction>, onToggle: ((String) -> 
                 .padding(horizontal = UiMetrics.GapMedium),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
                 Text(reaction.key, style = MaterialTheme.typography.bodyLarge)
-                Text("${reaction.count}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
-                    color = if (reaction.mine) colors.accent else colors.textSecondary)
+                Text("${reaction.count}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium,
+                    color = if (reaction.mine) colors.accent else colors.textPrimary)
             }
         }
     }
