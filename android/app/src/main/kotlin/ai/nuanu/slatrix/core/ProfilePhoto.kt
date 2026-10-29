@@ -7,6 +7,8 @@ import android.graphics.ImageDecoder
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
+import androidx.core.graphics.get
+import androidx.core.graphics.scale
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
 import kotlin.math.min
@@ -69,7 +71,7 @@ object ProfilePhoto {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
                 var sample = 1
-                while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 2 * MaxPixels) sample *= 2
+                while (max(bounds.outWidth, bounds.outHeight) / sample > 2 * MaxPixels) sample *= 2
                 context.contentResolver.openInputStream(uri)?.use {
                     BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
                 }
@@ -87,8 +89,8 @@ object ProfilePhoto {
         if (bounds.width() <= 0 || !bounds.intersect(0, 0, bitmap.width, bitmap.height)) return null
         val side = min(min(bounds.width(), bounds.height()), MaxPixels)
         val square = Bitmap.createBitmap(bitmap, bounds.left, bounds.top, bounds.width(), bounds.height())
-        val scaled = Bitmap.createScaledBitmap(square, side, side, true)
-        val opaque = !scaled.hasAlpha() || (0 until scaled.height step 8).all { y -> (0 until scaled.width step 8).all { x -> scaled.getPixel(x, y) ushr 24 == 0xFF } }
+        val scaled = square.scale(side, side)
+        val opaque = !scaled.hasAlpha() || (0 until scaled.height step 8).all { y -> (0 until scaled.width step 8).all { x -> scaled[x, y] ushr 24 == 0xFF } }
         val output = ByteArrayOutputStream()
         if (!scaled.compress(if (opaque) Bitmap.CompressFormat.JPEG else Bitmap.CompressFormat.PNG, 85, output)) return null
         return PhotoUpload(output.toByteArray(), if (opaque) "image/jpeg" else "image/png")
