@@ -44,8 +44,9 @@ class PushNotificationWorker(context: Context, parameters: WorkerParameters) : C
                     } catch (_: Exception) {
                         null
                     }
+                    val identity = PushNotifications.knownIdentity(runtime.identity.filterNotNull().first().state)
                     if ((runtime.account.state.value as? AccountState.Connected)?.client === account.client) {
-                        notifications.deliver(account.client, account.userId, roomId, eventId, status, runtime.identity.value?.state?.value)
+                        notifications.deliver(account.client, account.userId, roomId, eventId, status, identity)
                     }
                 } finally {
                     status?.destroy()

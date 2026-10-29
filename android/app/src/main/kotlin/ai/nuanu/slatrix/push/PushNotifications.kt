@@ -17,6 +17,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import java.security.MessageDigest
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.Membership
 import org.matrix.rustcomponents.sdk.MessageLikeEventContent
@@ -82,6 +85,11 @@ class PushNotifications(private val context: Context) {
     companion object {
         const val USER_ID = "push_user_id"
         const val ROOM_ID = "push_room_id"
+
+        /** On a cold start the identity is still loading; waiting a moment lets a verified device show the message. */
+        suspend fun knownIdentity(identity: StateFlow<IdentityState>?): IdentityState? = identity?.let {
+            withTimeoutOrNull(5_000) { it.first { state -> state.status != IdentityStatus.Unknown } } ?: it.value
+        }
         private const val CHANNEL = "messages"
         private val deliveryLock = Any()
     }
