@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 
@@ -50,19 +51,37 @@ class MatrixWorkspaceTest {
     }
 
     @Test fun failedDraftSaveKeepsTheChannelOpenUntilTheDraftCanBeSaved() = runTest {
-        val client = WorkspaceClient().also { it.failSaves = true }
+        val saveStarted = CompletableDeferred<Unit>()
+        val allowSave = CompletableDeferred<Unit>()
+        val client = WorkspaceClient {
+            saveStarted.complete(Unit)
+            allowSave.await()
+        }.also { it.failSaves = true }
         val workspace = MatrixWorkspace(backgroundScope, client)
         val alpha = workspaceRoom("!alpha:example.org", "Alpha")
         workspace.open(alpha)
         runCurrent()
-        val composer = requireNotNull(workspace.selected.value?.composer)
+        val current = requireNotNull(workspace.selected.value)
+        val composer = requireNotNull(current.composer)
         composer.state.first { !it.loading }
         composer.edit("Keep this even while storage is unavailable")
-        composer.state.first { it.error != null }
+        saveStarted.await()
 
         workspace.back()
         runCurrent()
-        assertEquals("A failed save must keep the draft editable", composer, workspace.selected.value?.composer)
+        try {
+            assertSame("The channel must stay mounted while saving before Back", current, workspace.selected.value)
+        } finally {
+            allowSave.complete(Unit)
+        }
+        composer.state.first { it.error != null }
+        runCurrent()
+        assertSame("A failed save must keep the same channel mounted", current, workspace.selected.value)
+
+        workspace.open(workspaceRoom("!beta:example.org", "Beta"))
+        assertSame("Opening another channel must wait for the draft save", current, workspace.selected.value)
+        runCurrent()
+        assertSame("A refused channel change must keep the same channel mounted", current, workspace.selected.value)
         assertEquals("Keep this even while storage is unavailable", workspace.selected.value?.composer?.state?.value?.text)
 
         client.failSaves = false
@@ -108,8 +127,9 @@ class MatrixWorkspaceTest {
         composer.edit("Finish Alpha tomorrow")
 
         workspace.open(beta)
-        assertEquals(beta, workspace.selected.value?.room)
+        assertSame("Keep Alpha mounted until its draft is saved", first, workspace.selected.value)
         runCurrent()
+        assertEquals(beta, workspace.selected.value?.room)
         val betaComposer = requireNotNull(workspace.selected.value?.composer)
         betaComposer.state.first { !it.loading }
         assertEquals("", betaComposer.state.value.text)
@@ -120,9 +140,11 @@ class MatrixWorkspaceTest {
         val restored = requireNotNull(workspace.selected.value?.composer)
         assertEquals("Finish Alpha tomorrow", restored.state.first { !it.loading }.text)
         restored.edit("Last edit before Back")
+        val beforeBack = workspace.selected.value
         workspace.back()
-        assertNull(workspace.selected.value)
+        assertSame("Keep the channel mounted until its draft is saved", beforeBack, workspace.selected.value)
         runCurrent()
+        assertNull(workspace.selected.value)
         assertEquals(true, client.handles.all { it.uniffiIsDestroyed })
 
         workspace.open(alpha)
@@ -150,8 +172,8 @@ private class WorkspaceClient(private val beforeSave: suspend () -> Unit = {}) :
             }
         override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = drafts[roomId]
         override suspend fun saveComposerDraft(draft: ComposerDraft, threadRoot: String?) {
-            check(!failSaves) { "Storage is unavailable" }
             beforeSave()
+            check(!failSaves) { "Storage is unavailable" }
             check(!uniffiIsDestroyed) { "The room was closed before its draft was saved" }
             drafts[roomId] = draft
         }
