@@ -122,6 +122,30 @@ class PushNotificationsTest {
         identity.value = IdentityState()
         assertEquals(IdentityStatus.Unknown, PushNotifications.knownIdentity(identity)?.status)
     }
+
+    @Test fun theOpenConversationRaisesNoAlertAndClearingARoomRemovesOnlyItsAlerts() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val notifications = PushNotifications(context)
+        val verified = IdentityState(status = IdentityStatus.Verified)
+
+        PushNotifications.openRoom = "!team:example.org"
+        try {
+            notifications.show("@alex:example.org", "!team:example.org", "\$while-open", notificationMessage(), verified)
+            assertTrue(manager.activeNotifications.isEmpty())
+        } finally {
+            PushNotifications.openRoom = null
+        }
+
+        notifications.show("@alex:example.org", "!team:example.org", "\$first", notificationMessage(), verified)
+        notifications.show("@alex:example.org", "!team:example.org", "\$second", notificationMessage(), verified)
+        notifications.show("@alex:example.org", "!other:example.org", "\$elsewhere", notificationMessage(), verified)
+        notifications.clear("!team:example.org")
+
+        val remaining = manager.activeNotifications.single().notification
+        assertEquals("!other:example.org", shadowOf(remaining.contentIntent).savedIntent.getStringExtra(PushNotifications.ROOM_ID))
+    }
 }
 
 private fun notificationMessage(noisy: Boolean = true) = NotificationStatus.Event(NotificationItem(
