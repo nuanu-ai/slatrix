@@ -44,6 +44,7 @@ class ComposerMediaTest {
     @get:Rule val compose = createComposeRule()
     private val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
     private val attached = mutableListOf<Uri>()
+    private val composer = androidx.compose.runtime.mutableStateOf(ComposerState(loading = false))
     private lateinit var view: View
 
     private fun show(registry: ActivityResultRegistry? = null) {
@@ -53,7 +54,7 @@ class ComposerMediaTest {
             CompositionLocalProvider(LocalActivityResultRegistryOwner provides (owner ?: LocalActivityResultRegistryOwner.current!!)) {
                 SlatrixTheme {
                     LiveChannelScreen(room, ConversationState(emptyList(), loading = false, hasMore = false),
-                        ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                        composer.value, {}, {}, {}, {}, {}, {}, {}, {},
                         composerActions = ComposerActions(onAttach = { attached += it }))
                 }
             }
@@ -62,6 +63,8 @@ class ComposerMediaTest {
 
     // capability: composer.attachments
     @Test fun cameraTakesAPhotoIntoTheAppsOwnFileAndAttachesIt() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>()
+        org.robolectric.Shadows.shadowOf(context.packageManager).setSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_ANY, true)
         val asked = mutableListOf<Any?>()
         var result = Activity.RESULT_CANCELED
         show(object : ActivityResultRegistry() {
@@ -79,7 +82,8 @@ class ComposerMediaTest {
         compose.onNodeWithText("Camera").performClick()
         compose.runOnIdle {
             val photo = asked.last() as Uri
-            assertEquals("${view.context.packageName}.files", photo.authority)
+            // The camera app writes the photo through the URI it was given.
+            checkNotNull(context.contentResolver.openOutputStream(photo)).use { it.write(1) }
             assertEquals(listOf(photo), attached)
         }
     }
@@ -97,5 +101,19 @@ class ComposerMediaTest {
                 InputContentInfoCompat(image, ClipDescription("sticker", arrayOf("image/png")), null), 0, null))
             assertEquals(listOf(image), attached)
         }
+
+        composer.value = ComposerState(loading = false, target = ai.nuanu.slatrix.core.ComposerTarget.Edit("\$one", "Typo"))
+        compose.runOnIdle {
+            val editor = EditorInfo()
+            view.onCreateInputConnection(editor)
+            assertTrue("An edit takes no attachments", EditorInfoCompat.getContentMimeTypes(editor).isEmpty())
+        }
+    }
+
+    @Test fun withoutACameraPlusOffersNone() {
+        show()
+        compose.onNodeWithContentDescription("Attachments").performClick()
+        compose.onNodeWithText("Files").assertExists()
+        compose.onNodeWithText("Camera").assertDoesNotExist()
     }
 }
