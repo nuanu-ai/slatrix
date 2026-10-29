@@ -28,7 +28,9 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
-import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.hasAnySibling
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -297,11 +299,17 @@ class ChannelDetailsScreenTest {
             ChannelDetailsActions(setInWorkspace = { id, add -> changes += id to add }), spaces = spaces)
         compose.onNodeWithText("Workspaces").performClick()
         compose.onNodeWithText("Through another workspace").assertIsDisplayed()
-        compose.onNodeWithText("Remove").performClick()
-        compose.onAllNodesWithText("Add")[0].performClick()
-        compose.onAllNodesWithText("Add")[1].assertIsNotEnabled()
+        workspaceButton("Operations", "Add").assertIsNotEnabled()
+        workspaceButton("Design", "Remove").performClick()
+        // Shows the change at once, before the workspaces are read again, so a second tap doesn't send it twice.
+        workspaceButton("Design", "Add").assertIsDisplayed()
+        workspaceButton("Studio", "Add").performClick()
+        workspaceButton("Studio", "Remove").assertIsDisplayed()
         compose.runOnIdle { assertEquals(listOf("!design:example.org" to false, "!studio:example.org" to true), changes) }
     }
+
+    private fun workspaceButton(workspace: String, label: String) =
+        compose.onNode(hasText(label) and hasClickAction() and hasAnySibling(hasText(workspace)))
 
     private fun pinned(body: String) = ConversationMessage(body, "\$$body", "@mira:example.org", "Mira", body, null,
         1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "M", 0)
