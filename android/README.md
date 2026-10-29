@@ -31,19 +31,20 @@ Use a dedicated test account and room for automated message checks.
 
 ## Push notifications
 
-Push builds need a Firebase Android client and an HTTPS Sygnal gateway. Keep the
+Push builds need a Firebase Android client and the [push gateway](push-gateway/README.md).
+Keep the
 Firebase configuration outside the repository, then pass its absolute path:
 
 ```sh
 ./gradlew :app:assembleDebug \
   -PslatrixGoogleServices=/absolute/path/google-services.json \
-  -PslatrixPushGateway=https://push.example.org/_matrix/push/v1/notify
+  -PslatrixPushGateway=https://europe-west1-slatrix-18cdc.cloudfunctions.net/matrixPush/_matrix/push/v1/notify
 ```
 
 The Firebase file must include `ai.nuanu.slatrix.dev` for debug builds or
-`ai.nuanu.slatrix` for release builds. Sygnal uses the same package as its app ID
-and sends through that Firebase project. Its service-account key stays on the
-server. Builds without these properties leave push disabled.
+`ai.nuanu.slatrix` for release builds. The Cloud Function sends through that
+Firebase project using its runtime identity, without a service-account key.
+Builds without these properties leave push disabled.
 
 ## Screen mockups
 
