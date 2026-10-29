@@ -113,7 +113,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(end = UiMetrics.GapLarge,
             top = UiMetrics.GapSmall, bottom = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
-            Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.extraLarge, color = colors.raised) {
+            Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.extraLarge, color = colors.raised, contentColor = colors.textPrimary) {
                 Row(Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapTiny),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                     if (!room.direct) Icon(Icons.Outlined.Tag, null, Modifier.size(UiMetrics.Icon))
@@ -148,23 +148,25 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             }
         }
         val description = if (room.direct) "Message ${room.name}" else "Message #${room.name}"
-        Surface(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ComposerMinHeight),
-            shape = MaterialTheme.shapes.extraLarge, color = colors.canvas, border = BorderStroke(UiMetrics.Divider, colors.border)) {
-            Column(Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapTiny)) {
+        // Slack's composer: a rounded field on a bar under a hairline, with send inside the field.
+        HorizontalDivider(color = colors.border)
+        Surface(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall),
+            shape = MaterialTheme.shapes.extraLarge, color = colors.raised) {
+            Row(verticalAlignment = Alignment.Bottom) {
                 BasicTextField(composer.text, onDraft, enabled = !composer.loading,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = UiMetrics.ComposerFieldMinHeight).semantics { contentDescription = description },
+                    modifier = Modifier.weight(1f).heightIn(min = UiMetrics.Touch).padding(start = UiMetrics.GapMedium)
+                        .semantics { contentDescription = description },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
                     cursorBrush = SolidColor(colors.accent), maxLines = 5,
                     decorationBox = { inner ->
-                        Box(contentAlignment = Alignment.CenterStart) {
-                            if (composer.text.isEmpty()) Text(description, style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
+                        Box(Modifier.padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.CenterStart) {
+                            if (composer.text.isEmpty()) Text(description, style = MaterialTheme.typography.bodyLarge,
+                                color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             inner()
                         }
                     })
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    IconButton(onClick = onSend, enabled = !composer.loading && !composer.sending && composer.text.isNotBlank()) {
-                        Icon(Icons.AutoMirrored.Outlined.Send, "Send message", tint = if (composer.text.isNotBlank()) colors.accent else colors.textTertiary)
-                    }
+                IconButton(onClick = onSend, enabled = !composer.loading && !composer.sending && composer.text.isNotBlank()) {
+                    Icon(Icons.AutoMirrored.Outlined.Send, "Send message", tint = if (composer.text.isNotBlank()) colors.accent else colors.textTertiary)
                 }
             }
         }

@@ -3,6 +3,7 @@ package ai.nuanu.slatrix
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
@@ -16,6 +17,11 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.Density
 import com.github.takahirom.roborazzi.captureRoboImage
+import com.github.takahirom.roborazzi.captureScreenRoboImage
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
 import java.util.Calendar
 import org.junit.Rule
 import org.junit.Test
@@ -39,11 +45,14 @@ class LiveChannelScreenshots(private val dark: Boolean, private val fontScale: F
             ConversationMessage(id, "\$$id", "@${sender.lowercase()}:example.org", sender, body, null, at,
                 MessageKind.Text, state, sender == "Jordan", sender.take(1), if (sender == "Mira") 2 else 5)
         val messages = listOf(
+            DayDivider("yesterday", today - 24 * 60 * minute),
             message("a", "Mira", "Morning! The new onboarding flow is up on staging.", today - 24 * 60 * minute),
-            message("b", "Mira", "Would love eyes on the empty states.", today - 24 * 60 * minute + minute),
+            message("b", "Mira", "Would love eyes on the empty states.", today - 24 * 60 * minute + minute).copy(grouped = true),
+            DayDivider("today", today),
             message("c", "Jordan", "Looking now.", today),
-            message("d", "Jordan", "The illustrations read well in dark mode too.", today + 2 * minute),
-            message("e", "Jordan", "One more pass after lunch.", today + 3 * minute, MessageSendState.Failed),
+            message("d", "Jordan", "The illustrations read well in dark mode too.", today + 2 * minute).copy(grouped = true),
+            message("e", "Jordan", "One more pass after lunch.", today + 3 * minute, MessageSendState.Failed)
+                .copy(grouped = true, transactionId = "txn", canRetry = true),
         )
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
@@ -55,6 +64,9 @@ class LiveChannelScreenshots(private val dark: Boolean, private val fontScale: F
         }
         val theme = if (dark) "dark" else "light"
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/LiveChannel-$theme-$fontScale.png")
+        compose.onNodeWithText("One more pass after lunch.").performTouchInput { longClick() }
+        compose.onNodeWithText("Delete message").assertIsDisplayed()
+        captureScreenRoboImage("build/outputs/roborazzi/LiveChannel-sheet-$theme-$fontScale.png")
     }
 
     companion object {
