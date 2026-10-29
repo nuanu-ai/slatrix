@@ -142,3 +142,21 @@ test('only expired or invalid registration tokens remove Matrix pushers; other f
     }
   }
 });
+
+test('low-priority Matrix pushes use normal FCM priority for the release app', async (t) => {
+  const delivered = [];
+  t.mock.method(getMessaging(), 'send', async (message) => {
+    delivered.push(message);
+    return 'projects/test/messages/delivered';
+  });
+  const response = await post({ notification: notification({
+    prio: 'low',
+    devices: [{ app_id: 'ai.nuanu.slatrix', pushkey: 'release-registration-token' }],
+  }) });
+  assert.equal(response.status, 200);
+  assert.deepEqual(delivered, [{
+    token: 'release-registration-token',
+    data: { event_id: '$launch-message', room_id: '!launch:example.org' },
+    android: { priority: 'normal', restrictedPackageName: 'ai.nuanu.slatrix' },
+  }]);
+});
