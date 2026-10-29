@@ -11,7 +11,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.OAuthConfiguration
@@ -32,10 +37,15 @@ class AccountRuntime private constructor(application: Application) {
     private val mutableRooms = MutableStateFlow<MatrixRooms?>(null)
     val rooms = mutableRooms.asStateFlow()
 
+    // A push wakes the process without the UI; sync and push registration wait until the app is visible.
+    private val foreground = ProcessLifecycleOwner.get().lifecycle.currentStateFlow
+        .map { it.isAtLeast(Lifecycle.State.STARTED) }.stateIn(scope, SharingStarted.Eagerly, false)
+
     init {
         scope.launch {
             var client: Client? = null
-            account.state.collect { state ->
+            var registered = false
+            combine(account.state, foreground, ::Pair).collect { (state, visible) ->
                 val next = (state as? AccountState.Connected)?.client
                 if (next !== client) {
                     mutableIdentity.value?.close()
@@ -43,9 +53,14 @@ class AccountRuntime private constructor(application: Application) {
                     mutableIdentity.value = null
                     mutableRooms.value = null
                     client = next
-                    mutableRooms.value = next?.let { MatrixRooms(scope, it) }
+                    registered = false
+                    // One sync service per client: a second would run a second encryption sync.
+                    mutableRooms.value = next?.let { MatrixRooms(scope, it, foreground) }
                     mutableIdentity.value = next?.let { IdentityVerification(scope, it) }
-                    if (next != null && BuildConfig.PUSH_GATEWAY.isNotEmpty()) PushRegistrationWorker.enqueue(application)
+                }
+                if (next != null && visible && !registered) {
+                    registered = true
+                    if (BuildConfig.PUSH_GATEWAY.isNotEmpty()) PushRegistrationWorker.enqueue(application)
                 }
             }
         }

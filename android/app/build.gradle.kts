@@ -88,6 +88,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
     implementation("com.google.firebase:firebase-messaging")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.9.4")
     implementation("androidx.browser:browser:1.10.0")
     implementation("org.jsoup:jsoup:1.23.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
