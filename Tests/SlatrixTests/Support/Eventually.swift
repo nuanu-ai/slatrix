@@ -1,12 +1,15 @@
 import Foundation
 
-/// Polls `condition` on the main actor until it holds or `timeout` passes.
+/// Polls `condition` on the main actor every 5 ms until it holds, giving up after `timeout` worth of polls. It counts
+/// polls, not clock time: at the start of a parallel run on CI's cold runners, other tests' main-actor work (AppKit's
+/// first text views above all) holds the main actor for seconds, and the clock would run out while the work being
+/// waited for is still queued behind it. A poll held back like that counts once.
 @MainActor
 func eventually(timeout: Duration = .seconds(5), _ condition: () -> Bool) async -> Bool {
-    let deadline = ContinuousClock.now + timeout
-    while ContinuousClock.now < deadline {
+    let interval = Duration.milliseconds(5)
+    for _ in 0..<Int(timeout / interval) {
         if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(5))
+        try? await Task.sleep(for: interval)
     }
     return condition()
 }

@@ -19,9 +19,9 @@ struct PerformanceLogTests {
                 Performance.measure(.timelineProject) { () -> Void in _ = usleep(150_000) }
             }
         }
-        let hang = await Task.detached {
-            await firstPerformanceMessage(since: since) { $0.hasPrefix("hang ") && $0.contains("timeline.project") }
-        }.value
+        let hang = await firstPerformanceMessage(since: since) {
+            $0.hasPrefix("hang ") && $0.contains("timeline.project")
+        }
         #expect(milliseconds(try #require(hang)) >= 150)
     }
 }

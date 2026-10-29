@@ -10,7 +10,9 @@ import Testing
 @Suite("Profile editing")
 struct ProfileEditingTests {
     @Test("A large photo uploads small enough for avatars to show")
-    func largePhoto() throws {
+    // Off the main actor, as the app does it: on CI, making and scaling this photo there holds the main actor for most
+    // of a second, and every test waiting on it pays for that.
+    nonisolated func largePhoto() throws {
         let folder = try TemporaryDirectory()
         // Noise doesn't compress, so this PNG is several megabytes, like a photo from a phone.
         let original = try noisePNG(folder.path("photo.png"), side: 1_500)
@@ -199,7 +201,7 @@ struct ProfileEditingTests {
         return matrix
     }
 
-    private func size(of image: CGImage) -> CGSize { CGSize(width: image.width, height: image.height) }
+    nonisolated private func size(of image: CGImage) -> CGSize { CGSize(width: image.width, height: image.height) }
 
     /// `data` decoded to 8-bit RGBA, and whether every pixel is blue, allowing for compression.
     private func rgba(_ data: Data) throws -> (width: Int, height: Int, allBlue: Bool) {
@@ -216,7 +218,7 @@ struct ProfileEditingTests {
         return (image.width, image.height, allBlue)
     }
 
-    private func noisePNG(_ url: URL, side: Int) throws -> URL {
+    nonisolated private func noisePNG(_ url: URL, side: Int) throws -> URL {
         var bytes = [UInt8](repeating: 0, count: side * side * 4)
         arc4random_buf(&bytes, bytes.count)
         let context = try #require(
