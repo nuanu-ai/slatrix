@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectable
@@ -76,8 +77,9 @@ fun YouScreen(dark: Boolean, palette: SidebarPalette, onDarkToggle: () -> Unit, 
             if (!preferences) {
                 item {
                     Row(Modifier.padding(UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(UiMetrics.ProfileAvatar).clip(MaterialTheme.shapes.large).background(DesignTokens.avatarColors[0]), contentAlignment = Alignment.Center) {
-                            Text(MockData.profile.initials, style = AvatarStyle.label, color = SlatrixTheme.colors.onAccent)
+                        Box(Modifier.sizeIn(minWidth = UiMetrics.ProfileAvatar, minHeight = UiMetrics.ProfileAvatar).clip(MaterialTheme.shapes.large)
+                            .background(DesignTokens.avatarColors[0]).padding(UiMetrics.GapTiny), contentAlignment = Alignment.Center) {
+                            Text(MockData.profile.initials, style = AvatarStyle.label, color = SlatrixTheme.colors.onAccent, maxLines = 1, softWrap = false)
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
                             Text(MockData.profile.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)

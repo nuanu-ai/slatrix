@@ -47,6 +47,9 @@ fun SlatrixMockups(
     var darkOverride by rememberSaveable { mutableStateOf<Int?>(null) }
     var drafts by rememberSaveable { mutableStateOf(mapOf<String, String>()) }
     var sentByRoom by rememberSaveable { mutableStateOf(mapOf<String, List<MockMessage>>()) }
+    var reactions by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    val onReaction: (String) -> Unit = { id -> reactions = if (id in reactions) reactions - id else reactions + id }
+    val withReaction: (MockMessage) -> MockMessage = { it.copy(reacted = it.id in reactions) }
     var sentReplies by rememberSaveable { mutableStateOf(emptyList<MockMessage>()) }
     val effectiveDark = darkOverride?.let { it == 1 } ?: dark
     val room = MockData.channels.firstOrNull { it.id == roomId } ?: MockData.conversations.first { it.id == roomId }.let {
@@ -58,7 +61,7 @@ fun SlatrixMockups(
     } else MockData.messages.map { message ->
         if (message.id == MockData.threadParent.id) message.copy(replyCount = MockData.replies.size + sentReplies.size) else message
     }
-    val visibleMessages = messages + sentByRoom[roomId].orEmpty()
+    val visibleMessages = (messages + sentByRoom[roomId].orEmpty()).map(withReaction)
     val back: () -> Unit = { screen = if (screen == MockScreen.Thread) threadReturn else tab }
     BackHandler(enabled = screen !in rootScreens, onBack = back)
 
@@ -97,7 +100,7 @@ fun SlatrixMockups(
                                 MockScreen.Activity -> SlackActivityScreen(MockData.activity,
                                     onThread = { threadReturn = screen; roomId = "design"; screen = MockScreen.Thread },
                                     onYou = { screen = MockScreen.You })
-                                MockScreen.Channel -> SlackChannelScreen(room, visibleMessages,
+                                MockScreen.Channel -> SlackChannelScreen(room, visibleMessages, onReaction = onReaction,
                                     draft = drafts["channel:$roomId"].orEmpty(),
                                     onDraft = { drafts = drafts + ("channel:$roomId" to it) },
                                     onSend = {
@@ -109,7 +112,7 @@ fun SlatrixMockups(
                                             drafts = drafts - key
                                         }
                                     }, onThread = { threadReturn = screen; screen = MockScreen.Thread }, onBack = back)
-                                MockScreen.Thread -> SlackThreadScreen(MockData.threadParent, MockData.replies + sentReplies,
+                                MockScreen.Thread -> SlackThreadScreen(withReaction(MockData.threadParent), (MockData.replies + sentReplies).map(withReaction), onReaction = onReaction,
                                     draft = drafts["thread:${MockData.threadParent.id}"].orEmpty(),
                                     onDraft = { drafts = drafts + ("thread:${MockData.threadParent.id}" to it) },
                                     onSend = {

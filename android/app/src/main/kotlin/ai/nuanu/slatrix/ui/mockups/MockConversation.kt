@@ -43,7 +43,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +62,7 @@ fun SlackChannelScreen(
     onSend: () -> Unit,
     onThread: () -> Unit,
     onBack: () -> Unit,
+    onReaction: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
     var previousCount by remember(channel.id) { mutableStateOf(messages.size) }
@@ -74,7 +74,7 @@ fun SlackChannelScreen(
         ConversationHeader(channel.name, channel.topic, onBack, channel = !channel.direct)
         LazyColumn(Modifier.weight(1f), state = listState) {
             item { ConversationDate("Today") }
-            items(messages, key = { it.id }) { ConversationMessage(it, onThread) }
+            items(messages, key = { it.id }) { ConversationMessage(it, onThread, onReaction) }
         }
         ConversationComposer(
             draft, onDraft, onSend,
@@ -92,6 +92,7 @@ fun SlackThreadScreen(
     onDraft: (String) -> Unit,
     onSend: () -> Unit,
     onBack: () -> Unit,
+    onReaction: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
     var previousCount by remember(parent.id) { mutableStateOf(replies.size) }
@@ -102,7 +103,7 @@ fun SlackThreadScreen(
     Column(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas).imePadding()) {
         ConversationHeader("Thread", "# design", onBack, raised = false)
         LazyColumn(Modifier.weight(1f), state = listState) {
-            item { ConversationMessage(parent.copy(replyCount = 0), {}, expanded = true) }
+            item { ConversationMessage(parent.copy(replyCount = 0), {}, onReaction, expanded = true) }
             item {
                 HorizontalDivider(color = SlatrixTheme.colors.border)
                 Row(
@@ -115,7 +116,7 @@ fun SlackThreadScreen(
                 }
                 HorizontalDivider(color = SlatrixTheme.colors.border)
             }
-            items(replies, key = { it.id }) { ConversationMessage(it, {}) }
+            items(replies, key = { it.id }) { ConversationMessage(it, {}, onReaction) }
         }
         ConversationComposer(draft, onDraft, onSend, "Reply…", "Send reply")
     }
@@ -162,16 +163,17 @@ private fun ConversationDate(label: String) {
 }
 
 @Composable
-private fun ConversationMessage(message: MockMessage, onThread: () -> Unit, expanded: Boolean = false) {
+private fun ConversationMessage(message: MockMessage, onThread: () -> Unit, onReaction: (String) -> Unit, expanded: Boolean = false) {
     Column(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall)) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge),
         ) {
             Box(
-                Modifier.size(UiMetrics.Avatar).clip(MaterialTheme.shapes.large).background(DesignTokens.avatarColors[message.colorIndex]),
+                Modifier.sizeIn(minWidth = UiMetrics.Avatar, minHeight = UiMetrics.Avatar).clip(MaterialTheme.shapes.large)
+                    .background(DesignTokens.avatarColors[message.colorIndex]).padding(UiMetrics.GapTiny),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(message.initials, style = AvatarStyle.label, fontWeight = FontWeight.Bold, color = SlatrixTheme.colors.onAccent)
+                Text(message.initials, style = AvatarStyle.label, color = SlatrixTheme.colors.onAccent, maxLines = 1, softWrap = false)
             }
             Column(Modifier.weight(1f)) {
                 if (expanded) {
@@ -183,27 +185,27 @@ private fun ConversationMessage(message: MockMessage, onThread: () -> Unit, expa
                         Text(message.time, style = MaterialTheme.typography.bodyMedium, color = SlatrixTheme.colors.textSecondary)
                     }
                     Text(message.body, style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textBody)
-                    MessageActions(message, onThread)
+                    MessageActions(message, onThread, onReaction)
                 }
             }
         }
         if (expanded) {
             Spacer(Modifier.height(UiMetrics.GapLarge))
             Text(message.body, style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textBody)
-            MessageActions(message, onThread)
+            MessageActions(message, onThread, onReaction)
         }
     }
 }
 
 @Composable
-private fun MessageActions(message: MockMessage, onThread: () -> Unit) {
-    var reacted by rememberSaveable(message.id) { mutableStateOf(false) }
+private fun MessageActions(message: MockMessage, onThread: () -> Unit, onReaction: (String) -> Unit) {
+    val reacted = message.reacted
     if (message.reaction != null || message.replyCount > 0) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
             message.reaction?.let { count ->
                 Box(
                     Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
-                        .clickable(role = Role.Button, onClickLabel = if (reacted) "Remove thumbs up reaction" else "Add thumbs up reaction") { reacted = !reacted },
+                        .clickable(role = Role.Button, onClickLabel = if (reacted) "Remove thumbs up reaction" else "Add thumbs up reaction") { onReaction(message.id) },
                     contentAlignment = Alignment.Center,
                 ) {
                     Surface(color = if (reacted) SlatrixTheme.colors.selection else SlatrixTheme.colors.raised, shape = MaterialTheme.shapes.extraLarge) {

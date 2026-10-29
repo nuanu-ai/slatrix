@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.mockups
 
+import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -240,7 +242,7 @@ private fun RootFrame(title: String, onYou: () -> Unit, workspace: Boolean = fal
             Text(title, Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
                 color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Box(
-                Modifier.size(UiMetrics.Touch).clickable(role = Role.Button, onClick = onYou)
+                Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch).clickable(role = Role.Button, onClick = onYou)
                     .semantics { contentDescription = "You" },
                 contentAlignment = Alignment.Center,
             ) { RootAvatar(MockData.profile.initials, 0, UiMetrics.HeaderAvatar) }
@@ -294,12 +296,13 @@ private fun RootFilters(labels: List<String>, selected: String, onSelect: (Strin
 
 @Composable
 private fun RootAvatar(initials: String, colorIndex: Int, size: Dp) {
+    val background = DesignTokens.avatarColors[colorIndex]
     Box(
-        Modifier.size(size).clip(MaterialTheme.shapes.small).background(DesignTokens.avatarColors[colorIndex]),
+        Modifier.sizeIn(minWidth = size, minHeight = size).clip(MaterialTheme.shapes.small)
+            .background(background).padding(UiMetrics.GapTiny),
         contentAlignment = Alignment.Center,
     ) {
-        Text(initials, style = if (size == UiMetrics.CompactAvatar) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold, color = SlatrixTheme.colors.onAccent)
+        Text(initials, style = AvatarStyle.label, color = SlatrixTheme.colors.onAccent, maxLines = 1, softWrap = false)
     }
 }
 
