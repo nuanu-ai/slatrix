@@ -79,10 +79,15 @@ struct SearchIndexTests {
         let service = client.searchService()
         let handle = await service.subscribeToResults(listener: hits)
         defer { handle.cancel() }
-        // The cache indexes what paging brought in on its own time, so wait until every message can be found.
+        // The cache indexes what paging brought in on its own time, and a query's results never grow after it runs,
+        // so ask again until every message can be found.
         let everything: Set<String> = ["$alice-new", "$bob-new", "$odd-new", "$alice-old"]
-        try await service.setQuery(query: "launch")
-        try #require(await eventually(timeout: .seconds(30)) { hits.eventIDs == everything })
+        let deadline = ContinuousClock.now + .seconds(30)
+        repeat {
+            try await service.setQuery(query: "launch")
+        } while await !eventually(timeout: .milliseconds(200), { hits.eventIDs == everything })
+            && ContinuousClock.now < deadline
+        try #require(hits.eventIDs == everything)
         try await service.setQuery(query: query)
         // A page of hits lands at once, after the query returns; every case finds fewer than all.
         _ = await eventually { !hits.eventIDs.isEmpty && hits.eventIDs != everything }
