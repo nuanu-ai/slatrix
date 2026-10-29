@@ -135,6 +135,8 @@ private final class AccountDataObserver: RawAccountDataListener {
     @ObservationIgnored private var changes: AsyncStream<Void>.Continuation?
     /// The account's list as last read or written; nil until read, so nothing is written over a list not yet seen.
     @ObservationIgnored private var published: SavedMessages?
+    /// Lists heard from the account, so a write knows whether one landed while it was out.
+    @ObservationIgnored private var heard = 0
 
     /// The signed-in account's client, or nil on sign-out. The list stays with its account until another's arrives,
     /// so the last save to the device's vault still has it.
@@ -171,10 +173,12 @@ private final class AccountDataObserver: RawAccountDataListener {
             for await _ in stream {
                 guard let self, let published = self.published, self.list != published else { continue }
                 let next = self.list
+                let heard = self.heard
                 guard (try? await client.setAccountData(eventType: SavedMessages.eventType, content: next.json)) != nil,
                     self.session == session
                 else { continue }
-                self.published = next
+                // A list heard meanwhile may have landed after this write, so it stands for the account's.
+                if self.heard == heard { self.published = next }
             }
         }
     }
@@ -201,6 +205,7 @@ private final class AccountDataObserver: RawAccountDataListener {
     private func receive(_ content: String?) {
         let remote = SavedMessages(json: content)
         published = remote
+        heard += 1
         update(list.merged(with: remote))
     }
 
