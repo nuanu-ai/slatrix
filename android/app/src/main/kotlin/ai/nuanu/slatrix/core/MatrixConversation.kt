@@ -21,6 +21,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.DateDividerMode
+import org.matrix.rustcomponents.sdk.EmbeddedEventDetails
 import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.EventSendState
 import org.matrix.rustcomponents.sdk.FormattedBody
@@ -119,7 +120,9 @@ internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } c
 class MatrixConversation(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null) {
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
-    private val mutableState = MutableStateFlow(ConversationState())
+    // Only a fake room lacks it; a real one always knows who it belongs to.
+    private val ownUserId = runCatching { room.ownUserId() }.getOrNull()
+    private val mutableState = MutableStateFlow(ConversationState(ownUserId = ownUserId))
     val state: StateFlow<ConversationState> = mutableState.asStateFlow()
     private val ready = CompletableDeferred<Timeline>()
     private val updates = Channel<List<TimelineDiff>>(Channel.UNLIMITED)
@@ -408,6 +411,16 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 failure.error !is QueueWedgeError.MissingMediaContent && failure.error !is QueueWedgeError.InvalidMimeType,
             queuePaused = failure?.isRecoverable == true,
             edited = (content.kind as? MsgLikeKind.Message)?.content?.isEdited == true,
+            reactions = event.reactions.map { reaction ->
+                MessageReaction(reaction.key, reaction.senders.size, reaction.senders.any { it.senderId == ownUserId },
+                    reaction.senders.map { it.senderId })
+            },
+            thread = content.threadSummary?.let { summary ->
+                val latest = summary.latestEvent() as? EmbeddedEventDetails.Ready
+                MessageThread(summary.numReplies().coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
+                    latest?.let { (it.senderProfile as? ProfileDetails.Ready)?.displayName?.takeIf(String::isNotBlank) ?: it.sender },
+                    latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong())
+            }?.takeIf { it.replies > 0 },
         ).also { it.runs }
     }
 }
