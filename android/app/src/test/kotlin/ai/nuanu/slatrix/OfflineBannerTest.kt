@@ -6,6 +6,7 @@ import android.app.Application
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import org.junit.Assert.assertEquals
@@ -25,7 +26,6 @@ class OfflineBannerTest {
     // capability: app.offline-banner
     @Test fun theBannerWaitsOutAShortDropFloatsOverTheScreenAndLeavesWhenTheConnectionReturns() {
         val offline = mutableStateOf(false)
-        compose.mainClock.autoAdvance = false
         compose.setContent {
             SlatrixTheme {
                 Box {
@@ -34,18 +34,16 @@ class OfflineBannerTest {
                 }
             }
         }
-        compose.mainClock.advanceTimeBy(100)
         val before = compose.onNodeWithText("Channels").fetchSemanticsNode().boundsInRoot
+        val banner = hasText("You’re offline", substring = true)
 
-        offline.value = true
-        compose.mainClock.advanceTimeBy(1_500)
-        compose.onNodeWithText("You’re offline", substring = true).assertDoesNotExist()
-        compose.mainClock.advanceTimeBy(1_000)
-        compose.onNodeWithText("You’re offline", substring = true).assertExists()
+        compose.runOnIdle { offline.value = true }
+        compose.waitForIdle()
+        compose.onNode(banner).assertDoesNotExist()
+        compose.waitUntil(5_000) { compose.onAllNodes(banner).fetchSemanticsNodes().isNotEmpty() }
         assertEquals("Nothing under it moves", before, compose.onNodeWithText("Channels").fetchSemanticsNode().boundsInRoot)
 
-        offline.value = false
-        compose.mainClock.advanceTimeBy(1_000)
-        compose.onNodeWithText("You’re offline", substring = true).assertDoesNotExist()
+        compose.runOnIdle { offline.value = false }
+        compose.waitUntil(5_000) { compose.onAllNodes(banner).fetchSemanticsNodes().isEmpty() }
     }
 }

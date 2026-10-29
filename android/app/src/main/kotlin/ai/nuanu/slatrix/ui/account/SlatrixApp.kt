@@ -167,6 +167,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             }
                         }
                     }
+                    OfflineBanner(rooms?.offline?.collectAsState()?.value == true)
                     (state as AccountState.Connected).warning?.let { warning ->
                         Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(warning) }
                     }

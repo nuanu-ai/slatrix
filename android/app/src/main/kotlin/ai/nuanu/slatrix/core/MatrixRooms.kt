@@ -93,6 +93,9 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private val activeSync = MutableStateFlow<SyncService?>(null)
     private val mutableState = MutableStateFlow(RoomListState())
     val state: StateFlow<RoomListState> = mutableState.asStateFlow()
+    private val mutableOffline = MutableStateFlow(false)
+    /** The SDK lost the server and is waiting for the network, which the offline banner says. */
+    val offline: StateFlow<Boolean> = mutableOffline.asStateFlow()
     private val events = Channel<Event>(Channel.UNLIMITED)
     private val retries = Channel<Unit>(Channel.CONFLATED)
     private val summaries = mutableMapOf<String, RoomSummary>()
@@ -102,6 +105,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private val followed = mutableMapOf<String, Followed>()
     private val syncGeneration = AtomicLong()
     private var error: String? = null
+    private var isOffline = false
     // Room calls block on the SDK, so the list never builds on the main thread.
     private val worker = scope.launch(Dispatchers.Default) {
         try {
@@ -191,6 +195,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             }
             is Event.Connection -> if (event.generation == syncGeneration.get()) {
                 error = event.error
+                isOffline = event.offline
                 // A network error pauses a room's send queue; what waited there goes out once sync is back.
                 if (event.running) runCatching { client.enableAllSendQueues(true) }
             }
@@ -295,6 +300,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             error = error,
             spacesKnown = parents != null,
         )
+        mutableOffline.value = isOffline
     }
 
     private fun topLevel(id: String): Boolean = parents?.get(id).isNullOrEmpty()
@@ -370,10 +376,10 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                     override fun onUpdate(state: SyncServiceState) {
                         val error = when (state) {
                             SyncServiceState.ERROR, SyncServiceState.TERMINATED -> "Couldn’t sync conversations."
-                            SyncServiceState.OFFLINE -> "You’re offline."
                             else -> null
                         }
-                        events.trySend(Event.Connection(error, generation, state == SyncServiceState.RUNNING))
+                        events.trySend(Event.Connection(error, generation, state == SyncServiceState.RUNNING,
+                            offline = state == SyncServiceState.OFFLINE))
                     }
                 })
                 list = current.roomListService().allRooms()
@@ -441,7 +447,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         data class Spaces(val parents: Map<String, List<String>>?, val error: String? = null) : Event
         data class Info(val info: RoomInfo, val room: Followed) : Event
         data class Entries(val updates: List<RoomListEntriesUpdate>, val generation: Long) : Event
-        data class Connection(val error: String?, val generation: Long, val running: Boolean = false) : Event
+        data class Connection(val error: String?, val generation: Long, val running: Boolean = false, val offline: Boolean = false) : Event
     }
 }
 

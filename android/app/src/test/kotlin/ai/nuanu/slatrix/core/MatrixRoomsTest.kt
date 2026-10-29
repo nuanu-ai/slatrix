@@ -378,7 +378,8 @@ class MatrixRoomsTest {
         val sync = RoomsSync()
         client.services.trySend(sync)
         val rooms = MatrixRooms(backgroundScope, client)
-        sync.started.await()
+        // The sync running has been handled, so it can't land after the drop.
+        client.sendQueuesEnabled.first { it }
 
         sync.emitState(SyncServiceState.OFFLINE)
         rooms.offline.first { it }
