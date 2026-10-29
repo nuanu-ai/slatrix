@@ -378,8 +378,9 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
     }
     Box(Modifier.fillMaxSize()) {
         PushedPage("Files", onBack) {
-            item(key = "filters") {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            // Stays above the list as it scrolls, as the Mac's filter bar does.
+            stickyHeader(key = "filters") {
+                Row(Modifier.fillMaxWidth().background(colors.canvas).horizontalScroll(rememberScrollState())
                     .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                     FilesFilter.entries.forEach { ChoiceChip(it.name, it == filter) { filter = it } }
@@ -397,9 +398,12 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
                     when {
                         link != null -> uris.openUri(link)
                         file?.kind == MessageAttachment.Kind.Image -> viewing = file to thumbnail
-                        file != null -> scope.launch {
+                        // Marked before it starts, so a second tap before the row disables opens nothing more.
+                        file != null -> if (message.id !in opening) {
                             opening = opening + message.id
-                            try { files.onOpenFile(file)?.let { error = it } } finally { opening = opening - message.id }
+                            scope.launch {
+                                try { files.onOpenFile(file)?.let { error = it } } finally { opening = opening - message.id }
+                            }
                         }
                         else -> message.eventId?.let(onOpenMessage)
                     }
@@ -424,6 +428,14 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
                         Text(listOfNotNull(file?.let { kind?.label(it.name) }, "Shared by ${message.senderName}", dayLabel(message.timestamp))
                             .joinToString(" · "), style = MaterialTheme.typography.bodyMedium,
                             color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    // A file downloading to open shows it after the usual wait, in space the row always holds, as its row in the
+                    // conversation does.
+                    if (file != null && file.kind != MessageAttachment.Kind.Image) Box(Modifier.size(UiMetrics.Icon)) {
+                        val busy = message.id in opening
+                        var late by remember { mutableStateOf(false) }
+                        LaunchedEffect(busy) { late = false; if (busy) { delay(UiMetrics.ProgressDelayMillis); late = true } }
+                        if (busy && late) CircularProgressIndicator(Modifier.fillMaxSize())
                     }
                 }
             }
