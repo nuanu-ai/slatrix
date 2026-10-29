@@ -181,7 +181,6 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                     val timeline = ready.await()
                     if (!isLatestRemote(eventId)) return@withLock false
                     if (lastRead == eventId) return@withLock true
-                    mutableState.update { it.copy(error = null) }
                     timeline.sendReadReceipt(ReceiptType.READ, eventId)
                     currentCoroutineContext().ensureActive()
                     if (!isLatestRemote(eventId)) return@withLock false
@@ -196,8 +195,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
-                    currentCoroutineContext().ensureActive()
-                    mutableState.update { it.copy(error = "Couldn’t mark this conversation as read.") }
+                    // The next visible message sends it again.
                     false
                 }
             }
