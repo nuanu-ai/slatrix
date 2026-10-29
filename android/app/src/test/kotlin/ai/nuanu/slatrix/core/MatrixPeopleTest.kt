@@ -5,7 +5,10 @@ import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,6 +30,7 @@ import uniffi.matrix_sdk_base.EncryptionState
 import org.matrix.rustcomponents.sdk.RoomMember
 import org.matrix.rustcomponents.sdk.RoomMembersIterator
 import org.matrix.rustcomponents.sdk.RoomVisibility
+import org.matrix.rustcomponents.sdk.SearchUsersResults
 import org.matrix.rustcomponents.sdk.UserProfile
 
 class MatrixPeopleTest {
@@ -100,6 +104,48 @@ class MatrixPeopleTest {
         assertTrue(client.created.isEmpty())
     }
 
+    // capability: search.people
+    @Test fun theDirectoryFindsPeopleAndAQueryReplacedWhileTypingNeverAsks() = runTest {
+        val client = PeopleClient().apply { directory = listOf(UserProfile("@sam:example.org", "Sam Lee", null, null, null)) }
+        val people = MatrixPeople(backgroundScope, client)
+
+        people.search("sa")
+        people.search(" sam ")
+        val found = people.results.first { !it.loading && it.people.isNotEmpty() }
+
+        assertEquals(listOf("sam"), client.searches)
+        assertEquals(listOf(Person("@sam:example.org", "Sam Lee")), found.people)
+    }
+
+    @Test fun aLateAnswerForAnOldQueryNeverReplacesTheNewOnes() = runTest {
+        val client = PeopleClient()
+        val people = MatrixPeople(backgroundScope, client)
+        val late = CompletableDeferred<Unit>()
+        client.searchGate = late
+        client.directory = listOf(UserProfile("@old:example.org", "Old", null, null, null))
+        people.search("old")
+        client.searching.await()
+
+        client.searchGate = null
+        client.directory = listOf(UserProfile("@new:example.org", "New", null, null, null))
+        people.search("new")
+        people.results.first { state -> state.people.any { it.name == "New" } }
+        late.complete(Unit)
+        client.answered.await()
+
+        assertEquals(listOf("New"), people.results.value.people.map { it.name })
+    }
+
+    // capability: search.people
+    @Test fun aFullMatrixIdIsFoundEvenOutsideTheDirectory() = runTest {
+        val people = MatrixPeople(backgroundScope, PeopleClient())
+        people.search(" $Alice ")
+        assertEquals(listOf(Person(Alice, "Alice Moss", "mxc://example.org/alice")), people.results.first { !it.loading && it.people.isNotEmpty() }.people)
+        people.search("@gone:example.org")
+        assertEquals("A Matrix ID without a public profile can still be messaged", listOf(Person("@gone:example.org", "@gone:example.org")),
+            people.results.first { state -> !state.loading && state.people.any { it.id == "@gone:example.org" } }.people)
+    }
+
     // capability: people.profile
     @Test fun aDirectMessagesPersonIsTheOneOtherMemberItNames() = runTest {
         val client = PeopleClient(DirectRoom("!dm:example.org", true, heroes = listOf(hero(Alice, "Alice Moss"))),
@@ -127,6 +173,19 @@ private class PeopleClient(private vararg val rooms: DirectRoom) : Client(NoHand
     val creating = CompletableDeferred<Unit>()
     var createGate: CompletableDeferred<Unit>? = null
     override fun userId(): String = Me
+    var directory = emptyList<UserProfile>()
+    var searchGate: CompletableDeferred<Unit>? = null
+    val searches = mutableListOf<String>()
+    val searching = CompletableDeferred<Unit>()
+    val answered = CompletableDeferred<Unit>()
+    override suspend fun searchUsers(searchTerm: String, limit: ULong): SearchUsersResults {
+        searches += searchTerm
+        val results = directory
+        searching.complete(Unit)
+        // An FFI call runs on after its coroutine is cancelled.
+        searchGate?.let { gate -> withContext(NonCancellable) { gate.await() }; answered.complete(Unit) }
+        return SearchUsersResults(results, false)
+    }
     override fun getDmRooms(userId: String): List<Room> = rooms.toList()
     override fun getRoom(roomId: String): Room? = rooms.firstOrNull { it.id() == roomId }
     override suspend fun createRoom(request: CreateRoomParameters): String {

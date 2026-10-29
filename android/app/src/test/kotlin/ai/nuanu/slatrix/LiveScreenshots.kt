@@ -88,7 +88,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
                             NotificationRows(NotifyAbout.DirectAndMentions, true, null, {}, {})
                         }
                         else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spaces = spaces, spacesKnown = true),
-                            {}, {}, {}, Harbor, onBrowseChannels = {}, onCreateChannel = {}, laterCount = 2,
+                            {}, {}, {}, Harbor, onBrowseChannels = {}, onCreateChannel = {}, laterCount = 2, onNewMessage = {},
                             search = { SearchScreen(rooms, "@alex:example.org", hits, {}, {}, {}, listOf("release notes", "offsite photos", "budget in:#design"), onRoom = {}) })
                     }
                     Box(Modifier.fillMaxWidth().height(GestureBar).background(if (tab in Pushed) colors.canvas else colors.raised))
