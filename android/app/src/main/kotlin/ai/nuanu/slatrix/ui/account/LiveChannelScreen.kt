@@ -63,7 +63,10 @@ import java.util.Locale
 @Composable
 fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: ComposerState,
     onDraft: (String) -> Unit, onSend: () -> Unit, onBack: () -> Unit, onLoadOlder: () -> Unit, onRead: (String) -> Unit,
-    onRetry: () -> Unit, onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit) {
+    onRetry: () -> Unit, onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit,
+    onOpenThread: (rootEventId: String) -> Unit = {},
+    /** Shows the thread this message starts, as Slack's thread page, instead of the channel. */
+    threadRoot: String? = null) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -116,7 +119,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(end = UiMetrics.GapLarge,
             top = UiMetrics.GapSmall, bottom = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
-            Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.extraLarge, color = colors.raised, contentColor = colors.textPrimary) {
+            if (threadRoot != null) Column(Modifier.weight(1f).padding(start = UiMetrics.GapSection + UiMetrics.GapLarge)) {
+                Text("Thread", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                Text(if (room.direct) room.name else "#${room.name}", style = MaterialTheme.typography.bodyMedium,
+                    color = colors.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.extraLarge, color = colors.raised, contentColor = colors.textPrimary) {
                 Row(Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapTiny),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                     if (!room.direct) Icon(Icons.Outlined.Tag, null, Modifier.size(UiMetrics.Icon))
@@ -131,18 +138,33 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
         HorizontalDivider(color = colors.border)
         Box(Modifier.weight(1f).fillMaxWidth()) {
+            val rows = state.rows
+            val firstReply = remember(rows, threadRoot) {
+                rows.getOrNull(rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot } + 1)?.id.takeIf { threadRoot != null }
+            }
+            // A thread reads down from its root, as in Slack, so a short one sits at the top.
             LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true,
+                verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
                 contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
-                items(state.rows.asReversed(), key = { it.id }) { row ->
+                items(rows.asReversed(), key = { it.id }) { row ->
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
-                        is ConversationMessage -> LiveMessageRow(row) { menu = it }
+                        is ConversationMessage -> if (threadRoot != null && row.eventId == threadRoot) Column {
+                            LiveMessageRow(row) { menu = it }
+                            // The root shows once the whole thread has loaded, so its sent replies are all here.
+                            RepliesBar(rows.count { it is ConversationMessage && it.eventId != null && it.eventId != threadRoot })
+                        // The first reply starts under the replies bar, so it shows its sender again.
+                        } else LiveMessageRow(if (row.id == firstReply) row.copy(grouped = false) else row) { menu = it }
                     }
                 }
-                // The top of the conversation, which also lets an empty one ask for history.
+                // The top of the conversation, which also lets an empty one ask for history; a thread tops out at its root.
                 item(key = "top") {
-                    if (!state.hasMore && !state.loading) ConversationIntro(room)
-                    else if (state.rows.isNotEmpty()) HistoryProgress(state.loadingHistory)
+                    when {
+                        !state.hasMore && !state.loading -> if (threadRoot == null) ConversationIntro(room)
+                        // A thread fills in from its newest replies, so it shows the wait even before any arrive.
+                        threadRoot != null -> HistoryProgress(state.loading || state.loadingHistory)
+                        state.rows.isNotEmpty() -> HistoryProgress(state.loadingHistory)
+                    }
                 }
             }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
@@ -150,7 +172,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
             }
         }
-        val description = if (room.direct) "Message ${room.name}" else "Message #${room.name}"
+        val description = when {
+            threadRoot != null -> "Add a reply"
+            room.direct -> "Message ${room.name}"
+            else -> "Message #${room.name}"
+        }
         // Slack's composer: a rounded field on a bar under a hairline, with send inside the field.
         HorizontalDivider(color = colors.border)
         Surface(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall),
@@ -173,6 +199,20 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 }
             }
         }
+    }
+}
+
+/** Slack's bar between a thread's root and its replies. */
+@Composable
+private fun RepliesBar(count: Int) {
+    val colors = SlatrixTheme.colors
+    if (count < 1) return
+    Column(Modifier.fillMaxWidth().padding(top = UiMetrics.GapSmall)) {
+        HorizontalDivider(color = colors.border)
+        Text(if (count == 1) "1 reply" else "$count replies",
+            Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge).wrapContentHeight(),
+            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+        HorizontalDivider(color = colors.border)
     }
 }
 
