@@ -40,12 +40,22 @@ data class RoomSummary(
     val unread: UnreadBadge,
     val initials: String,
     val colorIndex: Int,
+    val spaceIds: Set<String> = emptySet(),
+)
+
+data class SpaceSummary(
+    val id: String,
+    val name: String,
+    val isTopLevel: Boolean = true,
+    val initials: String = AvatarPlaceholder.initials(name),
+    val colorIndex: Int = AvatarPlaceholder.colorIndex(name),
 )
 
 data class RoomListState(
     val rooms: List<RoomSummary> = emptyList(),
     val loading: Boolean = true,
     val error: String? = null,
+    val spaces: List<SpaceSummary> = emptyList(),
 )
 
 class MatrixRooms(scope: CoroutineScope, private val client: Client) {

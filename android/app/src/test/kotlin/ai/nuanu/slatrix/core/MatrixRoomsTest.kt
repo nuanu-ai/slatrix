@@ -15,6 +15,32 @@ import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_base.EncryptionState
 
 class MatrixRoomsTest {
+    @Test fun joinedSpacesExposeSeparateWorkspacesAndNestedChannelMembership() = runTest {
+        val client = RoomsClient(listOf(
+            TestRoom(roomInfo("!nuanu:example.org", "Nuanu", space = true)),
+            TestRoom(roomInfo("!studio:example.org", "Test Studio", space = true)),
+            TestRoom(roomInfo("!nested:example.org", "Design", space = true)),
+            TestRoom(roomInfo("!work:example.org", "Operations")),
+            TestRoom(roomInfo("!test:example.org", "Sandbox")),
+            TestRoom(roomInfo("!dm:example.org", "Avery", direct = true)),
+            TestRoom(roomInfo("!invited:example.org", "Private", space = true, membership = Membership.INVITED)),
+        ))
+        client.spaces = RoomsSpaces(mapOf(
+            "!nested:example.org" to listOf("!studio:example.org"),
+            "!work:example.org" to listOf("!nuanu:example.org"),
+            "!test:example.org" to listOf("!nested:example.org"),
+        ))
+        val rooms = MatrixRooms(backgroundScope, client)
+        runCurrent()
+
+        assertEquals(listOf("Design", "Nuanu", "Test Studio"), rooms.state.value.spaces.map { it.name })
+        assertEquals(listOf("Nuanu", "Test Studio"), rooms.state.value.spaces.filter { it.isTopLevel }.map { it.name })
+        assertEquals(setOf("!nested:example.org", "!studio:example.org"), rooms.state.value.rooms.single { it.name == "Sandbox" }.spaceIds)
+        assertEquals(setOf("!nuanu:example.org"), rooms.state.value.rooms.single { it.name == "Operations" }.spaceIds)
+        assertEquals(emptySet<String>(), rooms.state.value.rooms.single { it.direct }.spaceIds)
+        rooms.close()
+    }
+
     @Test fun cachedJoinedConversationsAppearBeforeSyncFinishes() = runTest {
         val client = RoomsClient(listOf(
             TestRoom(roomInfo("!z:example.org", "Zebra", direct = true, messages = 3u)),
@@ -111,6 +137,8 @@ class MatrixRoomsTest {
 }
 
 private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
+    var spaces: SpaceService = RoomsSpaces()
+    override suspend fun spaceService(): SpaceService = spaces
     val services = Channel<SyncService>(Channel.UNLIMITED)
     var finish: suspend () -> SyncService = { services.receive() }
     override fun rooms(): List<Room> = cached
@@ -198,3 +226,8 @@ private fun roomInfo(
     historyVisibility = RoomHistoryVisibility.Shared, powerLevels = null, roomVersion = null,
     privilegedCreatorsRole = false,
 )
+
+private class RoomsSpaces(private val parents: Map<String, List<String>> = emptyMap()) : SpaceService(NoHandle) {
+    override suspend fun topLevelJoinedSpaces(): List<SpaceRoom> = emptyList()
+    override suspend fun joinedParentIdsOfChild(childId: String): List<String> = parents[childId].orEmpty()
+}
