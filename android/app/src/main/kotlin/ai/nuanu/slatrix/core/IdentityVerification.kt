@@ -36,11 +36,13 @@ data class IdentityState(
     val emojis: List<VerificationEmoji> = emptyList(),
     val decimals: List<Int> = emptyList(),
     val error: String? = null,
+    val hasIdentity: Boolean? = null,
     val hasOtherDevice: Boolean? = null,
     val recoveryAvailable: Boolean? = null,
     val requestDeviceName: String? = null,
 ) {
     val verified: Boolean get() = status == IdentityStatus.Verified
+    val requiresVerification: Boolean get() = !verified && hasIdentity != false
 }
 
 class IdentityVerification(private val scope: CoroutineScope, private val client: Client) : AutoCloseable {
@@ -79,9 +81,12 @@ class IdentityVerification(private val scope: CoroutineScope, private val client
                 encryption.waitForE2eeInitializationTasks()
                 updateStatus(encryption.verificationState())
                 updateRecovery(encryption.recoveryState())
-                val hasOtherDevice = encryption.hasDevicesToVerifyAgainst()
+                val hasIdentity = encryption.userIdentity(client.userId(), true).use { it != null }
+                coroutineContext.ensureActive()
+                mutableState.update { it.copy(hasIdentity = hasIdentity) }
+                val hasOtherDevice = if (hasIdentity) encryption.hasDevicesToVerifyAgainst() else false
                 try {
-                    sdk.withLock { ensureController() }
+                    if (hasIdentity) sdk.withLock { ensureController() }
                 } catch (error: CancellationException) {
                     throw error
                 } catch (_: Exception) {
