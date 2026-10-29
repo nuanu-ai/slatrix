@@ -71,6 +71,8 @@ class MatrixChannel(private val client: Client, private val roomId: String) {
 
     suspend fun leave() = joined { room -> room.leave() }
 
+    suspend fun setInWorkspace(spaceId: String, adding: Boolean) = Unit
+
     suspend fun invite(userId: String) = joined("Join this conversation before inviting people.") { room ->
         val id = userId.trim()
         if (!ComposerFormat.userID.matches(id)) throw ChannelActionFailure("Enter a complete Matrix ID, such as @name:example.org.")

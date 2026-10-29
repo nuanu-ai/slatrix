@@ -69,6 +69,7 @@ data class RoomSummary(
     val canPin: Boolean = false,
     /** The pinned messages' event IDs, in the order they were pinned. */
     val pinned: List<String> = emptyList(),
+    val parentIds: Set<String> = emptySet(),
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
@@ -80,6 +81,7 @@ data class SpaceSummary(
     val isTopLevel: Boolean = true,
     val initials: String = AvatarPlaceholder.initials(name),
     val colorIndex: Int = AvatarPlaceholder.colorIndex(name),
+    val canManageRooms: Boolean = true,
 )
 
 data class RoomListState(

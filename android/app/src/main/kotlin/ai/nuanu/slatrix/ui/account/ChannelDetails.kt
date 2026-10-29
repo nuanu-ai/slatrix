@@ -7,6 +7,7 @@ import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.NotificationChoice
 import ai.nuanu.slatrix.core.NotificationSetting
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -58,6 +59,7 @@ data class ChannelDetailsActions(
     /** The room's pinned messages, read while the Pinned messages page shows. */
     val pins: @Composable () -> PinnedMessages = { PinnedMessages() },
     val files: @Composable () -> SharedFiles = { SharedFiles() },
+    val setInWorkspace: suspend (spaceId: String, adding: Boolean) -> Unit = { _, _ -> },
 )
 
 /** Every message in a conversation, threads included, to find what was shared, and asking for older ones. */
@@ -74,7 +76,7 @@ private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeopl
  */
 @Composable
 fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetailsActions, onLeft: () -> Unit,
-    onOpenMessage: (eventId: String) -> Unit, onBack: () -> Unit) {
+    onOpenMessage: (eventId: String) -> Unit, spaces: List<SpaceSummary> = emptyList(), onBack: () -> Unit) {
     var page by rememberSaveable { mutableStateOf(DetailsPage.Details) }
     // Where Add people goes back to: the page it was opened from.
     var opener by rememberSaveable { mutableStateOf(DetailsPage.Details) }
