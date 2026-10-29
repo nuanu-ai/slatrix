@@ -41,7 +41,7 @@ class PushNotificationsTest {
         notifications.show(user, room, "\$redacted", NotificationStatus.EventRedacted)
         assertTrue(manager.activeNotifications.isEmpty())
 
-        notifications.show(user, room, "\$resolved", notificationMessage())
+        notifications.show(user, room, "\$resolved", notificationMessage(), previewAllowed = true)
         val notification = manager.activeNotifications.single().notification
         assertEquals("Team", notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
         assertEquals("Sam: Review budget?", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
@@ -53,7 +53,7 @@ class PushNotificationsTest {
         assertEquals(room, target.getStringExtra(PushNotifications.ROOM_ID))
 
         manager.cancelAll()
-        PushNotifications(context).show(user, room, "\$resolved", notificationMessage())
+        PushNotifications(context).show(user, room, "\$resolved", notificationMessage(), previewAllowed = true)
         assertTrue("A repeated gateway delivery must not resurrect a dismissed notification", manager.activeNotifications.isEmpty())
 
         notifications.show(user, room, "\$missing", NotificationStatus.EventNotFound)

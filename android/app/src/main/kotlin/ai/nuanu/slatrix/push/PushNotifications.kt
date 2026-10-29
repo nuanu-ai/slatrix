@@ -26,13 +26,13 @@ class PushNotifications(private val context: Context) {
     val enabled: Boolean get() = manager.areNotificationsEnabled() && (Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
 
-    fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?) = synchronized(deliveryLock) {
+    fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, previewAllowed: Boolean = false) = synchronized(deliveryLock) {
         if (!enabled || status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted) return@synchronized
         val key = pushKey(userId, roomId, eventId)
         val delivered = preferences.getString("delivered", "").orEmpty().split('\n').filter { it.isNotEmpty() }
         if (key in delivered) return@synchronized
 
-        val item = (status as? NotificationStatus.Event)?.item
+        val item = (status as? NotificationStatus.Event)?.item?.takeIf { previewAllowed }
         val event = (item?.event as? NotificationEvent.Timeline)?.event
         val content = (event?.content() as? TimelineEventContent.MessageLike)?.content
         if (content is MessageLikeEventContent.RoomRedaction) return@synchronized
