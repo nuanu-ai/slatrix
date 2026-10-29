@@ -34,6 +34,19 @@ if (googleServices != null) {
     }
 }
 
+/** Packs the Mac's emoji catalog as the `emoji.txt` asset, so both apps read one list. */
+abstract class EmojiAsset : DefaultTask() {
+    @get:InputFile abstract val source: RegularFileProperty
+    @get:OutputDirectory abstract val output: DirectoryProperty
+    @TaskAction fun copy() { source.get().asFile.copyTo(output.file("emoji.txt").get().asFile, overwrite = true) }
+}
+val emojiAsset = tasks.register<EmojiAsset>("emojiAsset") {
+    source.set(rootProject.layout.projectDirectory.file("../Sources/Slatrix/Core/EmojiData.swift"))
+}
+extensions.configure<ApplicationAndroidComponentsExtension> {
+    onVariants { it.sources.assets?.addGeneratedSourceDirectory(emojiAsset, EmojiAsset::output) }
+}
+
 extensions.configure<ApplicationExtension> {
     namespace = "ai.nuanu.slatrix"
     compileSdk = 36
