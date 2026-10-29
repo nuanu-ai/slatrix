@@ -20,6 +20,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     val account = runtime.account
     val identity = runtime.identity
     val rooms = runtime.rooms
+    val activity = runtime.activity
     private val mutableWorkspace = MutableStateFlow<MatrixWorkspace?>(null)
     val workspace = mutableWorkspace.asStateFlow()
     /** The thread pushed over whatever is open, with its own timeline and draft. */
