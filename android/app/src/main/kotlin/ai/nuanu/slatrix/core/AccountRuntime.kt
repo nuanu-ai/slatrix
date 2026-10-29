@@ -2,7 +2,9 @@ package ai.nuanu.slatrix.core
 
 import android.app.Application
 import ai.nuanu.slatrix.BuildConfig
+import ai.nuanu.slatrix.push.PushRegistration
 import ai.nuanu.slatrix.push.PushRegistrationWorker
+import android.app.NotificationManager
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,7 +22,11 @@ class AccountRuntime private constructor(application: Application) {
     val account = MatrixAccount(scope, SessionStore(application), File(application.noBackupFilesDir, "matrix"),
         OAuthConfiguration(clientName = "Slatrix", redirectUri = "$callbackScheme:/oauth/callback",
             clientUri = "https://github.com/nuanu-ai/slatrix", logoUri = null, tosUri = null, policyUri = null,
-            staticRegistrations = emptyMap()))
+            staticRegistrations = emptyMap()),
+        onSignOut = { client ->
+            application.getSystemService(NotificationManager::class.java).cancelAll()
+            PushRegistration(application).unregister(client, client.userId())
+        })
     private val mutableIdentity = MutableStateFlow<IdentityVerification?>(null)
     val identity = mutableIdentity.asStateFlow()
     private val mutableRooms = MutableStateFlow<MatrixRooms?>(null)

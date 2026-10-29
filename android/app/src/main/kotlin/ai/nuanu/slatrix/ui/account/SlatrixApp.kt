@@ -127,7 +127,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 BrowserSignInScreen(browser.options.homeserver, error, open, account::cancel)
             }
             connecting?.restoring == true || failure?.canRetryRestore == true ->
-                RestoreSessionScreen(connecting != null, failure?.message, account::restore, account::cancel)
+                RestoreSessionScreen(connecting != null, failure?.message, account::restore, account::signOut)
             options != null && (options.password || options.oauth || options.sso) ->
                 SignInMethodsScreen(options, connecting != null, failure?.message, account::signIn, account::signInWithBrowser, account::cancel)
             else -> AccountProviderScreen(server, { server = it }, connecting != null, failure?.message,

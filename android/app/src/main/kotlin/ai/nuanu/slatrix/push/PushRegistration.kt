@@ -28,7 +28,7 @@ class PushRegistration(context: Context) {
     }
 
     suspend fun register(client: Client, userId: String, gateway: String) = registrationLock.withLock {
-        val owner = MessageDigest.getInstance("SHA-256").digest(userId.toByteArray()).joinToString("") { "%02x".format(it) }
+        val owner = owner(userId)
         while (true) {
             currentCoroutineContext().ensureActive()
             val token = synchronized(tokenLock) { preferences.getString("token", null) } ?: return@withLock
@@ -51,6 +51,16 @@ class PushRegistration(context: Context) {
             if (synchronized(tokenLock) { preferences.getString("token", null) } == token) return@withLock
         }
     }
+
+    /** Best effort: a revoked session can't delete its pushers, and the server drops them with the device. */
+    suspend fun unregister(client: Client, userId: String) = registrationLock.withLock {
+        val owner = owner(userId)
+        val tokens = preferences.getStringSet("$owner.stale", emptySet())!! + listOfNotNull(preferences.getString("$owner.current", null))
+        for (token in tokens) runCatching { client.deletePusher(PusherIdentifiers(token, appId)) }
+        check(preferences.edit().remove("$owner.current").remove("$owner.stale").commit())
+    }
+
+    private fun owner(userId: String) = MessageDigest.getInstance("SHA-256").digest(userId.toByteArray()).joinToString("") { "%02x".format(it) }
 
     companion object {
         private val tokenLock = Any()

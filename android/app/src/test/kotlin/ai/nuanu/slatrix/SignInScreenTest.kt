@@ -13,6 +13,7 @@ import androidx.test.core.app.ApplicationProvider
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import org.junit.Assert.assertFalse
 import org.matrix.rustcomponents.sdk.OAuthConfiguration
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -54,7 +55,8 @@ class SignInScreenTest {
     @Test fun signingInAgainAfterAFailedRestoreForgetsTheSavedSession() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val saved = File(context.noBackupFilesDir, "session.enc").apply { writeBytes("unreadable-session-fixture".toByteArray()) }
-        val account = MatrixAccount(CoroutineScope(SupervisorJob()), SessionStore(context), File(context.noBackupFilesDir, "matrix"),
+        val scope = CoroutineScope(SupervisorJob())
+        val account = MatrixAccount(scope, SessionStore(context), File(context.noBackupFilesDir, "matrix"),
             OAuthConfiguration("Slatrix", "com.github.nuanu-ai.slatrix.dev:/oauth/callback", "https://github.com/nuanu-ai/slatrix",
                 null, null, null, emptyMap()))
         compose.setContent { SlatrixApp(account, null, null, null) }
@@ -64,5 +66,6 @@ class SignInScreenTest {
         compose.onNodeWithText("Sign in again").performClick()
         compose.waitUntil(5_000) { compose.onAllNodesWithText("Homeserver").fetchSemanticsNodes().isNotEmpty() }
         assertFalse(saved.exists())
+        scope.cancel()
     }
 }

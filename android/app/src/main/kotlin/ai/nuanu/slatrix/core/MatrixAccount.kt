@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.ClientDelegate
 import org.matrix.rustcomponents.sdk.ClientBuilder
 import org.matrix.rustcomponents.sdk.ClientException
 import org.matrix.rustcomponents.sdk.ClientSessionDelegate
@@ -28,7 +29,9 @@ import org.matrix.rustcomponents.sdk.Session
 import org.matrix.rustcomponents.sdk.SlidingSyncVersionBuilder
 import org.matrix.rustcomponents.sdk.SqliteStoreBuilder
 import org.matrix.rustcomponents.sdk.SsoHandler
+import org.matrix.rustcomponents.sdk.TaskHandle
 import uniffi.matrix_sdk.OAuthAuthorizationData
+import uniffi.matrix_sdk_common.BackgroundTaskFailureReason
 
 data class SignInOptions(val homeserver: String, val password: Boolean, val sso: Boolean, val oauth: Boolean)
 
@@ -48,6 +51,7 @@ class MatrixAccount(
     private val store: SessionStore,
     private val rootDirectory: File,
     private val oauthConfiguration: OAuthConfiguration,
+    private val onSignOut: suspend (Client) -> Unit = {},
     private val clientFactory: suspend (String, String, String, Boolean, ClientSessionDelegate) -> Client =
         { homeserver, storeId, storeKey, restoring, delegate ->
             val directory = File(rootDirectory, storeId)
@@ -190,26 +194,40 @@ class MatrixAccount(
 
     fun cancel() = reset(AccountState.SignedOut)
 
-    private fun reset(nextState: AccountState) {
-        val (oldJob, oldAttempt) = synchronized(lock) {
-            generation++
-            val job = operation
-            operation = null
-            val attempt = pending ?: connected
-            attempt?.persistence?.deactivate()
-            pending = null
-            connected = null
-            options = null
-            mutableState.value = nextState
-            job to attempt
-        }
+    fun signOut() = reset(AccountState.Connecting(), signingOut = true)
+
+    private fun reset(nextState: AccountState, signingOut: Boolean = false, onlyIf: Attempt? = null) = synchronized(lock) {
+        if (onlyIf != null && connected !== onlyIf) return@synchronized
+        generation++
+        val owner = generation
+        val oldJob = operation
+        val oldAttempt = pending ?: connected
+        val signedIn = connected
+        operation = null
+        oldAttempt?.persistence?.deactivate()
+        pending = null
+        connected = null
+        options = null
+        mutableState.value = nextState
         oldJob?.cancel()
-        if (oldAttempt != null) {
-            scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                withContext(NonCancellable + Dispatchers.IO) {
-                    oldJob?.join()
-                    dispose(oldAttempt)
+        if (oldAttempt == null && !signingOut) return@synchronized
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            withContext(NonCancellable + Dispatchers.IO) {
+                oldJob?.join()
+                // Stores created after the session is cleared belong to a newer sign-in.
+                val stores = if (signingOut) rootDirectory.listFiles().orEmpty() else emptyArray()
+                val cleared = signingOut && runCatching { store.clear() }.isSuccess
+                if (signingOut) synchronized(lock) {
+                    if (owner == generation) mutableState.value = if (cleared) AccountState.SignedOut
+                        else AccountState.Failed("Couldn’t sign out.", canRetryRestore = true)
                 }
+                if (cleared && signedIn != null) {
+                    runCatching { onSignOut(signedIn.client) }
+                    runCatching { signedIn.client.logout() }
+                }
+                if (oldAttempt != null) dispose(oldAttempt)
+                // A session that is still saved can restore into its store, so keep it.
+                if (cleared) stores.forEach { it.deleteRecursively() }
             }
         }
     }
@@ -279,6 +297,15 @@ class MatrixAccount(
             checkOwner(attempt.owner)
             // A refresh can land between reading the session and saving it.
             if (attempt.fresh) attempt.persistence.persist(attempt.persistence.cached ?: session)
+            // Without it a revoked session keeps working offline; sign-in has already succeeded either way.
+            attempt.authErrorSubscription = runCatching {
+                attempt.client.setDelegate(object : ClientDelegate {
+                    override fun didReceiveAuthError(isSoftLogout: Boolean) {
+                        if (!isSoftLogout) reset(AccountState.Connecting(), signingOut = true, onlyIf = attempt)
+                    }
+                    override fun onBackgroundTaskErrorReport(taskName: String, error: BackgroundTaskFailureReason) = Unit
+                })
+            }.getOrNull()
             pending = null
             connected = attempt
             operation = null
@@ -292,6 +319,7 @@ class MatrixAccount(
             attempt.disposed = true
             attempt.persistence.deactivate()
         }
+        attempt.authErrorSubscription?.cancel()
         try { attempt.oauth?.let { attempt.client.abortOauthAuth(it) } } catch (_: Exception) { }
         attempt.oauth?.close()
         attempt.sso?.close()
@@ -314,6 +342,8 @@ class MatrixAccount(
         var oauth: OAuthAuthorizationData? = null
         var sso: SsoHandler? = null
         var nonce: String? = null
+        // Dropping the handle ends the subscription, and the subscription keeps the client alive.
+        var authErrorSubscription: TaskHandle? = null
         var disposed = false
     }
 
