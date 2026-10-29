@@ -32,9 +32,15 @@ class MatrixWorkspace(scope: CoroutineScope, client: Client) {
     private var composerRoom: Room? = null
     private var conversation: MatrixConversation? = null
     private var composer: MatrixComposer? = null
+    private var current: OpenChannel? = null
     private val worker = scope.launch {
         try {
             for ((token, requested) in requests) {
+                if (generation.get() != token) continue
+                if (composer?.flush() == false) {
+                    if (generation.get() == token) mutableSelected.value = current
+                    continue
+                }
                 release()
                 currentCoroutineContext().ensureActive()
                 if (requested == null || generation.get() != token) continue
@@ -46,7 +52,8 @@ class MatrixWorkspace(scope: CoroutineScope, client: Client) {
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), timeline::send)
                     if (generation.get() == token) {
-                        mutableSelected.value = requested.copy(conversation = timeline, composer = composer)
+                        current = requested.copy(conversation = timeline, composer = composer)
+                        mutableSelected.value = current
                     } else release()
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -92,5 +99,6 @@ class MatrixWorkspace(scope: CoroutineScope, client: Client) {
         // A cancelled constructor task may never enter the conversation's cleanup.
         runCatching { conversationRoom?.close() }
         conversationRoom = null
+        current = null
     }
 }
