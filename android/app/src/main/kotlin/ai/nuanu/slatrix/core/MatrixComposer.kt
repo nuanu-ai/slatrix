@@ -8,6 +8,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +28,8 @@ data class ComposerState(
     val error: String? = null,
 )
 
+private const val SAVE_DELAY_MILLIS = 500L
+
 /** Borrows [room]; the caller closes it after [close] flushes the draft. */
 class MatrixComposer(scope: CoroutineScope, private val room: Room, private val sendMessage: suspend (ComposerMessage) -> Boolean) {
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
@@ -42,7 +45,8 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     private val worker = operations.launch {
         try {
             restore()
-            for (edit in edits) if (loaded) flush() else restore()
+            // Typing saves after a pause rather than on every keystroke; leaving flushes the rest.
+            for (edit in edits) if (loaded) { delay(SAVE_DELAY_MILLIS); flush() } else restore()
         } finally {
             withContext(NonCancellable) { flush() }
             edits.close()
@@ -72,7 +76,8 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
                     if (revision == sendingRevision) {
                         revision++
                         mutableState.value = mutableState.value.copy(text = "")
-                        edits.trySend(Unit)
+                        // At once, so a sent message never comes back as a draft.
+                        flush()
                     }
                 } else fail(Failure.Send)
             } catch (cancelled: CancellationException) {

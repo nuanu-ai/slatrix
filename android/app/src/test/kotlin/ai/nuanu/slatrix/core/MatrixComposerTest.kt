@@ -2,7 +2,7 @@ package ai.nuanu.slatrix.core
 
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -37,7 +37,7 @@ class MatrixComposerTest {
         runCurrent()
         assertNull("Each keystroke must not write the encrypted store", room.draft)
         composer.edit("Hello")
-        advanceUntilIdle()
+        advanceTimeBy(1_000)
         assertEquals("Hello", room.draft?.plainText)
 
         composer.send()
@@ -101,12 +101,12 @@ class MatrixComposerTest {
 
         room.saveFailure = IllegalStateException("Disk unavailable")
         composer.edit("Keep the pending edit")
-        runCurrent()
+        advanceTimeBy(1_000)
         assertNotNull(composer.state.value.error)
         assertEquals("Keep the pending edit", composer.state.value.text)
         room.saveFailure = null
         composer.retry()
-        runCurrent()
+        advanceTimeBy(1_000)
         assertNull(composer.state.value.error)
         composer.close()
         val reopened = MatrixComposer(backgroundScope, room) { true }
