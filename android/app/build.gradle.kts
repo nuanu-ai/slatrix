@@ -80,6 +80,8 @@ extensions.configure<ApplicationExtension> {
         warningsAsErrors = true
         // Toolchain updates are reviewed separately, so pinned builds stay reproducible.
         disable += setOf("OldTargetApi", "GradleDependency", "AndroidGradlePluginVersion", "NewerVersionAvailable")
+        // Release ships arm64 only: an x86_64 SDK library would add 70 MB for x86 Chromebooks.
+        disable += "ChromeOsAbiSupport"
     }
 }
 
