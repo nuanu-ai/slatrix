@@ -66,9 +66,10 @@ struct RecentSearchesTests {
     // capability: search.recent
     @Test("The search bar offers recent searches as in every shared case", arguments: try spec.get().offered)
     func offered(spec: Case) {
-        let recents = SearchSuggestions.items(query: spec.query, recents: spec.recents, rooms: [], visited: []).compactMap {
-            if case .recent(let value) = $0 { value } else { nil }
-        }
+        let recents = SearchSuggestions.items(query: spec.query, recents: spec.recents, rooms: [], visited: [])
+            .compactMap {
+                if case .recent(let value) = $0 { value } else { nil }
+            }
         #expect(recents == spec.expected)
     }
 }
