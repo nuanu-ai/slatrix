@@ -97,9 +97,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     val loadOlder by rememberUpdatedState(onLoadOlder)
     // Asks again after every page while the top stays near, so pages of hidden events don't stall it.
-    LaunchedEffect(list, !state.loading && state.hasMore && !state.loadingHistory) {
-        // Waits for the cached messages, so a conversation that has plenty doesn't page on open.
-        if (state.loading || !state.hasMore || state.loadingHistory) return@LaunchedEffect
+    val canPage = !state.loading && state.hasMore && !state.loadingHistory && state.error == null
+    LaunchedEffect(list, canPage) {
+        // Waits for the cached messages, so a conversation that has plenty doesn't page on open, and after a
+        // failure waits for Retry.
+        if (!canPage) return@LaunchedEffect
         snapshotFlow {
             val visible = list.layoutInfo.visibleItemsInfo
             // About three screens ahead, as on the Mac; the list is reversed, so its top is its last index.
