@@ -61,7 +61,7 @@ class LiveChannelScreenTest {
         var requests = 0
         compose.setContent {
             SlatrixTheme {
-                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, { requests++ }, {}, {})
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, { requests++ }, {}, {}, {}, {})
             }
         }
         compose.waitForIdle()
@@ -85,7 +85,7 @@ class LiveChannelScreenTest {
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(many, loading = false, loadingHistory = true),
-                    ComposerState(loading = false), {}, {}, {}, {}, {}, {})
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
             }
         }
         repeat(10) { compose.onRoot().performTouchInput { swipeDown() } }
@@ -101,7 +101,7 @@ class LiveChannelScreenTest {
         val state = mutableStateOf(ConversationState(listOf(message("Hello", minutes = 0)), loading = false, loadingHistory = true))
         compose.mainClock.autoAdvance = false
         compose.setContent {
-            SlatrixTheme { LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}) }
+            SlatrixTheme { LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
         }
         compose.mainClock.advanceTimeBy(200)
         compose.onNode(progress).assertDoesNotExist()
@@ -119,7 +119,7 @@ class LiveChannelScreenTest {
         val state = mutableStateOf(ConversationState(listOf(message("Hello", minutes = 0)), loading = false))
         val current = mutableStateOf(room)
         compose.setContent {
-            SlatrixTheme { LiveChannelScreen(current.value, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}) }
+            SlatrixTheme { LiveChannelScreen(current.value, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
         }
         compose.onNodeWithText("Hello").assertIsDisplayed()
         compose.onNodeWithText("This is the very beginning of the #design channel.").assertDoesNotExist()
@@ -141,7 +141,7 @@ class LiveChannelScreenTest {
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), ComposerState(loading = false),
-                    {}, {}, {}, {}, {}, {})
+                    {}, {}, {}, {}, {}, {}, {}, {})
             }
         }
         compose.onNodeWithText("Today").assertIsDisplayed()
@@ -155,7 +155,7 @@ class LiveChannelScreenTest {
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), ComposerState(loading = false),
-                    {}, {}, {}, {}, {}, {})
+                    {}, {}, {}, {}, {}, {}, {}, {})
             }
         }
         compose.onNodeWithText("Second").assertIsDisplayed()
@@ -196,7 +196,7 @@ class LiveChannelScreenTest {
         compose.setContent {
             SlatrixTheme(dark = false) {
                 LiveChannelScreen(room.copy(topic = "Launch reviews"), ConversationState(loading = false, hasMore = false),
-                    ComposerState(text = "Draft", loading = false), {}, {}, {}, {}, {}, {})
+                    ComposerState(text = "Draft", loading = false), {}, {}, {}, {}, {}, {}, {}, {})
             }
         }
         compose.onNodeWithText("design", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action ->

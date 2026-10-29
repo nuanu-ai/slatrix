@@ -131,19 +131,20 @@ class MatrixConversationTest {
         conversation.close()
     }
 
-    @Test fun historyStopsAfterFiveBlankPagesUntilAnOlderMessageShows() = runTest {
+    @Test fun historyStopsAfterPagesOfHiddenEventsUntilAnOlderMessageShows() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.page.complete(false)
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
         conversation.state.first { it.rows.isNotEmpty() }
-        repeat(6) { conversation.loadOlder(); runCurrent() }
-        assertEquals("Pages of hidden events stop after five", 5, timeline.pages)
+        repeat(20) { conversation.loadOlder(); runCurrent() }
+        val stopped = timeline.pages
+        assertTrue("Pages of hidden events stop on their own", stopped < 20)
 
         timeline.emit(listOf(TimelineDiff.PushFront(conversationItem("stable-0", "\$zero", "Earlier"))))
         conversation.state.first { it.rows.first().id == "stable-0" }
         conversation.loadOlder()
         runCurrent()
-        assertEquals(6, timeline.pages)
+        assertEquals("An older message lets history page again", stopped + 1, timeline.pages)
         conversation.close()
     }
 

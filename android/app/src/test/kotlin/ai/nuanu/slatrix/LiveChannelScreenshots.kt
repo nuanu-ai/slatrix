@@ -58,7 +58,7 @@ class LiveChannelScreenshots(private val dark: Boolean, private val fontScale: F
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
                 SlatrixTheme(dark = dark) {
                     LiveChannelScreen(room, ConversationState(messages, loading = false, hasMore = false),
-                        ComposerState(loading = false), {}, {}, {}, {}, {}, {})
+                        ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
                 }
             }
         }

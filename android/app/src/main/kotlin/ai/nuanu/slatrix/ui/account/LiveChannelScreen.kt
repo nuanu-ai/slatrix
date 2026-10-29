@@ -7,8 +7,6 @@ import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
-import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
-import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.compose.BackHandler
@@ -35,7 +33,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -66,7 +63,7 @@ import java.util.Locale
 @Composable
 fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: ComposerState,
     onDraft: (String) -> Unit, onSend: () -> Unit, onBack: () -> Unit, onLoadOlder: () -> Unit, onRead: (String) -> Unit,
-    onRetry: () -> Unit, onRetrySend: (ConversationMessage) -> Unit = {}, onDeleteUnsent: (ConversationMessage) -> Unit = {}) {
+    onRetry: () -> Unit, onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -248,7 +245,7 @@ private fun LiveMessageRow(message: ConversationMessage, onMenu: (ConversationMe
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
         if (message.grouped) Box(Modifier.width(UiMetrics.Avatar), contentAlignment = Alignment.Center) {
             if (failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.size(UiMetrics.Icon), tint = colors.destructive)
-        } else MessageAvatar(message.initials, message.colorIndex)
+        } else LiveAvatar(message.initials, message.colorIndex)
         Column(Modifier.weight(1f)) {
             if (!message.grouped) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
@@ -262,14 +259,6 @@ private fun LiveMessageRow(message: ConversationMessage, onMenu: (ConversationMe
             Text(message.body, style = MaterialTheme.typography.bodyLarge,
                 color = if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody)
         }
-    }
-}
-
-@Composable
-private fun MessageAvatar(initials: String, colorIndex: Int) {
-    Box(Modifier.sizeIn(minWidth = UiMetrics.Avatar, minHeight = UiMetrics.Avatar).clip(MaterialTheme.shapes.large)
-        .background(DesignTokens.avatarColors[colorIndex]).padding(UiMetrics.GapTiny), contentAlignment = Alignment.Center) {
-        Text(initials, style = AvatarStyle.label, color = SlatrixTheme.colors.onAccent, maxLines = 1, softWrap = false)
     }
 }
 
