@@ -46,7 +46,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
         )
         compose.setContent {
             SlatrixTheme(dark = dark, palette = palette) {
-                if (tab == "You") LiveYouScreen("@alex:example.org", {}, {}, {})
+                if (tab == "You") LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, {})
                 else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {})
             }
         }
