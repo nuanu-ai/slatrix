@@ -10,6 +10,21 @@ import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 
 class MatrixWorkspaceTest {
+    @Test fun queuedBackAndRepeatedOpenKeepTheLatestChannelLive() = runTest {
+        val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
+        workspace.open(workspaceRoom("!alpha:example.org", "Alpha"))
+        workspace.back()
+        val beta = workspaceRoom("!beta:example.org", "Beta")
+        workspace.open(beta)
+        workspace.open(beta)
+        runCurrent()
+
+        assertEquals(beta, workspace.selected.value?.room)
+        assertNotNull("The last repeated selection must finish opening", workspace.selected.value?.conversation)
+        assertNotNull(workspace.selected.value?.composer)
+        workspace.close()
+    }
+
     @Test fun navigationRestoresEachRoomsDraftAndBackReleasesItsSdkResources() = runTest {
         val client = WorkspaceClient()
         val workspace = MatrixWorkspace(backgroundScope, client)
