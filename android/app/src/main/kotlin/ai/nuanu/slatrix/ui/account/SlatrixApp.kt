@@ -218,6 +218,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
             onNeedPeople = { composer?.loadPeople() },
             onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
+            onFormat = { start, end, kind, href -> composer?.format(start, end, kind, href) },
             onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
         // A quote doesn't know its parent's thread, so it asks before jumping.
         { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } })

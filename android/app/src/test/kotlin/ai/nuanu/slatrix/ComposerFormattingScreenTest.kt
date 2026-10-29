@@ -16,6 +16,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.text.TextRange
@@ -55,7 +56,7 @@ class ComposerFormattingScreenTest {
         compose.onNodeWithContentDescription("Formatting").performClick()
         val kinds = listOf("Bold" to Kind.Bold, "Italic" to Kind.Italic, "Strikethrough" to Kind.Strike, "Code" to Kind.Code,
             "Bulleted list" to Kind.Bullet, "Numbered list" to Kind.Numbered, "Quote" to Kind.Quote, "Code block" to Kind.CodeBlock)
-        for ((label, _) in kinds) compose.onNodeWithContentDescription(label).performClick()
+        for ((label, _) in kinds) compose.onNodeWithContentDescription(label).performScrollTo().performClick()
         compose.runOnIdle { assertEquals(kinds.map { Format(3, 8, it.second, null) }, formats) }
     }
 

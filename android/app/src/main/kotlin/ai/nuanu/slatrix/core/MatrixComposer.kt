@@ -29,6 +29,8 @@ data class ComposerState(
     val error: String? = null,
     val target: ComposerTarget? = null,
     val mentions: List<ComposerMention> = emptyList(),
+    val styles: List<ComposerStyle> = emptyList(),
+    val typing: ComposerTyping? = null,
 )
 
 private const val SAVE_DELAY_MILLIS = 500L
@@ -69,7 +71,33 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     fun edit(text: String) {
         val current = mutableState.value
         if (!loaded || !worker.isActive || text == current.text) return
-        change(current.copy(text = text, mentions = current.mentions.after(current.text, text)))
+        // Return on an empty list item, quote or code line ends the block instead of adding a line, as on the Mac.
+        val at = current.text.commonPrefixWith(text).length
+        val block = ComposerStyles.blockOf(current.styles, current.text, at)
+        if (block != null && text == current.text.substring(0, at) + "\n" + current.text.substring(at) &&
+            ComposerStyles.lineStart(current.text, at) == at && ComposerStyles.lineEnd(current.text, at) == at) {
+            change(current.copy(styles = ComposerStyles.toggled(current.styles, current.text, at, at, block, null), typing = null))
+            return
+        }
+        change(current.copy(text = text, mentions = current.mentions.after(current.text, text),
+            styles = ComposerStyles.after(current.styles, current.text, text, current.typing), typing = null))
+    }
+
+    /**
+     * Turns [kind] on or off over `start until end`, as Slack's toolbar does; a link sets [href] there. At the caret an
+     * inline format applies to what is typed next.
+     */
+    fun format(start: Int, end: Int, kind: ComposerStyle.Kind, href: String? = null) {
+        val current = mutableState.value
+        if (!loaded || !worker.isActive || start < 0 || end > current.text.length || start > end) return
+        val emptyFirstLine = kind.block && start == 0 && ComposerStyles.lineEnd(current.text, 0) == 0
+        if (start == end && (!kind.block || emptyFirstLine) && kind != ComposerStyle.Kind.Link) {
+            val kinds = current.typing?.takeIf { it.position == start }?.kinds ?: ComposerStyles.typingAt(current.styles, current.text, start)
+            val toggled = if (kind in kinds) kinds - kind else kinds.filterNot { kind.block && it.block }.toSet() + kind
+            mutableState.value = current.copy(typing = ComposerTyping(start, toggled))
+            return
+        }
+        change(current.copy(styles = ComposerStyles.toggled(current.styles, current.text, start, end, kind, href), typing = null))
     }
 
     /** Replaces the @ query `start until end` with a pill for [candidate], and a space after it. */
@@ -127,9 +155,9 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
         if (!loaded || mutableState.value.sending) return
         cancelTarget()
         setAside = mutableState.value
-        // The formatted body only when it holds pills: the composer keeps no other formatting.
-        val (text, mentions) = target.html?.let(ComposerFormat::editable)?.takeIf { it.second.isNotEmpty() } ?: (target.body to emptyList())
-        mutableState.value = mutableState.value.copy(text = text, target = target, mentions = mentions)
+        val content = target.html?.let(ComposerFormat::editable) ?: ComposerContent(target.body, emptyList())
+        mutableState.value = mutableState.value.copy(text = content.text, target = target, mentions = content.mentions,
+            styles = content.styles, typing = null)
     }
 
     /** Closes the reply bar, or leaves editing with the draft back in the composer. */
@@ -138,13 +166,13 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
         val draft = setAside
         setAside = null
         mutableState.value = mutableState.value.copy(text = draft?.text ?: mutableState.value.text,
-            mentions = draft?.mentions ?: mutableState.value.mentions, target = null)
+            mentions = draft?.mentions ?: mutableState.value.mentions, styles = draft?.styles ?: mutableState.value.styles, target = null)
     }
 
     fun send() {
         val current = mutableState.value
         if (!loaded || !lifetime.isActive || current.sending) return
-        val message = ComposerFormat.message(ComposerFormat.plainTextDraft(current.text, current.mentions)).copy(target = current.target)
+        val message = ComposerFormat.message(ComposerFormat.draft(current.text, current.mentions, current.styles)).copy(target = current.target)
         if (message.body.isBlank()) return
         val sendingRevision = revision
         failure = null
@@ -155,13 +183,13 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
                 currentCoroutineContext().ensureActive()
                 if (accepted && message.target is ComposerTarget.Edit) {
                     mutableState.value = mutableState.value.copy(text = setAside?.text.orEmpty(),
-                        mentions = setAside?.mentions.orEmpty(), target = null)
+                        mentions = setAside?.mentions.orEmpty(), styles = setAside?.styles.orEmpty(), target = null)
                     setAside = null
                 } else if (accepted) {
                     mutableState.value = mutableState.value.copy(target = null)
                     if (revision == sendingRevision) {
                         revision++
-                        mutableState.value = mutableState.value.copy(text = "", mentions = emptyList())
+                        mutableState.value = mutableState.value.copy(text = "", mentions = emptyList(), styles = emptyList(), typing = null)
                         // At once, so a sent message never comes back as a draft.
                         flush()
                     }
@@ -201,8 +229,9 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
             currentCoroutineContext().ensureActive()
             loaded = true
             failure = null
-            val (text, mentions) = draft?.htmlText?.let(ComposerFormat::editable) ?: (draft?.plainText.orEmpty() to emptyList())
-            mutableState.value = mutableState.value.copy(text = text, mentions = mentions, loading = false, error = null)
+            val content = draft?.htmlText?.let(ComposerFormat::editable) ?: ComposerContent(draft?.plainText.orEmpty(), emptyList())
+            mutableState.value = mutableState.value.copy(text = content.text, mentions = content.mentions, styles = content.styles,
+                loading = false, error = null)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -220,8 +249,8 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
         val text = draft.text
         try {
             if (text.isEmpty()) room.clearComposerDraft(threadRoot)
-            else room.saveComposerDraft(ComposerDraft(text, draft.mentions.takeIf { it.isNotEmpty() }
-                ?.let { ComposerFormat.plainTextDraft(text, it) }, ComposerDraftType.NewMessage, emptyList()), threadRoot)
+            else room.saveComposerDraft(ComposerDraft(text, ComposerFormat.draft(text, draft.mentions, draft.styles)
+                .takeIf { draft.mentions.isNotEmpty() || draft.styles.isNotEmpty() }, ComposerDraftType.NewMessage, emptyList()), threadRoot)
             savedRevision = savingRevision
             if (failure == Failure.Save) {
                 failure = null

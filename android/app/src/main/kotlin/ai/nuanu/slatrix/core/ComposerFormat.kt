@@ -6,6 +6,9 @@ import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
 import org.jsoup.nodes.TextNode
 
+/** The composer's text with its pills and formats. */
+data class ComposerContent(val text: String, val mentions: List<ComposerMention>, val styles: List<ComposerStyle> = emptyList())
+
 data class ComposerMessage(val body: String, val html: String?, val mentions: List<String>, val mentionsRoom: Boolean,
     val target: ComposerTarget? = null)
 
@@ -14,55 +17,139 @@ object ComposerFormat {
     private val userID = Regex("^$userPattern$")
     internal val mentioned = Regex("(?<![A-Za-z0-9_])(?:$userPattern|@room(?![A-Za-z0-9_:]))")
 
-    /** The composer's text as a draft, with each pill in [mentions] a link to its person. */
-    fun plainTextDraft(text: String, mentions: List<ComposerMention> = emptyList()): String {
-        val pills = mentions.associateBy { it.start }
-        val draft = StringBuilder()
+    /**
+     * The composer's text as a draft: Matrix HTML from the spec's list, with each pill in [mentions] a link to its person
+     * and [styles] as tags. Lines in one block share a list, quote or code block.
+     */
+    fun draft(text: String, mentions: List<ComposerMention> = emptyList(), styles: List<ComposerStyle> = emptyList()): String {
+        val starts = generateSequence(0) { start -> text.indexOf('\n', start).takeIf { it >= 0 }?.plus(1) }.toList()
+        val lines = starts.map { it to ComposerStyles.lineEnd(text, it) }
+        val blocks = starts.map { ComposerStyles.blockOf(styles, text, it) }
+        val html = StringBuilder()
         var index = 0
-        var lineStart = true
-        while (index < text.length) {
-            val pill = pills[index]
-            if (pill != null) {
-                draft.append("<a href=\"${escape(permalink(pill.userId))}\">${escape(text.substring(pill.start + 1, pill.end))}</a>")
-                index = pill.end
-                lineStart = false
-                continue
+        while (index < lines.size) {
+            val block = blocks[index]
+            var next = index
+            while (next < lines.size && blocks[next] == block) next++
+            val group = lines.subList(index, next)
+            when (block) {
+                null -> {
+                    html.append(group.joinToString("<br>") { (start, end) -> inline(text, start, end, mentions, styles) })
+                    // A break before a block shows nothing, so an empty last line needs one more.
+                    if (next < lines.size && group.last().let { it.first == it.second }) html.append("<br>")
+                }
+                ComposerStyle.Kind.Quote -> html.append("<blockquote>")
+                    .append(group.joinToString("<br>") { (start, end) -> inline(text, start, end, mentions, styles) }).append("</blockquote>")
+                ComposerStyle.Kind.CodeBlock -> html.append("<pre><code>")
+                    .append(escape(text.substring(group.first().first, group.last().second))).append("</code></pre>")
+                else -> {
+                    val tag = if (block == ComposerStyle.Kind.Numbered) "ol" else "ul"
+                    html.append("<$tag>").append(group.joinToString("") { (start, end) -> "<li>${inline(text, start, end, mentions, styles)}</li>" })
+                        .append("</$tag>")
+                }
             }
-            val character = text[index]
-            when {
-                character == '\r' && text.getOrNull(index + 1) == '\n' -> Unit
-                character == '\r' || character == '\n' -> { draft.append("<br>"); lineStart = true; index++; continue }
-                character == ' ' && (lineStart || text[index - 1] == ' ') -> draft.append("&nbsp;")
-                else -> draft.append(escape(character.toString()))
-            }
-            lineStart = false
-            index++
+            index = next
         }
-        return draft.toString()
+        return html.toString()
     }
 
-    /** A draft this composer wrote, back as text and the pills in it. */
-    fun editable(draftHtml: String): Pair<String, List<ComposerMention>> {
+    /** One line's text, its formats as tags. HTML collapses spaces, so leading and repeated ones go as no-break spaces. */
+    private fun inline(text: String, start: Int, end: Int, mentions: List<ComposerMention>, styles: List<ComposerStyle>): String {
+        val inline = styles.filter { !it.kind.block && it.start < end && it.end > start }
+        val pills = mentions.filter { it.start >= start && it.end <= end }
+        val cuts = (listOf(start, end) + (inline.flatMap { listOf(it.start, it.end) } + pills.flatMap { listOf(it.start, it.end) })
+            .filter { it in start..end }).distinct().sorted()
+        val html = StringBuilder()
+        for ((from, to) in cuts.zipWithNext()) {
+            val pill = pills.firstOrNull { it.start == from }
+            if (pills.any { it.start < from && from < it.end }) continue
+            val on = inline.filter { it.start <= from && to <= it.end }
+            var piece = if (pill != null) "<a href=\"${escape(permalink(pill.userId))}\">${escape(text.substring(pill.start + 1, pill.end))}</a>"
+            else buildString {
+                for (at in from until to) append(if (text[at] == ' ' && (at == start || text[at - 1] == ' ')) "&nbsp;" else escape(text[at].toString()))
+            }
+            val kinds = on.map { it.kind }
+            if (pill == null && ComposerStyle.Kind.Code in kinds) piece = "<code>$piece</code>"
+            for ((kind, tag) in listOf(ComposerStyle.Kind.Strike to "del", ComposerStyle.Kind.Italic to "em", ComposerStyle.Kind.Bold to "strong"))
+                if (kind in kinds) piece = "<$tag>$piece</$tag>"
+            on.firstOrNull { it.kind == ComposerStyle.Kind.Link }?.href?.takeIf { pill == null }?.let { piece = "<a href=\"${escape(it)}\">$piece</a>" }
+            html.append(piece)
+        }
+        return html.toString()
+    }
+
+    /** What a draft this composer wrote, or a message being edited, holds as the composer's text, pills and formats. */
+    fun editable(draftHtml: String): ComposerContent {
         val text = StringBuilder()
         val mentions = mutableListOf<ComposerMention>()
-        fun walk(element: Element) {
+        val styles = mutableListOf<ComposerStyle>()
+        var breakPending = false
+        fun mark(start: Int, kinds: Set<ComposerStyle.Kind>, href: String?) {
+            kinds.forEach { styles += ComposerStyle(start, text.length, it) }
+            if (href != null) styles += ComposerStyle(start, text.length, ComposerStyle.Kind.Link, href)
+        }
+        fun append(value: String, kinds: Set<ComposerStyle.Kind>, href: String?) {
+            if (value.isEmpty()) return
+            if (breakPending) { text.append('\n'); breakPending = false }
+            val start = text.length
+            text.append(value)
+            mark(start, kinds, href)
+        }
+        /** A new line inside [block] keeps it, so an empty line there still has it. */
+        fun lineBreak(block: ComposerStyle.Kind?) {
+            breakPending = false
+            text.append('\n')
+            if (block != null) styles += ComposerStyle(text.length - 1, text.length, block)
+        }
+        fun startBlock() { if (text.isNotEmpty() && !text.endsWith('\n')) breakPending = true }
+        fun walk(element: Element, kinds: Set<ComposerStyle.Kind>, href: String?) {
+            val block = kinds.firstOrNull { it.block }
             for (node in element.childNodes()) when {
-                node is TextNode -> text.append(node.wholeText.replace('\u00a0', ' '))
+                node is TextNode -> append(node.wholeText.replace(' ', ' '), kinds, href)
                 node !is Element -> Unit
-                node.normalName() == "br" -> text.append('\n')
+                node.normalName() == "br" -> lineBreak(block)
                 node.normalName() == "a" && mentionedUser(node.attr("href")) != null -> {
-                    val start = text.length
-                    text.append('@').append(node.wholeText().removePrefix("@"))
-                    mentions += ComposerMention(start, text.length, mentionedUser(node.attr("href"))!!)
+                    append("@" + node.wholeText().removePrefix("@"), kinds, null)
+                    mentions += ComposerMention(text.length - node.wholeText().removePrefix("@").length - 1, text.length, mentionedUser(node.attr("href"))!!)
+                }
+                node.normalName() == "a" -> walk(node, kinds, safeLink(node.attr("href")) ?: href)
+                node.normalName() == "pre" -> {
+                    startBlock()
+                    val code = node.wholeText()
+                    append(code, kinds - kinds.filter { it.block }.toSet() + ComposerStyle.Kind.CodeBlock, null)
+                    breakPending = true
+                }
+                node.normalName() in setOf("ul", "ol", "blockquote") -> {
+                    startBlock()
+                    val kind = when (node.normalName()) {
+                        "ul" -> ComposerStyle.Kind.Bullet
+                        "ol" -> ComposerStyle.Kind.Numbered
+                        else -> ComposerStyle.Kind.Quote
+                    }
+                    val inner = kinds.filterNot { it.block }.toSet() + kind
+                    if (kind == ComposerStyle.Kind.Quote) walk(node, inner, href)
+                    else node.children().filter { it.normalName() == "li" }.forEachIndexed { index, item ->
+                        if (index > 0) lineBreak(kind)
+                        walk(item, inner, href)
+                    }
+                    breakPending = true
                 }
                 else -> {
-                    if (node.isBlock && text.isNotEmpty() && !text.endsWith('\n')) text.append('\n')
-                    walk(node)
+                    val kind = when (node.normalName()) {
+                        "b", "strong" -> ComposerStyle.Kind.Bold
+                        "i", "em" -> ComposerStyle.Kind.Italic
+                        "s", "strike", "del" -> ComposerStyle.Kind.Strike
+                        "code", "tt" -> ComposerStyle.Kind.Code
+                        else -> null
+                    }
+                    if (kind == null && node.isBlock) startBlock()
+                    walk(node, kinds + listOfNotNull(kind), href)
+                    if (kind == null && node.isBlock) breakPending = true
                 }
             }
         }
-        walk(Jsoup.parseBodyFragment(draftHtml).body())
-        return text.toString() to mentions
+        walk(Jsoup.parseBodyFragment(draftHtml).body(), emptySet(), null)
+        return ComposerContent(text.toString(), mentions, styles.filter { it.start < it.end })
     }
 
     fun message(draftHtml: String): ComposerMessage {
