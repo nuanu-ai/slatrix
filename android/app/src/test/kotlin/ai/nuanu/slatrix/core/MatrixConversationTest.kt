@@ -86,6 +86,16 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    @Test fun retryLeavesATimelineThatStoppedUpdatingToBeReopened() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { !it.loading }
+        timeline.emit(listOf(TimelineDiff.Remove(9u)))
+        conversation.state.first { it.error != null }
+        assertFalse(conversation.retry())
+        conversation.close()
+    }
+
     @Test fun timelineUpdatesAreMappedOffTheCallersThread() = runTest {
         val caller = Thread.currentThread()
         var mappedOn: Thread? = null
