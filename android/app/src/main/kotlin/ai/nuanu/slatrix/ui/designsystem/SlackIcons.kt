@@ -50,9 +50,12 @@ object SlackIcons {
     val Plus = outline("plus", "M12 5 V19 M5 12 H19")
     /** Slack's forward: an arrow that turns off to the right. */
     val Forward = outline("forward", "M14 5.5 L19.5 10.75 L14 16 M19.5 10.75 H11.5 A6.5 6.5 0 0 0 5 17.25 V18.5")
+    val Bookmark = outline("bookmark", BookmarkShape)
+    val BookmarkFilled = filled("bookmark-filled", BookmarkShape)
     val Tray = outline("tray", "M4 13 H8.5 L9.5 15.5 H14.5 L15.5 13 H20 M4 13 V18.5 A1.5 1.5 0 0 0 5.5 20 H18.5 " +
         "A1.5 1.5 0 0 0 20 18.5 V13 L17.5 5.5 H6.5 Z")
 
+    private const val BookmarkShape = "M7.5 4.5 H16.5 A1 1 0 0 1 17.5 5.5 V19.5 L12 15.75 L6.5 19.5 V5.5 A1 1 0 0 1 7.5 4.5 Z"
     private const val BellBody = "M6 16.75 V11 A6 6 0 0 1 18 11 V16.75 L19.5 18.25 H4.5 Z"
     private const val SmallBubble = "M4 20.5 V16.25 A4.25 4.25 0 1 1 8.25 20.5 Z"
     private const val BigBubble = "M9.52 12.13 A5.75 5.75 0 1 1 18.9 12.95 L20.25 16 L16.7 14.55 A5.75 5.75 0 0 1 9.52 12.13 Z"
