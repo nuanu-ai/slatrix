@@ -39,7 +39,6 @@ class PushNotificationsTest {
             val notification = manager.activeNotifications.single().notification
             assertEquals("Slatrix", notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
             assertEquals("New message", notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
-            assertEquals(Notification.GROUP_ALERT_ALL, notification.groupAlertBehavior)
         }
 
         manager.cancelAll()

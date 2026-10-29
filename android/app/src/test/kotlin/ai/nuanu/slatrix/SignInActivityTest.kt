@@ -2,6 +2,7 @@ package ai.nuanu.slatrix
 
 import android.app.Application
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import org.junit.Rule
 import org.junit.Test
@@ -17,7 +18,8 @@ class SignInActivityTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test fun aNewInstallationAsksForTheServerBeforeCredentials() {
-        compose.onNodeWithText("Homeserver").assertExists()
+        // The launch restore checks for a saved session off the main thread first.
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Homeserver").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Continue").assertExists()
         compose.onNodeWithText("Username").assertDoesNotExist()
         compose.onNodeWithText("Password").assertDoesNotExist()
