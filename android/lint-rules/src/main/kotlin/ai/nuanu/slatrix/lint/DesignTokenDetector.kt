@@ -32,11 +32,14 @@ class DesignTokenDetector : Detector(), SourceCodeScanner {
                 val method = node.resolve() ?: return
                 val owner = method.containingClass?.qualifiedName ?: return
                 if ((method.isConstructor && owner == COLOR) ||
-                    (method.name == "Color" && owner == "${COLOR}Kt")
+                    (method.name == "Color" && owner == "${COLOR}Kt") ||
+                    (owner == "$COLOR.Companion" && method.name.substringBefore('-') in setOf("hsv", "hsl"))
                 ) {
                     context.report(ISSUE, node, context.getLocation(node), "Use a design system color role.")
                 }
-                if (method.isConstructor && owner == "androidx.compose.ui.unit.Dp" &&
+                if (((method.isConstructor && owner == "androidx.compose.ui.unit.Dp") ||
+                        (owner == "androidx.compose.ui.unit.TextUnitKt" &&
+                            method.name.substringBefore('-') == "TextUnit")) &&
                     node.valueArguments.firstOrNull()?.let { ConstantEvaluator.evaluate(context, it) } is Number
                 ) {
                     context.report(ISSUE, node, context.getLocation(node), "Use a design system size token.")
