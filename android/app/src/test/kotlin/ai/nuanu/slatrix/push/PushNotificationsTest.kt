@@ -7,6 +7,10 @@ import android.app.NotificationManager
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityStatus
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -106,6 +110,17 @@ class PushNotificationsTest {
 
         notifications.deliver(client, "@alex:example.org", "!team:example.org", "\$missing", NotificationStatus.EventNotFound, null)
         assertEquals("New message", manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    }
+
+    @Test fun aColdStartWaitsBrieflyForTheIdentityBeforeChoosingWhatToShow() = runTest {
+        val identity = MutableStateFlow(IdentityState())
+        val known = async { PushNotifications.knownIdentity(identity) }
+        runCurrent()
+        identity.value = IdentityState(status = IdentityStatus.Verified)
+        assertEquals(IdentityStatus.Verified, known.await()?.status)
+
+        identity.value = IdentityState()
+        assertEquals(IdentityStatus.Unknown, PushNotifications.knownIdentity(identity)?.status)
     }
 }
 
