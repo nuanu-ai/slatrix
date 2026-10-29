@@ -16,9 +16,14 @@ data class MessageAttachment(
     /** The sender's own small picture of it, when they attached one. */
     val thumbnail: MediaSource? = null,
     val thumbnailSize: Long? = null,
+    /** A video's length. */
+    val durationMillis: Long? = null,
 ) {
     enum class Kind { Image, Video, Audio, File }
 }
+
+/** The caption of a file or picture: its text, unless that is its name, which a captionless one carries instead. */
+val ConversationMessage.caption: String? get() = body.takeIf { attachment != null && it != attachment.name }
 
 /** What kind of file an attachment is, for its tile and card, by the rule in spec/file-kind.json. */
 enum class FileKind(private val title: String, extensions: String) {
