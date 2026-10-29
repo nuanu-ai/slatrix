@@ -121,6 +121,22 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    @Test fun historyStopsAfterFiveBlankPagesUntilAnOlderMessageShows() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        timeline.page.complete(false)
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.isNotEmpty() }
+        repeat(6) { conversation.loadOlder(); runCurrent() }
+        assertEquals("Pages of hidden events stop after five", 5, timeline.pages)
+
+        timeline.emit(listOf(TimelineDiff.PushFront(conversationItem("stable-0", "\$zero", "Earlier"))))
+        conversation.state.first { it.rows.first().id == "stable-0" }
+        conversation.loadOlder()
+        runCurrent()
+        assertEquals(6, timeline.pages)
+        conversation.close()
+    }
+
     @Test fun sendPreservesComposerFieldsAndAcceptsOnlyTheSdkQueueResult() = runTest {
         val timeline = ConversationTimeline(emptyList())
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
@@ -227,7 +243,9 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         return object : TaskHandle(NoHandle) { override fun cancel() { listenerCancelled.complete(Unit) } }
     }
     var pageFailure: Exception? = null
+    var pages = 0
     override suspend fun paginateBackwards(numEvents: UShort): Boolean {
+        pages++
         pageStarted.complete(Unit)
         pageFailure?.let { throw it }
         return try { page.await() } finally { pageCancelled.complete(Unit) }
