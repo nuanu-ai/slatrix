@@ -155,29 +155,56 @@ class MatrixWorkspaceTest {
         assertEquals(true, client.handles.all { it.uniffiIsDestroyed })
         assertEquals(false, client.uniffiIsDestroyed)
     }
+
+    // capability: thread.open
+    @Test fun aThreadOpensOnItsRootWithADraftApartFromItsChannel() = runTest {
+        val client = WorkspaceClient()
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+
+        workspace.open(alpha, threadRoot = "\$root")
+        runCurrent()
+        assertEquals("\$root", workspace.selected.value?.threadRoot)
+        assertEquals(TimelineFocus.Thread("\$root"), client.focuses.last())
+        val reply = requireNotNull(workspace.selected.value?.composer)
+        reply.state.first { !it.loading }
+        reply.edit("A reply in the thread")
+
+        workspace.open(alpha)
+        runCurrent()
+        assertEquals(TimelineFocus.Live(true), client.focuses.last())
+        val channel = requireNotNull(workspace.selected.value?.composer)
+        assertEquals("", channel.state.first { !it.loading }.text)
+
+        workspace.open(alpha, threadRoot = "\$root")
+        runCurrent()
+        assertEquals("A reply in the thread", requireNotNull(workspace.selected.value?.composer).state.first { !it.loading }.text)
+        workspace.close()
+    }
 }
 
 private class WorkspaceClient(private val beforeSave: suspend () -> Unit = {}) : Client(NoHandle) {
     private val drafts = mutableMapOf<String, ComposerDraft>()
     val handles = mutableListOf<Room>()
+    val focuses = mutableListOf<TimelineFocus>()
     var failSaves = false
     override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
         override fun id(): String = roomId
         override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
-            object : Timeline(NoHandle) {
+            focuses.add(configuration.focus).let { object : Timeline(NoHandle) {
                 override suspend fun addListener(listener: TimelineListener): TaskHandle = object : TaskHandle(NoHandle) {
                     override fun cancel() = Unit
                 }
                 override suspend fun paginateBackwards(numEvents: UShort): Boolean = true
-            }
-        override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = drafts[roomId]
+            } }
+        override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = drafts["$roomId $threadRoot"]
         override suspend fun saveComposerDraft(draft: ComposerDraft, threadRoot: String?) {
             beforeSave()
             check(!failSaves) { "Storage is unavailable" }
             check(!uniffiIsDestroyed) { "The room was closed before its draft was saved" }
-            drafts[roomId] = draft
+            drafts["$roomId $threadRoot"] = draft
         }
-        override suspend fun clearComposerDraft(threadRoot: String?) { drafts.remove(roomId) }
+        override suspend fun clearComposerDraft(threadRoot: String?) { drafts.remove("$roomId $threadRoot") }
     }.also(handles::add)
 }
 
