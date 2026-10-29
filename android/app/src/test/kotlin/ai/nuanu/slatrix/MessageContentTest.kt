@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageReaction
 import ai.nuanu.slatrix.core.MessageThread
+import ai.nuanu.slatrix.core.ReplyPreview
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
@@ -17,6 +18,7 @@ import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
@@ -124,6 +126,33 @@ class MessageContentTest {
         compose.onNodeWithText("Last reply 2 hours ago", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("3 replies", useUnmergedTree = true).performClick()
         compose.runOnIdle { assertEquals("\$Plan?", thread) }
+    }
+
+    // capability: message.reply-preview
+    @Test fun aReplyQuotesItsParentAndATapJumpsToIt() {
+        val parent = message("The parent message")
+        val between = (1..40).map { message("Message $it") }
+        val reply = message("Agreed").copy(replyTo = ReplyPreview(parent.eventId!!, ReplyPreview.State.Ready, "Mira", "Parent summary"))
+        show(parent, *between.toTypedArray(), reply)
+        compose.onNodeWithText("The parent message", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("Parent summary", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("The parent message", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    // capability: message.reply-preview
+    @Test fun aReplyKeepsItsHeightWhenItsParentLoads() {
+        val reply = mutableStateOf(message("Agreed").copy(replyTo = ReplyPreview("\$p", ReplyPreview.State.Loading)))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(reply.value), loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        fun top() = compose.onNodeWithText("Agreed", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top
+        val loading = top()
+        compose.runOnIdle { reply.value = reply.value.copy(replyTo = ReplyPreview("\$p", ReplyPreview.State.Ready, "Sam", "Ship it?")) }
+        compose.onNodeWithText("Ship it?", useUnmergedTree = true).assertExists()
+        assertEquals(loading, top())
     }
 
     // capability: message.deleted

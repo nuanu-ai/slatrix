@@ -85,6 +85,8 @@ data class ConversationMessage(
     val reactions: List<MessageReaction> = emptyList(),
     /** Set on a thread's root: the summary under it. */
     val thread: MessageThread? = null,
+    /** The message this one replies to, quoted above it. */
+    val replyTo: ReplyPreview? = null,
 ) : ConversationRow {
     /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
     val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
@@ -92,6 +94,11 @@ data class ConversationMessage(
 
 /** One emoji's reactions: how many, whether one is yours, and who, as user IDs in the order they reacted. */
 data class MessageReaction(val key: String, val count: Int, val mine: Boolean, val senders: List<String>)
+
+/** The quoted parent above a reply; until it loads, or when it can't, only its event ID is known. */
+data class ReplyPreview(val eventId: String, val state: State, val senderName: String = "", val body: String = "") {
+    enum class State { Loading, Ready, Unavailable }
+}
 
 /** Slack's "N replies" line under a thread's root. */
 data class MessageThread(val replies: Int, val lastReplier: String?, val lastReplyAt: Long?)
