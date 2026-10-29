@@ -312,8 +312,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { target, event ->
                 if (event != null) scope.launch { jump(target, event, main?.threadRootOf(target.id, event)) }
                 else { if (open.threadRoot != null) owner?.back(); main?.open(target) }
-            },
-            { notice = it }) {
+            }, profile, { notice = it }) {
         LiveChannelScreen(room, timeline, draft, { composer?.edit(it); if (draft.target !is ComposerTarget.Edit) open.typing?.changed(it) }, { composer?.send(); open.typing?.stopped() },
             { owner?.back() }, { conversation?.loadOlder() },
             { event ->
