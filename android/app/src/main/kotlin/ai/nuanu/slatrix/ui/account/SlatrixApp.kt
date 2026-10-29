@@ -8,6 +8,8 @@ import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.MatrixChannel
 import ai.nuanu.slatrix.core.MatrixConversation
+import org.matrix.rustcomponents.sdk.Client
+import ai.nuanu.slatrix.core.ConversationView
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityVerification
 import ai.nuanu.slatrix.core.MatrixRooms
@@ -237,17 +239,18 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             rooms?.client?.let { client ->
                 val channel = MatrixChannel(client, open.room.id)
                 ChannelDetailsActions(channel::members, channel::save, channel::leave, channel::invite, channel::notifications,
-                    channel::setNotifications) {
-                    // A conversation of the room's pins, open while its page shows: leaving it cancels the scope, which closes it.
-                    val pinScope = rememberCoroutineScope()
-                    val pins = remember {
-                        runCatching { client.getRoom(open.room.id) }.getOrNull()?.let { MatrixConversation(pinScope, it, pinned = true) }
-                    }
+                    channel::setNotifications, pins = {
+                    val pins = rememberConversation(client, open.room.id, ConversationView.Pins)
                     // Unpins through the conversation, which outlives the page, so going back doesn't cancel it.
                     PinnedMessages(pins?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load pins")) {
                         conversation?.pin(it, false)
                     }
-                }
+                }, files = {
+                    val files = rememberConversation(client, open.room.id, ConversationView.Files)
+                    val state = files?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load files")
+                    // Asks for the next page, which after a failed one is that page again.
+                    SharedFiles(state) { files?.loadOlder() }
+                })
             }
         }
         // Over the conversation, so Back finds it where it was.
@@ -259,6 +262,13 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             }) { details = false }
         }
     }
+}
+
+/** The room in [view], open while its caller shows: leaving cancels the scope, which closes it. */
+@Composable
+private fun rememberConversation(client: Client, roomId: String, view: ConversationView): MatrixConversation? {
+    val scope = rememberCoroutineScope()
+    return remember { runCatching { client.getRoom(roomId) }.getOrNull()?.let { MatrixConversation(scope, it, view = view) } }
 }
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
