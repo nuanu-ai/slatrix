@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.core
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -24,6 +25,22 @@ class MatrixConversationTest {
         assertEquals("Hello", message.body)
         assertEquals("Mira Chen", message.senderName)
         assertEquals("MC", message.initials)
+        conversation.close()
+    }
+
+    @Test fun aResetOrClearedTimelineLoadsOlderHistoryAgain() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.loadOlder()
+        timeline.page.complete(true)
+        conversation.state.first { !it.hasMore }
+
+        timeline.emit(listOf(TimelineDiff.Reset(listOf(conversationItem("stable-2", "\$two", "Again")))))
+        assertTrue(conversation.state.first { it.messages.firstOrNull()?.id == "stable-2" }.hasMore)
+        conversation.loadOlder()
+        conversation.state.first { !it.hasMore }
+        timeline.emit(listOf(TimelineDiff.Clear))
+        assertTrue(conversation.state.first { it.messages.isEmpty() }.hasMore)
         conversation.close()
     }
 
