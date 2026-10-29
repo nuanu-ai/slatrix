@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.ui.mockups.SlatrixMockups
 import ai.nuanu.slatrix.ui.mockups.MockScreen
 import android.app.Application
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -51,5 +52,16 @@ class MockNavigationTest {
         compose.onNodeWithContentDescription("Send message").performClick()
         compose.onNodeWithText("Channel draft").assertIsDisplayed()
         compose.onNodeWithText("Message #design").assertIsDisplayed()
+    }
+    @Test fun activityFiltersAndReturnsFromItsThread() {
+        compose.setContent { SlatrixMockups(initialScreen = MockScreen.Activity) }
+        compose.onNodeWithText("All notifications").assertIsDisplayed()
+        compose.onNodeWithText("Mentions").performClick()
+        compose.onNodeWithText("Sam Taylor").assertDoesNotExist()
+        compose.onNodeWithText("Threads").performClick()
+        compose.onNodeWithText("Sam Taylor").performClick()
+        compose.onNodeWithText("Thread").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Threads").assertIsSelected()
     }
 }
