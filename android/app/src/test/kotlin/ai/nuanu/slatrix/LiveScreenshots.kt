@@ -82,7 +82,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
                     Box(Modifier.weight(1f)) {
                         if (tab == "You") LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, {})
                         else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spaces = spaces, spacesKnown = true),
-                            {}, {}, {}, Harbor, search = { SearchScreen(rooms, "@alex:example.org", hits, {}, {}, {}, onRoom = {}) })
+                            {}, {}, {}, Harbor, search = { SearchScreen(rooms, "@alex:example.org", hits, {}, {}, {}, listOf("release notes", "offsite photos", "budget in:#design"), onRoom = {}) })
                     }
                     Box(Modifier.fillMaxWidth().height(GestureBar).background(if (tab == "You") colors.canvas else colors.raised))
                 }
@@ -92,6 +92,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
             "DMs" -> compose.onNode(hasText(tab) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
             "Switcher" -> compose.onNodeWithContentDescription("Switch workspace").performClick()
             "Sheet" -> compose.onNodeWithText("general").performTouchInput { longClick() }
+            "Recent" -> compose.onNode(hasText("Search") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
             "Search", "SearchResults" -> {
                 compose.onNode(hasText("Search") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
                 compose.onNode(hasSetTextAction()).performTextInput(if (tab == "Search") "d" else "release")
@@ -111,7 +112,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
 
         @JvmStatic @Parameters(name = "{0}-{1}-{2}")
         fun cases(): List<Array<Any>> = buildList {
-            for (tab in listOf("Home", "DMs", "You", "Switcher", "Sheet", "Search", "SearchResults")) for (dark in listOf(false, true)) add(arrayOf(tab, dark, SidebarPalette.Aubergine))
+            for (tab in listOf("Home", "DMs", "You", "Switcher", "Sheet", "Recent", "Search", "SearchResults")) for (dark in listOf(false, true)) add(arrayOf(tab, dark, SidebarPalette.Aubergine))
             add(arrayOf("Home", false, SidebarPalette.Lagoon))
         }
     }

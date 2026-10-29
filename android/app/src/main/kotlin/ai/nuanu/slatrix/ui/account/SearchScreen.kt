@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.ConversationSearch
 import ai.nuanu.slatrix.core.MessageSearchQuery
 import ai.nuanu.slatrix.core.MessageSearchState
+import ai.nuanu.slatrix.core.RecentSearches
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SearchHit
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
@@ -59,8 +60,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 
 /**
- * Slack's Search tab: the field takes focus as the tab opens; typing lists matching channels and people, and searching
- * lists the messages the index matched. [rooms] are the conversations in scope, so hits elsewhere stay out.
+ * Slack's Search tab: the field takes focus as the tab opens and offers your [recents]; typing lists matching channels
+ * and people, and searching lists the messages the index matched, telling [onSearched] what was searched. [rooms] are the
+ * conversations in scope, so hits elsewhere stay out.
  */
 @Composable
 fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchState, onSearch: (MessageSearchQuery?) -> Unit,
@@ -79,10 +81,12 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
     val submit = {
         if (text.isNotBlank()) {
             onSearch(MessageSearchQuery.parse(text, rooms, me))
+            onSearched(text)
             submitted = true
             focusManager.clearFocus()
         }
     }
+    val again = { recent: String -> text = recent; submit() }
     Column(Modifier.fillMaxSize()) {
         SearchField(text, { value ->
             text = value
@@ -90,7 +94,12 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
         }, submit, Modifier.focusRequester(focus))
         when {
             submitted -> MessageResults(text.trim(), rooms, messages, onMore, onMessage)
-            text.isNotBlank() -> Suggestions(text, rooms, submit, onRoom)
+            text.isNotBlank() -> Suggestions(text, rooms, RecentSearches.offered(text, recents), submit, again, onRoom)
+            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = UiMetrics.GapSmall)) {
+                val offered = RecentSearches.offered(text, recents)
+                if (offered.isNotEmpty()) item { SearchSection("Recent searches") }
+                items(offered, key = { it }) { RecentRow(it, again) }
+            }
         }
     }
 }
@@ -124,7 +133,8 @@ private fun SearchField(text: String, onText: (String) -> Unit, onSubmit: () -> 
 }
 
 @Composable
-private fun Suggestions(text: String, rooms: List<RoomSummary>, onSubmit: () -> Unit, onRoom: (String) -> Unit) {
+private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<String>, onSubmit: () -> Unit, onRecent: (String) -> Unit,
+    onRoom: (String) -> Unit) {
     val channels = remember(text, rooms) { ConversationSearch.results(rooms.filterNot { it.direct }, text).take(SuggestionCount) }
     val people = remember(text, rooms) { ConversationSearch.results(rooms.filter { it.direct }, text).take(SuggestionCount) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = UiMetrics.GapSmall)) {
@@ -136,6 +146,7 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, onSubmit: () -> 
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+        items(recents, key = { "recent-$it" }) { RecentRow(it, onRecent) }
         if (channels.isNotEmpty()) {
             item { SearchSection("Channels") }
             items(channels, key = { it.id }) { room ->
@@ -207,6 +218,15 @@ private fun MessageHit(hit: SearchHit, room: RoomSummary?, query: MessageSearchQ
             }
             Text(body, style = MaterialTheme.typography.bodyLarge, color = colors.textBody, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
+    }
+}
+
+@Composable
+private fun RecentRow(recent: String, onRecent: (String) -> Unit) {
+    SearchRow({ onRecent(recent) }) {
+        Icon(SlackIcons.History, null, Modifier.size(UiMetrics.Icon))
+        Spacer(Modifier.width(UiMetrics.GapLarge))
+        RowTitle(recent)
     }
 }
 

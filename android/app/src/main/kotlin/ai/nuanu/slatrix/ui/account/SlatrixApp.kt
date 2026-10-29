@@ -11,6 +11,8 @@ import ai.nuanu.slatrix.core.IdentityVerification
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.MatrixSearch
 import ai.nuanu.slatrix.core.MessageSearchState
+import ai.nuanu.slatrix.core.RecentSearchStore
+import ai.nuanu.slatrix.core.RecentSearches
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.ConversationState
@@ -240,13 +242,16 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
             val inScope = remember(state.rooms, selectedSpaceId) {
                 state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
             }
+            val context = LocalContext.current
+            val recentStore = remember(context, userId) { RecentSearchStore(context, userId) }
+            var recents by remember(recentStore) { mutableStateOf(recentStore.recents) }
             SearchScreen(inScope, userId, messages, { query -> if (query == null) search?.clear() else search?.search(query) },
                 { search?.loadMore() }, { hit ->
                     // A hit doesn't know its thread, so it is looked up first: a reply opens in its thread.
                     state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
                         scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
-                }, onRoom = open)
+                }, recents, { recents = RecentSearches.adding(it, recents).also { next -> recentStore.recents = next } }, open)
         }, activity = activity)
 }
 
