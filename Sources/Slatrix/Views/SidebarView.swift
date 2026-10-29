@@ -30,13 +30,15 @@ struct SidebarView: View {
         matrix.rooms.contains { room in
             (room.isSpace && room.membership == "invite")
                 || (room.membership != "leave"
-                    && (room.isDirect || workspaceID == nil || room.spaceIDs.contains(workspaceID!))
+                    && WorkspaceMembership.includes(
+                        direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID)
                     && (room.hasUnread || room.membership == "invite"))
         }
     }
     private var visibleRooms: [ChatRoom] {
         matrix.rooms.filter { room in
-            !room.isSpace && (room.isDirect || workspaceID == nil || room.spaceIDs.contains(workspaceID!))
+            !room.isSpace
+                && WorkspaceMembership.includes(direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID)
                 && (search.isEmpty || room.name.localizedCaseInsensitiveContains(search)) && room.membership != "leave"
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
