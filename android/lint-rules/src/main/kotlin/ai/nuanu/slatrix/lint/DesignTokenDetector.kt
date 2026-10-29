@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.lint
 
 import com.android.tools.lint.detector.api.Category
+import com.android.tools.lint.detector.api.ConstantEvaluator
 import com.android.tools.lint.detector.api.Detector
 import com.android.tools.lint.detector.api.Implementation
 import com.android.tools.lint.detector.api.Issue
@@ -14,7 +15,6 @@ import com.intellij.psi.PsiMethod
 import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.uast.UCallExpression
 import org.jetbrains.uast.UElement
-import org.jetbrains.uast.ULiteralExpression
 import org.jetbrains.uast.UQualifiedReferenceExpression
 import org.jetbrains.uast.USimpleNameReferenceExpression
 
@@ -36,6 +36,11 @@ class DesignTokenDetector : Detector(), SourceCodeScanner {
                 ) {
                     context.report(ISSUE, node, context.getLocation(node), "Use a design system color role.")
                 }
+                if (method.isConstructor && owner == "androidx.compose.ui.unit.Dp" &&
+                    node.valueArguments.firstOrNull()?.let { ConstantEvaluator.evaluate(context, it) } is Number
+                ) {
+                    context.report(ISSUE, node, context.getLocation(node), "Use a design system size token.")
+                }
             }
 
             override fun visitSimpleNameReferenceExpression(node: USimpleNameReferenceExpression) {
@@ -50,8 +55,7 @@ class DesignTokenDetector : Detector(), SourceCodeScanner {
                     context.report(ISSUE, node, context.getLocation(node), "Use a design system color role.")
                 }
                 val qualified = node.uastParent as? UQualifiedReferenceExpression ?: return
-                val receiver = qualified.receiver as? ULiteralExpression ?: return
-                if (receiver.value !is Number) return
+                if (ConstantEvaluator.evaluate(context, qualified.receiver) !is Number) return
                 if ((owner?.startsWith("androidx.compose.ui.unit.") == true &&
                         member is PsiMethod && member.name in setOf("getDp", "getSp", "getEm")) ||
                     (propertyOwner == "androidx.compose.ui.unit" && property.name in setOf("dp", "sp", "em"))
