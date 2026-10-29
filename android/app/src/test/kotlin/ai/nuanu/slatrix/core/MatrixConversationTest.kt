@@ -221,7 +221,6 @@ class MatrixConversationTest {
         conversation.close()
     }
 
-    // capability: message.edited
     // capability: message.reactions.show
     @Test fun reactionsCountTheirSendersAndMarkYours() = runTest {
         fun sent(id: String) = ReactionSenderData(id, 1_700_000_000_000u, null)
@@ -257,6 +256,7 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.edited
     @Test fun anEditedMessageSaysSo() = runTest {
         val edited = TimelineItemContent.MsgLike(MsgLikeContent(
             MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Fixed", null)), "Fixed", true, null)),

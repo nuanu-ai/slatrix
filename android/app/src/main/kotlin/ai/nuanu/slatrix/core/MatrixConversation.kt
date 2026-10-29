@@ -120,8 +120,7 @@ internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } c
 class MatrixConversation(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null) {
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
-    // Only a fake room lacks it; a real one always knows who it belongs to.
-    private val ownUserId = runCatching { room.ownUserId() }.getOrNull()
+    private val ownUserId = room.ownUserId()
     private val mutableState = MutableStateFlow(ConversationState(ownUserId = ownUserId))
     val state: StateFlow<ConversationState> = mutableState.asStateFlow()
     private val ready = CompletableDeferred<Timeline>()
@@ -364,13 +363,15 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return rows
     }
 
+    private fun name(profile: ProfileDetails, sender: String) =
+        (profile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: sender
+
     private fun row(item: TimelineItem): ConversationRow? {
         val event = item.asEvent() ?: return (item.asVirtual() as? VirtualTimelineItem.DateDivider)?.let {
             DayDivider(item.uniqueId().id, it.ts.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
         }
         val content = (event.content as? TimelineItemContent.MsgLike)?.content ?: return null
-        val senderName = (event.senderProfile as? ProfileDetails.Ready)?.displayName
-            ?.takeIf { it.isNotBlank() } ?: event.sender
+        val senderName = name(event.senderProfile, event.sender)
         var formatted: FormattedBody? = null
         val kind: MessageKind
         val body: String
@@ -418,7 +419,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             thread = content.threadSummary?.let { summary ->
                 val latest = summary.latestEvent() as? EmbeddedEventDetails.Ready
                 MessageThread(summary.numReplies().coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
-                    latest?.let { (it.senderProfile as? ProfileDetails.Ready)?.displayName?.takeIf(String::isNotBlank) ?: it.sender },
+                    latest?.let { name(it.senderProfile, it.sender) },
                     latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong())
             }?.takeIf { it.replies > 0 },
         ).also { it.runs }

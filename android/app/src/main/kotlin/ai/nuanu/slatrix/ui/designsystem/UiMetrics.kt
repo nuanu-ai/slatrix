@@ -25,7 +25,8 @@ object UiMetrics {
     val SheetIcon = 24.dp
     val ActionTile = 86.dp
     val QuoteBar = 4.dp
-    val ReactionHeight = 32.dp
+    /** Reaction chips and the thread replies line, as tall as Slack Android's. */
+    val ChipHeight = 32.dp
     /** A list's indent, in multiples of the text size, as on the Mac. */
     const val ListIndentScale = 1.6f
     /** Code reads a little smaller than the text around it, as on the Mac. */

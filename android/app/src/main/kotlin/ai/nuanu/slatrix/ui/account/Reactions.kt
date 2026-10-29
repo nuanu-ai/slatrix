@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.AvatarPlaceholder
+import ai.nuanu.slatrix.core.ComposerFormat
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationRow
 import ai.nuanu.slatrix.core.MessageReaction
@@ -44,7 +45,7 @@ internal fun Reactions(reactions: List<MessageReaction>, onToggle: ((String) -> 
     FlowRow(Modifier.padding(top = UiMetrics.GapSmall), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall),
         verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
         for (reaction in reactions) {
-            Row(Modifier.height(UiMetrics.ReactionHeight)
+            Row(Modifier.height(UiMetrics.ChipHeight)
                 .background(if (reaction.mine) colors.accentTint else colors.sunken, CircleShape)
                 .border(BorderStroke(UiMetrics.Divider, if (reaction.mine) colors.accent else colors.sunken), CircleShape)
                 .semantics { selected = reaction.mine }
@@ -61,9 +62,10 @@ internal fun Reactions(reactions: List<MessageReaction>, onToggle: ((String) -> 
 
 /** Slack's line under a thread's root: who replied last, how many replies and when; a tap opens the thread. */
 @Composable
-internal fun ThreadReplies(thread: MessageThread, onOpen: () -> Unit) {
+internal fun ThreadReplies(thread: MessageThread, onOpen: (() -> Unit)?) {
     val colors = SlatrixTheme.colors
-    Row(Modifier.padding(top = UiMetrics.GapTiny).heightIn(min = UiMetrics.ReactionHeight).clickable(onClick = onOpen),
+    Row(Modifier.padding(top = UiMetrics.GapTiny).heightIn(min = UiMetrics.ChipHeight)
+        .then(if (onOpen != null) Modifier.clickable(onClickLabel = "View thread", onClick = onOpen) else Modifier),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
         thread.lastReplier?.let { LiveAvatar(AvatarPlaceholder.initials(it), AvatarPlaceholder.colorIndex(it), UiMetrics.CompactAvatar) }
         Text("${thread.replies} ${if (thread.replies == 1) "reply" else "replies"}", style = MaterialTheme.typography.labelLarge,
@@ -89,7 +91,7 @@ internal fun ReactionsSheet(reactions: List<MessageReaction>, rows: List<Convers
     ModalBottomSheet(onDismissRequest = onDismiss, shape = SlatrixTheme.topPanelShape, containerColor = colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             for (reaction in reactions) {
-                val who = reaction.senders.map { if (it == me) "You" else names[it] ?: it.drop(1).substringBefore(':') }
+                val who = reaction.senders.map { if (it == me) "You" else names[it] ?: ComposerFormat.localpart(it) }
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge),
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
                     Text(reaction.key, style = MaterialTheme.typography.headlineSmall)
