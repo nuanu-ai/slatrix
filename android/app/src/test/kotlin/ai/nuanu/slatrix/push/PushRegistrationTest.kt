@@ -2,8 +2,6 @@ package ai.nuanu.slatrix.push
 
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
