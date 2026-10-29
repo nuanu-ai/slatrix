@@ -39,6 +39,7 @@ object UiMetrics {
     val ChipHeight = 32.dp
     /** The tallest an inline image gets; wider ones fill the row. */
     val MediaMaxHeight = 320.dp
+    val FileTile = 40.dp
     /** What one of an image's own pixels takes inline, so a small image keeps its size, as on the Mac. */
     val MediaPixel = 1.dp
     /** The most pixels a side of the full-screen picture asks for. */

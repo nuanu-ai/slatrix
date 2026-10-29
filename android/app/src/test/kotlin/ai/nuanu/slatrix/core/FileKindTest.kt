@@ -14,7 +14,7 @@ class FileKindTest {
             val name = case["name"].asString
             val mime = case["mime"].takeUnless { it.isJsonNull }?.asString
             val kind = FileKind.of(name, mime)
-            assertEquals(name, case["kind"].asString to case["label"].asString, kind.token to FileKind.label(name, kind))
+            assertEquals(name, case["kind"].asString to case["label"].asString, kind.token to kind.label(name))
         }
     }
 }

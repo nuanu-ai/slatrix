@@ -25,8 +25,9 @@ restores sessions, and supports identity verification and recovery. Home lists s
 conversations, channels and direct messages in sections that collapse, with top-level
 Matrix spaces as workspaces. A first launch opens the workspace with the most channels. Starring uses Matrix's favourite tag, so it follows the
 account's other clients. Search finds channels and direct messages by name, and messages
-through the SDK's local index, encrypted ones included. Conversations show messages, load earlier history, mark visible
-messages read and send text. Drafts are stored encrypted on the device.
+through the SDK's local index, encrypted ones included. Conversations show messages with their
+formatting, quoted replies, images, files, reactions and thread replies, load earlier history,
+mark visible messages read and send text. Drafts are stored encrypted on the device.
 
 You shows the signed-in identity and Preferences. Color mode follows the system by
 default, with Light and Dark overrides. Aubergine and Lagoon are separate palette

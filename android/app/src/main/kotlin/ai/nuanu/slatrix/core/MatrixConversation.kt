@@ -565,24 +565,16 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 is MessageType.Notice -> Shown(MessageKind.Notice, kind.content.body, html(type.content.formatted))
                 is MessageType.Emote -> Shown(MessageKind.Emote, kind.content.body, html(type.content.formatted))
                 // A caption is the attachment's text; without one the text is its name, which the row doesn't repeat.
-                is MessageType.Image -> type.content.let {
-                    Shown(MessageKind.Attachment, it.caption ?: it.filename, html(it.formattedCaption), MessageAttachment(
-                        MessageAttachment.Kind.Image, it.filename, it.info?.mimetype, it.info?.size?.long, it.info?.width?.int,
-                        it.info?.height?.int, it.source, it.info?.thumbnailSource))
-                }
-                is MessageType.Video -> type.content.let {
-                    Shown(MessageKind.Attachment, it.caption ?: it.filename, html(it.formattedCaption), MessageAttachment(
-                        MessageAttachment.Kind.Video, it.filename, it.info?.mimetype, it.info?.size?.long, it.info?.width?.int,
-                        it.info?.height?.int, it.source, it.info?.thumbnailSource))
-                }
-                is MessageType.Audio -> type.content.let {
-                    Shown(MessageKind.Attachment, it.caption ?: it.filename, html(it.formattedCaption), MessageAttachment(
-                        MessageAttachment.Kind.Audio, it.filename, it.info?.mimetype, it.info?.size?.long, null, null, it.source))
-                }
-                is MessageType.File -> type.content.let {
-                    Shown(MessageKind.Attachment, it.caption ?: it.filename, html(it.formattedCaption), MessageAttachment(
-                        MessageAttachment.Kind.File, it.filename, it.info?.mimetype, it.info?.size?.long, null, null, it.source))
-                }
+                is MessageType.Image -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                    MessageAttachment.Kind.Image, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
+                    source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long)) }
+                is MessageType.Video -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                    MessageAttachment.Kind.Video, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
+                    source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long)) }
+                is MessageType.Audio -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                    MessageAttachment.Kind.Audio, filename, info?.mimetype, info?.size?.long, null, null, source)) }
+                is MessageType.File -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                    MessageAttachment.Kind.File, filename, info?.mimetype, info?.size?.long, null, null, source)) }
                 is MessageType.Gallery -> Shown(MessageKind.Attachment, kind.content.body)
                 else -> Shown(MessageKind.Unsupported, kind.content.body)
             }
@@ -593,6 +585,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         is MsgLikeKind.Poll -> Shown(MessageKind.Unsupported, kind.question)
         else -> Shown(MessageKind.Unsupported, "Unsupported message")
     }
+
+    private fun attached(text: String, html: String?, attachment: MessageAttachment) =
+        Shown(MessageKind.Attachment, text, html, attachment)
 
     private val ULong.long get() = coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
     private val ULong.int get() = coerceAtMost(Int.MAX_VALUE.toULong()).toInt()

@@ -161,6 +161,18 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     var reacted by remember { mutableStateOf<ConversationMessage?>(null) }
     var viewing by remember { mutableStateOf<Pair<MessageAttachment, ImageBitmap?>?>(null) }
     viewing?.let { (attachment, placeholder) -> MediaViewer(attachment, placeholder, loadPicture) { viewing = null } }
+    val files = rememberCoroutineScope()
+    // A file opens from the screen, not its row, so scrolling the row away doesn't cancel the download.
+    var opening by remember { mutableStateOf(emptySet<String>()) }
+    var fileError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(fileError) { if (fileError != null) { delay(UiMetrics.NoticeMillis); fileError = null } }
+    val openFile = { message: ConversationMessage ->
+        val attachment = message.attachment
+        if (attachment != null && message.id !in opening) files.launch {
+            opening += message.id
+            try { onOpenFile(attachment)?.let { fileError = it } } finally { opening -= message.id }
+        }
+    }
     reacted?.let { ReactionsSheet(it.reactions, state.rows, state.ownUserId) { reacted = null } }
     Column(Modifier.fillMaxSize().background(colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(end = UiMetrics.GapLarge,
@@ -204,13 +216,13 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Box(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
                             if (threadRoot != null && row.eventId == threadRoot) Column {
-                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, onOpenFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
+                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
                                 // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                                 RepliesBar(replies)
                             // The first reply starts under the replies bar, so it shows its sender again.
                             } else LiveMessageRow(if (row.id == firstReply) row.copy(grouped = false) else row, state.ownUserId,
                                 actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
-                                loadPicture, onOpenFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
+                                loadPicture, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }) { menu = it }
                         }
                     }
                 }
@@ -228,7 +240,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
                 Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
                     action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
-            }
+            } ?: fileError?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
         }
         val placeholder = when {
             threadRoot != null -> "Add a reply"
@@ -311,7 +323,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
 @Composable
 private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
-    loadPicture: PictureLoader, onOpenFile: suspend (MessageAttachment) -> String?, onView: (MessageAttachment, ImageBitmap?) -> Unit,
+    loadPicture: PictureLoader, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (MessageAttachment, ImageBitmap?) -> Unit,
     onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
@@ -344,7 +356,7 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
             if (attachment == null || message.body != attachment.name) {
                 MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me)
             }
-            attachment?.let { Attachment(it, loadPicture, onOpenFile) { shown -> onView(it, shown) } }
+            attachment?.let { Attachment(it, loadPicture, opening, { onOpenFile(message) }) { shown -> onView(it, shown) } }
             if (message.reactions.isNotEmpty()) {
                 Reactions(message.reactions, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
             }

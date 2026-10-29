@@ -38,6 +38,9 @@ enum class FileKind(private val title: String, extensions: String) {
     /** Its color's name in design/tokens.json's fileColors. */
     val token: String get() = name.lowercase()
 
+    /** "PDF", or the extension in capitals, as a file's card shows its type. */
+    fun label(fileName: String): String = extension(fileName).let { if (this == Pdf || it.isEmpty()) title else it.uppercase() }
+
     companion object {
         /** In order: the first fragment the MIME type contains wins. */
         private val mimeTypes = listOf("pdf" to Pdf, "spreadsheet" to Spreadsheet, "ms-excel" to Spreadsheet,
@@ -54,11 +57,7 @@ enum class FileKind(private val title: String, extensions: String) {
             return mimeTypes.firstOrNull { mime.contains(it.first) }?.second ?: Generic
         }
 
-        /** "PDF", or the extension in capitals, as a file's card shows its type. */
-        fun label(name: String, kind: FileKind): String =
-            extension(name).let { if (kind == Pdf || it.isEmpty()) kind.title else it.uppercase() }
-
-        private fun extension(name: String) = name.substringAfterLast('/').let { file ->
+        internal fun extension(name: String) = name.substringAfterLast('/').let { file ->
             file.substringAfterLast('.', "").takeIf { file.lastIndexOf('.') > 0 }.orEmpty()
         }
     }
