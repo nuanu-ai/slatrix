@@ -104,7 +104,7 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
         clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(message.senderName, text)))
         onDismiss()
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, shape = SlatrixTheme.topPanelShape, containerColor = colors.overlay) {
+    ModalBottomSheet(onDismissRequest = onDismiss, shape = SlatrixTheme.topPanelShape, containerColor = colors.canvas) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             Row(Modifier.padding(horizontal = UiMetrics.GapLarge).padding(bottom = UiMetrics.GapSmall),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
@@ -119,7 +119,7 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge, Alignment.CenterHorizontally)) {
                     actions.quick.forEach { emoji ->
                         Round("React with $emoji", { react(message, emoji); onDismiss() }) {
-                            Text(emoji, style = MaterialTheme.typography.headlineSmall)
+                            Text(emoji, style = MaterialTheme.typography.titleLarge)
                         }
                     }
                     Round("Add reaction", { onStep(Step.Picker) }) {
@@ -166,7 +166,7 @@ private fun ActionTile(icon: ImageVector, label: String, modifier: Modifier, onC
         verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, null, Modifier.size(UiMetrics.SheetIcon), tint = colors.textPrimary)
-        Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+        Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary)
     }
 }
 

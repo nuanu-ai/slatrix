@@ -70,7 +70,7 @@ internal fun EmojiPickerSheet(recent: List<String>, onPick: (String) -> Unit, on
         }
     }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = SlatrixTheme.topPanelShape, containerColor = colors.overlay) {
+        shape = SlatrixTheme.topPanelShape, containerColor = colors.canvas) {
         Column(Modifier.fillMaxHeight()) {
             Surface(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge), shape = MaterialTheme.shapes.medium,
                 color = colors.raised) {
@@ -99,7 +99,7 @@ internal fun EmojiPickerSheet(recent: List<String>, onPick: (String) -> Unit, on
                         is PickerItem.Glyph -> Box(Modifier.size(UiMetrics.Touch)
                             .clickable(role = Role.Button) { onPick(item.value) }.semantics { contentDescription = item.name },
                             contentAlignment = Alignment.Center) {
-                            Text(item.value, style = MaterialTheme.typography.headlineSmall)
+                            Text(item.value, style = MaterialTheme.typography.titleLarge)
                         }
                     }
                 }

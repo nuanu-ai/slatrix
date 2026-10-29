@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.core
 
 import android.content.Context
+import android.graphics.Paint
 
 enum class EmojiCategory(val title: String) {
     Smileys("Smileys & emotion"), People("People & body"), Nature("Animals & nature"), Food("Food & drink"),
@@ -51,9 +52,12 @@ class EmojiCatalog private constructor(val all: List<Emoji>) {
         private val TONES = 0x1F3FB..0x1F3FF
         @Volatile private var loaded: EmojiCatalog? = null
 
-        /** Reads the asset once; call it off the main thread. */
+        /** Reads the asset once, without the emoji this device can't draw; call it off the main thread. */
         fun load(context: Context): EmojiCatalog = loaded ?: synchronized(this) {
-            loaded ?: parse(context.assets.open("emoji.txt").bufferedReader().use { it.readText() }).also { loaded = it }
+            loaded ?: parse(context.assets.open("emoji.txt").bufferedReader().use { it.readText() }).let { catalog ->
+                val paint = Paint()
+                EmojiCatalog(catalog.all.filter { paint.hasGlyph(it.value) })
+            }.also { loaded = it }
         }
 
         /** One emoji per line, `emoji;category;shortcodes;name[;toned]`; the Swift around the lines is skipped. */
