@@ -65,6 +65,54 @@ class DesignTokenDetectorTest : LintDetectorTest() {
         ).run().expectErrorCount(3)
     }
 
+    @Test
+    fun testInlineComposeColorUsesPackageExemptionAndAllowsRoleReferences() {
+        lint().files(
+            kotlin(
+                """
+                package androidx.compose.ui.graphics
+                @JvmInline value class Color(val value: ULong) {
+                    companion object { val White: Color get() = TODO() }
+                }
+                fun Color(value: Long): Color = TODO()
+                fun Color(value: Int): Color = TODO()
+                """,
+            ),
+            unitStub,
+            kotlin(
+                """
+                package ai.nuanu.slatrix.ui.designsystem
+                import androidx.compose.ui.graphics.Color
+                import androidx.compose.ui.unit.dp
+                import androidx.compose.ui.unit.sp
+                import androidx.compose.ui.unit.em
+                object AppColors {
+                    val surface = Color(0xff112233)
+                    val text = Color.White
+                }
+                object Spacing { val small = 8.dp }
+                object Type { val body = 14.sp; val lineHeight = 1.2.em }
+                """,
+            ).to("src/ai/nuanu/slatrix/ui/designsystem/Tokens.kt"),
+            kotlin(
+                """
+                package ai.nuanu.slatrix.ui.chat
+                import androidx.compose.ui.graphics.Color
+                import ai.nuanu.slatrix.ui.designsystem.AppColors
+                import ai.nuanu.slatrix.ui.designsystem.Spacing
+                import ai.nuanu.slatrix.ui.designsystem.Type
+                val background = AppColors.surface
+                val foreground = AppColors.text
+                val spacing = Spacing.small
+                val textSize = Type.body
+                val lineHeight = Type.lineHeight
+                val rawBackground = Color(0xff112233)
+                val rawForeground = Color.White
+                """,
+            ).to("src/ai/nuanu/slatrix/ui/chat/DesignSystem.kt"),
+        ).run().expectErrorCount(2)
+    }
+
     private val colorStub = kotlin(
         """
         package androidx.compose.ui.graphics
