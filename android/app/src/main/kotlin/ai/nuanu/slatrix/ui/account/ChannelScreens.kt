@@ -241,7 +241,7 @@ fun LiveCreateChannel(rooms: MatrixRooms?, spaceId: String?, workspace: String?,
 
 /** A spinner that shows only after a moment, so a quick answer never flashes one. */
 @Composable
-private fun DelayedSpinner() {
+internal fun DelayedSpinner() {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(UiMetrics.ProgressDelayMillis); visible = true }
     if (visible) CircularProgressIndicator(Modifier.size(UiMetrics.Icon))

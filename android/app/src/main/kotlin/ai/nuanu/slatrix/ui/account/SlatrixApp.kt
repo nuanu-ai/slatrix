@@ -24,6 +24,7 @@ import ai.nuanu.slatrix.core.MatrixAvatars
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.MatrixSearch
 import ai.nuanu.slatrix.core.MatrixPeople
+import ai.nuanu.slatrix.core.PeopleSearchState
 import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.core.MessageSearchState
 import ai.nuanu.slatrix.core.RecentSearchStore
@@ -101,6 +102,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var invitation by rememberSaveable { mutableStateOf<String?>(null) }
     // Someone's profile, pushed over whatever is open, and the name to show until theirs loads.
     var person by rememberSaveable { mutableStateOf<Pair<String, String?>?>(null) }
+    var newMessage by rememberSaveable { mutableStateOf(false) }
     // Browse channels or Create a channel, pushed over Home; null while neither is open.
     var channels by rememberSaveable { mutableStateOf<ChannelPage?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -182,6 +184,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         channels = null
                         person = null
                         later = false
+                        newMessage = false
                         jump(room, target.eventId, target.threadRoot)
                         onNotificationHandled(target)
                     }
@@ -201,6 +204,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
                                     { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
                             } } }
+                            newMessage -> { { LiveNewMessage(people, rooms, { room -> newMessage = false; workspace?.open(room) }) { newMessage = false } } }
                             person != null -> { { person?.let { (id, name) ->
                                 LivePersonProfile(id, name, userId, people, rooms?.state, { room ->
                                     person = null
@@ -238,8 +242,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, userAvatarUrl, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it },
-                                saved.size, { later = true }, { invitation = it }) {
+                            LiveHome(userId, userAvatarUrl, rooms, workspace, search, people, jump, { you = true }, selectedSpaceId, chooseSpace,
+                                { channels = it }, saved.size, { later = true }, { invitation = it }, { newMessage = true }, { id, name -> person = id to name }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
@@ -390,8 +394,10 @@ private fun rememberConversation(client: Client, roomId: String, view: Conversat
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
 @Composable
 private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
+    people: MatrixPeople?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, laterCount: Int, onLater: () -> Unit, onInvitation: (String) -> Unit,
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, laterCount: Int, onLater: () -> Unit, onInvitation: (String) -> Unit, onNewMessage: () -> Unit,
+    onPerson: (userId: String, name: String?) -> Unit,
     activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
@@ -402,6 +408,7 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
         onInvitation = onInvitation,
+        onNewMessage = onNewMessage,
         onBrowseChannels = { onChannels(ChannelPage.Browse) }, onCreateChannel = { onChannels(ChannelPage.Create) },
         onMarkUnread = { id, unread ->
             (rooms?.setUnread(id, unread) ?: false).also { if (it && !unread) PushNotifications(context).clear(id) }
@@ -424,7 +431,8 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
                     state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
                         scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
-                }, recents, { recents = recentStore.add(it) }, onRoom = open)
+                }, recents, { recents = recentStore.add(it) }, people?.results?.collectAsState()?.value ?: PeopleSearchState(),
+                { people?.search(it) }, { onPerson(it.id, it.name) }, open)
         }, userAvatarUrl = userAvatarUrl, activity = activity)
 }
 

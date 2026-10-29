@@ -140,6 +140,14 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                             HomeTab.Activity -> activity()
                             HomeTab.Search -> search()
                         }
+                        // Slack's + on Home and DMs, which starts a new message.
+                        if (onNewMessage != null && (tab == HomeTab.Home || tab == HomeTab.Dms)) {
+                            FloatingActionButton(onNewMessage, Modifier.align(Alignment.BottomEnd)
+                                .padding(end = UiMetrics.GapLarge, bottom = UiMetrics.GapSmall).semantics { contentDescription = "New message" },
+                                shape = MaterialTheme.shapes.large, containerColor = colors.textPrimary, contentColor = colors.canvas) {
+                                Icon(SlackIcons.Plus, null, Modifier.size(UiMetrics.LargeIcon))
+                            }
+                        }
                         val failure = notice
                         if (failure != null) {
                             Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)

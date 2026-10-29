@@ -27,7 +27,7 @@
     {"id": "home.keyboard-navigation", "what": "Move to the previous, next or next unread conversation from the keyboard.", "mac": "done", "android": "n/a: phones switch conversations by touch"},
 
     {"id": "search.rooms", "what": "Find a conversation by name and open it.", "mac": "done", "android": "done"},
-    {"id": "search.people", "what": "Find people by name or Matrix ID.", "mac": "done", "android": "missing"},
+    {"id": "search.people", "what": "Find people by name or Matrix ID.", "mac": "done", "android": "done"},
     {"id": "search.messages", "what": "Search messages, encrypted ones included, with in: and from: filters.", "mac": "done", "android": "done"},
     {"id": "search.recent", "what": "Search offers your recent searches.", "mac": "done", "android": "done"},
 
