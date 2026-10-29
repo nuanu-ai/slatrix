@@ -33,20 +33,13 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     val state: StateFlow<ComposerState> = mutableState.asStateFlow()
     private val edits = Channel<Unit>(Channel.CONFLATED)
     private var loaded = false
+    private var failure: Failure? = null
     private var revision = 0L
     private var savedRevision = 0L
     private val worker = operations.launch {
         try {
-            try {
-                val draft = room.loadComposerDraft(null)
-                mutableState.value = mutableState.value.copy(text = draft?.plainText.orEmpty(), loading = false)
-                loaded = true
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                mutableState.value = mutableState.value.copy(loading = false, error = "Couldn’t restore your draft.")
-            }
-            for (edit in edits) persist()
+            restore()
+            for (edit in edits) if (loaded) persist() else restore()
         } finally {
             withContext(NonCancellable) { persist() }
             edits.close()
@@ -66,6 +59,7 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
         val message = ComposerFormat.message(ComposerFormat.plainTextDraft(current.text))
         if (message.body.isBlank()) return
         val sendingRevision = revision
+        failure = null
         mutableState.value = current.copy(sending = true, error = null)
         operations.launch {
             try {
@@ -77,20 +71,44 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
                         mutableState.value = mutableState.value.copy(text = "")
                         edits.trySend(Unit)
                     }
-                } else mutableState.value = mutableState.value.copy(error = "Couldn’t send your message. Try again.")
+                } else fail(Failure.Send)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 currentCoroutineContext().ensureActive()
-                mutableState.value = mutableState.value.copy(error = "Couldn’t send your message. Try again.")
+                fail(Failure.Send)
             } finally {
                 if (lifetime.isActive) mutableState.value = mutableState.value.copy(sending = false)
             }
         }
     }
 
-    fun retry() { send() }
-    suspend fun close() { lifetime.cancelAndJoin() }
+    fun retry() {
+        if (!lifetime.isActive) return
+        if (failure == Failure.Send) send()
+        else {
+            if (!loaded) mutableState.value = mutableState.value.copy(loading = true)
+            edits.trySend(Unit)
+        }
+    }
+
+    suspend fun close() { withContext(NonCancellable) { lifetime.cancelAndJoin() } }
+
+    private suspend fun restore() {
+        try {
+            val draft = room.loadComposerDraft(null)
+            currentCoroutineContext().ensureActive()
+            loaded = true
+            failure = null
+            mutableState.value = mutableState.value.copy(text = draft?.plainText.orEmpty(), loading = false, error = null)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            currentCoroutineContext().ensureActive()
+            fail(Failure.Restore)
+            mutableState.value = mutableState.value.copy(loading = false)
+        }
+    }
 
     private suspend fun persist() {
         if (!loaded || revision == savedRevision) return
@@ -100,10 +118,25 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
             if (text.isEmpty()) room.clearComposerDraft(null)
             else room.saveComposerDraft(ComposerDraft(text, null, ComposerDraftType.NewMessage, emptyList()), null)
             savedRevision = savingRevision
+            if (failure == Failure.Save) {
+                failure = null
+                mutableState.value = mutableState.value.copy(error = null)
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(error = "Couldn’t save your draft.")
+            fail(Failure.Save)
         }
     }
+
+    private fun fail(reason: Failure) {
+        failure = reason
+        mutableState.value = mutableState.value.copy(error = when (reason) {
+            Failure.Restore -> "Couldn’t restore your draft."
+            Failure.Save -> "Couldn’t save your draft."
+            Failure.Send -> "Couldn’t send your message. Try again."
+        })
+    }
+
+    private enum class Failure { Restore, Save, Send }
 }
