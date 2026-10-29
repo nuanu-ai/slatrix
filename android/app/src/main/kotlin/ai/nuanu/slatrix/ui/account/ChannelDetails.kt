@@ -1,6 +1,8 @@
 package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.ChannelMember
+import ai.nuanu.slatrix.core.ConversationMessage
+import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.NotificationChoice
 import ai.nuanu.slatrix.core.NotificationSetting
 import ai.nuanu.slatrix.core.RoomSummary
@@ -47,7 +49,10 @@ data class ChannelDetailsActions(
     val invite: suspend (userId: String) -> Unit = {},
     val notifications: suspend () -> NotificationSetting = { NotificationSetting(NotificationChoice.Default, NotificationChoice.All) },
     val setNotifications: suspend (NotificationChoice) -> Unit = {},
+    val pins: @Composable () -> PinnedMessages = { PinnedMessages() },
 )
+
+data class PinnedMessages(val state: ConversationState = ConversationState(), val onUnpin: (ConversationMessage) -> Unit = {})
 
 private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeople }
 
@@ -56,7 +61,8 @@ private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeopl
  * members, adding people and leaving. Each part pushes its own page, and Back returns to the details.
  */
 @Composable
-fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetailsActions, onLeft: () -> Unit, onBack: () -> Unit) {
+fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetailsActions, onLeft: () -> Unit,
+    onOpenMessage: (eventId: String) -> Unit, onBack: () -> Unit) {
     var page by rememberSaveable { mutableStateOf(DetailsPage.Details) }
     // Where Add people goes back to: the page it was opened from.
     var opener by rememberSaveable { mutableStateOf(DetailsPage.Details) }

@@ -66,6 +66,8 @@ data class RoomSummary(
     val canEditName: Boolean = false,
     val canEditTopic: Boolean = false,
     val canInvite: Boolean = true,
+    val canPin: Boolean = false,
+    val pinned: List<String> = emptyList(),
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */

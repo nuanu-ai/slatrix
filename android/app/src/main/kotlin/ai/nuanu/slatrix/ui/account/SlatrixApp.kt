@@ -238,7 +238,9 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         }
         // Over the conversation, so Back finds it where it was.
         if (details && actions != null) {
-            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }) { details = false }
+            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }, onOpenMessage = {}) {
+                details = false
+            }
         }
     }
 }

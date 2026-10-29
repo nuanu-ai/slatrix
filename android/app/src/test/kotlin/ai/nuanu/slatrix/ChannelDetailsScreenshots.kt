@@ -42,7 +42,7 @@ class ChannelDetailsScreenshots(private val dark: Boolean, private val fontScale
             notifications = { NotificationSetting(NotificationChoice.Default, NotificationChoice.Mentions) })
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
-                SlatrixTheme(dark = dark) { ChannelDetailsScreen(room, "@jordan:example.org", actions, {}) {} }
+                SlatrixTheme(dark = dark) { ChannelDetailsScreen(room, "@jordan:example.org", actions, {}, {}) {} }
             }
         }
         val name = "${if (dark) "dark" else "light"}-$fontScale"

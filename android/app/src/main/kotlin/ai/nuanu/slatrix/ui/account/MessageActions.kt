@@ -70,6 +70,8 @@ data class MessageActions(
     val onQuote: ((ConversationMessage) -> Unit)? = null,
     val onEdit: ((ConversationMessage) -> Unit)? = null,
     val onDelete: ((ConversationMessage) -> Unit)? = null,
+    val pinned: Set<String> = emptySet(),
+    val onPin: ((ConversationMessage, Boolean) -> Unit)? = null,
 )
 
 /** Slack Android's sheet holds five, beside Add reaction. */

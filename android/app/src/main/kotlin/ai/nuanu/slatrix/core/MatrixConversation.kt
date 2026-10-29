@@ -157,7 +157,7 @@ internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } c
 class MatrixConversation(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null,
     private val at: String? = null,
     /** The thread's root as its channel shows it, on screen at once while the thread loads, as on the Mac. */
-    root: ConversationMessage? = null) {
+    root: ConversationMessage? = null, pinned: Boolean = false) {
     // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
     private val root = root?.copy(id = ROOT_KEY, grouped = false)
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
@@ -459,6 +459,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             }
         }
     }
+
+    fun pin(message: ConversationMessage, pinned: Boolean) = Unit
 
     fun delete(message: ConversationMessage) {
         val id = EventOrTransactionId.EventId(message.eventId ?: return)
