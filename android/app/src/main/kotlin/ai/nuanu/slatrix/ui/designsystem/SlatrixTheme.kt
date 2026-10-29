@@ -11,14 +11,21 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
-class AppColors internal constructor(roles: Map<String, Color>) {
+class AppColors internal constructor(
+    roles: Map<String, Color>,
+    /** The workspace color root headers sit on; Slack keeps it in light mode too, under white text. */
+    val workspaceBar: Color,
+) {
     val textPrimary = roles.getValue("textPrimary")
     val textBody = roles.getValue("textBody")
     val textSecondary = roles.getValue("textSecondary")
@@ -62,7 +69,23 @@ class AppColors internal constructor(roles: Map<String, Color>) {
     val onMediaEdge = roles.getValue("onMediaEdge")
 }
 
-private val LocalColors = staticCompositionLocalOf { AppColors(DesignTokens.colors(false, SidebarPalette.Aubergine)) }
+private val LocalColors = staticCompositionLocalOf { appColors(false, SidebarPalette.Aubergine) }
+private val LocalDark = staticCompositionLocalOf { false }
+
+private fun appColors(dark: Boolean, palette: SidebarPalette) =
+    AppColors(DesignTokens.colors(dark, palette), DesignTokens.colors(true, palette).getValue("frame"))
+
+/** Keeps status bar icons light while the workspace color sits behind them, and hands them back to the theme after. */
+@Composable
+fun StatusBarOverWorkspaceBar() {
+    val window = LocalActivity.current?.window ?: return
+    val dark by rememberUpdatedState(LocalDark.current)
+    // Runs after the theme's own SideEffect, which sets the icons for the canvas.
+    SideEffect { WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = false }
+    DisposableEffect(window) {
+        onDispose { WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = !dark }
+    }
+}
 
 object SlatrixTheme {
     val topPanelShape @Composable get() = MaterialTheme.shapes.extraLarge.copy(bottomStart = ZeroCornerSize, bottomEnd = ZeroCornerSize)
@@ -84,7 +107,7 @@ fun SlatrixTheme(
             }
         }
     }
-    val colors = remember(dark, palette) { AppColors(DesignTokens.colors(dark, palette)) }
+    val colors = remember(dark, palette) { appColors(dark, palette) }
     val scheme = remember(colors) {
         lightColorScheme(
             primary = colors.accent,
@@ -134,7 +157,7 @@ fun SlatrixTheme(
             extraLarge = RoundedCornerShape(DesignTokens.radii.getValue("panel").dp),
         )
     }
-    CompositionLocalProvider(LocalColors provides colors, LocalContentColor provides colors.textPrimary) {
+    CompositionLocalProvider(LocalColors provides colors, LocalDark provides dark, LocalContentColor provides colors.textPrimary) {
         MaterialTheme(colorScheme = scheme, typography = Typography().let { it.copy(titleSmall = it.titleMedium) }, shapes = shapes, content = content)
     }
 }

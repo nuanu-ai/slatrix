@@ -18,6 +18,7 @@ object UiMetrics {
     val BadgeMin = 20.dp
     val Divider = 1.dp
     val CompactAvatar = 24.dp
+    val ListAvatar = 36.dp
     val HeaderAvatar = 32.dp
     val RootHeaderHeight = 72.dp
     val ContactWidth = 72.dp

@@ -40,6 +40,8 @@ import androidx.compose.ui.Alignment
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 
 @Composable
@@ -53,7 +55,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     val dark = darkOverride ?: isSystemInDarkTheme()
     var palette by rememberSaveable { mutableStateOf(SidebarPalette.entries.firstOrNull { it.name == appearance.paletteName } ?: SidebarPalette.Aubergine) }
     var server by rememberSaveable { mutableStateOf("") }
-    var you by rememberSaveable { mutableStateOf(false) }
+    var preferences by rememberSaveable { mutableStateOf(false) }
     // Back during a restore leaves the app; cancelling would show sign-in with the session still saved.
     BackHandler(enabled = (state as? AccountState.Connecting)?.restoring == false || state is AccountState.ChooseMethod ||
         state is AccountState.BrowserSignIn || (state as? AccountState.Failed)?.let { it.options != null && !it.canRetryRestore } == true) {
@@ -76,18 +78,16 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
                 var selectedSpaceId by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
-                val roomState = rooms?.state?.collectAsState()?.value ?: RoomListState()
                 val selected = workspace?.selected?.collectAsState()?.value
-                LaunchedEffect(notification, userId, roomState.rooms, workspace) {
+                LaunchedEffect(notification, userId, rooms, workspace) {
                     val target = notification ?: return@LaunchedEffect
                     if (target.userId != userId) {
                         onNotificationHandled(target)
-                    } else if (workspace != null) {
-                        target.roomFor(userId, roomState.rooms)?.let { room ->
-                            you = false
-                            workspace.open(room)
-                            onNotificationHandled(target)
-                        }
+                    } else if (workspace != null && rooms != null) {
+                        val room = rooms.state.mapNotNull { target.roomFor(userId, it.rooms) }.first()
+                        preferences = false
+                        workspace.open(room)
+                        onNotificationHandled(target)
                     }
                 }
                 Box(Modifier.fillMaxSize()) {
@@ -95,11 +95,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         { identity?.requestVerification() }, { identity?.acceptVerification() },
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {
-                        when {
-                            you -> LiveProfileScreen((state as AccountState.Connected).userId, dark, darkOverride, palette,
+                        LiveWorkspace(when {
+                            preferences -> { { LivePreferencesScreen(dark, darkOverride, palette,
                                 { darkOverride = it; appearance.darkMode = it },
-                                { palette = it; appearance.paletteName = it.name }, { you = false })
-                            selected != null -> key(selected.room.id) {
+                                { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
+                            selected != null -> { { key(selected.room.id) {
                                 val conversation = selected.conversation
                                 val composer = selected.composer
                                 val timeline = conversation?.state?.collectAsState()?.value ?: ConversationState(error = selected.error)
@@ -109,11 +109,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     { workspace?.back() }, { conversation?.loadOlder() },
                                     { event -> scope.launch { conversation?.markRead(event) } },
                                     { if (draft.error != null) composer?.retry() else workspace?.open(selected.room) })
-                            }
-                            else -> LiveHomeScreen((state as AccountState.Connected).userId, roomState,
-                                { id -> roomState.rooms.firstOrNull { it.id == id }?.let { workspace?.open(it) } },
-                                { you = true }, { rooms?.retry() }, selectedSpaceId,
-                                { selectedSpaceId = it; workspacePreferences.selectedSpaceId = it })
+                            } } }
+                            else -> null
+                        }) {
+                            LiveHome(userId, rooms, workspace, { preferences = true }, selectedSpaceId,
+                                { selectedSpaceId = it; workspacePreferences.selectedSpaceId = it }, account::signOut)
                         }
                     }
                     (state as AccountState.Connected).warning?.let { warning ->
@@ -143,4 +143,15 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 { account.selectHomeserver(server) }, account::cancel)
         }
     }
+}
+
+/** Collects the room list here, so its updates recompose Home rather than the whole app. */
+@Composable
+private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorkspace?, onPreferences: () -> Unit,
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, onSignOut: () -> Unit) {
+    val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
+    val open: (String) -> Unit = remember(rooms, workspace) {
+        { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
+    }
+    LiveHomeScreen(userId, state, open, onPreferences, { rooms?.retry() }, selectedSpaceId, onSpace, onSignOut)
 }

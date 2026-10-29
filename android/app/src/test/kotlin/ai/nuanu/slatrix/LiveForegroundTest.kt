@@ -11,7 +11,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -42,32 +46,32 @@ class LiveForegroundTest {
         for (isDark in listOf(false, true)) for (sidebar in SidebarPalette.entries) {
             compose.runOnIdle { dark.value = isDark; palette.value = sidebar }
             compose.onNodeWithText("All conversations", useUnmergedTree = true)
-                .assertReadableOn(DesignTokens.colors(isDark, sidebar).getValue("frame"))
+                .assertReadableOn(DesignTokens.colors(true, sidebar).getValue("frame"))
         }
     }
 
     @Test fun selectedPhoneDestinationsStayReadableAndNavigateInBothThemes() {
         val dark = mutableStateOf(false)
         val palette = mutableStateOf(SidebarPalette.Aubergine)
-        var openedYou = false
         compose.setContent {
             SlatrixTheme(dark = dark.value, palette = palette.value) {
-                LiveHomeScreen("@alex:example.org", RoomListState(loading = false), {}, { openedYou = true }, {})
+                LiveHomeScreen("@alex:example.org", RoomListState(loading = false), {}, {}, {})
             }
         }
         for (isDark in listOf(false, true)) for (sidebar in SidebarPalette.entries) {
             compose.runOnIdle { dark.value = isDark; palette.value = sidebar }
             val canvas = DesignTokens.colors(isDark, sidebar).getValue("canvas")
-            compose.onNodeWithText("Home").performClick()
+            tab("Home").performClick()
             compose.onNodeWithText("Home", useUnmergedTree = true).assertReadableOn(canvas)
-            compose.onNodeWithText("DMs").performClick()
+            tab("DMs").performClick()
             compose.onNodeWithText("Direct messages").assertExists()
             compose.onNodeWithText("DMs", useUnmergedTree = true).assertReadableOn(canvas)
-            compose.runOnIdle { openedYou = false }
-            compose.onNodeWithText("You").performClick()
-            compose.runOnIdle { assertTrue("You destination must keep its callback", openedYou) }
+            tab("You").performClick().assertIsSelected()
         }
     }
+
+    private fun tab(label: String) =
+        compose.onNode(hasText(label) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected))
 
     private fun SemanticsNodeInteraction.assertReadableOn(background: Color) {
         performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action ->
