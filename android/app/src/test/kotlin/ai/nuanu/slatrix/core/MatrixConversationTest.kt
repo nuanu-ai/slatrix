@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -83,6 +84,16 @@ class MatrixConversationTest {
         val conversation = MatrixConversation(backgroundScope, room)
         conversation.state.first { it.error != null }
         assertFalse(conversation.retry())
+        conversation.close()
+    }
+
+    @Test fun timelineUpdatesAreMappedOffTheCallersThread() = runTest {
+        val caller = Thread.currentThread()
+        var mappedOn: Thread? = null
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello") { mappedOn = Thread.currentThread() }))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.messages.isNotEmpty() }
+        assertNotSame(caller, mappedOn)
         conversation.close()
     }
 
@@ -223,6 +234,7 @@ private fun conversationItem(
     body: String,
     local: Boolean = false,
     content: TimelineItemContent? = null,
+    onMap: () -> Unit = {},
 ): TimelineItem {
     val event = EventTimelineItem(
         isRemote = !local,
@@ -241,6 +253,6 @@ private fun conversationItem(
     )
     return object : TimelineItem(NoHandle) {
         override fun uniqueId(): TimelineUniqueId = TimelineUniqueId(stableId)
-        override fun asEvent(): EventTimelineItem = event
+        override fun asEvent(): EventTimelineItem = event.also { onMap() }
     }
 }
