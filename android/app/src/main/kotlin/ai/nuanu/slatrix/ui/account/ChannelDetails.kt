@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.FileKind
 import ai.nuanu.slatrix.core.ChannelMember
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.NotificationChoice
 import ai.nuanu.slatrix.core.NotificationSetting
@@ -67,7 +68,8 @@ data class ChannelDetailsActions(
 )
 
 /** Every message in a conversation, threads included, to find what was shared, and asking for older ones. */
-data class SharedFiles(val state: ConversationState = ConversationState(), val onLoadMore: () -> Unit = {})
+data class SharedFiles(val state: ConversationState = ConversationState(), val loadPicture: PictureLoader = { _, _, _, _ -> null },
+    val onOpenFile: suspend (MessageAttachment) -> String? = { null }, val onLoadMore: () -> Unit = {})
 
 /** A conversation's pinned messages as they load, and unpinning one. */
 data class PinnedMessages(val state: ConversationState = ConversationState(), val onUnpin: (ConversationMessage) -> Unit = {})
