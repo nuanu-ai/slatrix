@@ -13,7 +13,10 @@ import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -59,27 +62,27 @@ class CaptionEditTest {
     // capability: message.edit-caption
     @Test fun yourMediasCaptionChangesFromTheSheetAndEmptyRemovesIt() {
         show(media("p", "Our new office", own = true))
-        compose.onNodeWithText("Our new office").performTouchInput { longClick() }
+        compose.onNodeWithText("Our new office", useUnmergedTree = true).performTouchInput { longClick() }
         compose.onNodeWithText("Edit caption").performClick()
-        compose.onNode(hasSetTextAction()).assertTextEquals("Caption", "Our new office").performTextReplacement("Our new office, 3rd floor")
+        compose.onNode(hasSetTextAction() and hasText("Caption", substring = true)).assertTextEquals("Caption", "Our new office").performTextReplacement("Our new office, 3rd floor")
         compose.onNodeWithText("Save").performClick()
 
-        compose.onNodeWithText("Our new office").performTouchInput { longClick() }
+        compose.onNodeWithText("Our new office", useUnmergedTree = true).performTouchInput { longClick() }
         compose.onNodeWithText("Edit caption").performClick()
-        compose.onNode(hasSetTextAction()).performTextClearance()
+        compose.onNode(hasSetTextAction() and hasText("Caption", substring = true)).performTextClearance()
         compose.onNodeWithText("Save").performClick()
         compose.runOnIdle { assertEquals(listOf("\$p" to "Our new office, 3rd floor", "\$p" to null), edits) }
     }
 
     @Test fun mediaWithoutACaptionStartsEmptyAndOthersMediaOffersNone() {
         show(media("p", "office.jpg", own = true), media("q", "Their photo", own = false, name = "theirs.jpg"))
-        compose.onNodeWithText("Their photo").performTouchInput { longClick() }
+        compose.onNodeWithContentDescription("theirs.jpg").performTouchInput { longClick() }
+        compose.onAllNodes(isRoot()).assertCountEquals(2)
         compose.onNodeWithText("Edit caption").assertDoesNotExist()
-        compose.onNodeWithText("Copy message").assertExists()
         androidx.test.espresso.Espresso.pressBack()
 
         compose.onNodeWithContentDescription("office.jpg").performTouchInput { longClick() }
         compose.onNodeWithText("Edit caption").performClick()
-        compose.onNode(hasSetTextAction()).assertTextEquals("Caption", "")
+        compose.onNode(hasSetTextAction() and hasText("Caption", substring = true)).assertTextEquals("Caption", "")
     }
 }

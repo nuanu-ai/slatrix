@@ -507,6 +507,15 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
+    /** Replaces your media's caption, or with null removes it, keeping the file as it is. */
+    fun editCaption(message: ConversationMessage, caption: String?) {
+        val id = EventOrTransactionId.EventId(message.eventId ?: return)
+        operations.launch {
+            if (quietly { timeline().edit(id, EditedContent.MediaCaption(caption, null, Mentions(emptyList(), false))) } == null)
+                announce("Couldn’t change the caption.")
+        }
+    }
+
     /** Prepares and sends each in turn, so they arrive in the order picked; the copies go once uploaded. */
     fun sendAttachments(attachments: List<suspend () -> OutgoingAttachment>) {
         operations.launch {

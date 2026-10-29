@@ -80,6 +80,8 @@ data class MessageActions(
     val onPin: ((ConversationMessage, pin: Boolean) -> Unit)? = null,
     /** What the room is called in Pin to channel. */
     val place: String = "channel",
+    /** Sets your media's caption; null removes it. */
+    val onEditCaption: ((ConversationMessage, String?) -> Unit)? = null,
 )
 
 /** Slack Android's sheet holds five, beside Add reaction. */
@@ -108,10 +110,11 @@ internal fun MessageActionsHost(message: ConversationMessage, actions: MessageAc
             },
             dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
             containerColor = SlatrixTheme.colors.overlay)
+        Step.Caption -> CaptionSheet(message, { caption -> actions.onEditCaption?.invoke(message, caption); onDismiss() }, onDismiss)
     }
 }
 
-private enum class Step { Sheet, Picker, ConfirmDelete }
+private enum class Step { Sheet, Picker, ConfirmDelete, Caption }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -177,10 +180,12 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
                     colors.textPrimary) { pin(message, !pinned); onDismiss() }
             }
             val edit = actions.onEdit?.takeIf { message.editable }
+            val caption = eventId != null && message.own && message.attachment != null && actions.onEditCaption != null
             val delete = eventId != null && message.own && actions.onDelete != null
-            if (eventId != null && (edit != null || delete)) {
+            if (eventId != null && (edit != null || caption || delete)) {
                 HorizontalDivider(Modifier.padding(vertical = UiMetrics.GapSmall), color = colors.border)
                 if (edit != null) SheetAction(Icons.Outlined.Edit, "Edit message", colors.textPrimary) { edit(message); onDismiss() }
+                if (caption) SheetAction(Icons.Outlined.Edit, "Edit caption", colors.textPrimary) { onStep(Step.Caption) }
                 if (delete) SheetAction(Icons.Outlined.Delete, "Delete message", colors.destructive) { onStep(Step.ConfirmDelete) }
             }
         }
@@ -227,6 +232,7 @@ internal fun rememberMessageActions(conversation: MatrixConversation?, composer:
             onReact = { message, emoji -> conversation.react(message, emoji) { workspace?.emojiHistory?.use(emoji) } },
             link = conversation::link,
             onDelete = conversation::delete,
+            onEditCaption = conversation::editCaption,
             onQuote = { message -> ComposerTarget.reply(message)?.let { composer?.reply(it) } },
             onEdit = { message -> ComposerTarget.edit(message)?.let { composer?.editMessage(it) } },
             pinned = room.pinned.toSet(),

@@ -419,7 +419,7 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
                     if (attachment == null || message.body != attachment.name) {
                         MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me)
                     }
-                    attachment?.let { Attachment(it, loadPicture, opening, { onOpenFile(message) }) { shown -> onView(it, shown) } }
+                    attachment?.let { Attachment(it, loadPicture, opening, { onOpenFile(message) }, { onMenu(message) }) { shown -> onView(it, shown) } }
                 }
                 // In the row's bottom padding, so the bar comes and goes without moving anything.
                 message.uploadProgress?.let {
