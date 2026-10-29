@@ -54,7 +54,7 @@
     {"id": "composer.send", "what": "Send a text message.", "mac": "done", "android": "done"},
     {"id": "composer.formatting", "what": "Format a message with bold, italic, strikethrough, code, lists, quotes and links.", "mac": "done", "android": "missing"},
     {"id": "composer.drafts", "what": "An unsent message stays in its conversation's composer.", "mac": "done", "android": "done"},
-    {"id": "composer.mentions", "what": "Mention someone by picking them from an @ list.", "mac": "done", "android": "missing"},
+    {"id": "composer.mentions", "what": "Mention someone by picking them from an @ list.", "mac": "done", "android": "done"},
     {"id": "composer.attachments", "what": "Attach files and images with +, by dragging or by pasting.", "mac": "done", "android": "missing"},
     {"id": "composer.typing", "what": "Others see when you're typing.", "mac": "done", "android": "missing"},
     {"id": "composer.up-to-edit", "what": "Press ↑ in an empty composer to edit your last message.", "mac": "done", "android": "n/a: phone keyboards have no arrow keys"},
