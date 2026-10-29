@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -108,7 +109,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
                 items(state.rows.asReversed(), key = { it.id }) { row -> if (row is ConversationMessage) LiveMessageRow(row) }
                 // The top of the conversation, which also lets an empty one ask for history.
-                item(key = "top") { if (state.loadingHistory && state.rows.isNotEmpty()) HistoryProgress() }
+                item(key = "top") {
+                    if (!state.hasMore && !state.loading) ConversationIntro(room)
+                    else if (state.loadingHistory && state.rows.isNotEmpty()) HistoryProgress()
+                }
             }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
                 Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
@@ -136,6 +140,24 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 }
             }
         }
+    }
+}
+
+/** Tops a conversation loaded back to its start, as in Slack. */
+@Composable
+private fun ConversationIntro(room: RoomSummary) {
+    val colors = SlatrixTheme.colors
+    Column(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSection),
+        verticalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+        Box(Modifier.size(UiMetrics.ProfileAvatar).background(colors.raised, MaterialTheme.shapes.extraLarge),
+            contentAlignment = Alignment.Center) {
+            Icon(if (room.direct) Icons.Outlined.Person else Icons.Outlined.Tag, null, Modifier.size(UiMetrics.HeaderAvatar))
+        }
+        Text(if (room.direct) room.name else "# ${room.name}", style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold, color = colors.textPrimary)
+        Text(if (room.direct) "This conversation is just between ${room.name} and you."
+            else "This is the very beginning of the #${room.name} channel.",
+            style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
     }
 }
 
