@@ -442,6 +442,23 @@ class MatrixConversationTest {
         files.close()
     }
 
+    // capability: message.edit-caption
+    @Test fun aCaptionChangesOrGoesByEditingTheMediaEvent() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Our new office")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val message = conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single()
+        conversation.editCaption(message, "Our new office, 3rd floor")
+        assertEquals(EventOrTransactionId.EventId("\$one") to EditedContent.MediaCaption("Our new office, 3rd floor", null,
+            Mentions(emptyList(), false)), timeline.edits.receive())
+        conversation.editCaption(message, null)
+        assertEquals(EditedContent.MediaCaption(null, null, Mentions(emptyList(), false)), timeline.edits.receive().second)
+
+        timeline.editFailure = IllegalStateException("Offline")
+        conversation.editCaption(message, "Again")
+        assertEquals("Couldn’t change the caption.", conversation.state.first { it.notice != null }.notice)
+        conversation.close()
+    }
+
     @Test fun aFailedDeleteSaysSoForAMoment() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.redactFailure = IllegalStateException("Offline")
@@ -780,7 +797,9 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         }
     }
     val edits = Channel<Pair<EventOrTransactionId, EditedContent>>(Channel.UNLIMITED)
+    var editFailure: Exception? = null
     override suspend fun edit(eventOrTransactionId: EventOrTransactionId, newContent: EditedContent) {
+        editFailure?.let { throw it }
         edits.send(eventOrTransactionId to newContent)
     }
 }
