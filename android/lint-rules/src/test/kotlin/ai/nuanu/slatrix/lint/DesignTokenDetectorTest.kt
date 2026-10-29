@@ -34,7 +34,7 @@ class DesignTokenDetectorTest : LintDetectorTest() {
         """
         package androidx.compose.ui.graphics
         class Color(value: Long) {
-            companion object { val White = Color(0xffffffff) }
+            companion object { val White: Color get() = TODO() }
         }
         """,
     )
