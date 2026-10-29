@@ -22,7 +22,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.matrix.rustcomponents.sdk.AttachmentKind
 import org.matrix.rustcomponents.sdk.DateDividerMode
+import org.matrix.rustcomponents.sdk.FileInfo
+import org.matrix.rustcomponents.sdk.ImageInfo
+import org.matrix.rustcomponents.sdk.UploadParameters
+import org.matrix.rustcomponents.sdk.UploadSource
+import org.matrix.rustcomponents.sdk.VideoInfo
 import org.matrix.rustcomponents.sdk.EditedContent
 import org.matrix.rustcomponents.sdk.EmbeddedEventDetails
 import org.matrix.rustcomponents.sdk.EventOrTransactionId
@@ -89,6 +95,8 @@ data class ConversationMessage(
     /** The message this one replies to, quoted above it. */
     val replyTo: ReplyPreview? = null,
     val attachment: MessageAttachment? = null,
+    /** How much of an attachment you're sending has gone up, from 0 to 1. */
+    val uploadProgress: Float? = null,
 ) : ConversationRow {
     /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
     val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
@@ -130,6 +138,12 @@ fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Bo
 private const val MAX_BLANK_PAGES = 5
 private const val ROOT_KEY = "thread-root"
 private const val NOTICE_MILLIS = 4_000L
+
+/** The relation that puts an attachment in a thread, as the Mac sends it. */
+private fun threadRelation(root: String): String {
+    val id = "\"" + root.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    return """{"m.relates_to":{"rel_type":"m.thread","event_id":$id,"is_falling_back":true,"m.in_reply_to":{"event_id":$id}}}"""
+}
 
 /** The value, or null when [block] failed; cancellation still cancels. */
 internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } catch (cancelled: CancellationException) {
@@ -455,6 +469,33 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
+    /** Prepares and sends each in turn, so they arrive in the order picked; the copies go once uploaded. */
+    fun sendAttachments(attachments: List<suspend () -> OutgoingAttachment>) {
+        operations.launch {
+            for (prepare in attachments) {
+                val sent = quietly {
+                    val attachment = prepare()
+                    try {
+                        val params = UploadParameters(UploadSource.File(attachment.path), null, null, null, null,
+                            threadRoot?.let(::threadRelation))
+                        val size = attachment.size.toULong()
+                        val kind = if (attachment.mimeType.startsWith("video/")) AttachmentKind.Video(VideoInfo(
+                            attachment.durationMillis?.let(java.time.Duration::ofMillis), attachment.height?.toULong(),
+                            attachment.width?.toULong(), attachment.mimeType, size, null, null, null), null)
+                        else if (attachment.width != null && attachment.height != null) AttachmentKind.Image(
+                            ImageInfo(attachment.height.toULong(), attachment.width.toULong(), attachment.mimeType, size, null, null, null, null),
+                            null)
+                        else AttachmentKind.File(FileInfo(attachment.mimeType, size, null, null))
+                        timeline().sendAttachment(params, kind).use { it.join() }
+                    } finally {
+                        java.io.File(attachment.path).parentFile?.deleteRecursively()
+                    }
+                }
+                if (sent == null) announce("Couldn’t send this file.")
+            }
+        }
+    }
+
     suspend fun link(message: ConversationMessage): String? {
         val id = message.eventId ?: return null
         return quietly { room.matrixToEventPermalink(id) }
@@ -650,6 +691,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             canRetry = failure != null && failure.error !is QueueWedgeError.ExpiredAccessToken &&
                 failure.error !is QueueWedgeError.MissingMediaContent && failure.error !is QueueWedgeError.InvalidMimeType,
             queuePaused = failure?.isRecoverable == true,
+            uploadProgress = (event.localSendState as? EventSendState.NotSentYet)?.progress?.progress
+                ?.takeIf { it.total > 0u }?.let { it.current.toFloat() / it.total.toFloat() },
             // An edit goes out as text, so only a text message keeps its kind.
             editable = event.isEditable && shown.kind == MessageKind.Text,
             edited = (content.kind as? MsgLikeKind.Message)?.content?.isEdited == true,

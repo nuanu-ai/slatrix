@@ -3,15 +3,18 @@ package ai.nuanu.slatrix.ui.account
 import android.content.ActivityNotFoundException
 import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountState
+import ai.nuanu.slatrix.core.AttachmentImport
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.MatrixMedia
 import java.io.File
+import ai.nuanu.slatrix.core.MatrixChannel
 import ai.nuanu.slatrix.core.IdentityState
 import ai.nuanu.slatrix.core.IdentityVerification
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.MatrixSearch
 import ai.nuanu.slatrix.core.MessageSearchState
+import ai.nuanu.slatrix.core.RecentSearchStore
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.ConversationState
@@ -154,10 +157,10 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 { darkOverride = it; appearance.darkMode = it },
                                 { palette = it; appearance.paletteName = it.name }) { preferences = false } } }
                             you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut) { you = false } } }
-                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, media) } } }
+                            thread != null -> { { key(thread.room.id, thread.threadRoot) { LiveConversation(thread, threads, workspace, jump, rooms, media) } } }
                             // Kept while a thread covers it, so Back returns to the same place in the channel.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace, jump, media) { root, row -> threads?.open(selected.room, root, root = row) }
+                                LiveConversation(selected, workspace, workspace, jump, rooms, media) { root, row -> threads?.open(selected.room, root, root = row) }
                             } } } }
                             else -> null
                         }) {
@@ -200,29 +203,51 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
 private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
-    jump: (RoomSummary, String, String?) -> Unit, media: MatrixMedia, onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
+    jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?, media: MatrixMedia,
+    onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
+    // The room as the list follows it, so a change of name, topic or permissions shows while it's open; read only
+    // below, so other rooms' updates don't recompose the conversation.
+    val roomList = rooms?.state?.collectAsState()
+    val room by remember(open.room, roomList) {
+        derivedStateOf { roomList?.value?.rooms?.firstOrNull { it.id == open.room.id } ?: open.room }
+    }
     val conversation = open.conversation
     val composer = open.composer
     val timeline = conversation?.state?.collectAsState()?.value ?: ConversationState(error = open.error)
     val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
     val scope = rememberCoroutineScope()
-    LiveChannelScreen(open.room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
-        { owner?.back() }, { conversation?.loadOlder() },
-        { event ->
-            scope.launch {
-                if (conversation?.markRead(event) == true && open.threadRoot == null) PushNotifications(context).clear(open.room.id)
+    var details by rememberSaveable(open.room.id) { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize()) {
+        LiveChannelScreen(room, timeline, draft, { composer?.edit(it) }, { composer?.send() },
+            { owner?.back() }, { conversation?.loadOlder() },
+            { event ->
+                scope.launch {
+                    if (conversation?.markRead(event) == true && open.threadRoot == null) PushNotifications(context).clear(open.room.id)
+                }
+            },
+            { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
+            { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
+            { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
+            open.threadRoot, rememberMessageActions(conversation, composer, main),
+            ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
+                onNeedPeople = { composer?.loadPeople() },
+                onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
+                onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
+            // A quote doesn't know its parent's thread, so it asks before jumping.
+            { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } },
+            { attachment, width, height, full -> media.picture(attachment, width, height, full) },
+            { openAttachment(context, media, it) }, { details = true })
+        val actions = remember(rooms, open.room.id) {
+            rooms?.client?.let { MatrixChannel(it, open.room.id) }?.let {
+                ChannelDetailsActions(it::members, it::save, it::leave, it::invite, it::notifications, it::setNotifications)
             }
-        },
-        { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.open(open.room, open.threadRoot, open.at) },
-        { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
-        { root -> onOpenThread(root, timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage) },
-        open.threadRoot, rememberMessageActions(conversation, composer, main),
-        ComposerActions(onCancelTarget = { composer?.cancelTarget() }), { conversation?.loadNewer(it) },
-        // A quote doesn't know its parent's thread, so it asks before jumping.
-        { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } },
-        { attachment, width, height, full -> media.picture(attachment, width, height, full) },
-        { openAttachment(context, media, it) })
+        }
+        // Over the conversation, so Back finds it where it was.
+        if (details && actions != null) {
+            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }) { details = false }
+        }
+    }
 }
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
@@ -242,13 +267,16 @@ private fun LiveHome(userId: String, rooms: MatrixRooms?, workspace: MatrixWorks
             val inScope = remember(state.rooms, selectedSpaceId) {
                 state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
             }
+            val context = LocalContext.current
+            val recentStore = remember(context, userId) { RecentSearchStore(context, userId) }
+            var recents by remember(recentStore) { mutableStateOf(recentStore.recents) }
             SearchScreen(inScope, userId, messages, { query -> if (query == null) search?.clear() else search?.search(query) },
                 { search?.loadMore() }, { hit ->
                     // A hit doesn't know its thread, so it is looked up first: a reply opens in its thread.
                     state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
                         scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
-                }, open)
+                }, recents, { recents = recentStore.add(it) }, open)
         }, activity = activity)
 }
 

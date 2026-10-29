@@ -367,6 +367,47 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: composer.attachments
+    @Test fun attachmentsGoOutInOrderAsImagesAndVideosWithTheirSizeOrAsFilesAndShowTheirUpload() = runTest {
+        val uploading = EventSendState.NotSentYet(MediaUploadProgress(0u, AbstractProgress(25u, 100u)))
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "txn-a", "photo.png", local = true, sendState = uploading)))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        assertEquals(0.25f, conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single().uploadProgress)
+
+        conversation.sendAttachments(listOf(
+            { OutgoingAttachment("/cache/photo.png", "photo.png", "image/png", 2_048, 1200, 800) },
+            { OutgoingAttachment("/cache/notes.pdf", "notes.pdf", "application/pdf", 4_096, null, null) },
+            { OutgoingAttachment("/cache/clip.mp4", "clip.mp4", "video/mp4", 8_192, 640, 360, durationMillis = 3_000) },
+        ))
+        val (photo, image) = timeline.attachments.receive()
+        assertEquals(UploadSource.File("/cache/photo.png"), photo.source)
+        assertEquals(ImageInfo(800u, 1200u, "image/png", 2_048u, null, null, null, null), (image as AttachmentKind.Image).imageInfo)
+        val (notes, file) = timeline.attachments.receive()
+        assertEquals(UploadSource.File("/cache/notes.pdf"), notes.source)
+        assertEquals(FileInfo("application/pdf", 4_096u, null, null), (file as AttachmentKind.File).fileInfo)
+        val (_, video) = timeline.attachments.receive()
+        assertEquals(VideoInfo(java.time.Duration.ofMillis(3_000), 360u, 640u, "video/mp4", 8_192u, null, null, null),
+            (video as AttachmentKind.Video).videoInfo)
+        conversation.close()
+    }
+
+    @Test fun anAttachmentInAThreadGoesToTheThread() = runTest {
+        val timeline = ConversationTimeline(emptyList())
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root")
+        conversation.sendAttachments(listOf({ OutgoingAttachment("/cache/a.txt", "a.txt", "text/plain", 1, null, null) }))
+        val relation = com.google.gson.JsonParser.parseString(timeline.attachments.receive().first.extraContentJson).asJsonObject["m.relates_to"].asJsonObject
+        assertEquals("m.thread", relation["rel_type"].asString)
+        assertEquals("\$root", relation["event_id"].asString)
+        conversation.close()
+    }
+
+    @Test fun anAttachmentThatCantBeReadSaysSo() = runTest {
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(ConversationTimeline(emptyList())))
+        conversation.sendAttachments(listOf({ throw java.io.FileNotFoundException("gone") }))
+        assertEquals("Couldn’t send this file.", conversation.state.first { it.notice != null }.notice)
+        conversation.close()
+    }
+
     @Test fun aFailedDeleteSaysSoForAMoment() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.redactFailure = IllegalStateException("Offline")
@@ -606,6 +647,14 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     override suspend fun sendReply(msg: RoomMessageEventContentWithoutRelation, eventId: String): SendHandle {
         replies.send(eventId)
         return send(msg)
+    }
+    val attachments = Channel<Pair<UploadParameters, AttachmentKind>>(Channel.UNLIMITED)
+    override fun sendAttachment(params: UploadParameters, attachment: AttachmentKind): SendAttachmentJoinHandle {
+        attachments.trySend(params to attachment)
+        return object : SendAttachmentJoinHandle(NoHandle) {
+            override suspend fun join() = Unit
+            override fun cancel() = Unit
+        }
     }
     val edits = Channel<Pair<EventOrTransactionId, EditedContent>>(Channel.UNLIMITED)
     override suspend fun edit(eventOrTransactionId: EventOrTransactionId, newContent: EditedContent) {

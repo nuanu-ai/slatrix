@@ -30,6 +30,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performClick
@@ -205,9 +206,9 @@ class MessageContentTest {
     @Test fun aFileKeepsOpeningAfterItsRowScrollsAwayAndSaysWhenItCannot() {
         val report = MessageAttachment(MessageAttachment.Kind.File, "Q3 report.pdf", "application/pdf", 250_000, null, null, source)
         show(message("Q3 report.pdf").copy(kind = MessageKind.Attachment, attachment = report), *(1..40).map { message("Message $it") }.toTypedArray())
-        repeat(10) { compose.onRoot().performTouchInput { swipeDown() } }
+        repeat(10) { compose.onNode(hasScrollAction()).performTouchInput { swipeDown() } }
         compose.onNodeWithText("Q3 report.pdf", useUnmergedTree = true).performClick()
-        repeat(10) { compose.onRoot().performTouchInput { swipeUp() } }
+        repeat(10) { compose.onNode(hasScrollAction()).performTouchInput { swipeUp() } }
         compose.onNodeWithText("Q3 report.pdf", useUnmergedTree = true).assertDoesNotExist()
         opening.complete("Couldn’t download Q3 report.pdf.")
         compose.onNodeWithText("Couldn’t download Q3 report.pdf.").assertIsDisplayed()
