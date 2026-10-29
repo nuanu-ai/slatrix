@@ -48,7 +48,9 @@ object SlackIcons {
     private fun filled(name: String, path: String, evenOdd: Boolean = false) = vector(name, fill = path, evenOdd = evenOdd)
 
     private fun vector(name: String, stroke: String? = null, fill: String? = null, width: Float = 1.75f, evenOdd: Boolean = false) =
-        ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
+        // The paths sit on a 24-unit grid with a 4-unit margin; Slack's glyphs fill more of their box, so 2 units are cropped.
+        ImageVector.Builder(name, 24.dp, 24.dp, 20f, 20f).apply {
+            addGroup(translationX = -2f, translationY = -2f)
             stroke?.let {
                 addPath(PathParser().parsePathString(it).toNodes(), stroke = SolidColor(Color.Black), strokeLineWidth = width,
                     strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)
@@ -57,5 +59,6 @@ object SlackIcons {
                 addPath(PathParser().parsePathString(it).toNodes(), fill = SolidColor(Color.Black),
                     pathFillType = if (evenOdd) PathFillType.EvenOdd else PathFillType.NonZero)
             }
+            clearGroup()
         }.build()
 }
