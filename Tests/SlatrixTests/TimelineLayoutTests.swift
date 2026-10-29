@@ -65,7 +65,8 @@ struct TimelineLayoutTests {
                 body: "", timestamp: Self.now.addingTimeInterval(message.second))
         }
         let grouped = TimelineLayout.rows(
-            messages, unreadBoundaryEventID: nil, groups: true, now: Self.now, calendar: Self.calendar, locale: Self.locale
+            messages, unreadBoundaryEventID: nil, groups: true, now: Self.now, calendar: Self.calendar,
+            locale: Self.locale
         ).compactMap { row -> Bool? in
             if case .message(_, let grouped, _) = row.kind { grouped } else { nil }
         }
