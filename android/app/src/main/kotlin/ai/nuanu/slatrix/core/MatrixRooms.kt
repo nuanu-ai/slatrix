@@ -22,6 +22,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.JoinRule
 import org.matrix.rustcomponents.sdk.LatestEventValue
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.NotificationProcessSetup
@@ -246,7 +247,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             spaceIds = ancestors(info.id),
             latest = if (info.isDirect) followed[info.id]?.let { latest(it.room) } else null,
             starred = info.isFavourite,
-            isPrivate = info.isPublic == false,
+            // Slack's private channel: only an invitation lets someone in. A restricted room is open to its space, a public channel.
+            isPrivate = info.joinRule.let { it is JoinRule.Invite || it is JoinRule.Knock || it is JoinRule.Private },
         )
         // An unchanged room keeps its instance, so its row skips recomposition.
         if (summaries[info.id] != summary) summaries[info.id] = summary
