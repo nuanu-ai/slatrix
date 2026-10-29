@@ -70,8 +70,11 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
-    // Coming back to results leaves the keyboard down, so it doesn't cover them.
-    LaunchedEffect(Unit) { if (!submitted) { focus.requestFocus(); keyboard?.show() } }
+    // Coming back to results leaves the keyboard down, so it doesn't cover them; after the process was gone, it asks again.
+    LaunchedEffect(Unit) {
+        if (!submitted) { focus.requestFocus(); keyboard?.show() }
+        else if (messages.query == null) onSearch(MessageSearchQuery.parse(text, rooms, me))
+    }
     val submit = {
         if (text.isNotBlank()) {
             onSearch(MessageSearchQuery.parse(text, rooms, me))
@@ -101,7 +104,7 @@ private fun SearchField(text: String, onText: (String) -> Unit, onSubmit: () -> 
         decorationBox = { field ->
             Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.SearchField).clip(MaterialTheme.shapes.large)
                 .border(UiMetrics.Divider, colors.borderStrong, MaterialTheme.shapes.large).background(colors.canvas)
-                .padding(horizontal = UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically,
+                .padding(start = UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Icon(SlackIcons.Search, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
                 Box(Modifier.weight(1f)) {
@@ -109,8 +112,11 @@ private fun SearchField(text: String, onText: (String) -> Unit, onSubmit: () -> 
                     field()
                 }
                 if (text.isNotEmpty()) {
-                    Icon(SlackIcons.Close, null, Modifier.size(UiMetrics.Icon).clickable(role = Role.Button) { onText("") }
-                        .semantics { contentDescription = "Clear" }, tint = colors.textSecondary)
+                    // As tall as the field, so the target is bigger than the glyph without growing the field.
+                    Box(Modifier.size(UiMetrics.SearchField).clickable(role = Role.Button) { onText("") }
+                        .semantics { contentDescription = "Clear" }, contentAlignment = Alignment.Center) {
+                        Icon(SlackIcons.Close, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
+                    }
                 }
             }
         })
@@ -164,9 +170,9 @@ private fun MessageResults(text: String, rooms: List<RoomSummary>, messages: Mes
         when {
             messages.error != null -> item { SearchNote(messages.error) }
             messages.loading -> item { ConnectionIndicator(true, null) }
+            // Asks for the next page as the end comes into view; a page with no hits here asks for the one after.
+            !messages.endReached -> item { LaunchedEffect(messages.hits.size) { onMore() } }
             hits.isEmpty() -> item { SearchNote("No results for “$text”") }
-            // Asks for the next page as the end comes into view.
-            !messages.endReached -> item { LaunchedEffect(hits.size) { onMore() } }
         }
     }
 }

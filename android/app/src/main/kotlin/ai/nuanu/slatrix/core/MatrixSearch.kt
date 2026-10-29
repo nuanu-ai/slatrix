@@ -60,8 +60,9 @@ class MatrixSearch(private val scope: CoroutineScope, private val client: Client
         if (backfill == null) backfill = runCatching { client.runSearchBackfill(SearchBackfillStrategy.FOREGROUND) }.getOrNull()
         val requests = Channel<Unit>(Channel.CONFLATED).also { more = it }
         job = scope.launch(Dispatchers.Default) {
+            // Checked inside the update, so a listener on an SDK thread can't land on a newer search's state.
             fun publish(change: (MessageSearchState) -> MessageSearchState) {
-                if (generation.get() == token) mutableState.update(change)
+                mutableState.update { if (generation.get() == token) change(it) else it }
             }
             val results = mutableListOf<SearchServiceResult>()
             var handle: TaskHandle? = null
