@@ -25,7 +25,7 @@ import uniffi.matrix_sdk_ui.SearchServicePaginationState
 
 /** A message the search index matched. */
 data class SearchHit(val roomId: String, val eventId: String, val senderId: String, val senderName: String, val body: String,
-    val timestamp: Long)
+    val timestamp: Long, val senderAvatarUrl: String? = null)
 
 data class MessageSearchState(
     val query: MessageSearchQuery? = null,
@@ -136,7 +136,8 @@ class MatrixSearch(private val scope: CoroutineScope, private val client: Client
         if (roomId != null && message.roomId != roomId) return null
         val result = message.result
         val body = previewText(result.content)?.takeIf { it.isNotBlank() } ?: return null
-        val name = (result.senderProfile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: result.sender
-        return SearchHit(message.roomId, result.eventId, result.sender, name, body, result.timestamp.toLong())
+        val profile = result.senderProfile as? ProfileDetails.Ready
+        val name = profile?.displayName?.takeIf { it.isNotBlank() } ?: result.sender
+        return SearchHit(message.roomId, result.eventId, result.sender, name, body, result.timestamp.toLong(), profile?.avatarUrl)
     }
 }

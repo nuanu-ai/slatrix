@@ -119,7 +119,7 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
                                 MembershipState.Join -> "join"
                                 MembershipState.Invite -> "invite"
                                 else -> "other"
-                            })
+                            }, member.avatarUrl)
                         }
                     }
                 }
