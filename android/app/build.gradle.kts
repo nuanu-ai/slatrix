@@ -18,7 +18,7 @@ if (googleServices != null) {
     require(googleServices.isAbsolute && googleServices.isFile) { "slatrixGoogleServices must name an existing absolute file." }
     val gateway = URI(pushGateway)
     require(gateway.scheme == "https" && !gateway.host.isNullOrEmpty() && gateway.rawUserInfo == null &&
-        gateway.rawQuery == null && gateway.rawFragment == null && gateway.path == "/_matrix/push/v1/notify") {
+        gateway.rawQuery == null && gateway.rawFragment == null && gateway.path.endsWith("/_matrix/push/v1/notify")) {
         "slatrixPushGateway must be an HTTPS /_matrix/push/v1/notify endpoint."
     }
     apply(plugin = "com.google.gms.google-services")

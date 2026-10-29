@@ -1,3 +1,4 @@
+import os
 import subprocess
 import tempfile
 import unittest
@@ -35,3 +36,28 @@ class PushConfigurationTests(unittest.TestCase):
             google_services.write_text("{}", encoding="utf-8")
             result = self.configure(CLOUD_FUNCTION, google_services)
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_unsafe_gateway_urls_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            google_services = Path(directory) / "google-services.json"
+            google_services.write_text("{}", encoding="utf-8")
+            for gateway in (
+                "http://push.example.org/_matrix/push/v1/notify",
+                "https://owner@push.example.org/_matrix/push/v1/notify",
+                "https://push.example.org/_matrix/push/v1/notify?token=secret",
+                "https://push.example.org/_matrix/push/v1/notify#fragment",
+                "https:///_matrix/push/v1/notify",
+                "https://push.example.org/other",
+            ):
+                with self.subTest(gateway=gateway):
+                    result = self.configure(gateway, google_services)
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+
+    def test_relative_firebase_file_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            google_services = Path(directory) / "google-services.json"
+            google_services.write_text("{}", encoding="utf-8")
+            result = self.configure(
+                CLOUD_FUNCTION, os.path.relpath(google_services, ANDROID)
+            )
+        self.assertNotEqual(result.returncode, 0, result.stdout)
