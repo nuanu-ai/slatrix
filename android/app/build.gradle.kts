@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.ApplicationExtension
+import com.android.build.api.variant.ApplicationAndroidComponentsExtension
 import com.google.gms.googleservices.GoogleServicesTask
 import java.net.URI
 import java.io.File
@@ -22,7 +23,15 @@ if (googleServices != null) {
         "slatrixPushGateway must be an HTTPS /_matrix/push/v1/notify endpoint."
     }
     apply(plugin = "com.google.gms.google-services")
-    tasks.withType<GoogleServicesTask>().configureEach { googleServicesJsonFiles.set(listOf(googleServices)) }
+    extensions.configure<ApplicationAndroidComponentsExtension> {
+        // The plugin registers each task with its default file list before this callback.
+        onVariants { variant ->
+            val variantName = variant.name.replaceFirstChar { it.uppercaseChar() }
+            tasks.named<GoogleServicesTask>("process${variantName}GoogleServices") {
+                googleServicesJsonFiles.set(listOf(googleServices))
+            }
+        }
+    }
 }
 
 extensions.configure<ApplicationExtension> {
