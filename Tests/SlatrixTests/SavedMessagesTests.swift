@@ -1,4 +1,5 @@
 import Foundation
+import MatrixRustSDK
 import Testing
 
 @testable import Slatrix
@@ -112,5 +113,144 @@ struct SavedMessagesRuleTests {
         let list = SavedMessages(saved: saved, removed: [])
         #expect(list.saved.first?.eventID == "$10000")
         #expect(list.saved.last?.eventID == "$1")
+    }
+}
+
+/// Account data as the SDK keeps it: what the store last synced, what a sync brings, and what this device writes.
+final class LaterClient: Client, @unchecked Sendable {
+    private let lock = NSLock()
+    private var listeners: [RawAccountDataListener] = []
+    private var content: String?
+    private var failing = false
+    /// The content of every write that reached the server, oldest first.
+    let writes = Recorder<String>()
+    /// Every write tried, whether or not it reached the server.
+    let attempts = Recorder<String>()
+    /// The type every write and subscription named.
+    let types = Recorder<String>()
+    init(stored: String? = nil) {
+        content = stored
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    var failsWrites: Bool {
+        get { lock.withLock { failing } }
+        set { lock.withLock { failing = newValue } }
+    }
+    override func accountData(eventType: String) async throws -> String? {
+        types.append(eventType)
+        return lock.withLock { content }
+    }
+    override func observeRawAccountDataEvent(eventType: String, listener: RawAccountDataListener) -> TaskHandle {
+        types.append(eventType)
+        lock.withLock { listeners.append(listener) }
+        return FakeCancellableHandle(noHandle: .init())
+    }
+    override func setAccountData(eventType: String, content: String) async throws {
+        types.append(eventType)
+        // Decided before the attempt shows, so a test that sees a failed attempt knows it failed.
+        let fails = failsWrites
+        attempts.append(content)
+        if fails { throw ClientError.Generic(msg: "fixture is offline", details: nil) }
+        writes.append(content)
+    }
+    /// A sync bringing what another device wrote.
+    func sync(_ content: String) {
+        let current = lock.withLock {
+            self.content = content
+            return listeners
+        }
+        for listener in current { listener.onChange(content: content) }
+    }
+}
+
+/// The saved event IDs of written content, newest first.
+private func savedIDs(_ content: String) -> [String] {
+    guard case .object(let object) = try? JSONValue(json: content), case .array(let saved) = object["saved"] else {
+        return []
+    }
+    return saved.compactMap {
+        guard case .object(let entry) = $0, case .string(let id) = entry["event_id"] else { return nil }
+        return id
+    }
+}
+
+/// Later kept in step with the account's data, against an SDK fake.
+@MainActor
+struct SavedMessagesServiceTests {
+    private let owner = "@owner:example.org"
+    private let one = #"{"room_id":"!design:example.org","event_id":"$one","ts":1761955200000}"#
+    private let three = #"{"room_id":"!general:example.org","event_id":"$three","ts":1761955400000}"#
+
+    // capability: message.save
+    @Test("Saves and removals made on another device show in Later after their sync")
+    func otherDevice() async {
+        let client = LaterClient(stored: #"{"saved":[\#(one)],"removed":[]}"#)
+        let later = SavedMessagesService()
+        later.attach(client, accountID: owner)
+        #expect(await eventually { later.list.saved.map(\.eventID) == ["$one"] })
+
+        client.sync(#"{"saved":[\#(three),\#(one)],"removed":[]}"#)
+        #expect(await eventually { later.list.saved.map(\.eventID) == ["$three", "$one"] })
+        let removedLater = #"{"room_id":"!design:example.org","event_id":"$one","ts":1761955500000}"#
+        client.sync(#"{"saved":[\#(three)],"removed":[\#(removedLater)]}"#)
+        #expect(await eventually { later.list.saved.map(\.eventID) == ["$three"] })
+    }
+
+    @Test("A device's first run puts the list it kept into the account, under the shared type")
+    func firstRun() async throws {
+        let client = LaterClient()
+        let later = SavedMessagesService()
+        let kept = SavedMessageReference(
+            roomID: "!design:example.org", eventID: "$one", savedAt: Date(timeIntervalSince1970: 1_761_955_200))
+        later.merge(SavedMessages(saved: [kept]), accountID: owner)
+        later.attach(client, accountID: owner)
+
+        #expect(await eventually { !client.writes.all.isEmpty })
+        #expect(try JSONValue(json: client.writes.all[0]) == JSONValue(json: #"{"saved":[\#(one)],"removed":[]}"#))
+        #expect(Set(client.types.all) == [try SavedMessagesRuleTests.spec.get().eventType])
+    }
+
+    @Test("A save made offline stays in Later and reaches the account once the connection is back")
+    func offline() async {
+        let client = LaterClient(stored: #"{"saved":[\#(one)],"removed":[]}"#)
+        let matrix = MatrixService()
+        matrix.savedMessages.attach(client, accountID: owner)
+        #expect(await eventually { matrix.savedMessages.list.saved.map(\.eventID) == ["$one"] })
+        client.failsWrites = true
+        matrix.savedMessages.toggle(roomID: "!general:example.org", eventID: "$two")
+        #expect(await eventually { !client.attempts.all.isEmpty })
+        #expect(matrix.savedMessages.list.saved.map(\.eventID) == ["$two", "$one"])
+
+        client.failsWrites = false
+        matrix.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
+        #expect(await eventually { client.writes.all.last.map(savedIDs) == ["$two", "$one"] })
+    }
+
+    @Test("A save here survives another device writing the account's list without it")
+    func concurrentWrite() async {
+        let client = LaterClient(stored: #"{"saved":[\#(one)],"removed":[]}"#)
+        let later = SavedMessagesService()
+        later.attach(client, accountID: owner)
+        #expect(await eventually { later.list.saved.map(\.eventID) == ["$one"] })
+        later.toggle(roomID: "!general:example.org", eventID: "$two")
+        #expect(await eventually { client.writes.all.last.map(savedIDs) == ["$two", "$one"] })
+
+        // Written by a device that hadn't seen $two yet, after this one wrote.
+        client.sync(#"{"saved":[\#(three),\#(one)],"removed":[]}"#)
+        #expect(await eventually { client.writes.all.last.map(savedIDs) == ["$two", "$three", "$one"] })
+    }
+
+    @Test("Signing out keeps the account's Later for its last local save, and the next account starts from its own")
+    func accounts() async {
+        let later = SavedMessagesService()
+        later.attach(LaterClient(stored: #"{"saved":[\#(one)],"removed":[]}"#), accountID: owner)
+        #expect(await eventually { later.list.saved.map(\.eventID) == ["$one"] })
+        later.attach(nil, accountID: nil)
+        #expect(later.list.saved.map(\.eventID) == ["$one"])
+
+        later.attach(LaterClient(stored: #"{"saved":[\#(three)],"removed":[]}"#), accountID: "@other:example.org")
+        #expect(await eventually { later.list.saved.map(\.eventID) == ["$three"] })
     }
 }
