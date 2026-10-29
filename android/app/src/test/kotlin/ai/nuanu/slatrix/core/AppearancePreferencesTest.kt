@@ -2,7 +2,7 @@ package ai.nuanu.slatrix.core
 
 import android.app.Application
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -19,7 +19,10 @@ class AppearancePreferencesTest {
         settings.paletteName = "Lagoon"
 
         val reopened = AppearancePreferences(context)
-        assertFalse(reopened.darkMode)
+        assertEquals(false, reopened.darkMode)
         assertEquals("Lagoon", reopened.paletteName)
+
+        reopened.darkMode = null
+        assertNull(AppearancePreferences(context).darkMode)
     }
 }
