@@ -102,6 +102,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private val retries = Channel<Unit>(Channel.CONFLATED)
     private val summaries = mutableMapOf<String, RoomSummary>()
     private val spaces = mutableMapOf<String, SpaceSummary>()
+    private val invitations = mutableMapOf<String, Invitation>()
     private var parents: Map<String, List<String>>? = null
     private val spaceRequests = Channel<SpaceRequest>(Channel.UNLIMITED)
     private val followed = mutableMapOf<String, Followed>()
@@ -236,13 +237,24 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     }
 
     private suspend fun accept(info: RoomInfo) {
-        if (info.membership != Membership.JOINED) {
+        if (RoomPlacement.of(info.isSpace, info.membership) == RoomPlacement.Ignored) {
             summaries.remove(info.id)
             spaces.remove(info.id)
+            invitations.remove(info.id)
             followed.remove(info.id)?.release()
             return
         }
         val name = info.displayName?.takeIf { it.isNotBlank() } ?: info.id
+        // Still followed, so accepting it, here or on another device, turns it into the conversation or workspace it is.
+        if (info.membership == Membership.INVITED) {
+            summaries.remove(info.id)
+            spaces.remove(info.id)
+            val invitation = Invitation(info.id, name, direct = info.isDirect, space = info.isSpace,
+                inviter = info.inviter?.let { it.displayName?.takeIf(String::isNotBlank) ?: it.userId })
+            if (invitations[info.id] != invitation) invitations[info.id] = invitation
+            return
+        }
+        invitations.remove(info.id)
         if (info.isSpace) {
             summaries.remove(info.id)
             val space = SpaceSummary(id = info.id, name = name, isTopLevel = topLevel(info.id))
@@ -301,6 +313,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             loading = false,
             error = error,
             spacesKnown = parents != null,
+            invitations = invitations.values.sortedWith(compareBy<Invitation, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.id }),
         )
     }
 

@@ -23,7 +23,7 @@
     {"id": "home.private-channel-icon", "what": "Private channels show a lock where public ones show #.", "mac": "missing", "android": "done"},
     {"id": "home.browse-channels", "what": "Browse a workspace's or the server's channels and join one.", "mac": "done", "android": "done"},
     {"id": "home.create-channel", "what": "Create a channel in a workspace.", "mac": "done", "android": "done"},
-    {"id": "home.invitations", "what": "Accept or decline an invitation to a channel, direct message or workspace.", "mac": "done", "android": "missing"},
+    {"id": "home.invitations", "what": "Accept or decline an invitation to a channel, direct message or workspace.", "mac": "done", "android": "done"},
     {"id": "home.keyboard-navigation", "what": "Move to the previous, next or next unread conversation from the keyboard.", "mac": "done", "android": "n/a: phones switch conversations by touch"},
 
     {"id": "search.rooms", "what": "Find a conversation by name and open it.", "mac": "done", "android": "done"},

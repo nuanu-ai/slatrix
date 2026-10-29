@@ -110,7 +110,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                     Box(Modifier.fillMaxSize()) {
                         when (tab) {
                             HomeTab.Home -> HomeList(homeList, shown, selectedSpaceId, onRoom, onBrowseChannels,
-                                (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } }) { actions = it.id }
+                                (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } }, onInvitation) { actions = it.id }
                             HomeTab.Dms -> DirectList(directList, shown, onRoom) { actions = it.id }
                             HomeTab.Activity -> activity()
                             HomeTab.Search -> search()
@@ -251,7 +251,7 @@ private enum class HomeSection(val label: String, val icon: ImageVector) {
 
 @Composable
 private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId: String?, onRoom: (String) -> Unit,
-    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, onActions: (RoomSummary) -> Unit) {
+    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, onInvitation: (String) -> Unit, onActions: (RoomSummary) -> Unit) {
     // A saved workspace's channels are known only with its spaces, so its list waits for them rather than filling in.
     val waiting = state.loading || (selectedSpaceId != null && !state.spacesKnown)
     val sections = remember(state.rooms, selectedSpaceId) {
@@ -268,8 +268,13 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
         if (waiting) {
             item { ConnectionIndicator(true, null) }
         } else {
+            // Invitations lead while there are any, all of them in view, as unread conversations stay.
+            if (state.invitations.isNotEmpty()) {
+                item(key = "invitations") { InvitationsHeader() }
+                items(state.invitations, key = { "invitation ${it.id}" }) { InvitationRow(it, onInvitation) }
+            }
             sections.forEachIndexed { index, (section, rooms) ->
-                if (index > 0) item(key = "divider-${section.name}") { SectionDivider() }
+                if (index > 0 || state.invitations.isNotEmpty()) item(key = "divider-${section.name}") { SectionDivider() }
                 val open = section.name !in collapsed
                 item(key = section.name) {
                     SectionHeader(section, open, onBrowseChannels.takeIf { section == HomeSection.Channels }) {
