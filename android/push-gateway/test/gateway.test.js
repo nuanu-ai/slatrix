@@ -160,3 +160,23 @@ test('low-priority Matrix pushes use normal FCM priority for the release app', a
     android: { priority: 'normal', restrictedPackageName: 'ai.nuanu.slatrix' },
   }]);
 });
+
+test('the Matrix endpoint enforces its path, HTTP method, JSON media type and body limit', async (t) => {
+  const delivered = [];
+  t.mock.method(getMessaging(), 'send', async (message) => {
+    delivered.push(message);
+    return 'projects/test/messages/unexpected';
+  });
+  const unknown = await fetch(new URL('/other', endpoint), { method: 'POST' });
+  assert.equal(unknown.status, 404);
+  assert.equal((await unknown.json()).errcode, 'M_UNRECOGNIZED');
+  const method = await fetch(endpoint);
+  assert.equal(method.status, 405);
+  assert.equal(method.headers.get('allow'), 'POST');
+  assert.equal((await method.json()).errcode, 'M_UNRECOGNIZED');
+  const plain = await post({ notification: notification() }, { headers: { 'content-type': 'text/plain' } });
+  assert.equal(plain.status, 415);
+  const oversized = await post({ notification: notification({ content: { body: 'x'.repeat(1024 * 1024) } }) });
+  assert.equal(oversized.status, 413);
+  assert.deepEqual(delivered, []);
+});
