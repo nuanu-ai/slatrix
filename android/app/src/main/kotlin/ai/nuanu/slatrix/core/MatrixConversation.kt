@@ -277,17 +277,23 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room) {
         }
     }
 
-    /** The visible rows, each message grouped under the one before it when the same sender sent it soon after. */
+    /**
+     * The visible rows, each message grouped under the one before it when the same sender sent it soon after. A day
+     * divider shows only above a message, as on the Mac, since the SDK also starts days that hold only hidden events.
+     */
     private fun rows(): List<ConversationRow> {
         val rows = ArrayList<ConversationRow>(items.size)
         var previous: ConversationMessage? = null
+        var divider: ConversationRow? = null
         for (index in items.indices) {
             val row = items[index] ?: continue
             if (row !is ConversationMessage) {
-                rows.add(row)
+                divider = row
                 previous = null
                 continue
             }
+            divider?.let(rows::add)
+            divider = null
             val grouped = previous?.let { groupsUnder(it, row) } == true
             // Stored back, so an unchanged row stays the same object in the next batch.
             val current = if (row.grouped == grouped) row else row.copy(grouped = grouped).also { items[index] = it }
