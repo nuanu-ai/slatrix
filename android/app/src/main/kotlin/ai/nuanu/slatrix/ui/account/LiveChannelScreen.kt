@@ -33,6 +33,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import java.text.DateFormat
 import java.util.Date
 
@@ -71,6 +72,17 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     LaunchedEffect(newest?.id) {
         if (following || newest?.own == true && newest.sendState == MessageSendState.Sending) list.scrollToItem(0)
     }
+    val loadOlder by rememberUpdatedState(onLoadOlder)
+    // Asks again after every page while the top stays near, so pages of hidden events don't stall it.
+    LaunchedEffect(list, state.hasMore && !state.loadingHistory) {
+        if (!state.hasMore || state.loadingHistory) return@LaunchedEffect
+        snapshotFlow {
+            val visible = list.layoutInfo.visibleItemsInfo
+            // About three screens ahead, as on the Mac; the list is reversed, so its top is its last index.
+            visible.isNotEmpty() && list.layoutInfo.totalItemsCount - 1 - visible.last().index <= 3 * visible.size
+        }.first { it }
+        loadOlder()
+    }
     BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize().background(colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(end = UiMetrics.GapLarge,
@@ -94,11 +106,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true,
                 contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
                 items(state.rows.asReversed(), key = { it.id }) { row -> if (row is ConversationMessage) LiveMessageRow(row) }
-                if (state.hasMore) item {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        TextButton(onClick = onLoadOlder, enabled = !state.loading && !state.loadingHistory) { Text("Earlier messages") }
-                    }
-                }
+                // The top of the conversation, which also lets an empty one ask for history.
+                item(key = "top") { Spacer(Modifier.fillMaxWidth()) }
             }
             if (state.loading || state.loadingHistory) Box(Modifier.align(Alignment.TopCenter)) { ConnectionIndicator(true, null) }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
