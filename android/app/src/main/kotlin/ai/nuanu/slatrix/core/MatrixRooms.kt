@@ -168,6 +168,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
             }
             is Event.Connection -> if (event.generation == syncGeneration.get()) {
                 error = event.error
+                // A network error pauses a room's send queue; what waited there goes out once sync is back.
+                if (event.running) runCatching { client.enableAllSendQueues(true) }
             }
         }
     }
@@ -349,7 +351,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
                             SyncServiceState.OFFLINE -> "You’re offline."
                             else -> null
                         }
-                        events.trySend(Event.Connection(error, generation))
+                        events.trySend(Event.Connection(error, generation, state == SyncServiceState.RUNNING))
                     }
                 })
                 list = service.roomListService().allRooms()
@@ -413,6 +415,6 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client) {
         data class Spaces(val parents: Map<String, List<String>>?, val error: String? = null) : Event
         data class Info(val info: RoomInfo, val room: Followed) : Event
         data class Entries(val updates: List<RoomListEntriesUpdate>, val generation: Long) : Event
-        data class Connection(val error: String?, val generation: Long) : Event
+        data class Connection(val error: String?, val generation: Long, val running: Boolean = false) : Event
     }
 }
