@@ -3,6 +3,7 @@ package ai.nuanu.slatrix
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
@@ -20,6 +21,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
+import java.time.LocalDate
+import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -101,6 +104,25 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("This is the very beginning of the #design channel.").assertIsDisplayed()
         compose.runOnIdle { current.value = RoomSummary("!mira:example.org", "Mira Chen", true, "", UnreadBadge.None, "MC", 2) }
         compose.onNodeWithText("This conversation is just between Mira Chen and you.").assertIsDisplayed()
+    }
+
+    @Test fun dayDividersReadTodayYesterdayOrTheDate() {
+        fun noon(day: LocalDate) = day.atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val today = LocalDate.now()
+        val rows = listOf(
+            DayDivider("older", noon(LocalDate.of(2023, 10, 23))), message("Back then", minutes = 0),
+            DayDivider("yesterday", noon(today.minusDays(1))), message("Yesterday's", minutes = 1),
+            DayDivider("today", noon(today)), message("Today's", minutes = 2),
+        )
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), ComposerState(loading = false),
+                    {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("Today").assertIsDisplayed()
+        compose.onNodeWithText("Yesterday").assertIsDisplayed()
+        compose.onNodeWithText("Oct 23rd, 2023").assertIsDisplayed()
     }
 
     private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)
