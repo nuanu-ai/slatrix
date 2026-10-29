@@ -24,7 +24,6 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasAnyAncestor
@@ -36,7 +35,11 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
-import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performTouchInput
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -53,7 +56,7 @@ import org.robolectric.annotation.GraphicsMode
 class LiveHomeScreenTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
-    @Test fun backFromAConversationRestoresTheTabSearchAndScrollPosition() {
+    @Test fun backFromAConversationRestoresTheTabAndScrollPosition() {
         val people = (0 until 40).map { direct("!p$it:example.org", "Person $it", latest = LatestMessage("Hello $it", 1_000L - it, false)) }
         val open = mutableStateOf(false)
         compose.setContent {
@@ -64,16 +67,102 @@ class LiveHomeScreenTest {
             }
         }
         tab("DMs").performClick()
-        compose.onNode(hasSetTextAction()).performTextReplacement("Person")
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(40)
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(39)
         compose.onNodeWithText("Person 39").performClick()
         compose.onNodeWithText("Conversation").assertExists()
 
         compose.runOnIdle { open.value = false }
         tab("DMs").assertIsSelected()
         compose.onNodeWithText("Person 39").assertIsDisplayed()
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
-        compose.onNode(hasSetTextAction()).assertTextContains("Person")
+    }
+
+    @Test fun homeAndDmsListConversationsWithoutAPermanentSearchField() {
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(listOf(direct("!sam:example.org", "Sam")), loading = false, spacesKnown = true), {}, {}, {}) } }
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        tab("DMs").performClick()
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+    }
+
+    // capability: home.starred
+    @Test fun starredConversationsLeadInTheirOwnSection() {
+        val rooms = listOf(
+            channel("!general:example.org", "general"),
+            channel("!design:example.org", "design").copy(starred = true),
+            direct("!sam:example.org", "Sam").copy(starred = true),
+            direct("!avery:example.org", "Avery"),
+        )
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {}) } }
+
+        val starred = top("Starred")
+        val channels = top("Channels")
+        val direct = top("Direct messages")
+        assertTrue(starred < top("design") && top("design") < channels)
+        assertTrue(starred < top("Sam") && top("Sam") < channels)
+        assertTrue(channels < top("general") && top("general") < direct)
+        assertTrue(direct < top("Avery"))
+        compose.onAllNodesWithText("design").assertCountEquals(1)
+        compose.onAllNodesWithText("Sam").assertCountEquals(1)
+    }
+
+    @Test fun withNothingStarredThereIsNoStarredSection() {
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(listOf(channel("!general:example.org", "general")), loading = false, spacesKnown = true), {}, {}, {}) } }
+        compose.onNodeWithText("Channels").assertIsDisplayed()
+        compose.onNodeWithText("Starred").assertDoesNotExist()
+    }
+
+    // capability: home.sections-collapse
+    @Test fun aSectionHeaderCollapsesAndExpandsItsConversations() {
+        val rooms = listOf(channel("!general:example.org", "general"), direct("!sam:example.org", "Sam"))
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {}) } }
+
+        compose.onNodeWithText("Channels").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
+        compose.onNodeWithText("Channels").performClick()
+        compose.onNodeWithText("general").assertDoesNotExist()
+        compose.onNodeWithText("Sam").assertIsDisplayed()
+        compose.onNodeWithText("Channels").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
+
+        compose.onNodeWithText("Channels").performClick()
+        compose.onNodeWithText("general").assertIsDisplayed()
+    }
+
+    // capability: home.private-channel-icon
+    @Test fun privateChannelsShowALock() {
+        val rooms = listOf(channel("!secret:example.org", "secret").copy(isPrivate = true), channel("!general:example.org", "general"))
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {}) } }
+
+        compose.onNode(hasText("secret") and hasContentDescription("Private channel")).assertIsDisplayed()
+        compose.onNode(hasText("general") and hasContentDescription("Private channel")).assertDoesNotExist()
+    }
+
+    // capability: home.star-toggle
+    @Test fun longPressingAConversationStarsOrUnstarsIt() {
+        val starred = mutableListOf<Pair<String, Boolean>>()
+        val rooms = listOf(channel("!general:example.org", "general"), direct("!sam:example.org", "Sam").copy(starred = true))
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
+                    onStar = { id, star -> starred += id to star; true })
+            }
+        }
+        compose.onNodeWithText("general").performTouchInput { longClick() }
+        compose.onNodeWithText("Star channel").performClick()
+        compose.onNodeWithText("Sam").performTouchInput { longClick() }
+        compose.onNodeWithText("Unstar conversation").performClick()
+
+        compose.runOnIdle { assertEquals(listOf("!general:example.org" to true, "!sam:example.org" to false), starred) }
+        compose.onNodeWithText("Star channel").assertDoesNotExist()
+    }
+
+    @Test fun aStarThatDoesNotSaveSaysSo() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(listOf(channel("!general:example.org", "general")), loading = false, spacesKnown = true),
+                    {}, {}, {}, onStar = { _, _ -> false })
+            }
+        }
+        compose.onNodeWithText("general").performTouchInput { longClick() }
+        compose.onNodeWithText("Star channel").performClick()
+        compose.onNodeWithText("Couldn’t star general.").assertIsDisplayed()
     }
 
     // capability: home.dms
@@ -186,6 +275,10 @@ class LiveHomeScreenTest {
 
     private fun tab(label: String) =
         compose.onNode(hasText(label) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected))
+
+    private fun top(text: String) = compose.onNodeWithText(text).fetchSemanticsNode().boundsInRoot.top
+
+    private fun channel(id: String, name: String) = RoomSummary(id, name, false, "", UnreadBadge.None, name.take(1), 0)
 
     private fun direct(id: String, name: String, unread: UnreadBadge = UnreadBadge.None, latest: LatestMessage? = null) =
         RoomSummary(id, name, true, "", unread, name.split(" ").joinToString("") { it.take(1) }, 0, latest = latest)

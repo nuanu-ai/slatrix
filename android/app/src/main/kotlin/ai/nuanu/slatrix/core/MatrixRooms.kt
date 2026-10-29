@@ -54,6 +54,8 @@ data class RoomSummary(
     val colorIndex: Int,
     val spaceIds: Set<String> = emptySet(),
     val latest: LatestMessage? = null,
+    val starred: Boolean = false,
+    val isPrivate: Boolean = false,
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
@@ -121,6 +123,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     fun retry() { retries.trySend(Unit); spaceRequests.trySend(SpaceRequest.Rebuild) }
 
     suspend fun close() { worker.cancelAndJoin() }
+
+    suspend fun setStarred(roomId: String, starred: Boolean): Boolean = false
 
     suspend fun notification(roomId: String, eventId: String): NotificationStatus? = withTimeoutOrNull(15_000) {
         val service = activeSync.filterNotNull().first()
