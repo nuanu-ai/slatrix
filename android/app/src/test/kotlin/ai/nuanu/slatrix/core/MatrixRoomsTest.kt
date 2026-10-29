@@ -92,6 +92,21 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    @Test fun aRoomThatCouldNotBeReadIsReadAgainWhenTheListResets() = runTest {
+        val room = TestRoom(roomInfo("!a:example.org", "Alpha")).apply { unreadable = true }
+        val client = RoomsClient(listOf(room))
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        sync.started.await()
+        assertEquals(emptyList<RoomSummary>(), rooms.state.first { !it.loading }.rooms)
+
+        room.unreadable = false
+        sync.emitEntries(listOf(RoomListEntriesUpdate.Reset(listOf(room))))
+        assertEquals(listOf("Alpha"), rooms.state.first { it.rooms.isNotEmpty() }.rooms.map { it.name })
+        rooms.close()
+    }
+
     @Test fun anAccountWithNoRoomsFinishesLoading() = runTest {
         val rooms = MatrixRooms(backgroundScope, RoomsClient(emptyList()))
         assertEquals(emptyList<RoomSummary>(), rooms.state.first { !it.loading && it.spacesKnown }.rooms)
@@ -302,8 +317,9 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
 
 private class TestRoom(var info: RoomInfo, var latest: LatestEventValue = LatestEventValue.None) : Room(NoHandle) {
     private var listener: RoomInfoListener? = null
+    var unreadable = false
     override fun id(): String = info.id
-    override suspend fun roomInfo(): RoomInfo = info
+    override suspend fun roomInfo(): RoomInfo = if (unreadable) throw IllegalStateException("Store busy") else info
     override suspend fun latestEvent(): LatestEventValue = latest
     override fun subscribeToRoomInfoUpdates(listener: RoomInfoListener): TaskHandle {
         this.listener = listener
