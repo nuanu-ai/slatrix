@@ -38,7 +38,8 @@ class LiveChannelScreenshots(private val dark: Boolean, private val fontScale: F
     @get:Rule val compose = createComposeRule()
 
     @Test fun render() {
-        val room = RoomSummary("!design:example.org", "design", false, "Launch reviews and critique", UnreadBadge.None, "D", 0)
+        val room = RoomSummary("!design:example.org", "design", false, "Launch reviews and critique", UnreadBadge.None, "D", 0,
+            memberCount = 7, isPrivate = true)
         val today = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 9); set(Calendar.MINUTE, 0) }.timeInMillis
         val minute = 60_000L
         fun message(id: String, sender: String, body: String, at: Long, state: MessageSendState = MessageSendState.Sent) =

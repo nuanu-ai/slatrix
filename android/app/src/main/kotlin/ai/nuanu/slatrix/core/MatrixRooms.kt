@@ -59,6 +59,8 @@ data class RoomSummary(
     val latest: LatestMessage? = null,
     val starred: Boolean = false,
     val isPrivate: Boolean = false,
+    /** Where its unread messages start, which it opens at; null when it has none to resume. */
+    val resumeAt: String? = null,
     /** False where the room's power levels keep you from posting; unknown ones leave the composer. */
     val canPost: Boolean = true,
     val memberCount: Int = 0,
@@ -69,6 +71,7 @@ data class RoomSummary(
     val canPin: Boolean = false,
     /** The pinned messages' event IDs, in the order they were pinned. */
     val pinned: List<String> = emptyList(),
+    val avatarUrl: String? = null,
     /** The workspaces holding it directly; [spaceIds] adds the ones holding those. */
     val parentIds: Set<String> = emptySet(),
 )
@@ -82,6 +85,7 @@ data class SpaceSummary(
     val isTopLevel: Boolean = true,
     val initials: String = AvatarPlaceholder.initials(name),
     val colorIndex: Int = AvatarPlaceholder.colorIndex(name),
+    val avatarUrl: String? = null,
     /** Whether your power level lets you add channels or take them out; unknown ones leave it to the action to check. */
     val canManageRooms: Boolean = true,
 )
@@ -270,26 +274,30 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         if (invitations.remove(info.id) != null) spaceRequests.trySend(SpaceRequest.Lookup(listOf(info.id)))
         if (placement == RoomPlacement.Workspace) {
             summaries.remove(info.id)
-            val space = SpaceSummary(id = info.id, name = name, isTopLevel = topLevel(info.id),
+            val space = SpaceSummary(id = info.id, name = name, isTopLevel = topLevel(info.id), avatarUrl = info.avatarUrl,
                 canManageRooms = info.powerLevels?.canOwnUserSendState(StateEventType.SpaceChild) ?: true)
             if (spaces[info.id] != space) spaces[info.id] = space
             return
         }
         spaces.remove(info.id)
+        val unread = RoomUnread(
+            direct = info.isDirect, muted = info.cachedUserDefinedNotificationMode == RoomNotificationMode.MUTE,
+            markedUnread = info.isMarkedUnread, messages = info.numUnreadMessages.clampedLong(),
+            notifications = info.numUnreadNotifications.clampedLong(), mentions = info.numUnreadMentions.clampedLong(),
+        )
         val summary = RoomSummary(
             id = info.id, name = name, direct = info.isDirect, topic = info.topic.orEmpty(),
-            unread = UnreadBadge.forRoom(RoomUnread(
-                direct = info.isDirect, muted = info.cachedUserDefinedNotificationMode == RoomNotificationMode.MUTE,
-                markedUnread = info.isMarkedUnread, messages = info.numUnreadMessages.clampedLong(),
-                notifications = info.numUnreadNotifications.clampedLong(), mentions = info.numUnreadMentions.clampedLong(),
-            )),
+            unread = UnreadBadge.forRoom(unread),
             initials = AvatarPlaceholder.initials(name), colorIndex = AvatarPlaceholder.colorIndex(name),
             spaceIds = ancestors(info.id),
             parentIds = parentIds(info.id),
             latest = if (info.isDirect) followed[info.id]?.let { latest(it.room) } else null,
             starred = info.isFavourite,
+            // A direct message without a picture of its own shows the other person's.
+            avatarUrl = info.avatarUrl ?: info.heroes.singleOrNull()?.avatarUrl?.takeIf { info.isDirect },
             // Slack's private channel: only an invitation lets someone in. A restricted room is open to its space, a public channel.
             isPrivate = info.joinRule.let { it is JoinRule.Invite || it is JoinRule.Knock || it is JoinRule.Private },
+            resumeAt = UnreadLine.resumeAt(unread, info.fullyReadEventId),
             canPost = info.powerLevels?.canOwnUserSendMessage(MessageLikeEventType.RoomMessage) ?: true,
             memberCount = info.joinedMembersCount.coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
             canEditName = info.powerLevels?.canOwnUserSendState(StateEventType.RoomName) ?: false,

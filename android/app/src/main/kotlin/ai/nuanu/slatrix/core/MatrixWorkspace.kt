@@ -28,6 +28,8 @@ data class OpenChannel(
     val at: String? = null,
     /** A thread's root as the channel showed it, so it shows at once. */
     val root: ConversationMessage? = null,
+    /** [at] is where its unread messages start, which it opens at without a highlight. */
+    val resume: Boolean = false,
     /** Who else is typing here, and telling them you are. */
     val typing: MatrixTyping? = null,
 )
@@ -61,7 +63,8 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                     conversationRoom = checkNotNull(client.getRoom(requested.room.id))
                     composerRoom = checkNotNull(client.getRoom(requested.room.id))
                     currentCoroutineContext().ensureActive()
-                    val timeline = MatrixConversation(scope, checkNotNull(conversationRoom), requested.threadRoot, requested.at, requested.root)
+                    val timeline = MatrixConversation(scope, checkNotNull(conversationRoom), requested.threadRoot, requested.at,
+                        requested.root, requested.resume)
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
                     if (generation.get() == token) {
@@ -86,8 +89,11 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
         }
     }
 
-    fun open(room: RoomSummary, threadRoot: String? = null, at: String? = null, root: ConversationMessage? = null) =
-        select(OpenChannel(room, threadRoot = threadRoot, at = at, root = root))
+    /** Opens [room]; a channel opened without [at] opens where its unread messages start, as on the Mac. */
+    fun open(room: RoomSummary, threadRoot: String? = null, at: String? = null, root: ConversationMessage? = null) {
+        val resume = room.resumeAt?.takeIf { at == null && threadRoot == null }
+        select(OpenChannel(room, threadRoot = threadRoot, at = at ?: resume, root = root, resume = resume != null))
+    }
 
     /**
      * Opens [room] at [eventId], highlighted; a reply in the thread [threadRoot] opens the channel at the root, for the

@@ -229,6 +229,23 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: home.workspace-switcher
+    @Test fun workspacesAndDirectMessagesCarryTheirPictures() = runTest {
+        val client = RoomsClient(listOf(
+            TestRoom(roomInfo("!harbor:example.org", "Harbor", space = true).copy(avatarUrl = "mxc://example.org/harbor")),
+            TestRoom(roomInfo("!sam:example.org", "Sam", direct = true)
+                .copy(heroes = listOf(RoomHero("@sam:example.org", "Sam", "mxc://example.org/sam", null, null)))),
+            TestRoom(roomInfo("!team:example.org", "Team")),
+        ))
+        val rooms = MatrixRooms(backgroundScope, client)
+        val state = rooms.state.first { !it.loading && it.spaces.isNotEmpty() }
+
+        assertEquals("mxc://example.org/harbor", state.spaces.single().avatarUrl)
+        assertEquals("A direct message shows the other person", "mxc://example.org/sam", state.rooms.single { it.direct }.avatarUrl)
+        assertNull(state.rooms.single { it.name == "Team" }.avatarUrl)
+        rooms.close()
+    }
+
     @Test fun anAccountWithNoRoomsFinishesLoading() = runTest {
         val rooms = MatrixRooms(backgroundScope, RoomsClient(emptyList()))
         assertEquals(emptyList<RoomSummary>(), rooms.state.first { !it.loading && it.spacesKnown }.rooms)
@@ -331,6 +348,16 @@ class MatrixRoomsTest {
         room.emit(room.info.copy(displayName = "Stale room", membership = Membership.JOINED))
         other.emit(other.info.copy(displayName = "Beta renamed"))
         assertEquals(listOf("Beta renamed"), rooms.state.first { state -> state.rooms.any { it.name == "Beta renamed" } }.rooms.map { it.name })
+        rooms.close()
+    }
+
+    // capability: conversation.unread-line
+    @Test fun anUnreadRoomKnowsWhereItsUnreadMessagesStart() = runTest {
+        val room = TestRoom(roomInfo("!a:example.org", "Alpha", messages = 2u).copy(fullyReadEventId = "\$read"))
+        val client = RoomsClient(listOf(room))
+        client.services.trySend(RoomsSync())
+        val rooms = MatrixRooms(backgroundScope, client)
+        assertEquals("\$read", rooms.state.first { !it.loading }.rooms.single().resumeAt)
         rooms.close()
     }
 
