@@ -225,6 +225,7 @@ class LiveChannelScreenTest {
             action(layouts)
             assertEquals(DesignTokens.colors(false, SidebarPalette.Aubergine).getValue("textPrimary"), layouts.single().layoutInput.style.color)
         }
+        compose.onNodeWithContentDescription("Message #design").performClick()
         val field = compose.onNodeWithContentDescription("Message #design").fetchSemanticsNode().boundsInRoot
         val send = compose.onNodeWithContentDescription("Send message").fetchSemanticsNode().boundsInRoot
         val mention = compose.onNodeWithContentDescription("Mention someone").fetchSemanticsNode().boundsInRoot
