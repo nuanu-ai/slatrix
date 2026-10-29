@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.ComposerDraft
 import org.matrix.rustcomponents.sdk.ComposerDraftType
@@ -32,6 +34,7 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     private val mutableState = MutableStateFlow(ComposerState())
     val state: StateFlow<ComposerState> = mutableState.asStateFlow()
     private val edits = Channel<Unit>(Channel.CONFLATED)
+    private val draftLock = Mutex()
     private var loaded = false
     private var failure: Failure? = null
     private var revision = 0L
@@ -39,9 +42,9 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     private val worker = operations.launch {
         try {
             restore()
-            for (edit in edits) if (loaded) persist() else restore()
+            for (edit in edits) if (loaded) flush() else restore()
         } finally {
-            withContext(NonCancellable) { persist() }
+            withContext(NonCancellable) { flush() }
             edits.close()
         }
     }
@@ -94,7 +97,14 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
 
     suspend fun close() { withContext(NonCancellable) { lifetime.cancelAndJoin() } }
 
-    private suspend fun restore() {
+    suspend fun flush(): Boolean = draftLock.withLock {
+        do {
+            if (!persist()) return@withLock false
+        } while (revision != savedRevision)
+        true
+    }
+
+    private suspend fun restore() = draftLock.withLock {
         try {
             val draft = room.loadComposerDraft(null)
             currentCoroutineContext().ensureActive()
@@ -110,8 +120,9 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
         }
     }
 
-    private suspend fun persist() {
-        if (!loaded || revision == savedRevision) return
+    private suspend fun persist(): Boolean {
+        if (!loaded) return false
+        if (revision == savedRevision) return true
         val savingRevision = revision
         val text = mutableState.value.text
         try {
@@ -122,10 +133,12 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
                 failure = null
                 mutableState.value = mutableState.value.copy(error = null)
             }
+            return true
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             fail(Failure.Save)
+            return false
         }
     }
 
