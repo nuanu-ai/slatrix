@@ -59,6 +59,33 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    @Test fun retryLoadsFailedHistoryAgainWithoutLosingMessages() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        timeline.pageFailure = IllegalStateException("Offline")
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.loadOlder()
+        conversation.state.first { it.error != null && !it.loadingHistory }
+        assertTrue(conversation.markRead("\$one"))
+        assertNotNull("Reading must not hide the history error", conversation.state.value.error)
+
+        timeline.pageFailure = null
+        timeline.page.complete(true)
+        assertTrue(conversation.retry())
+        val loaded = conversation.state.first { !it.hasMore }
+        assertNull(loaded.error)
+        assertEquals(listOf("Hello"), loaded.messages.map { it.body })
+        conversation.close()
+    }
+
+    @Test fun retryLeavesATimelineThatNeverOpenedToBeReopened() = runTest {
+        val room = ConversationRoom(ConversationTimeline(emptyList()))
+        room.openFailure = IllegalStateException("Store unavailable")
+        val conversation = MatrixConversation(backgroundScope, room)
+        conversation.state.first { it.error != null }
+        assertFalse(conversation.retry())
+        conversation.close()
+    }
+
     @Test fun sendPreservesComposerFieldsAndAcceptsOnlyTheSdkQueueResult() = runTest {
         val timeline = ConversationTimeline(emptyList())
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
@@ -141,7 +168,9 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
     var markedUnread = true
     override suspend fun setUnreadFlag(newValue: Boolean) { markedUnread = newValue }
     override suspend fun timeline(): Timeline = value
+    var openFailure: Exception? = null
     override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline {
+        openFailure?.let { throw it }
         this.configuration = configuration
         return value
     }
@@ -161,8 +190,10 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         listener.onUpdate(listOf(TimelineDiff.Reset(cached)))
         return object : TaskHandle(NoHandle) { override fun cancel() { listenerCancelled.complete(Unit) } }
     }
+    var pageFailure: Exception? = null
     override suspend fun paginateBackwards(numEvents: UShort): Boolean {
         pageStarted.complete(Unit)
+        pageFailure?.let { throw it }
         return try { page.await() } finally { pageCancelled.complete(Unit) }
     }
     var receiptFailure: Exception? = null
