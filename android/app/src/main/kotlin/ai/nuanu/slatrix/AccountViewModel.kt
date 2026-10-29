@@ -4,6 +4,7 @@ import android.app.Application
 import ai.nuanu.slatrix.core.AccountRuntime
 import ai.nuanu.slatrix.core.AccountState
 import ai.nuanu.slatrix.core.MatrixSearch
+import ai.nuanu.slatrix.core.MatrixPeople
 import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.push.NotificationTarget
 import androidx.lifecycle.AndroidViewModel
@@ -29,6 +30,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     val threads = mutableThreads.asStateFlow()
     private val mutableSearch = MutableStateFlow<MatrixSearch?>(null)
     val search = mutableSearch.asStateFlow()
+    private val mutablePeople = MutableStateFlow<MatrixPeople?>(null)
+    val people = mutablePeople.asStateFlow()
     private val mutableNotificationTarget = MutableStateFlow<NotificationTarget?>(null)
     val notificationTarget = mutableNotificationTarget.asStateFlow()
 
@@ -52,11 +55,14 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                         mutableWorkspace.value = next?.let { MatrixWorkspace(viewModelScope, it) }
                         mutableThreads.value = next?.let { MatrixWorkspace(viewModelScope, it) }
                         mutableSearch.value = next?.let { MatrixSearch(viewModelScope, it) }
+                        mutablePeople.value?.close()
+                        mutablePeople.value = next?.let { MatrixPeople(viewModelScope, it) }
                     }
                 }
             } finally {
                 withContext(NonCancellable) {
                     mutableSearch.value?.close()
+                    mutablePeople.value?.close()
                     mutableThreads.value?.close()
                     mutableWorkspace.value?.close()
                 }

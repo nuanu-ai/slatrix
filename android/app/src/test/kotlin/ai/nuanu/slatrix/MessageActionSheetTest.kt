@@ -75,6 +75,16 @@ class MessageActionSheetTest {
         compose.runOnIdle { assertEquals(listOf("Ship it" to "👍"), reactions) }
     }
 
+    // capability: conversation.mark-unread
+    @Test fun markUnreadMarksTheConversationUnreadFromAMessage() {
+        var marked = false
+        show(MessageActions(onMarkUnread = { marked = true }))
+        open("Ship it")
+        compose.onNodeWithText("Mark unread").performClick()
+        compose.runOnIdle { assertTrue(marked) }
+        compose.onNodeWithText("Mark unread").assertDoesNotExist()
+    }
+
     // capability: message.forward
     @Test fun forwardSendsTheMessageOnToChooseWhere() {
         val forwarded = mutableListOf<String>()
@@ -82,6 +92,17 @@ class MessageActionSheetTest {
         open("Ship it")
         compose.onNodeWithText("Forward").performClick()
         compose.runOnIdle { assertEquals(listOf("Ship it"), forwarded) }
+    }
+
+    // capability: message.save
+    @Test fun saveForLaterSavesOrRemovesTheMessage() {
+        val saved = mutableListOf<Pair<String, Boolean>>()
+        show(MessageActions(saved = setOf(mine.eventId!!), onSave = { message, save -> saved += message.body to save }))
+        open("Ship it")
+        compose.onNodeWithText("Save for later").performClick()
+        open("On it")
+        compose.onNodeWithText("Remove from Later").performClick()
+        compose.runOnIdle { assertEquals(listOf("Ship it" to true, "On it" to false), saved) }
     }
 
     // capability: message.copy-link

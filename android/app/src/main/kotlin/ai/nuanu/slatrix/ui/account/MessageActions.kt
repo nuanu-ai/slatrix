@@ -9,8 +9,8 @@ import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
-import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
+import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.content.ClipData
@@ -74,6 +74,8 @@ data class MessageActions(
     val onQuote: ((ConversationMessage) -> Unit)? = null,
     val onEdit: ((ConversationMessage) -> Unit)? = null,
     val onDelete: ((ConversationMessage) -> Unit)? = null,
+    /** Marks the conversation unread; Matrix keeps no unread point inside it, so it doesn't take the message. */
+    val onMarkUnread: (() -> Unit)? = null,
     /** Opens the conversation picker that forwards the message. */
     val onForward: ((ConversationMessage) -> Unit)? = null,
     /** The room's pinned messages, which the sheet offers to unpin; [onPin] is null where you may not pin. */
@@ -83,6 +85,9 @@ data class MessageActions(
     val place: String = "channel",
     /** Sets your media's caption; null removes it. */
     val onEditCaption: ((ConversationMessage, String?) -> Unit)? = null,
+    /** Event IDs saved for later here, which the sheet offers to remove; [onSave] saves (true) or removes one. */
+    val saved: Set<String> = emptySet(),
+    val onSave: ((ConversationMessage, Boolean) -> Unit)? = null,
 )
 
 /** Slack Android's sheet holds five, beside Add reaction. */
@@ -168,6 +173,16 @@ private fun MessageActionSheet(message: ConversationMessage, actions: MessageAct
             if (message.sendState == MessageSendState.Failed) {
                 if (message.canRetry) SheetAction(Icons.Outlined.Refresh, "Retry", colors.textPrimary) { onRetrySend(message); onDismiss() }
                 SheetAction(Icons.Outlined.Delete, "Delete message", colors.destructive) { onDeleteUnsent(message); onDismiss() }
+            }
+            val markUnread = actions.onMarkUnread
+            if (eventId != null && markUnread != null) SheetAction(SlackIcons.MarkUnread, "Mark unread", colors.textPrimary) {
+                markUnread(); onDismiss()
+            }
+            val save = actions.onSave
+            if (eventId != null && save != null) {
+                val isSaved = eventId in actions.saved
+                SheetAction(if (isSaved) SlackIcons.BookmarkFilled else SlackIcons.Bookmark, if (isSaved) "Remove from Later" else "Save for later",
+                    colors.textPrimary) { save(message, !isSaved); onDismiss() }
             }
             val link = actions.link
             if (eventId != null && link != null) SheetAction(Icons.Outlined.Link, "Copy link to message", colors.textPrimary) {

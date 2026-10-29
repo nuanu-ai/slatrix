@@ -7,6 +7,7 @@ import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.NotificationChoice
 import ai.nuanu.slatrix.core.NotificationSetting
+import ai.nuanu.slatrix.core.PinOrder
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
@@ -80,7 +81,8 @@ private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeopl
  */
 @Composable
 fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetailsActions, onLeft: () -> Unit,
-    onOpenMessage: (eventId: String) -> Unit, spaces: List<SpaceSummary> = emptyList(), onBack: () -> Unit) {
+    onOpenMessage: (eventId: String) -> Unit, spaces: List<SpaceSummary> = emptyList(), onPerson: (userId: String) -> Unit = {},
+    onBack: () -> Unit) {
     var page by rememberSaveable { mutableStateOf(DetailsPage.Details) }
     // Where Add people goes back to: the page it was opened from.
     var opener by rememberSaveable { mutableStateOf(DetailsPage.Details) }
@@ -93,7 +95,7 @@ fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetails
     val details = { page = DetailsPage.Details }
     when (page) {
         DetailsPage.Details -> DetailsPage(room, notifications?.getOrNull(), actions, scope, onLeft, onBack, open, spaces.isNotEmpty())
-        DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, details)
+        DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, onPerson, details)
         DetailsPage.Edit -> EditPage(room, actions, scope, details)
         DetailsPage.Notifications -> NotificationsPage(notifications, actions, scope, { notifications = Result.success(it) },
             { loads++ }, details)
@@ -229,9 +231,9 @@ private fun NotificationsPage(loaded: Result<NotificationSetting>?, actions: Cha
                     }
                 }
             }
-            error?.let { ErrorLine(it) }
+            error?.let { NoteLine(it) }
             loaded?.exceptionOrNull()?.let { failure ->
-                ErrorLine(failure.message.orEmpty())
+                NoteLine(failure.message.orEmpty())
                 TextButton(onClick = onRetry, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
             }
         }
@@ -239,7 +241,8 @@ private fun NotificationsPage(loaded: Result<NotificationSetting>?, actions: Cha
 }
 
 @Composable
-private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsActions, onAddPeople: () -> Unit, onBack: () -> Unit) {
+private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsActions, onAddPeople: () -> Unit,
+    onPerson: (String) -> Unit, onBack: () -> Unit) {
     val colors = SlatrixTheme.colors
     var query by rememberSaveable { mutableStateOf("") }
     var tries by remember { mutableIntStateOf(0) }
@@ -270,7 +273,8 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
         when {
             shown != null -> {
                 items(shown, key = { it.id }) { member ->
-                    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow).padding(horizontal = UiMetrics.GapLarge),
+                    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow)
+                        .clickable(role = Role.Button) { onPerson(member.id) }.padding(horizontal = UiMetrics.GapLarge),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
                         LiveAvatar(member.initials, member.colorIndex, UiMetrics.ListAvatar, member.avatarUrl)
                         Text(member.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
@@ -278,7 +282,7 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
                         if (member.id == me) Text("(you)", style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
                     }
                 }
-                if (shown.isEmpty()) item { ErrorLine("No matches", colors.textSecondary) }
+                if (shown.isEmpty()) item { NoteLine("No matches", colors.textSecondary) }
             }
             members?.isFailure == true -> item {
                 Column(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -296,15 +300,14 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
 private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpenMessage: (String) -> Unit, onBack: () -> Unit) {
     val colors = SlatrixTheme.colors
     val messages = remember(pins.state.rows, room.pinned) {
-        pins.state.rows.filterIsInstance<ConversationMessage>().filter { it.eventId in room.pinned }
-            .sortedByDescending { room.pinned.indexOf(it.eventId) }
+        PinOrder.arrange(room.pinned, pins.state.rows.filterIsInstance<ConversationMessage>()) { it.eventId }
     }
     PushedPage("Pinned messages", onBack) {
         items(messages, key = { it.id }) { message ->
             Row(Modifier.fillMaxWidth().clickable { message.eventId?.let(onOpenMessage) }
                 .padding(start = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapMedium),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-                LiveAvatar(message.initials, message.colorIndex)
+                LiveAvatar(message.initials, message.colorIndex, url = message.avatarUrl)
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                         Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
@@ -326,9 +329,10 @@ private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpe
             messages.isNotEmpty() -> Unit
             pins.state.loading && room.pinned.isNotEmpty() -> item { DelayedProgress() }
             else -> item {
-                ErrorLine(pins.state.error ?: if (room.pinned.isEmpty()) "No pinned messages" else "Couldn’t load pins", colors.textSecondary)
+                NoteLine(pins.state.error ?: if (room.pinned.isEmpty()) "No pinned messages" else "Couldn’t load pins", colors.textSecondary)
             }
         }
+        PinOrder.note(room.pinned.distinct().size)?.let { item { NoteLine(it, colors.textSecondary) } }
     }
 }
 
@@ -373,11 +377,11 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
         when {
             state.loading -> item { DelayedProgress() }
             state.error != null -> item {
-                ErrorLine(state.error, colors.textSecondary)
+                NoteLine(state.error, colors.textSecondary)
                 TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
             }
             else -> {
-                if (shared.isEmpty() && !state.loadingHistory) item { ErrorLine("Nothing shared yet", colors.textSecondary) }
+                if (shared.isEmpty() && !state.loadingHistory) item { NoteLine("Nothing shared yet", colors.textSecondary) }
                 // Older history is asked for, as on the Mac, rather than paged through on its own in a long conversation. The
                 // button stays while a page loads, so the end of the list doesn't move.
                 if (state.hasMore) item {
@@ -429,7 +433,7 @@ private fun WorkspacesPage(room: RoomSummary, spaces: List<SpaceSummary>, action
                 }) { Text(if (direct) "Remove" else "Add") }
             }
         }
-        error?.let { item { ErrorLine(it) } }
+        error?.let { item { NoteLine(it) } }
     }
 }
 
@@ -492,7 +496,7 @@ private fun AddPeoplePage(actions: ChannelDetailsActions, scope: CoroutineScope,
 }
 
 @Composable
-private fun ErrorLine(message: String, color: Color = SlatrixTheme.colors.destructive) {
+private fun NoteLine(message: String, color: Color = SlatrixTheme.colors.destructive) {
     Text(message, Modifier.fillMaxWidth().padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyMedium, color = color)
 }
 

@@ -37,14 +37,23 @@ object SlackIcons {
         "M18.5 12 H9.5")
     val Close = outline("close", "M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5")
     val Check = outline("check", "M5 12.5 L10 17.5 L19 7", width = 2f)
+    /** A bubble with a dot at its corner, as Slack's Mark unread. */
+    val MarkUnread = outline("mark-unread", "M13.5 5 H7 A2 2 0 0 0 5 7 V17 A2 2 0 0 0 7 19 H17 A2 2 0 0 0 19 17 V10.5 " +
+        "M15.5 6.5 A2 2 0 1 0 19.5 6.5 A2 2 0 1 0 15.5 6.5 Z")
+    val MarkRead = outline("mark-read", "M7 5 H17 A2 2 0 0 1 19 7 V17 A2 2 0 0 1 17 19 H7 A2 2 0 0 1 5 17 V7 A2 2 0 0 1 7 5 Z " +
+        "M9 12.25 L11.25 14.5 L15.5 9.75")
+    val MarkAllRead = outline("mark-all-read", "M3.5 12.5 L7.5 16.5 L15 8 M11.5 15.5 L12.5 16.5 L20 8")
     /** A clock with a turning-back arrow, for recent searches. */
     val History = outline("history", "M4.75 12 A7.25 7.25 0 1 0 6.9 6.85 M4.75 4.5 V8.25 H8.5 M12 8.25 V12 L14.75 14")
     val Plus = outline("plus", "M12 5 V19 M5 12 H19")
     /** Slack's forward: an arrow that turns off to the right. */
     val Forward = outline("forward", "M14 5.5 L19.5 10.75 L14 16 M19.5 10.75 H11.5 A6.5 6.5 0 0 0 5 17.25 V18.5")
+    val Bookmark = outline("bookmark", BookmarkShape)
+    val BookmarkFilled = filled("bookmark-filled", BookmarkShape)
     val Tray = outline("tray", "M4 13 H8.5 L9.5 15.5 H14.5 L15.5 13 H20 M4 13 V18.5 A1.5 1.5 0 0 0 5.5 20 H18.5 " +
         "A1.5 1.5 0 0 0 20 18.5 V13 L17.5 5.5 H6.5 Z")
 
+    private const val BookmarkShape = "M7.5 4.5 H16.5 A1 1 0 0 1 17.5 5.5 V19.5 L12 15.75 L6.5 19.5 V5.5 A1 1 0 0 1 7.5 4.5 Z"
     private const val BellBody = "M6 16.75 V11 A6 6 0 0 1 18 11 V16.75 L19.5 18.25 H4.5 Z"
     private const val SmallBubble = "M4 20.5 V16.25 A4.25 4.25 0 1 1 8.25 20.5 Z"
     private const val BigBubble = "M9.52 12.13 A5.75 5.75 0 1 1 18.9 12.95 L20.25 16 L16.7 14.55 A5.75 5.75 0 0 1 9.52 12.13 Z"

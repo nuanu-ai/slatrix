@@ -5,6 +5,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -27,6 +29,7 @@ import org.matrix.rustcomponents.sdk.LatestEventValue
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.NotificationProcessSetup
 import org.matrix.rustcomponents.sdk.NotificationStatus
+import org.matrix.rustcomponents.sdk.ReceiptType
 import org.matrix.rustcomponents.sdk.Membership
 import org.matrix.rustcomponents.sdk.Room
 import org.matrix.rustcomponents.sdk.RoomInfo
@@ -97,6 +100,8 @@ data class RoomListState(
     val spaces: List<SpaceSummary> = emptyList(),
     /** False until the first space lookup finishes; rooms show at once, with no [RoomSummary.spaceIds] yet. */
     val spacesKnown: Boolean = false,
+    /** Invitations waiting for you, to conversations and workspaces alike. */
+    val invitations: List<Invitation> = emptyList(),
 )
 
 class MatrixRooms(scope: CoroutineScope, internal val client: Client, private val foreground: StateFlow<Boolean> = MutableStateFlow(true)) {
@@ -108,6 +113,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private val retries = Channel<Unit>(Channel.CONFLATED)
     private val summaries = mutableMapOf<String, RoomSummary>()
     private val spaces = mutableMapOf<String, SpaceSummary>()
+    private val invitations = mutableMapOf<String, Invitation>()
     private var parents: Map<String, List<String>>? = null
     private val spaceRequests = Channel<SpaceRequest>(Channel.UNLIMITED)
     private val followed = mutableMapOf<String, Followed>()
@@ -159,6 +165,31 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         }
     }
 
+    /**
+     * Marks a conversation read, with receipts and the fully-read marker at its newest message, or unread, with Matrix's
+     * flag, which the account's other clients show too, as on the Mac.
+     */
+    suspend fun setUnread(roomId: String, unread: Boolean): Boolean = withContext(Dispatchers.Default) {
+        try {
+            client.getRoom(roomId)?.use { room ->
+                if (!unread) {
+                    room.markAsRead(ReceiptType.READ)
+                    room.markAsRead(ReceiptType.FULLY_READ)
+                }
+                room.setUnreadFlag(unread)
+            } != null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Marks these conversations read at once, and returns the ones that failed. */
+    suspend fun markAllRead(roomIds: List<String>): List<String> = coroutineScope {
+        roomIds.map { id -> async { id.takeUnless { setUnread(id, false) } } }.awaitAll().filterNotNull()
+    }
+
     suspend fun notification(roomId: String, eventId: String): NotificationStatus? = withTimeoutOrNull(15_000) {
         val service = activeSync.filterNotNull().first()
         syncLock.withLock {
@@ -171,7 +202,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
 
     private suspend fun handle(event: Event) {
         when (event) {
-            // A room that stops being joined is released; if it comes back, the list adds it again.
+            // A room you leave is released; if it comes back, the list adds it again. An invitation stays followed.
             is Event.Info -> if (followed[event.info.id] === event.room) {
                 val wasSpace = event.info.id in spaces
                 accept(event.info)
@@ -249,14 +280,27 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     }
 
     private suspend fun accept(info: RoomInfo) {
-        if (info.membership != Membership.JOINED) {
+        val placement = RoomPlacement.of(info.isSpace, info.membership)
+        if (placement == RoomPlacement.Ignored) {
             summaries.remove(info.id)
             spaces.remove(info.id)
+            invitations.remove(info.id)
             followed.remove(info.id)?.release()
             return
         }
         val name = info.displayName?.takeIf { it.isNotBlank() } ?: info.id
-        if (info.isSpace) {
+        // Still followed, so accepting it, here or on another device, turns it into the conversation or workspace it is.
+        if (info.membership == Membership.INVITED) {
+            summaries.remove(info.id)
+            spaces.remove(info.id)
+            val invitation = Invitation(info.id, name, direct = info.isDirect, space = info.isSpace,
+                inviter = info.inviter?.let { it.displayName?.takeIf(String::isNotBlank) ?: it.userId })
+            if (invitations[info.id] != invitation) invitations[info.id] = invitation
+            return
+        }
+        // A joined invitation's workspaces may have changed since it was looked up.
+        if (invitations.remove(info.id) != null) spaceRequests.trySend(SpaceRequest.Lookup(listOf(info.id)))
+        if (placement == RoomPlacement.Workspace) {
             summaries.remove(info.id)
             val space = SpaceSummary(id = info.id, name = name, isTopLevel = topLevel(info.id), avatarUrl = info.avatarUrl,
                 canManageRooms = info.powerLevels?.canOwnUserSendState(StateEventType.SpaceChild) ?: true)
@@ -320,6 +364,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             loading = false,
             error = error,
             spacesKnown = parents != null,
+            invitations = invitations.values.sortedWith(compareBy<Invitation, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.id }),
         )
     }
 

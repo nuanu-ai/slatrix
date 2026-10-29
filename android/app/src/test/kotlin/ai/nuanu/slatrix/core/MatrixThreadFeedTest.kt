@@ -37,6 +37,7 @@ class MatrixThreadFeedTest {
         assertEquals("design", started.roomName)
         assertEquals("Shall we ship?", started.root.body)
         assertEquals("Yes, Friday", started.latest?.body)
+        assertEquals("Each message brings its sender's picture", "mxc://example.org/sam", started.latest?.avatarUrl)
         assertEquals(3, started.replies)
 
         direct.change(listOf(thread(root = event("\$asked", "@sam:example.org", 4u, "Review?"),
@@ -72,7 +73,8 @@ private fun thread(root: ThreadListItemEvent, latest: ThreadListItemEvent) = Thr
 
 private fun event(id: String, sender: String, at: ULong, body: String) = ThreadListItemEvent(
     eventId = id, timestamp = at, sender = sender,
-    senderProfile = ProfileDetails.Ready(sender.drop(1).substringBefore(':').replaceFirstChar { it.uppercase() }, false, null, null, null),
+    senderProfile = ProfileDetails.Ready(sender.drop(1).substringBefore(':').replaceFirstChar { it.uppercase() }, false,
+        "mxc://example.org/" + sender.drop(1).substringBefore(':'), null, null),
     isOwn = sender == "@alex:example.org",
     content = TimelineItemContent.MsgLike(MsgLikeContent(
         MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)), null, null, null)),
