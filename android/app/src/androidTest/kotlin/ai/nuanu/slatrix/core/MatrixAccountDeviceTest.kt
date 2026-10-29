@@ -27,6 +27,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.ClientSessionDelegate
+import org.matrix.rustcomponents.sdk.HomeserverLoginDetails
 import org.matrix.rustcomponents.sdk.NoHandle
 import org.matrix.rustcomponents.sdk.Session
 import org.matrix.rustcomponents.sdk.SlidingSyncVersion
@@ -47,6 +48,19 @@ class MatrixAccountDeviceTest {
         scope.cancel()
         store.clear()
         directory.deleteRecursively()
+    }
+
+    @Test fun homeserverDiscoveryOnlyOffersAdvertisedMethodsWithoutSigningIn() = runBlocking {
+        val client = AuthClient()
+        val account = MatrixAccount(scope, store, File(directory, "matrix")) { _, _, _, _, _ -> client }
+        account.selectHomeserver("https://matrix.example.org")
+        val method = withTimeout(5_000) {
+            account.state.first { it is AccountState.ChooseMethod }
+        } as AccountState.ChooseMethod
+
+        assertEquals(SignInOptions("https://matrix.example.org", password = true, sso = false, oauth = false), method.options)
+        assertNull(client.credentials)
+        assertNull(store.load())
     }
 
     @Test fun signInPersistsTheAuthenticatedDeviceAndPreservesPasswordWhitespace() = runBlocking {
@@ -185,6 +199,13 @@ class MatrixAccountDeviceTest {
         assertNull(SessionStore(context).load())
     }
 
+    private class LoginDetails : HomeserverLoginDetails(NoHandle) {
+        override fun url() = "https://matrix.example.org"
+        override fun supportsPasswordLogin() = true
+        override fun supportsSsoLogin() = false
+        override fun supportsOauthLogin() = false
+    }
+
     private class AuthClient(private val beforeLogin: suspend () -> Unit = {}) : Client(NoHandle) {
         val authenticatedSession = Session(
             "test-access-token", "test-refresh-token", "@alice:example.org", "ANDROID",
@@ -197,6 +218,7 @@ class MatrixAccountDeviceTest {
             beforeLogin()
             credentials = username to password
         }
+        override suspend fun homeserverLoginDetails(): HomeserverLoginDetails = LoginDetails()
         override suspend fun restoreSession(session: Session) { restoredSession = session }
         override fun session() = authenticatedSession
     }
