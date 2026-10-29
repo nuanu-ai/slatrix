@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.ui.account.ActivityScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
@@ -43,6 +44,26 @@ class ActivityScreenTest {
         compose.onNodeWithText("DMs").performClick()
         compose.onNodeWithText("Lunch?").assertExists()
         compose.onNodeWithText("Can you review?").assertDoesNotExist()
+    }
+
+    // capability: activity.feed
+    @Test fun aReactionShowsTheMessageItReactedToWithItsReaction() {
+        val liked = item("\$r", ActivityKind.Reaction, "👍").copy(reactedTo = "Ship it on Friday?")
+        compose.setContent { SlatrixTheme { ActivityScreen(listOf(liked), {}, { _, _ -> }) } }
+        compose.onNodeWithText("Reacted in #design").assertExists()
+        compose.onNodeWithText("Ship it on Friday?").assertExists()
+        compose.onNodeWithContentDescription("👍 reaction").assertExists()
+    }
+
+    // capability: activity.feed
+    @Test fun theUnreadsPillShowsOnlyWhatYouHaventOpenedYet() {
+        val items = listOf(item("\$m", ActivityKind.Mention, "Can you review?"), item("\$d", ActivityKind.Message, "Lunch?", direct = true).copy(unread = false))
+        compose.setContent { SlatrixTheme { ActivityScreen(items, {}, { _, _ -> }) } }
+        compose.onNodeWithText("Unreads").performClick()
+        compose.onNodeWithText("Can you review?").assertExists()
+        compose.onNodeWithText("Lunch?").assertDoesNotExist()
+        compose.onNodeWithText("Unreads").performClick()
+        compose.onNodeWithText("Lunch?").assertExists()
     }
 
     // capability: activity.open-item
