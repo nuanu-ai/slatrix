@@ -182,9 +182,30 @@ class MatrixWorkspaceTest {
         assertEquals("A reply in the thread", requireNotNull(workspace.selected.value?.composer).state.first { !it.loading }.text)
         workspace.close()
     }
+
+    // capability: conversation.jump-to-message
+    // capability: activity.open-item
+    @Test fun aJumpOpensTheChannelAtTheMessageAndAThreadReplyAtItsRoot() = runTest {
+        val client = WorkspaceClient(threadRoots = mapOf("\$reply" to "\$root"))
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+
+        workspace.jumpTo(alpha, "\$plain", threadRoot = null)
+        runCurrent()
+        assertEquals("\$plain", workspace.selected.value?.at)
+        // A caller that doesn't know, such as a search result, asks first.
+        val root = workspace.threadRootOf(alpha.id, "\$reply")
+        assertEquals("\$root", root)
+        assertNull(workspace.threadRootOf(alpha.id, "\$plain"))
+        workspace.jumpTo(alpha, "\$reply", root)
+        runCurrent()
+        assertEquals("\$root", workspace.selected.value?.at)
+        workspace.close()
+    }
 }
 
-private class WorkspaceClient(private val beforeSave: suspend () -> Unit = {}) : Client(NoHandle) {
+private class WorkspaceClient(private val threadRoots: Map<String, String> = emptyMap(),
+    private val beforeSave: suspend () -> Unit = {}) : Client(NoHandle) {
     private val drafts = mutableMapOf<String, ComposerDraft>()
     val handles = mutableListOf<Room>()
     val focuses = mutableListOf<TimelineFocus>()
@@ -205,6 +226,9 @@ private class WorkspaceClient(private val beforeSave: suspend () -> Unit = {}) :
             check(!failSaves) { "Storage is unavailable" }
             check(!uniffiIsDestroyed) { "The room was closed before its draft was saved" }
             drafts["$roomId $threadRoot"] = draft
+        }
+        override suspend fun loadOrFetchEvent(eventId: String): TimelineEvent = object : TimelineEvent(NoHandle) {
+            override fun threadRootEventId(): String? = threadRoots[eventId]
         }
         override suspend fun clearComposerDraft(threadRoot: String?) { drafts.remove("$roomId $threadRoot") }
     }.also(handles::add)

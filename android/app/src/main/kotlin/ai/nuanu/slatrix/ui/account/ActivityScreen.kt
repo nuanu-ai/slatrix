@@ -11,6 +11,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,25 +41,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 
 private enum class ActivityFilter(val label: String) { All("All"), Dms("DMs"), Mentions("Mentions"), Threads("Threads") }
 
-/** Slack's Activity tab: filter chips over what notified you, newest first. A thread reply opens its thread. */
+/** Slack's Activity tab: filter chips over what notified you, newest first. An item opens at its message. */
 @Composable
-fun ActivityScreen(items: List<ActivityItem>, onOpenRoom: (String) -> Unit, onOpenThread: (roomId: String, root: String) -> Unit,
+fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit, onOpenThread: (roomId: String, root: String) -> Unit,
     threads: @Composable (onOpenThread: (roomId: String, root: String) -> Unit) -> Unit = {}) {
     var filter by rememberSaveable { mutableStateOf(ActivityFilter.All) }
-    val shown = remember(items, filter) {
+    var unreadOnly by rememberSaveable { mutableStateOf(false) }
+    val shown = remember(items, filter, unreadOnly) {
         when (filter) {
             ActivityFilter.All -> items
             ActivityFilter.Threads -> emptyList()
             ActivityFilter.Dms -> items.filter { it.direct }
             ActivityFilter.Mentions -> items.filter { it.kind == ActivityKind.Mention }
-        }
+        }.filter { !unreadOnly || it.unread }
     }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
@@ -68,15 +72,20 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenRoom: (String) -> Unit, onOp
         }
         // Threads lists the threads you're in, as Slack's Threads view does, rather than only the replies that notified you.
         if (filter == ActivityFilter.Threads) threads(onOpenThread)
-        else LazyColumn(Modifier.fillMaxSize()) {
-            if (shown.isEmpty()) item(key = "empty") {
-                Text(if (filter == ActivityFilter.All) "You’re all caught up" else "Nothing here yet", Modifier.padding(UiMetrics.GapLarge),
-                    style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textSecondary)
+        else Box(Modifier.fillMaxSize()) {
+            // Room under the last item for the Unreads pill.
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = UiMetrics.Touch + UiMetrics.GapLarge * 2)) {
+                if (shown.isEmpty()) item(key = "empty") {
+                    Text(if (filter == ActivityFilter.All) "You’re all caught up" else "Nothing here yet",
+                        Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textSecondary)
+                }
+                items(shown, key = { it.id }) { item ->
+                    HorizontalDivider(color = SlatrixTheme.colors.border)
+                    ActivityRow(item) { onOpenItem(item) }
+                }
             }
-            items(shown, key = { it.id }) { item ->
-                HorizontalDivider(color = SlatrixTheme.colors.border)
-                ActivityRow(item) { item.threadRoot?.let { onOpenThread(item.roomId, it) } ?: onOpenRoom(item.roomId) }
-            }
+            // Slack's floating Unreads pill narrows any filter to what you haven't opened.
+            UnreadsPill(unreadOnly, Modifier.align(Alignment.BottomEnd).padding(UiMetrics.GapLarge)) { unreadOnly = !unreadOnly }
         }
     }
 }
@@ -95,10 +104,25 @@ private fun ActivityChip(label: String, selected: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
+private fun UnreadsPill(selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    Surface(onClick = onClick, modifier.semantics { this.selected = selected }, shape = MaterialTheme.shapes.extraLarge,
+        color = if (selected) colors.textPrimary else colors.raised, contentColor = if (selected) colors.canvas else colors.textPrimary,
+        border = BorderStroke(UiMetrics.Divider, colors.border)) {
+        Box(Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapSection), contentAlignment = Alignment.Center) {
+            Text("Unreads", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
 private fun ActivityRow(item: ActivityItem, onClick: () -> Unit) {
     val colors = SlatrixTheme.colors
     val where = if (item.direct) "DM" else "#${item.roomName}"
-    Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).padding(UiMetrics.GapLarge),
+    // Slack tints what you haven't opened yet.
+    Row(Modifier.fillMaxWidth().background(if (item.unread) colors.raised else colors.canvas)
+        .semantics { if (item.unread) stateDescription = "Unread" }
+        .clickable(role = Role.Button, onClick = onClick).padding(UiMetrics.GapLarge),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
         Box(Modifier.padding(top = UiMetrics.GapTiny)) {
             LiveAvatar(item.initials, item.colorIndex)
@@ -128,8 +152,17 @@ private fun ActivityRow(item: ActivityItem, onClick: () -> Unit) {
                 item.direct -> "Direct Message"
                 else -> "Message in $where"
             }, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (item.kind != ActivityKind.Reaction) Text(item.body, Modifier.padding(top = UiMetrics.GapTiny),
-                style = MaterialTheme.typography.bodyLarge, color = colors.textBody, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            // A reaction shows the message it reacted to, then the reaction, as Slack does.
+            (if (item.kind == ActivityKind.Reaction) item.reactedTo else item.body)?.let {
+                Text(it, Modifier.padding(top = UiMetrics.GapTiny), style = MaterialTheme.typography.bodyLarge, color = colors.textBody,
+                    maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+            if (item.kind == ActivityKind.Reaction) Surface(Modifier.padding(top = UiMetrics.GapSmall)
+                .semantics(mergeDescendants = true) { contentDescription = "${item.body} reaction" },
+                shape = MaterialTheme.shapes.extraLarge, color = colors.sunken) {
+                Text(item.body, Modifier.padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapTiny),
+                    style = MaterialTheme.typography.bodyLarge)
+            }
         }
     }
 }

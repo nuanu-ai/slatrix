@@ -108,6 +108,40 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: home.starred
+    @Test fun starredAndPrivateChannelsFollowTheirTagAndJoinRule() = runTest {
+        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha").copy(isFavourite = true, isPublic = false, joinRule = JoinRule.Invite))
+        val client = RoomsClient(listOf(alpha, TestRoom(roomInfo("!b:example.org", "Beta").copy(isPublic = true, joinRule = JoinRule.Public)),
+            // Slack's public channel: anyone in the workspace can join.
+            TestRoom(roomInfo("!c:example.org", "Gamma").copy(isPublic = false, joinRule = JoinRule.Restricted(emptyList()))),
+            TestRoom(roomInfo("!d:example.org", "Delta"))))
+        val rooms = MatrixRooms(backgroundScope, client)
+        val state = rooms.state.first { !it.loading }
+
+        assertEquals(listOf("Alpha"), state.rooms.filter { it.starred }.map { it.name })
+        assertEquals(listOf("Alpha"), state.rooms.filter { it.isPrivate }.map { it.name })
+
+        // Another client unstars it.
+        alpha.emit(alpha.info.copy(isFavourite = false))
+        rooms.state.first { state -> state.rooms.none { it.starred } }
+        rooms.close()
+    }
+
+    // capability: home.star-toggle
+    @Test fun starringAConversationTagsItAsAFavourite() = runTest {
+        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha"))
+        val client = RoomsClient(listOf(alpha))
+        val rooms = MatrixRooms(backgroundScope, client)
+
+        assertTrue(rooms.setStarred("!a:example.org", true))
+        assertEquals(true, alpha.favourite)
+        assertTrue(rooms.setStarred("!a:example.org", false))
+        assertEquals(false, alpha.favourite)
+        alpha.failFavourite = true
+        assertFalse(rooms.setStarred("!a:example.org", true))
+        rooms.close()
+    }
+
     @Test fun anAccountWithNoRoomsFinishesLoading() = runTest {
         val rooms = MatrixRooms(backgroundScope, RoomsClient(emptyList()))
         assertEquals(emptyList<RoomSummary>(), rooms.state.first { !it.loading && it.spacesKnown }.rooms)
@@ -346,6 +380,7 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
     val services = Channel<SyncService>(Channel.UNLIMITED)
     var finish: suspend () -> SyncService = { services.receive() }
     override fun rooms(): List<Room> = cached
+    override fun getRoom(roomId: String): Room? = cached.firstOrNull { it.id() == roomId }
     override fun syncService(): SyncServiceBuilder = object : SyncServiceBuilder(NoHandle) {
         override fun withOfflineMode(): SyncServiceBuilder = this
         override suspend fun finish(): SyncService = this@RoomsClient.finish()
@@ -355,6 +390,12 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
 private class TestRoom(var info: RoomInfo, var latest: LatestEventValue = LatestEventValue.None) : Room(NoHandle) {
     private var listener: RoomInfoListener? = null
     var unreadable = false
+    var favourite: Boolean? = null
+    var failFavourite = false
+    override suspend fun setIsFavourite(isFavourite: Boolean, tagOrder: Double?) {
+        if (failFavourite) throw IllegalStateException("Offline")
+        favourite = isFavourite
+    }
     override fun id(): String = info.id
     override suspend fun roomInfo(): RoomInfo = if (unreadable) throw IllegalStateException("Store busy") else info
     override suspend fun latestEvent(): LatestEventValue = latest

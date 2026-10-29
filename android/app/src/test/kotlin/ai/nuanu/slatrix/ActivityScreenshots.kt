@@ -35,15 +35,19 @@ class ActivityScreenshots(private val dark: Boolean) {
 
     @Test fun render() {
         val day = 86_400_000L
-        val oct22 = 1_761_134_400_000L
+        // This year's Oct 22, so dates read like Slack's, without the year.
+        val oct22 = java.time.LocalDate.now().withMonth(10).withDayOfMonth(22).atTime(9, 0)
+            .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
         fun item(event: String, kind: ActivityKind, body: String, direct: Boolean, at: Long, thread: String? = null) =
             ActivityItem("room $event", "!room:example.org", event, if (direct) "Mira" else "design", direct,
                 if (direct) "Mira Chen" else "Jordan Lee", if (direct) "MC" else "JL", if (direct) 2 else 5, body, at, kind, thread)
         val items = listOf(
-            item("\$1", ActivityKind.Reaction, "❤️", direct = true, at = oct22),
+            item("\$1", ActivityKind.Reaction, "❤️", direct = true, at = oct22)
+                .copy(reactedTo = "Yes, joining in four minutes. I'll connect too."),
             item("\$2", ActivityKind.Message, "The call starts in four minutes. I can join today if that suits you.", direct = true, at = oct22 - 1),
             item("\$3", ActivityKind.Mention, "@Alex could you take a look at the launch checklist before Friday?", direct = false, at = oct22 - day),
-            item("\$4", ActivityKind.ThreadReply, "Agreed, let's ship after QA signs off.", direct = false, at = oct22 - 2 * day, thread = "\$root"),
+            item("\$4", ActivityKind.ThreadReply, "Agreed, let's ship after QA signs off.", direct = false, at = oct22 - 2 * day, thread = "\$root")
+                .copy(unread = false),
         )
         val threads = listOf(
             ThreadFeedItem("!design:example.org", "design", false, "\$a", ThreadFeedMessage("Mira Chen", "MC", 2,
