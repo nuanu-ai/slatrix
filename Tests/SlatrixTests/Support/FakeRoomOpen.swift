@@ -8,6 +8,14 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     private var listeners: [TimelineListener] = []
     private var handles: [FakeCancellableHandle] = []
     let pageGate = Gate()
+    /// Whether the next older page reaches the start of the room.
+    var startReached: Bool {
+        get { lock.withLock { reachedStart } }
+        set { lock.withLock { reachedStart = newValue } }
+    }
+    private var reachedStart = false
+    /// Read receipts sent through this timeline, as "read:" or "fully:" and the event.
+    let receipts = Recorder<String>()
     var allListenersCancelled: Bool { lock.withLock { handles.allSatisfy(\.isCancelled) } }
     init(_ cached: [TimelineItem]) {
         self.cached = cached
@@ -25,7 +33,12 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     }
     override func paginateBackwards(numEvents: UInt16) async throws -> Bool {
         await pageGate.wait()
-        return false
+        return startReached
+    }
+    /// Loaded around an older message, it already reaches the newest one.
+    override func paginateForwards(numEvents: UInt16) async throws -> Bool { true }
+    override func sendReadReceipt(receiptType: ReceiptType, eventId: String) async throws {
+        receipts.append("\(receiptType == .read ? "read" : "fully"):\(eventId)")
     }
     /// Messages sent through this timeline into the room's send queue.
     let sent = Recorder<Void>()
@@ -49,6 +62,8 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     let buildGate = Gate()
     /// Holds a timeline opened at an older message, as the server's context request would.
     let eventGate = Gate()
+    /// What a timeline opened at an older message loads; the cache when nil.
+    var context: [TimelineItem]?
     /// Thread replies the room can load, by event ID, with their thread's root.
     var threadRoots: [String: String] = [:]
     let membersGate = Gate()
@@ -67,7 +82,9 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
         focuses.append(configuration.focus)
         await buildGate.wait()
         if case .event = configuration.focus { await eventGate.wait() }
-        let timeline = FakeLiveTimeline(cached)
+        var items = cached
+        if case .event = configuration.focus, let context { items = context }
+        let timeline = FakeLiveTimeline(items)
         timelines.append(timeline)
         return timeline
     }

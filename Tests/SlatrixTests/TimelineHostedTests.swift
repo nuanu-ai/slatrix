@@ -64,15 +64,24 @@ struct TimelineHostedTests {
         let hosting: NSHostingView<Fixture>
         var bottomReports: [Bool] = []
 
-        init(messages: [ChatMessage], room: ChatRoom = TimelineHostedTests.room, height: CGFloat = 400) {
-            client = FakeClient(rooms: [FakeRoom(roomInfo(id: room.id))])
-            service.user = ChatUser(id: TimelineHostedTests.user, name: "Reader")
+        /// With `opening`, the conversation opens the way the app opens it, its timelines built by that room.
+        init(
+            messages: [ChatMessage] = [], room: ChatRoom = TimelineHostedTests.room, height: CGFloat = 400,
+            opening: FakeOpenRoom? = nil
+        ) {
+            client = FakeClient(rooms: [opening ?? FakeRoom(roomInfo(id: room.id))])
+            let user = ChatUser(id: TimelineHostedTests.user, name: "Reader")
+            service.user = user
             service.rooms = [room]
-            service.selectedRoomID = room.id
-            service.configureMessageActionsForChecks(
-                client: client, main: timeline, thread: nil,
-                rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
-            service.messages = messages
+            if opening != nil {
+                service.configureRoomOpenForChecks(client: client, roomList: FakeRoomListService(), user: user)
+            } else {
+                service.selectedRoomID = room.id
+                service.configureMessageActionsForChecks(
+                    client: client, main: timeline, thread: nil,
+                    rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
+                service.messages = messages
+            }
             window = offscreenWindow(NSSize(width: 620, height: height))
             hosting = NSHostingView(
                 rootView: Fixture(
@@ -421,6 +430,41 @@ struct TimelineHostedTests {
         harness.hosting.rootView = fixture
         await settle(harness) { harness.top(of: "Message 39") != nil }
         #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+    }
+
+    @Test("A conversation opened at an older message turns live once scrolled to its newest, and no row moves")
+    func turnsLiveAtNewest() async throws {
+        // Like the SDK's, each timeline numbers its own items, so one ID names different messages in each.
+        func items(_ range: Range<Int>) -> [TimelineItem] {
+            range.enumerated().map { offset, index in
+                FakeTimelineItem(
+                    textEvent(
+                        "$m\(index)", body: "Message \(index)",
+                        sender: index % 3 == 0 ? Self.user : "@other:example.org"),
+                    uniqueID: "\(offset)")
+            }
+        }
+        let room = FakeOpenRoom(Self.room.id, cached: items(10..<40))
+        room.context = items(0..<40)
+        let harness = Harness(opening: room)
+        defer { harness.close() }
+        await harness.service.jumpToMessage(roomID: Self.room.id, eventID: "$m5")
+        await settle(harness) { harness.top(of: "Message 5") != nil && !harness.service.hasMoreForwardHistory }
+        #expect(harness.service.focusedEventID == "$m5")
+        harness.scroll(toTop: harness.clip.bounds.minY + 10_000)
+        let shown = (10..<40).map { "Message \($0)" }.filter { harness.top(of: $0) != nil }
+        let before = shown.map { harness.top(of: $0) }
+        #expect(shown.contains("Message 39"))
+        // The first layout with the live timeline's rows already shows every row where it was.
+        var after: [CGFloat?] = []
+        _ = await eventually {
+            harness.layout()
+            guard harness.service.focusedEventID == nil else { return false }
+            after = shown.map { harness.top(of: $0) }
+            return true
+        }
+        #expect(harness.service.focusedEventID == nil && harness.service.messages.first?.body == "Message 10")
+        #expect(after == before)
     }
 
     @Test("Jumping to a loaded message scrolls it into view in the same table and highlights it at its own height")
