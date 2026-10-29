@@ -11,7 +11,7 @@ import org.matrix.rustcomponents.sdk.RoomNotificationMode
 import uniffi.matrix_sdk_base.EncryptionState
 import uniffi.ruma_events.StateEventType
 
-data class ChannelMember(val id: String, val name: String) {
+data class ChannelMember(val id: String, val name: String, val avatarUrl: String? = null) {
     val initials get() = AvatarPlaceholder.initials(name)
     val colorIndex get() = AvatarPlaceholder.colorIndex(name)
 }
@@ -38,7 +38,7 @@ class MatrixChannel(private val client: Client, private val roomId: String) {
                 val chunk = iterator.nextChunk(500u) ?: break
                 chunk.filter { it.membership is MembershipState.Join }.mapTo(members) { member ->
                     ChannelMember(member.userId, member.displayName?.takeIf { it.isNotBlank() }
-                        ?: member.userId.removePrefix("@").substringBefore(':'))
+                        ?: member.userId.removePrefix("@").substringBefore(':'), member.avatarUrl)
                 }
             }
         }

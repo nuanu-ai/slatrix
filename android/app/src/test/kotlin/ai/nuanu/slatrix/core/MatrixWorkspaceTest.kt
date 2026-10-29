@@ -7,9 +7,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.*
 
@@ -200,6 +202,25 @@ class MatrixWorkspaceTest {
         workspace.jumpTo(alpha, "\$reply", root)
         runCurrent()
         assertEquals("\$root", workspace.selected.value?.at)
+        workspace.close()
+    }
+
+    // capability: conversation.unread-line
+    @Test fun anUnreadConversationOpensWhereItsUnreadMessagesStartUnlessAJumpOrThreadSaysWhere() = runTest {
+        val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha").copy(resumeAt = "\$read")
+
+        workspace.open(alpha)
+        runCurrent()
+        assertEquals("\$read", workspace.selected.value?.at)
+        assertTrue(workspace.selected.value?.resume == true)
+        workspace.jumpTo(alpha, "\$plain", threadRoot = null)
+        runCurrent()
+        assertEquals("\$plain", workspace.selected.value?.at)
+        assertFalse(workspace.selected.value?.resume == true)
+        workspace.open(alpha, threadRoot = "\$root")
+        runCurrent()
+        assertNull(workspace.selected.value?.at)
         workspace.close()
     }
 

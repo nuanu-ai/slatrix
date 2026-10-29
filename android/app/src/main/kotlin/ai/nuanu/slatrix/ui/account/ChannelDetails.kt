@@ -274,7 +274,7 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
                     Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow)
                         .clickable(role = Role.Button) { onPerson(member.id) }.padding(horizontal = UiMetrics.GapLarge),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-                        LiveAvatar(member.initials, member.colorIndex, UiMetrics.ListAvatar)
+                        LiveAvatar(member.initials, member.colorIndex, UiMetrics.ListAvatar, member.avatarUrl)
                         Text(member.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (member.id == me) Text("(you)", style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
