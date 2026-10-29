@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.ui.account
 import android.content.ActivityNotFoundException
 import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountState
+import ai.nuanu.slatrix.core.AttachmentImport
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.IdentityState
@@ -188,7 +189,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
         rememberMessageActions(conversation, composer, main),
         ComposerActions(onCancelTarget = { composer?.cancelTarget() }, people = composer?.people?.collectAsState()?.value,
             onNeedPeople = { composer?.loadPeople() },
-            onMention = { start, end, candidate -> composer?.mention(start, end, candidate) }))
+            onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
+            onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }))
 }
 
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */

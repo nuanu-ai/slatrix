@@ -72,6 +72,47 @@ class MessageComposerTest {
         compose.onNodeWithText("Sam Okafor").assertExists()
     }
 
+    // capability: composer.attachments
+    @Test fun plusPicksFilesAndHandsThemOver() {
+        val picked = listOf(android.net.Uri.parse("content://media/picker/1"), android.net.Uri.parse("content://media/picker/2"))
+        val attached = mutableListOf<android.net.Uri>()
+        val registry = object : androidx.activity.result.ActivityResultRegistry() {
+            override fun <I, O> onLaunch(requestCode: Int, contract: androidx.activity.result.contract.ActivityResultContract<I, O>,
+                input: I, options: androidx.core.app.ActivityOptionsCompat?) {
+                dispatchResult(requestCode, android.app.Activity.RESULT_OK, android.content.Intent().apply {
+                    clipData = android.content.ClipData.newRawUri(null, picked[0]).apply { addItem(android.content.ClipData.Item(picked[1])) }
+                })
+            }
+        }
+        compose.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(androidx.activity.compose.LocalActivityResultRegistryOwner provides
+                object : androidx.activity.result.ActivityResultRegistryOwner { override val activityResultRegistry = registry }) {
+                SlatrixTheme {
+                    LiveChannelScreen(room, ConversationState(emptyList(), loading = false, hasMore = false),
+                        ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                        composerActions = ComposerActions(onAttach = { attached += it }))
+                }
+            }
+        }
+        compose.onNodeWithContentDescription("Attachments").performClick()
+        compose.onNodeWithText("Files").performClick()
+        compose.runOnIdle { assertEquals(picked, attached) }
+    }
+
+    @Test fun anUploadShowsItsProgressOnTheMessageWithoutChangingItsHeight() {
+        val photo = ConversationMessage("p", null, "@me:example.org", "Me", "photo.png", null, 1_700_000_000_000L,
+            MessageKind.Attachment, MessageSendState.Sending, true, "M", 0, uploadProgress = 0.25f)
+        val state = mutableStateOf(ConversationState(listOf(photo), loading = false, hasMore = false))
+        compose.setContent {
+            SlatrixTheme { LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
+        }
+        compose.onNode(androidx.compose.ui.test.hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo(0.25f, 0f..1f)))
+            .assertExists()
+        val uploading = compose.onNodeWithText("photo.png").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { state.value = state.value.copy(rows = listOf(photo.copy(uploadProgress = null, sendState = MessageSendState.Sent))) }
+        assertEquals("The bar lands without moving the row", uploading, compose.onNodeWithText("photo.png").fetchSemanticsNode().boundsInRoot)
+    }
+
     @Test fun theEmojiButtonInsertsAnEmojiWhereYouType() {
         show()
         compose.onNodeWithContentDescription("Message #design").performTextInput("Ship it")

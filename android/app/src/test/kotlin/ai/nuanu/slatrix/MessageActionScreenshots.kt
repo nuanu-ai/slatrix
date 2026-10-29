@@ -47,10 +47,10 @@ class MessageActionScreenshots(private val dark: Boolean) {
             MessageKind.Text, MessageSendState.Sent, sender == "Jordan", sender.take(1), if (sender == "Mira") 2 else 5)
         val rows = listOf(
             message("a", "Mira", "The new onboarding flow is up on staging. Would love eyes on the empty states.", 0),
-            message("b", "Jordan", "Looking now. The illustrations read well in dark mode too.", 10),
+            message("b", "Jordan", "Looking now. The illustrations read well in dark mode too.", 10).copy(editable = true),
         )
         val actions = MessageActions(quick = listOf("🙂", "❤️", "👍", "💯", "🐛"), recent = listOf("🙂", "❤️", "👍"),
-            onReact = { _, _ -> }, link = { "" }, onDelete = {})
+            onReact = { _, _ -> }, link = { "" }, onDelete = {}, onQuote = {}, onEdit = {})
         compose.setContent {
             SlatrixTheme(dark = dark) {
                 LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), ComposerState(loading = false),
@@ -83,7 +83,7 @@ class MessageActionScreenshots(private val dark: Boolean) {
         captureScreenRoboImage("build/outputs/roborazzi/Editing-$theme.png")
     }
 
-    @Test fun composerAndMentions() {
+    @Test fun composerMentionsAndAttachments() {
         val room = RoomSummary("!design:example.org", "design", false, "Launch reviews and critique", UnreadBadge.None, "D", 0)
         val text = mutableStateOf("")
         val people = MentionPeople(listOf(MentionPerson("@mira:example.org", "Mira Chen"), MentionPerson("@miles:example.org", "Miles Park"),
@@ -92,7 +92,7 @@ class MessageActionScreenshots(private val dark: Boolean) {
             SlatrixTheme(dark = dark) {
                 LiveChannelScreen(room, ConversationState(emptyList(), loading = false, hasMore = false),
                     ComposerState(text.value, loading = false), { text.value = it }, {}, {}, {}, {}, {}, {}, {},
-                    composerActions = ComposerActions(people = people))
+                    composerActions = ComposerActions(people = people, onAttach = {}))
             }
         }
         val theme = if (dark) "dark" else "light"
@@ -100,6 +100,10 @@ class MessageActionScreenshots(private val dark: Boolean) {
         compose.onNodeWithContentDescription("Message #design").performTextInput("Can you check this @mi")
         compose.onNodeWithText("Miles Park").assertExists()
         captureScreenRoboImage("build/outputs/roborazzi/Mentions-$theme.png")
+        compose.runOnIdle { text.value = "" }
+        compose.onNodeWithContentDescription("Attachments").performClick()
+        compose.onNodeWithText("Files").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/Attachments-$theme.png")
     }
 
     companion object {
