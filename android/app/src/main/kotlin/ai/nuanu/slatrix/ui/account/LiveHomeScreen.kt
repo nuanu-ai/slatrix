@@ -403,9 +403,7 @@ private fun ConversationActions(room: RoomSummary, onStar: (Boolean) -> Unit, on
             Text(room.name, Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
                 style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) {
-                // Applied once the sheet is gone, so its label doesn't flip while it eases out.
-                val star = !room.starred
-                onStar(star); onDismiss()
+                onStar(!room.starred); onDismiss()
             }
                 .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge),
                 verticalAlignment = Alignment.CenterVertically) {

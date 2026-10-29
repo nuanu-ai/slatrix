@@ -22,6 +22,10 @@ object UiMetrics {
     /** The grab handle atop a bottom sheet. */
     val SheetHandleWidth = 32.dp
     val SheetHandleHeight = 4.dp
+    /** How far down a sheet is dragged, as a share of its height, before letting go closes it. */
+    const val SheetDismissShare = 0.25f
+    /** How fast a flick down closes a sheet, per second. */
+    val SheetDismissVelocity = 1_000.dp
     val CompactAvatar = 24.dp
     val ListAvatar = 36.dp
     val HeaderAvatar = 32.dp

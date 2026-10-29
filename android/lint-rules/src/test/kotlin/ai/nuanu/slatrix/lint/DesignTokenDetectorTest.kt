@@ -187,13 +187,18 @@ class DesignTokenDetectorTest : LintDetectorTest() {
             kotlin(
                 """
                 package ai.nuanu.slatrix.ui.chat
+                import androidx.compose.animation.core.TweenSpec
                 import androidx.compose.animation.core.keyframes
+                import androidx.compose.animation.core.snap
                 import androidx.compose.animation.core.spring
                 import androidx.compose.animation.core.tween
 
                 val slide = tween<Float>(300)
                 val bounce = spring<Float>()
                 val steps = keyframes<Float> { }
+                val made = TweenSpec<Float>(300)
+                // Instant, as everything but panes and overlays is.
+                val instant = snap<Float>()
                 """,
             ),
             kotlin(
@@ -210,7 +215,7 @@ class DesignTokenDetectorTest : LintDetectorTest() {
                 val pane = Motion.pane<Float>()
                 """,
             ),
-        ).run().expectErrorCount(3)
+        ).run().expectErrorCount(4)
     }
 
     private val animationStub = kotlin(
@@ -220,6 +225,8 @@ class DesignTokenDetectorTest : LintDetectorTest() {
         fun <T> tween(durationMillis: Int = 300): Spec<T> = TODO()
         fun <T> spring(dampingRatio: Float = 1f): Spec<T> = TODO()
         fun <T> keyframes(init: () -> Unit): Spec<T> = TODO()
+        fun <T> snap(delayMillis: Int = 0): Spec<T> = TODO()
+        class TweenSpec<T>(durationMillis: Int)
         """,
     )
 

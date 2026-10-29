@@ -37,7 +37,9 @@ class DesignTokenDetector : Detector(), SourceCodeScanner {
                 ) {
                     context.report(ISSUE, node, context.getLocation(node), "Use a design system color role.")
                 }
-                if (owner.startsWith("androidx.compose.animation.core.") && method.name in ANIMATION_SPECS) {
+                if (owner.startsWith("androidx.compose.animation.core.") &&
+                    (method.name in ANIMATION_SPECS || method.isConstructor && owner.substringAfterLast('.') in ANIMATION_SPEC_TYPES)
+                ) {
                     context.report(ISSUE, node, context.getLocation(node), "Use a design system motion token.")
                 }
                 if (((method.isConstructor && owner == "androidx.compose.ui.unit.Dp") ||
@@ -76,7 +78,8 @@ class DesignTokenDetector : Detector(), SourceCodeScanner {
         private const val COLOR = "androidx.compose.ui.graphics.Color"
         private const val DESIGN_SYSTEM = "ai.nuanu.slatrix.ui.designsystem"
         /** Animation specs carry their own timing, which only the design system's motion tokens may set. */
-        private val ANIMATION_SPECS = setOf("tween", "spring", "keyframes", "repeatable", "infiniteRepeatable", "snap")
+        private val ANIMATION_SPECS = setOf("tween", "spring", "keyframes", "repeatable", "infiniteRepeatable")
+        private val ANIMATION_SPEC_TYPES = setOf("TweenSpec", "SpringSpec", "KeyframesSpec", "RepeatableSpec", "InfiniteRepeatableSpec")
         val ISSUE = Issue.create(
             "SlatrixDesignTokens",
             "Use design system tokens",
