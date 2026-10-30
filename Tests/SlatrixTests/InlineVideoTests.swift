@@ -5,14 +5,19 @@ import Testing
 
 @testable import Slatrix
 
-/// Shows two playable videos in a conversation over the fake client, each a minute long so none ends mid-test.
+/// Shows two videos in a conversation over the fake client: playable, each a minute long so none ends mid-test, or
+/// with `file` as what their download holds.
 @MainActor
-func videoConversation() async throws -> (MatrixService, TemporaryDirectory) {
+func videoConversation(file: Data? = nil) async throws -> (MatrixService, TemporaryDirectory) {
     let roomID = "!videos:example.org"
     let folder = try TemporaryDirectory()
     let client = FakeClient(rooms: [FakeRoom(roomInfo(id: roomID))])
-    client.file = try Data(
-        contentsOf: try await folder.video("clip.mov", width: 32, height: 18, rotation: 0, seconds: 60))
+    if let file {
+        client.file = file
+    } else {
+        client.file = try Data(
+            contentsOf: try await folder.video("clip.mov", width: 32, height: 18, rotation: 0, seconds: 60))
+    }
     let service = MatrixService()
     service.configureMessageActionsForChecks(
         client: client, main: nil, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
@@ -57,6 +62,27 @@ struct InlineVideoTests {
         #expect(video.eventID == "$gone")
         #expect(await eventually { video.eventID == nil })
         #expect(video.player == nil)
+    }
+
+    @Test("A video that won't play goes back to its poster and says so")
+    func unplayable() async throws {
+        let (service, _) = try await videoConversation(file: Data("not a movie".utf8))
+        video.play(try #require(service.messages.first), matrix: service, from: timeline)
+        #expect(await eventually { video.player != nil })
+        #expect(await eventually { video.eventID == nil && service.errorMessage != nil })
+        #expect(video.player == nil)
+    }
+
+    @Test("The row's player stays clear until its video plays, so the poster shows instead of a black box")
+    func clearUntilPlaying() async throws {
+        let folder = try TemporaryDirectory()
+        let player = AVPlayer(
+            url: try await folder.video("clip.mov", width: 32, height: 18, rotation: 0, seconds: 60))
+        let view = InlinePlayerView()
+        view.player = player
+        #expect(view.alphaValue == 0)
+        player.play()
+        #expect(await eventually { view.alphaValue == 1 })
     }
 
     @Test("Leaving the timeline it plays in stops the video; leaving another doesn't")
