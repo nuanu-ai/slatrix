@@ -36,6 +36,15 @@ struct ThreadFeedMappingTests {
         #expect(projected.map(\.replyCount) == [9])
     }
 
+    // capability: home.private-channel-icon
+    @Test("A private channel's thread carries its privacy, for its lock")
+    func privateChannel() {
+        var channel = room
+        channel.isPrivate = true
+        #expect(ThreadFeedMapping.project([thread()], room: channel).first?.isPrivate == true)
+        #expect(ThreadFeedMapping.project([thread()], room: room).first?.isPrivate == false)
+    }
+
     @Test("The same event IDs in two rooms are two threads")
     func roomsKeepThreadsApart() {
         let first = ThreadFeedMapping.project([thread()], room: room)

@@ -153,7 +153,7 @@ private struct MediaViewerPage: View {
     private var subtitle: String {
         let time = message.timestamp.formatted(.dateTime.month(.abbreviated).day().hour().minute())
         guard let room = matrix.rooms.first(where: { $0.id == message.roomID }) else { return time }
-        return "\(time) in \(room.isDirect ? room.name : "#" + room.name)"
+        return "\(time) in \(room.writtenName)"
     }
 
     private var copyLink: (() -> Void)? {

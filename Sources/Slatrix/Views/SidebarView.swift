@@ -323,7 +323,7 @@ private struct SidebarRoomRow: View, Equatable {
                     AvatarView(name: room.name, size: m.avatarSmall, matrix: matrix, source: room.avatarURL)
                         .opacity(room.muted && !selected ? 0.5 : 1)
                 } else {
-                    Image(systemName: room.isEncrypted ? "lock" : "number").font(m.font(.body)).frame(
+                    Image(systemName: room.channelSymbol).font(m.font(.body)).frame(
                         width: m.avatarSmall)
                 }
                 Text(room.name).font(m.font(.body, badge != .none ? .bold : .regular)).lineLimit(1)
@@ -341,10 +341,12 @@ private struct SidebarRoomRow: View, Equatable {
             .modifier(SidebarRowFill(selected: selected))
         }.buttonStyle(.row).padding(.horizontal, m.sp8).help(room.name)
             .accessibilityAddTraits(selected ? .isSelected : [])
-            // Bold and dimming don't reach VoiceOver.
+            // Bold, dimming and the lock don't reach VoiceOver.
             .accessibilityValue(
-                [badge != .none ? "Unread" : nil, room.muted ? "Muted" : nil].compactMap(\.self)
-                    .joined(separator: ", ")
+                [
+                    room.isPrivate && !room.isDirect ? "Private channel" : nil, badge != .none ? "Unread" : nil,
+                    room.muted ? "Muted" : nil,
+                ].compactMap(\.self).joined(separator: ", ")
             )
             .contextMenu {
                 Button("Mark unread") { onMarkUnread(room) }.disabled(isPreview || room.membership != "join")

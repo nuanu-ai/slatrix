@@ -18,7 +18,8 @@ import Foundation
                 id: "preview.room.\(index)", name: name,
                 topic: index == 0
                     ? "A place for the team. Share ideas, ask questions, and keep things moving."
-                    : "Everything about \(name.lowercased()).", unread: [2, 7, 8].contains(index) ? 3 : 0,
+                    : "Everything about \(name.lowercased()).", isPrivate: index == 5,
+                unread: [2, 7, 8].contains(index) ? 3 : 0,
                 mentions: index == 7 ? 1 : 0, favorite: index == 0, muted: index == 8, memberCount: 4,
                 spaceIDs: ["preview.workspace"])
         }

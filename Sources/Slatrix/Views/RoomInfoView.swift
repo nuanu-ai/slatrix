@@ -34,7 +34,8 @@ struct RoomInfoView: View {
 
     var body: some View {
         Modal(
-            title: currentRoom.isDirect ? currentRoom.name : "# \(currentRoom.name)", size: .large,
+            title: currentRoom.isDirect || currentRoom.isPrivate ? currentRoom.name : "# \(currentRoom.name)",
+            size: .large,
             height: Self.height, padded: false, onClose: onClose
         ) {
             VStack(alignment: .leading, spacing: 0) {

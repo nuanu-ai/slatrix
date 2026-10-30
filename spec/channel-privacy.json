@@ -1,0 +1,13 @@
+{
+  "about": "Whether a channel shows Slack's lock instead of #. Slack's private channel takes people only by invitation, so a channel is private when its Matrix join rule lets no one in uninvited. A restricted room is open to its space, a public channel there. joinRule is the m.room.join_rules value, any other string a custom rule, and null a rule not known yet.",
+  "cases": [
+    { "name": "Anyone can join a public room", "joinRule": "public", "private": false },
+    { "name": "An invite-only room is private", "joinRule": "invite", "private": true },
+    { "name": "A room you ask to join is private", "joinRule": "knock", "private": true },
+    { "name": "The reserved private rule is private", "joinRule": "private", "private": true },
+    { "name": "A room open to its space is public there", "joinRule": "restricted", "private": false },
+    { "name": "A room open to its space that also takes requests is public there", "joinRule": "knock_restricted", "private": false },
+    { "name": "A custom rule shows #", "joinRule": "org.example.guests", "private": false },
+    { "name": "A room whose rule isn't known yet shows #", "joinRule": null, "private": false }
+  ]
+}

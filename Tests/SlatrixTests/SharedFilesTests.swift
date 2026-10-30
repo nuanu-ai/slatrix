@@ -551,18 +551,20 @@ struct SharedContentMappingTests {
     }
 
     @Test(
-        "A Files row says who shared it, in which channel and when; a direct message needs no place, an old year shows",
+        "A Files row says who shared it, where and when: no place for a DM, no # for a private channel, an old year",
         arguments: [
-            (false, "2026-10-24", "Shared by Alice in #design · Oct 24"),
-            (true, "2026-10-24", "Shared by Alice · Oct 24"),
-            (false, "2025-03-02", "Shared by Alice in #design · Mar 2, 2025"),
+            (false, false, "2026-10-24", "Shared by Alice in #design · Oct 24"),
+            (true, false, "2026-10-24", "Shared by Alice · Oct 24"),
+            (false, true, "2026-10-24", "Shared by Alice in design · Oct 24"),
+            (false, false, "2025-03-02", "Shared by Alice in #design · Mar 2, 2025"),
         ])
-    func caption(direct: Bool, day: String, expected: String) throws {
+    func caption(direct: Bool, isPrivate: Bool, day: String, expected: String) throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.locale = Locale(identifier: "en_US")
         calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
         let parse = Date.ISO8601FormatStyle().year().month().day()
-        let room = ChatRoom(id: "!design:example.org", name: direct ? "Alice" : "design", isDirect: direct)
+        let room = ChatRoom(
+            id: "!design:example.org", name: direct ? "Alice" : "design", isDirect: direct, isPrivate: isPrivate)
         #expect(
             SharedContentMapping.caption(
                 sender: "Alice", room: room, date: try parse.parse(day), now: try parse.parse("2026-10-26"),

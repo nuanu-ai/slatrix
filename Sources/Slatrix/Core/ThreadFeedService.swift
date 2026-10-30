@@ -8,6 +8,7 @@ struct ThreadFeedItem: Identifiable, Hashable {
     var roomID: String
     var roomName: String
     var isDirect = false
+    var isPrivate = false
     var root: ChatMessage
     var latest: ChatMessage?
     var replyCount: Int
@@ -79,7 +80,8 @@ enum ThreadFeedMapping {
             root.replyCount = Int(value.numReplies)
             let id = ActivityService.key(roomID: room.id, eventID: root.eventID)
             let item = ThreadFeedItem(
-                id: id, roomID: room.id, roomName: room.name, isDirect: room.isDirect, root: root,
+                id: id, roomID: room.id, roomName: room.name, isDirect: room.isDirect, isPrivate: room.isPrivate,
+                root: root,
                 latest: value.latestEvent.map { message($0, roomID: room.id) }, replyCount: Int(value.numReplies))
             if unique[id].map({ $0.lastActivityAt > item.lastActivityAt }) != true { unique[id] = item }
         }
@@ -337,7 +339,10 @@ final class RoomSubscriptionCoordinator {
                     ? lhs.id < rhs.id : lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
         // The room list refreshes with every unread change; the feed shows only which rooms, in order, and how.
-        if next.elementsEqual(rooms, by: { $0.id == $1.id && $0.name == $1.name && $0.isDirect == $1.isDirect }) {
+        if next.elementsEqual(
+            rooms,
+            by: { $0.id == $1.id && $0.name == $1.name && $0.isDirect == $1.isDirect && $0.isPrivate == $1.isPrivate })
+        {
             return
         }
         rooms = next

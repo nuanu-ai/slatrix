@@ -168,10 +168,15 @@ struct RoomIcon: View {
         if room.isDirect {
             AvatarView(name: room.name, size: side, matrix: matrix, source: room.avatarURL)
         } else {
-            Image(systemName: room.isEncrypted ? "lock" : "number").font(m.font(side > m.avatarMedium ? .title : .body))
+            Image(systemName: room.channelSymbol).font(m.font(side > m.avatarMedium ? .title : .body))
                 .frame(width: side, height: side)
         }
     }
+}
+
+extension ChatRoom {
+    /// Slack's # for a channel anyone can join, and its lock for a private one.
+    var channelSymbol: String { isPrivate ? "lock" : "number" }
 }
 
 /// Slack's search results in the main pane: the query, tabs for messages, files, channels and people, and filters for
@@ -537,7 +542,7 @@ private struct MessageResultRow: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: m.sp8) {
                 HStack(spacing: m.sp4) {
-                    Image(systemName: room?.isDirect == true ? "person" : "number")
+                    Image(systemName: room?.isDirect == true ? "person" : room?.channelSymbol ?? "number")
                     Text(room?.name ?? message.roomID)
                 }.font(m.font(.meta, .semibold)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 HStack(alignment: .top, spacing: m.sp8) {

@@ -33,7 +33,7 @@ struct ChannelHeader: View {
                 } label: {
                     HStack(spacing: m.sp8) {
                         if !room.isDirect {
-                            Image(systemName: room.isEncrypted ? "lock.fill" : "number").font(m.font(.title, .bold))
+                            Image(systemName: room.channelSymbol).font(m.font(.title, .bold))
                         }
                         Text(room.name).font(m.font(.title, .bold)).lineLimit(1)
                         Image(systemName: "chevron.down").font(m.font(.caption, .semibold))

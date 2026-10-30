@@ -34,6 +34,7 @@ struct TimelineWelcome: Hashable {
     var name: String
     var topic: String
     var isDirect: Bool
+    var isPrivate: Bool
     var isEncrypted: Bool
 }
 
@@ -1095,11 +1096,11 @@ private struct TimelineWelcomeRow: View {
         VStack(alignment: .leading, spacing: m.sp12) {
             Image(
                 systemName: welcome.isDirect
-                    ? "bubble.left.and.bubble.right.fill" : welcome.isEncrypted ? "lock.fill" : "number"
+                    ? "bubble.left.and.bubble.right.fill" : welcome.isPrivate ? "lock.fill" : "number"
             )
             .font(m.font(.display, .bold)).frame(width: m(Self.tile), height: m(Self.tile))
             .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusPanel))
-            Text(welcome.isDirect || welcome.isEncrypted ? welcome.name : "# \(welcome.name)")
+            Text(welcome.isDirect || welcome.isPrivate ? welcome.name : "# \(welcome.name)")
                 .font(m.font(.display, .bold)).foregroundStyle(colors.textPrimary)
             Text(
                 !welcome.topic.isEmpty

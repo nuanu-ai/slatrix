@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import MatrixRustSDK
 import Testing
 
@@ -36,10 +37,15 @@ private final class SendTimeline: Timeline, @unchecked Sendable {
         return SendHandle(noHandle: .init())
     }
     let attachments = Recorder<AttachmentKind>()
+    /// A video's poster as it is when it goes up; the upload removes it after.
+    let posters = Recorder<Data>()
     override func sendAttachment(params: UploadParameters, attachment: AttachmentKind) throws
         -> SendAttachmentJoinHandle
     {
         attachments.append(attachment)
+        if case .video(_, .file(let path)?) = attachment, let poster = FileManager.default.contents(atPath: path) {
+            posters.append(poster)
+        }
         return SentAttachment(noHandle: .init())
     }
 }
@@ -103,6 +109,41 @@ struct ComposerSendTests {
             return
         }
         #expect(info.width == width && info.height == height)
+    }
+
+    // capability: composer.video
+    @Test("An uploaded video carries its upright size, its length and a poster from a second in, as Slack's do")
+    func uploadedVideo() async throws {
+        let scratch = try TemporaryDirectory()
+        // Stored on its side and turned a quarter by its track, as a phone records upright.
+        let clip = try await scratch.video("clip.mov", width: 320, height: 180, rotation: 90, seconds: 2)
+        try await service.uploadFile(clip, roomID: roomID)
+        guard case .video(let info, .file(let path)?) = try #require(main.attachments.all.first) else {
+            Issue.record("not sent as a video with a poster")
+            return
+        }
+        #expect(info.width == 180 && info.height == 320 && info.mimetype == "video/quicktime")
+        #expect(abs((info.duration ?? 0) - 2) < 0.2)
+        let poster = try #require(main.posters.all.first)
+        let thumbnail = try #require(info.thumbnailInfo)
+        #expect(thumbnail.width == 180 && thumbnail.height == 320 && thumbnail.mimetype == "image/jpeg")
+        #expect(thumbnail.size == UInt64(poster.count))
+        let image = try #require(
+            CGImageSourceCreateWithData(poster as CFData, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
+        #expect(image.width == 180 && image.height == 320)
+        // Turned upright, not stretched: the stored left and right halves are now its top and bottom.
+        #expect(Self.redder(image, x: 90, y: 40) != Self.redder(image, x: 90, y: 280))
+        #expect(Self.redder(image, x: 20, y: 40) == Self.redder(image, x: 160, y: 40))
+        #expect(!FileManager.default.fileExists(atPath: path), "The poster goes once the video is up")
+    }
+
+    private static func redder(_ image: CGImage, x: Int, y: Int) -> Bool {
+        let context = CGContext(
+            data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: -x, y: y - image.height + 1, width: image.width, height: image.height))
+        let pixel = context.data!.assumingMemoryBound(to: UInt8.self)
+        return pixel[0] > pixel[2]
     }
 
     @Test("A send the SDK refuses to queue fails without being retried", arguments: [false, true])
