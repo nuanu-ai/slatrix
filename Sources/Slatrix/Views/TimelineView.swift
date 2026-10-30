@@ -177,7 +177,9 @@ struct TimelineView: View {
     }
 
     private var welcome: TimelineWelcome {
-        TimelineWelcome(name: room.name, topic: room.topic, isDirect: room.isDirect, isEncrypted: room.isEncrypted)
+        TimelineWelcome(
+            name: room.name, topic: room.topic, isDirect: room.isDirect, isPrivate: room.isPrivate,
+            isEncrypted: room.isEncrypted)
     }
 
     private func buildEntries(

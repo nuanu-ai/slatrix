@@ -19,6 +19,8 @@ struct ChatRoom: Identifiable, Hashable {
     var topic: String = ""
     var isDirect = false
     var isEncrypted = false
+    /// Slack's private channel: no one joins without an invitation.
+    var isPrivate = false
     var unread = 0
     var unreadMessages = 0
     var isMarkedUnread = false
@@ -38,6 +40,10 @@ struct ChatRoom: Identifiable, Hashable {
     var canInvite: Bool? = nil
     /// nil until the room's power levels are known; the composer shows until then.
     var canPostMessages: Bool? = nil
+
+    /// The name in running text: Slack's "#design" for a channel anyone can join. Text has no lock, so a private
+    /// channel reads as its bare name, like a person.
+    var writtenName: String { isDirect || isPrivate ? name : "#" + name }
 }
 
 struct ChatUser: Identifiable, Hashable {

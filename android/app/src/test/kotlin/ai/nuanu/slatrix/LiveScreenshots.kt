@@ -83,12 +83,12 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean, privat
                 Column {
                     Box(Modifier.fillMaxWidth().height(StatusBar).background(if (tab in Pushed) colors.canvas else colors.workspaceBar))
                     Box(Modifier.weight(1f)) {
-                        if (tab == "You") LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, {})
+                        if (tab == "You") LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, onBack = {})
                         else if (tab == "Preferences") LivePreferencesScreen(dark, null, palette, {}, {}, {}) {
                             NotificationRows(NotifyAbout.DirectAndMentions, true, null, {}, {})
                         }
                         else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spaces = spaces, spacesKnown = true),
-                            {}, {}, {}, Harbor, onBrowseChannels = {}, onCreateChannel = {}, laterCount = 2,
+                            {}, {}, {}, Harbor, onBrowseChannels = {}, onCreateChannel = {}, laterCount = 2, onNewMessage = {},
                             search = { SearchScreen(rooms, "@alex:example.org", hits, {}, {}, {}, listOf("release notes", "offsite photos", "budget in:#design"), onRoom = {}) })
                     }
                     Box(Modifier.fillMaxWidth().height(GestureBar).background(if (tab in Pushed) colors.canvas else colors.raised))

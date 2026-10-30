@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.EmojiCatalog
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.clickable
@@ -20,13 +21,10 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,7 +48,6 @@ private sealed interface PickerItem {
 }
 
 /** Slack's full emoji picker: search by shortcode or name above your recent emoji and every category. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun EmojiPickerSheet(recent: List<String>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
@@ -69,8 +66,7 @@ internal fun EmojiPickerSheet(recent: List<String>, onPick: (String) -> Unit, on
             }
         }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = SlatrixTheme.topPanelShape, containerColor = colors.canvas) {
+    BottomSheet(onDismissRequest = onDismiss, containerColor = colors.canvas) {
         Column(Modifier.fillMaxHeight()) {
             Surface(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge), shape = MaterialTheme.shapes.medium,
                 color = colors.raised) {

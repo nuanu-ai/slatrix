@@ -17,6 +17,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Test
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import java.io.File
 import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_base.EncryptionState
 import uniffi.ruma_events.MessageLikeEventType
@@ -88,10 +91,38 @@ class MatrixRoomsTest {
         sync.started.await()
         assertEquals(emptyList<RoomSummary>(), rooms.state.first { it.spacesKnown }.rooms)
 
-        invited.info = invited.info.copy(membership = Membership.JOINED)
-        sync.emitEntries(listOf(RoomListEntriesUpdate.Set(1u, invited)))
+        invited.emit(invited.info.copy(membership = Membership.JOINED))
         val joined = rooms.state.first { state -> state.rooms.any { it.spaceIds.isNotEmpty() } }
         assertEquals(setOf("!nuanu:example.org"), joined.rooms.single().spaceIds)
+        rooms.close()
+    }
+
+    // capability: home.invitations
+    @Test fun anInvitationIsListedApartWithWhoSentItUntilItIsJoined() = runTest {
+        val sam = RoomMember("@sam:example.org", "Sam Lee", null, null, null, MembershipState.Join, false, PowerLevel.Value(0), false,
+            uniffi.matrix_sdk.RoomMemberRole.USER, null, false)
+        val invited = TestRoom(roomInfo("!design:example.org", "design", membership = Membership.INVITED, inviter = sam))
+        val client = RoomsClient(listOf(invited, TestRoom(roomInfo("!harbor:example.org", "Harbor", space = true, membership = Membership.INVITED))))
+        val parents = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+        client.spaces = RoomsSpaces(parents)
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        sync.started.await()
+
+        val listed = rooms.state.first { it.invitations.size == 2 }
+        assertEquals(listOf(Invitation("!design:example.org", "design", inviter = "Sam Lee"),
+            Invitation("!harbor:example.org", "Harbor", space = true)), listed.invitations)
+        assertEquals(emptyList<RoomSummary>(), listed.rooms)
+        assertEquals(emptyList<SpaceSummary>(), listed.spaces)
+
+        // Added to a workspace while you were only invited, it lands there once joined.
+        parents["!design:example.org"] = listOf("!ops:example.org")
+        invited.emit(invited.info.copy(membership = Membership.JOINED))
+        val joined = rooms.state.first { state -> state.rooms.isNotEmpty() }
+        assertEquals(listOf("design"), joined.rooms.map { it.name })
+        assertEquals(setOf("!ops:example.org"), rooms.state.first { state -> state.rooms.any { it.spaceIds.isNotEmpty() } }.rooms.single().spaceIds)
+        assertEquals(listOf("Harbor"), joined.invitations.map { it.name })
         rooms.close()
     }
 
@@ -111,21 +142,43 @@ class MatrixRoomsTest {
     }
 
     // capability: home.starred
-    @Test fun starredAndPrivateChannelsFollowTheirTagAndJoinRule() = runTest {
-        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha").copy(isFavourite = true, isPublic = false, joinRule = JoinRule.Invite))
-        val client = RoomsClient(listOf(alpha, TestRoom(roomInfo("!b:example.org", "Beta").copy(isPublic = true, joinRule = JoinRule.Public)),
-            // Slack's public channel: anyone in the workspace can join.
-            TestRoom(roomInfo("!c:example.org", "Gamma").copy(isPublic = false, joinRule = JoinRule.Restricted(emptyList()))),
-            TestRoom(roomInfo("!d:example.org", "Delta"))))
+    @Test fun starredChannelsFollowTheirTag() = runTest {
+        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha").copy(isFavourite = true))
+        val client = RoomsClient(listOf(alpha, TestRoom(roomInfo("!b:example.org", "Beta"))))
         val rooms = MatrixRooms(backgroundScope, client)
         val state = rooms.state.first { !it.loading }
 
         assertEquals(listOf("Alpha"), state.rooms.filter { it.starred }.map { it.name })
-        assertEquals(listOf("Alpha"), state.rooms.filter { it.isPrivate }.map { it.name })
 
         // Another client unstars it.
         alpha.emit(alpha.info.copy(isFavourite = false))
         rooms.state.first { state -> state.rooms.none { it.starred } }
+        rooms.close()
+    }
+
+    @Test fun aChannelIsPrivateAsItsJoinRuleSaysInEverySharedCase() = runTest {
+        val spec = JsonParser.parseString(File(System.getProperty("slatrix.root"), "spec/channel-privacy.json").readText()).asJsonObject
+        val cases = spec["cases"].asJsonArray.map { it.asJsonObject }
+        fun rule(case: JsonObject) = when (val value = case["joinRule"].takeUnless { it.isJsonNull }?.asString) {
+            null -> null
+            "public" -> JoinRule.Public
+            "invite" -> JoinRule.Invite
+            "knock" -> JoinRule.Knock
+            "private" -> JoinRule.Private
+            "restricted" -> JoinRule.Restricted(emptyList())
+            "knock_restricted" -> JoinRule.KnockRestricted(emptyList())
+            else -> JoinRule.Custom(value)
+        }
+        val client = RoomsClient(cases.mapIndexed { index, case ->
+            TestRoom(roomInfo("!$index:example.org", case["name"].asString).copy(joinRule = rule(case)))
+        })
+        val rooms = MatrixRooms(backgroundScope, client)
+        val state = rooms.state.first { !it.loading }
+
+        for (case in cases) {
+            val name = case["name"].asString
+            assertEquals(name, case["private"].asBoolean, state.rooms.single { it.name == name }.isPrivate)
+        }
         rooms.close()
     }
 
@@ -454,6 +507,23 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: app.offline-banner
+    @Test fun aDroppedConnectionSaysOfflineUntilSyncRunsAgainWithoutAnError() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        // The sync running has been handled, so it can't land after the drop.
+        client.sendQueuesEnabled.first { it }
+
+        sync.emitState(SyncServiceState.OFFLINE)
+        rooms.offline.first { it }
+        assertNull("The banner says it, so Home's notice doesn't", rooms.state.value.error)
+        sync.emitState(SyncServiceState.RUNNING)
+        rooms.offline.first { !it }
+        rooms.close()
+    }
+
     @Test fun syncRunsOnlyInTheForegroundWhileAPushStillResolvesItsEvent() = runTest {
         val client = RoomsClient(emptyList())
         val sync = RoomsSync()
@@ -562,9 +632,10 @@ private class RoomsSync : SyncService(NoHandle) {
     }
     val running = MutableStateFlow(false)
     override suspend fun start() {
-        started.complete(Unit)
         running.value = true
         emitState(SyncServiceState.RUNNING)
+        // Only once its RUNNING is queued, so a state the test emits next lands after it rather than being cleared by it.
+        started.complete(Unit)
     }
     override suspend fun stop() {
         running.value = false
@@ -601,13 +672,14 @@ internal fun roomInfo(
     messages: ULong = 0u,
     space: Boolean = false,
     membership: Membership = Membership.JOINED,
+    inviter: RoomMember? = null,
 ) = RoomInfo(
     id = id, encryptionState = EncryptionState.NOT_ENCRYPTED, creators = null,
     displayName = name, rawName = name, topic = null, avatarUrl = null,
     isDirect = direct, isDm = direct, isPublic = null, isSpace = space,
     successorRoom = null, isFavourite = false, isLowPriority = false,
     canonicalAlias = null, alternativeAliases = emptyList(), membership = membership,
-    inviter = null, heroes = emptyList(), activeMembersCount = 2u, invitedMembersCount = 0u,
+    inviter = inviter, heroes = emptyList(), activeMembersCount = 2u, invitedMembersCount = 0u,
     joinedMembersCount = 2u, activeServiceMembersCount = 0u, serviceMembers = emptyList(),
     highlightCount = 0u, notificationCount = 0u, cachedUserDefinedNotificationMode = null,
     hasRoomCall = false, activeRoomCallParticipants = emptyList(),

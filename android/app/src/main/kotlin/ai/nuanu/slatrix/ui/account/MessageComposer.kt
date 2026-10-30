@@ -8,6 +8,7 @@ import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.MentionCandidate
 import ai.nuanu.slatrix.core.MentionPeople
 import ai.nuanu.slatrix.core.MentionSearch
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.net.Uri
@@ -40,9 +41,7 @@ import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PhotoLibrary
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
@@ -261,14 +260,13 @@ private fun AttachButton(onClick: () -> Unit) {
 }
 
 /** The sheet "+" opens: photos and videos, the camera, or any file, from the system pickers. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AttachSheet(open: Boolean, onAttach: (List<Uri>) -> Unit, onClose: () -> Unit) {
     val colors = SlatrixTheme.colors
     val media = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { if (it.isNotEmpty()) onAttach(it) }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) onAttach(it) }
     val camera = rememberCamera { onAttach(listOf(it)) }
-    if (open) ModalBottomSheet(onDismissRequest = onClose, shape = SlatrixTheme.topPanelShape, containerColor = colors.canvas) {
+    if (open) BottomSheet(onDismissRequest = onClose, containerColor = colors.canvas) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             AttachChoice(Icons.Outlined.PhotoLibrary, "Photos & videos") {
                 onClose()

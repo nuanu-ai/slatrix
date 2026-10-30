@@ -2,19 +2,23 @@ package ai.nuanu.slatrix.core
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
+import androidx.core.graphics.scale
 import java.io.File
+import java.io.FileInputStream
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** A picked file, copied where the SDK can read it, with what its event says about it. */
 data class OutgoingAttachment(val path: String, val name: String, val mimeType: String, val size: Long,
-    val width: Int?, val height: Int?, val durationMillis: Long? = null)
+    val width: Int?, val height: Int?, val durationMillis: Long? = null, val poster: VideoPoster? = null)
 
 /** Copies what the system picker hands over into the app's cache, since its permission ends with the picker. */
 // The platform's ExifInterface reads a file's orientation correctly from API 24, the app's minimum.
@@ -53,21 +57,61 @@ class AttachmentImport(context: Context) {
             bounds?.let { if (turned) it.outHeight else it.outWidth }, bounds?.let { if (turned) it.outWidth else it.outHeight })
     }
 
-    /** A video's shown size and length, so other apps can play it in place. */
+    /**
+     * A video's shown size and length, and its poster from a frame near the start, as Slack's videos carry, so others can
+     * reserve its box and show it before it plays. Read from the copy, which any picker's file can be, even one that
+     * streams; the poster is written beside it, so it goes when the upload is done.
+     */
     private fun video(copy: File, name: String, mimeType: String): OutgoingAttachment {
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(copy.path)
+            FileInputStream(copy).use { retriever.setDataSource(it.fd) }
             fun number(key: Int) = retriever.extractMetadata(key)?.toLongOrNull()
-            val turned = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.let { it % 180 == 90L } == true
-            val width = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt()
-            val height = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt()
-            return OutgoingAttachment(copy.path, name, mimeType, copy.length(), if (turned) height else width,
-                if (turned) width else height, number(MediaMetadataRetriever.METADATA_KEY_DURATION))
+            val rotation = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
+            val shown = VideoUpload.shown(number(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt(),
+                number(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt(), rotation)
+            val duration = number(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val poster = shown?.let { poster(retriever, copy, VideoUpload.posterAt(duration), rotation, it) }
+            return OutgoingAttachment(copy.path, name, mimeType, copy.length(), shown?.first, shown?.second, duration, poster)
         } catch (_: RuntimeException) {
             return OutgoingAttachment(copy.path, name, mimeType, copy.length(), null, null)
         } finally {
             retriever.release()
         }
+    }
+
+    /**
+     * The frame at [atMillis], or the first one, upright and drawn at the poster's size, as a JPEG beside [copy]. Null when
+     * none can be read or drawn, even for want of memory, so the video still goes, without a poster.
+     */
+    private fun poster(retriever: MediaMetadataRetriever, copy: File, atMillis: Long, rotation: Int, shown: Pair<Int, Int>): VideoPoster? {
+        val file = File(copy.parentFile, "poster-${UUID.randomUUID()}.jpg")
+        return try {
+            val frame = retriever.getFrameAtTime(atMillis * 1_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return null
+            val (width, height) = VideoUpload.posterSize(shown.first, shown.second)
+            // The platform turns the frame upright; a version that hands it over as stored shows it on its side.
+            // shortcut: a square video, or one turned a half, can't be told apart that way; upgrade if one shows up wrong.
+            val sideways = rotation % 180 != 0 && (frame.width > frame.height) != (shown.first > shown.second)
+            val upright = if (sideways) Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height,
+                Matrix().apply { postRotate(rotation.toFloat()) }, true) else frame
+            val drawn = upright.scale(width, height)
+            try {
+                file.outputStream().use { drawn.compress(Bitmap.CompressFormat.JPEG, POSTER_QUALITY, it) }
+            } finally {
+                setOf(frame, upright, drawn).forEach { it.recycle() }
+            }
+            VideoPoster(file.path, width, height, file.length())
+        } catch (_: Exception) {
+            file.delete()
+            null
+        } catch (_: OutOfMemoryError) {
+            file.delete()
+            null
+        }
+    }
+
+    private companion object {
+        const val POSTER_QUALITY = 80
     }
 }

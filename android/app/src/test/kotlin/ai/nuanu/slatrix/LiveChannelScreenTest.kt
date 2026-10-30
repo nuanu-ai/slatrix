@@ -37,10 +37,13 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasProgressBarRangeInfo
 import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
@@ -311,6 +314,20 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("2 members").assertDoesNotExist()
     }
 
+    @Test fun aPrivateChannelsIntroShowsItsLockRatherThanAHash() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room.copy(isPrivate = true), ConversationState(loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("This is the very beginning of the design channel.").assertIsDisplayed()
+        compose.onNodeWithText("# design").assertDoesNotExist()
+        compose.onAllNodesWithContentDescription("Private channel").assertCountEquals(2)
+        // Slack's composer names a private channel without a hash too.
+        compose.onNodeWithContentDescription("Message design").assertIsDisplayed()
+    }
+
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
 
     private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)
@@ -385,6 +402,31 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Several people are typing…").assertIsDisplayed()
         compose.runOnIdle { typing.value = emptyList() }
         compose.onNodeWithText("typing", substring = true).assertDoesNotExist()
+    }
+
+    // capability: conversation.keep-position
+    @Test fun comingBackToAConversationShowsItWhereTheReaderLeftItThoughNewMessagesCame() {
+        val state = mutableStateOf(ConversationState((1..200).map { message("Message $it", minutes = it) }, loading = false))
+        val shown = mutableStateOf(true)
+        compose.setContent {
+            SlatrixTheme {
+                val saved = rememberSaveableStateHolder()
+                if (shown.value) saved.SaveableStateProvider("design") {
+                    LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+                }
+            }
+        }
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(60)
+        // Partway through a row, so the place has an offset.
+        compose.onNode(hasScrollToIndexAction()).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 150f) }
+        val before = compose.onNodeWithText("Message 140").fetchSemanticsNode().boundsInRoot
+
+        compose.runOnIdle { shown.value = false }
+        compose.runOnIdle { state.value = state.value.copy(rows = state.value.rows + message("Message 201", minutes = 201)) }
+        compose.runOnIdle { shown.value = true }
+        compose.onNodeWithText("Message 140").assertIsDisplayed()
+        assertEquals(before, compose.onNodeWithText("Message 140").fetchSemanticsNode().boundsInRoot)
+        compose.onNodeWithText("Message 201").assertIsNotDisplayed()
     }
 
     private fun message(body: String, minutes: Int, sender: String = "Mira", state: MessageSendState = MessageSendState.Sent) =

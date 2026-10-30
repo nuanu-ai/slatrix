@@ -233,6 +233,15 @@ class ChannelDetailsScreenTest {
         compose.onNodeWithText("No pinned messages").assertDoesNotExist()
     }
 
+    @Test fun aRoomPastTheSdksLimitSaysHowManyOfItsPinsShow() {
+        details(room.copy(pinned = (1..140).map { "\$pin-$it" } + "\$Ship it"), ChannelDetailsActions(pins = {
+            PinnedMessages(ConversationState(listOf(pinned("Ship it")), loading = false)) {}
+        }))
+        compose.onNodeWithText("Pinned messages").performClick()
+        compose.onNodeWithText("Ship it").assertIsDisplayed()
+        compose.onNodeWithText("Showing the 128 most recent of 141 pinned messages.").assertIsDisplayed()
+    }
+
     @Test fun withoutThePowerToPinPinsCantBeUnpinned() {
         details(room.copy(pinned = listOf("\$Ship it")), ChannelDetailsActions(pins = {
             PinnedMessages(ConversationState(listOf(pinned("Ship it")), loading = false)) {}
@@ -287,6 +296,48 @@ class ChannelDetailsScreenTest {
         compose.onNodeWithText("Our new office").assertDoesNotExist()
         compose.onNodeWithText("JPG", substring = true).assertIsDisplayed()
     }
+
+    // capability: conversation.files
+    @Test fun aFileOpensWithThePhonesAppAndAnImageInTheViewerRatherThanAtItsMessage() {
+        val opened = mutableListOf<String>()
+        var jumped: String? = null
+        val rows = listOf(file("spec.pdf", MessageAttachment.Kind.File), file("office.jpg", MessageAttachment.Kind.Image))
+        details(room, ChannelDetailsActions(files = {
+            SharedFiles(ConversationState(rows, loading = false), onOpenFile = { opened += it.name; null })
+        }), onOpenMessage = { jumped = it })
+        compose.onNodeWithText("Files").performClick()
+        compose.onNodeWithText("spec.pdf").performClick()
+        compose.waitUntil { opened.isNotEmpty() }
+        compose.onNodeWithText("office.jpg").performClick()
+        compose.onNodeWithContentDescription("Close").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(listOf("spec.pdf"), opened)
+            assertEquals(null, jumped)
+        }
+    }
+
+    // capability: conversation.files
+    @Test fun filesNarrowToFilesImagesOrLinksAsOnTheMac() {
+        val rows = listOf(file("spec.pdf", MessageAttachment.Kind.File), file("office.jpg", MessageAttachment.Kind.Image),
+            pinned("Notes at https://example.org/notes"))
+        details(room, ChannelDetailsActions(files = { SharedFiles(ConversationState(rows, loading = false)) }))
+        compose.onNodeWithText("Files").performClick()
+        compose.onNodeWithText("Images").performClick()
+        compose.onNodeWithText("office.jpg").assertIsDisplayed()
+        compose.onNodeWithText("spec.pdf").assertDoesNotExist()
+        compose.onNodeWithText("Links").performClick()
+        compose.onNodeWithText("https://example.org/notes").assertIsDisplayed()
+        compose.onNodeWithText("office.jpg").assertDoesNotExist()
+        // Files holds every file, images included, as the Mac's does.
+        compose.onNode(hasText("Files") and hasClickAction()).performClick()
+        compose.onNodeWithText("spec.pdf").assertIsDisplayed()
+        compose.onNodeWithText("office.jpg").assertIsDisplayed()
+        compose.onNodeWithText("https://example.org/notes").assertDoesNotExist()
+    }
+
+    private fun file(name: String, kind: MessageAttachment.Kind) = pinned(name).copy(kind = MessageKind.Attachment,
+        attachment = MessageAttachment(kind, name, null, 1_000, 1600, 900,
+            object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/$name" }))
 
     @Test fun loadMoreHoldsItsPlaceWhileLoadingAndAFailedPageTriesAgain() {
         val files = mutableStateOf(SharedFiles(ConversationState(listOf(pinned("spec.pdf").copy(kind = MessageKind.Attachment)),

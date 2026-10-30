@@ -378,7 +378,8 @@ class MatrixConversationTest {
         conversation.sendAttachments(listOf(
             { OutgoingAttachment("/cache/photo.png", "photo.png", "image/png", 2_048, 1200, 800) },
             { OutgoingAttachment("/cache/notes.pdf", "notes.pdf", "application/pdf", 4_096, null, null) },
-            { OutgoingAttachment("/cache/clip.mp4", "clip.mp4", "video/mp4", 8_192, 640, 360, durationMillis = 3_000) },
+            { OutgoingAttachment("/cache/clip.mp4", "clip.mp4", "video/mp4", 8_192, 640, 360, durationMillis = 3_000,
+                poster = VideoPoster("/cache/poster.jpg", 640, 360, 1_024)) },
         ))
         val (photo, image) = timeline.attachments.receive()
         assertEquals(UploadSource.File("/cache/photo.png"), photo.source)
@@ -387,8 +388,10 @@ class MatrixConversationTest {
         assertEquals(UploadSource.File("/cache/notes.pdf"), notes.source)
         assertEquals(FileInfo("application/pdf", 4_096u, null, null), (file as AttachmentKind.File).fileInfo)
         val (_, video) = timeline.attachments.receive()
-        assertEquals(VideoInfo(java.time.Duration.ofMillis(3_000), 360u, 640u, "video/mp4", 8_192u, null, null, null),
-            (video as AttachmentKind.Video).videoInfo)
+        // capability: composer.video
+        assertEquals(VideoInfo(java.time.Duration.ofMillis(3_000), 360u, 640u, "video/mp4", 8_192u,
+            ThumbnailInfo(360u, 640u, "image/jpeg", 1_024u), null, null), (video as AttachmentKind.Video).videoInfo)
+        assertEquals("The poster goes up with the video", UploadSource.File("/cache/poster.jpg"), video.thumbnailSource)
         conversation.close()
     }
 
@@ -443,6 +446,38 @@ class MatrixConversationTest {
         files.close()
     }
 
+    // capability: message.edit-caption
+    @Test fun aCaptionChangesOrGoesByEditingTheMediaEvent() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Our new office")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val message = conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single()
+        conversation.editCaption(message, "Our new office, 3rd floor")
+        assertEquals(EventOrTransactionId.EventId("\$one") to EditedContent.MediaCaption("Our new office, 3rd floor", null,
+            Mentions(emptyList(), false)), timeline.edits.receive())
+        conversation.editCaption(message, null)
+        assertEquals(EditedContent.MediaCaption(null, null, Mentions(emptyList(), false)), timeline.edits.receive().second)
+
+        timeline.editFailure = IllegalStateException("Offline")
+        conversation.editCaption(message, "Again")
+        assertEquals("Couldn’t change the caption.", conversation.state.first { it.notice != null }.notice)
+        conversation.close()
+    }
+
+    // capability: message.video
+    @Test fun aVideoCarriesItsLengthAndSizeForItsPoster() = runTest {
+        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/clip" }
+        val poster = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/poster" }
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "clip.mp4", content = TimelineItemContent.MsgLike(
+            MsgLikeContent(MsgLikeKind.Message(MessageContent(MessageType.Video(VideoMessageContent("clip.mp4", null, null, source,
+                VideoInfo(java.time.Duration.ofSeconds(83), 720u, 1280u, "video/mp4", 5_000_000u, ThumbnailInfo(720u, 1280u, "image/jpeg", 40_000u),
+                    poster, null))), "clip.mp4", false, null)), null, null, null)))))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val video = conversation.state.first { it.rows.isNotEmpty() }.rows.messages.single()
+        assertEquals(MessageAttachment(MessageAttachment.Kind.Video, "clip.mp4", "video/mp4", 5_000_000, 1280, 720, source, poster, 40_000,
+            durationMillis = 83_000), video.attachment)
+        conversation.close()
+    }
+
     @Test fun aFailedDeleteSaysSoForAMoment() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.redactFailure = IllegalStateException("Offline")
@@ -456,27 +491,30 @@ class MatrixConversationTest {
     }
 
     // capability: message.forward
-    @Test fun aMessageForwardsAsItsTextOrItsFileButNotAVideoOrWhileAnEditOrDeleteIsPending() = runTest {
+    @Test fun aMessageForwardsAsItsTextOrItsMediaButNotWhileAnEditOrDeleteIsPending() = runTest {
         fun media(type: MessageType) = TimelineItemContent.MsgLike(MsgLikeContent(
             MsgLikeKind.Message(MessageContent(type, "clip", false, null)), null, null, null))
         val source = object : MediaSource(NoHandle) {}
         val file = MessageType.File(FileMessageContent("plan.pdf", null, null, source, null))
         val video = MessageType.Video(VideoMessageContent("clip.mp4", null, null, source, null))
+        val audio = MessageType.Audio(AudioMessageContent("memo.m4a", null, null, source, null, null, null))
         val timeline = ConversationTimeline(listOf(
             conversationItem("a", "\$text", "Ship it"),
             conversationItem("b", "\$file", "plan.pdf", content = media(file)),
             conversationItem("c", "\$video", "clip.mp4", content = media(video)),
             conversationItem("d", "\$editing", "Being edited", editState = EventSendState.NotSentYet(null)),
             conversationItem("e", "\$deleting", "Being deleted", deleting = true),
+            conversationItem("f", "\$audio", "memo.m4a", content = media(audio)),
         ))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        val rows = conversation.state.first { it.rows.messages.size == 5 }.rows.messages
+        val rows = conversation.state.first { it.rows.messages.size == 6 }.rows.messages
 
         assertEquals(MessageType.Text(TextMessageContent("Ship it", null)), conversation.forwardable(rows[0]))
         assertEquals(file, conversation.forwardable(rows[1]))
-        assertNull(conversation.forwardable(rows[2]))
+        assertEquals(video, conversation.forwardable(rows[2]))
         assertNull("A pending edit could change what goes", conversation.forwardable(rows[3]))
         assertNull(conversation.forwardable(rows[4]))
+        assertEquals(audio, conversation.forwardable(rows[5]))
         conversation.close()
     }
 
@@ -500,6 +538,20 @@ class MatrixConversationTest {
         assertTrue(room.markedUnread)
         assertFalse("Its newest message on screen doesn't read it again", conversation.markRead("\$one"))
         assertTrue(timeline.receipts.tryReceive().isFailure)
+        conversation.close()
+    }
+
+    // capability: conversation.keep-position
+    @Test fun comingBackToAKeptConversationLeavesLastVisitsJumpUnreadStartAndHoldBehind() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("a", "\$a", "Hello"), conversationItem("b", "\$b", "World")))
+        val conversation = MatrixConversation(backgroundScope, JumpRoom(live, ConversationTimeline(emptyList())), at = "\$a")
+        assertEquals("\$a", conversation.state.first { !it.loading }.highlight)
+        conversation.markUnread()
+
+        conversation.revisit()
+        val back = conversation.state.first { it.highlight == null }
+        assertFalse(back.startsAtUnread)
+        assertTrue("Reading works again", conversation.markRead("\$b"))
         conversation.close()
     }
 
@@ -795,7 +847,9 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         }
     }
     val edits = Channel<Pair<EventOrTransactionId, EditedContent>>(Channel.UNLIMITED)
+    var editFailure: Exception? = null
     override suspend fun edit(eventOrTransactionId: EventOrTransactionId, newContent: EditedContent) {
+        editFailure?.let { throw it }
         edits.send(eventOrTransactionId to newContent)
     }
 }
