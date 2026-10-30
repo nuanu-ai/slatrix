@@ -45,6 +45,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -164,7 +166,7 @@ internal fun box(width: Int?, height: Int?, maxWidth: Dp, maxHeight: Dp): Pair<D
 /** An attachment under its message: an image or video inline, anything else as Slack's file row. A long press opens the message's sheet. */
 @Composable
 internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, videos: VideoPlayback, opening: Boolean,
-    onOpenFile: () -> Unit, onLongPress: () -> Unit, onView: (ImageBitmap?) -> Unit) {
+    onOpenFile: () -> Unit, onLongPress: () -> Unit, onView: (tile: Pair<Int, Int>) -> Unit) {
     when (attachment.kind) {
         MessageAttachment.Kind.Image -> InlineImage(attachment, load, onLongPress, onView)
         MessageAttachment.Kind.Video -> InlineVideo(attachment, load, videos, onLongPress)
@@ -173,7 +175,7 @@ internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, vide
 }
 
 @Composable
-private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onLongPress: () -> Unit, onView: (ImageBitmap?) -> Unit) {
+private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onLongPress: () -> Unit, onView: (tile: Pair<Int, Int>) -> Unit) {
     val colors = SlatrixTheme.colors
     val shape = MaterialTheme.shapes.large
     BoxWithConstraints(Modifier.padding(top = UiMetrics.GapTiny).fillMaxWidth()) {
@@ -182,7 +184,7 @@ private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onLo
         val shown = picture(attachment, pixels.first, pixels.second, false, load)
         Box(Modifier.size(width, height).clip(shape).background(colors.sunken).border(UiMetrics.Divider, colors.border, shape)
             .semantics { contentDescription = attachment.name }
-            .combinedClickable(onClickLabel = "View image", onLongClickLabel = "Message actions", onLongClick = onLongPress) { onView(shown) }) {
+            .combinedClickable(onClickLabel = "View image", onLongClickLabel = "Message actions", onLongClick = onLongPress) { onView(pixels) }) {
             shown?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
         }
     }
@@ -226,14 +228,21 @@ internal fun FileTile(kind: FileKind) {
     }
 }
 
-/** An image full screen on black, as in Slack: pinch or double-tap to zoom, drag to look around, Close to leave. */
+private val OffsetSaver = Saver<Offset, List<Float>>({ listOf(it.x, it.y) }, { Offset(it[0], it[1]) })
+
+/**
+ * An image full screen on black, as in Slack: pinch or double-tap to zoom, drag to look around, Close to leave. Until the
+ * image loads, the picture its [tile] showed holds the image's box; one already loaded shows at once.
+ */
 @Composable
-internal fun MediaViewer(attachment: MessageAttachment, placeholder: ImageBitmap?, load: PictureLoader, onDismiss: () -> Unit) {
+internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, load: PictureLoader, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
+    // Saved with the screen rather than in the dialog, whose window keeps its saved state apart.
+    var scale by rememberSaveable { mutableFloatStateOf(1f) }
+    var offset by rememberSaveable(stateSaver = OffsetSaver) { mutableStateOf(Offset.Zero) }
     Dialog(onDismiss, DialogProperties(usePlatformDefaultWidth = false)) {
         val full = picture(attachment, UiMetrics.ViewerPixels, UiMetrics.ViewerPixels, true, load)
-        var scale by remember { mutableFloatStateOf(1f) }
-        var offset by remember { mutableStateOf(Offset.Zero) }
+        val placeholder = if (full == null) picture(attachment, tile.first, tile.second, false, load) else null
         var size by remember { mutableStateOf(IntSize.Zero) }
         // Zoomed in, the picture moves only as far as its edges.
         fun bounded(value: Offset): Offset {
@@ -241,20 +250,27 @@ internal fun MediaViewer(attachment: MessageAttachment, placeholder: ImageBitmap
             val y = size.height * (scale - 1) / 2
             return Offset(value.x.coerceIn(-x, x), value.y.coerceIn(-y, y))
         }
-        Box(Modifier.fillMaxSize().background(colors.mediaBackdrop).onSizeChanged { size = it }) {
-            (full ?: placeholder)?.let {
-                Image(it, attachment.name, Modifier.fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            scale = (scale * zoom).coerceIn(1f, UiMetrics.ViewerMaxZoom)
-                            offset = bounded(offset + pan)
-                        }
+        BoxWithConstraints(Modifier.fillMaxSize().background(colors.mediaBackdrop).onSizeChanged { size = it }) {
+            // The image's box fitted to the screen, from its size in the event; unknown, the small picture isn't stretched.
+            val (w, h) = (attachment.width ?: 0) to (attachment.height ?: 0)
+            val fit = if (w > 0 && h > 0) minOf(maxWidth / w, maxHeight / h) else null
+            Box(Modifier.fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        scale = (scale * zoom).coerceIn(1f, UiMetrics.ViewerMaxZoom)
+                        offset = bounded(offset + pan)
                     }
-                    .pointerInput(Unit) {
-                        detectTapGestures(onDoubleTap = { scale = if (scale > 1f) 1f else UiMetrics.ViewerDoubleTapZoom; offset = Offset.Zero })
-                    }
-                    .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
-                    contentScale = ContentScale.Fit)
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(onDoubleTap = { scale = if (scale > 1f) 1f else UiMetrics.ViewerDoubleTapZoom; offset = Offset.Zero })
+                }
+                .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
+                contentAlignment = Alignment.Center) {
+                when {
+                    full != null -> Image(full, attachment.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    placeholder != null && fit != null ->
+                        Image(placeholder, attachment.name, Modifier.size(fit * w, fit * h), contentScale = ContentScale.Crop)
+                }
             }
             Row(Modifier.fillMaxWidth().statusBarsPadding().background(colors.mediaShade).padding(end = UiMetrics.GapLarge),
                 verticalAlignment = Alignment.CenterVertically) {

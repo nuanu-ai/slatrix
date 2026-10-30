@@ -1,0 +1,279 @@
+{
+  "about": "Later: one list per account, which every device reads and writes in the global account data event eventType. Its content holds saved, the messages saved for later, and removed, the ones taken out of Later; each entry is room_id, event_id and ts, when it was saved or removed in milliseconds since 1970. It never holds message text. reading: the list a device takes from content. An entry without a room ID (!), an event ID ($) and a whole ts from zero to 2^53 - 1, the integers JSON holds exactly, is skipped. A message keeps only its latest entry, saved or removed, and saved wins a tie. Both lists run newest first, then by room and event ID. At most the newest 10,000 saved messages and the newest 1,000 removals are kept; a count rather than an age, so a device whose clock runs ahead can't make the others forget removals. merging: a device merges the list it holds with the account's, null when the server has none, by the same rules; it writes the result only when that differs from the account's list. setting: saving a message (saved true) or removing it (saved false) at now; the new entry lands after any the message already has, so a clock running behind can't lose the change, and a message already as asked stays as it is.",
+  "eventType": "ai.nuanu.slatrix.later",
+  "reading": [
+    {
+      "name": "Saved messages read newest first",
+      "content": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955400000 },
+          { "room_id": "!general:example.org", "event_id": "$two", "ts": 1761955300000 }
+        ]
+      },
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955400000 },
+          { "room_id": "!general:example.org", "event_id": "$two", "ts": 1761955300000 },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "name": "An entry that isn't a room, an event and a time is skipped and the rest are kept",
+      "content": {
+        "saved": [
+          { "room_id": "design", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "one", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": "1761955200000" },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": -1 },
+          { "room_id": "!design:example.org", "event_id": "$four", "ts": 1761955200000.5 },
+          { "room_id": "!design:example.org", "event_id": "$five" },
+          { "room_id": "!design:example.org", "event_id": "$six", "ts": 9007199254740992 },
+          "!design:example.org $one",
+          { "room_id": "!design:example.org", "event_id": "$seven", "ts": 1761955200000, "note": "kept" }
+        ],
+        "removed": [{ "room_id": "!design:example.org", "ts": 1761955200000 }]
+      },
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$seven", "ts": 1761955200000 }],
+        "removed": []
+      }
+    },
+    {
+      "name": "A message saved twice keeps its latest save",
+      "content": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }
+        ]
+      },
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }],
+        "removed": []
+      }
+    },
+    {
+      "name": "A message both saved and removed follows whichever came later",
+      "content": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955500000 }
+        ],
+        "removed": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955400000 }
+        ]
+      },
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955500000 }],
+        "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }]
+      }
+    },
+    {
+      "name": "Saved and removed at the same moment stays saved",
+      "content": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }],
+        "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }]
+      },
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }],
+        "removed": []
+      }
+    },
+    {
+      "name": "Messages saved at the same moment order by room, then event",
+      "content": {
+        "saved": [
+          { "room_id": "!general:example.org", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }
+        ]
+      },
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955200000 },
+          { "room_id": "!general:example.org", "event_id": "$one", "ts": 1761955200000 }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "name": "Content that isn't two lists of entries reads as an empty list",
+      "content": { "saved": { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }, "removed": 3 },
+      "expected": { "saved": [], "removed": [] }
+    },
+    {
+      "name": "Content that isn't an object reads as an empty list",
+      "content": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }],
+      "expected": { "saved": [], "removed": [] }
+    }
+  ],
+  "merging": [
+    {
+      "name": "What each device saved is kept",
+      "local": { "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "remote": { "saved": [{ "room_id": "!general:example.org", "event_id": "$two", "ts": 1761955300000 }] },
+      "expected": {
+        "saved": [
+          { "room_id": "!general:example.org", "event_id": "$two", "ts": 1761955300000 },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }
+        ],
+        "removed": []
+      },
+      "writes": true
+    },
+    {
+      "name": "A message removed on another device leaves Later here",
+      "local": { "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "remote": { "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }] },
+      "expected": {
+        "saved": [],
+        "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }]
+      },
+      "writes": false
+    },
+    {
+      "name": "A removal here outlasts an older save from another device",
+      "local": { "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }] },
+      "remote": { "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "expected": {
+        "saved": [],
+        "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }]
+      },
+      "writes": true
+    },
+    {
+      "name": "Saving here again after a removal elsewhere brings the message back",
+      "local": { "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955400000 }] },
+      "remote": { "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }] },
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955400000 }],
+        "removed": []
+      },
+      "writes": true
+    },
+    {
+      "name": "A device with nothing the account lacks writes nothing",
+      "local": { "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "remote": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!general:example.org", "event_id": "$two", "ts": 1761955300000 }
+        ]
+      },
+      "expected": {
+        "saved": [
+          { "room_id": "!general:example.org", "event_id": "$two", "ts": 1761955300000 },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }
+        ],
+        "removed": []
+      },
+      "writes": false
+    },
+    {
+      "name": "A device's first run puts what it saved into the account",
+      "local": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!general:example.org", "event_id": "$two", "ts": 1761955300000 }
+        ]
+      },
+      "remote": null,
+      "expected": {
+        "saved": [
+          { "room_id": "!general:example.org", "event_id": "$two", "ts": 1761955300000 },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }
+        ],
+        "removed": []
+      },
+      "writes": true
+    },
+    {
+      "name": "An empty Later with nothing in the account writes nothing",
+      "local": {},
+      "remote": null,
+      "expected": { "saved": [], "removed": [] },
+      "writes": false
+    }
+  ],
+  "setting": [
+    {
+      "name": "Saving puts the message first",
+      "list": { "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "room_id": "!general:example.org",
+      "event_id": "$two",
+      "saved": true,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [
+          { "room_id": "!general:example.org", "event_id": "$two", "ts": 1761955300000 },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "name": "Removing a saved message remembers when",
+      "list": { "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "saved": false,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [],
+        "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }]
+      }
+    },
+    {
+      "name": "Saving a removed message brings it back",
+      "list": { "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "saved": true,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }],
+        "removed": []
+      }
+    },
+    {
+      "name": "A clock behind the list still lands the change a millisecond after it",
+      "list": { "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }] },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "saved": true,
+      "now": 1761955200000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300001 }],
+        "removed": []
+      }
+    },
+    {
+      "name": "Saving a message already saved keeps it as it was",
+      "list": { "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "saved": true,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }],
+        "removed": []
+      }
+    },
+    {
+      "name": "Removing a message that isn't saved changes nothing",
+      "list": { "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "room_id": "!general:example.org",
+      "event_id": "$two",
+      "saved": false,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }],
+        "removed": []
+      }
+    }
+  ]
+}

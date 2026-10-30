@@ -1,0 +1,92 @@
+diff --git a/bindings/matrix-sdk-ffi/src/client.rs b/bindings/matrix-sdk-ffi/src/client.rs
+index f0d2e76..6ed9820 100644
+--- a/bindings/matrix-sdk-ffi/src/client.rs
++++ b/bindings/matrix-sdk-ffi/src/client.rs
+@@ -95,7 +95,8 @@ use ruma::{
+         error::ErrorKind,
+     },
+     events::{
+-        AnyMessageLikeEventContent, AnySyncTimelineEvent, AnyToDeviceEventContent,
++        AnyGlobalAccountDataEvent, AnyMessageLikeEventContent, AnySyncTimelineEvent,
++        AnyToDeviceEventContent,
+         GlobalAccountDataEvent as RumaGlobalAccountDataEvent,
+         RoomAccountDataEvent as RumaRoomAccountDataEvent, RoomAccountDataEventType,
+         ToDeviceEventType,
+@@ -273,6 +274,15 @@ pub trait AccountDataListener: SyncOutsideWasm + SendOutsideWasm {
+     fn on_change(&self, event: AccountDataEvent);
+ }
+ 
++/// A listener for changes of one global account data event type, including
++/// custom ones.
++#[matrix_sdk_ffi_macros::export(callback_interface)]
++pub trait RawAccountDataListener: SyncOutsideWasm + SendOutsideWasm {
++    /// Called with the event's content, as a JSON string, each time a sync
++    /// brings a new one.
++    fn on_change(&self, content: String);
++}
++
+ /// A listener for duplicate key upload errors triggered by requests to
+ /// /keys/upload.
+ #[matrix_sdk_ffi_macros::export(callback_interface)]
+@@ -1027,6 +1037,41 @@ impl Client {
+         }
+     }
+ 
++    /// Subscribe to updates of a global account data event of any type,
++    /// including custom ones, as raw JSON content.
++    ///
++    /// Every update a sync brings is delivered, in order, even when one sync
++    /// carries several account data events.
++    pub fn observe_raw_account_data_event(
++        &self,
++        event_type: String,
++        listener: Box<dyn RawAccountDataListener>,
++    ) -> Arc<TaskHandle> {
++        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<String>();
++        let handler = self.inner.add_event_handler(move |event: Raw<AnyGlobalAccountDataEvent>| {
++            let sender = sender.clone();
++            let event_type = event_type.clone();
++            async move {
++                if event.get_field::<String>("type").ok().flatten().as_deref()
++                    != Some(event_type.as_str())
++                {
++                    return;
++                }
++                if let Ok(Some(content)) = event.get_field::<Box<RawJsonValue>>("content") {
++                    let _ = sender.send(content.get().to_owned());
++                }
++            }
++        });
++        // Dropping the guard, when the task ends or is cancelled, removes the handler.
++        let guard = self.inner.event_handler_drop_guard(handler);
++        Arc::new(TaskHandle::new(get_runtime_handle().spawn(async move {
++            let _guard = guard;
++            while let Some(content) = receiver.recv().await {
++                listener.on_change(content);
++            }
++        })))
++    }
++
+     /// Subscribe to updates of room account data events.
+     ///
+     /// Be careful that only the most recent value can be observed. Subscribers
+@@ -1473,6 +1518,19 @@ impl Client {
+         Ok(event.map(|e| e.json().get().to_owned()))
+     }
+ 
++    /// Fetch the content of the event of the given type from the account data
++    /// on the server, or `None` when there is none.
++    ///
++    /// Unlike `account_data`, it doesn't read the store, which lags behind the
++    /// server until the next sync. It will be returned as a JSON string.
++    pub async fn fetch_account_data(
++        &self,
++        event_type: String,
++    ) -> Result<Option<String>, ClientError> {
++        let content = self.inner.account().fetch_account_data(event_type.into()).await?;
++        Ok(content.map(|c| c.json().get().to_owned()))
++    }
++
+     /// Set the given account data content for the given event type.
+     ///
+     /// It should be supplied as a JSON string.

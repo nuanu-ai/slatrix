@@ -41,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
@@ -208,8 +207,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // Inside a thread, Reply has nowhere further to go.
     menu?.let { MessageActionsHost(it, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent) { menu = null } }
     var reacted by remember { mutableStateOf<ConversationMessage?>(null) }
-    var viewing by remember { mutableStateOf<Pair<MessageAttachment, ImageBitmap?>?>(null) }
-    viewing?.let { (attachment, placeholder) -> MediaViewer(attachment, placeholder, loadPicture) { viewing = null } }
+    // The row and its tile's pixels, saved, so the viewer stays open on the same image when the phone turns.
+    var viewing by rememberSaveable { mutableStateOf<Pair<String, Pair<Int, Int>>?>(null) }
+    viewing?.let { (id, tile) ->
+        (state.rows.find { it.id == id } as? ConversationMessage)?.attachment?.let { MediaViewer(it, tile, loadPicture) { viewing = null } }
+    }
     val files = rememberCoroutineScope()
     // A file opens from the screen, not its row, so scrolling the row away doesn't cancel the download.
     var opening by remember { mutableStateOf(emptySet<String>()) }
@@ -274,14 +276,14 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val first = line != null && row.eventId == line
                             if (first) NewLine()
                             if (threadRoot != null && row.eventId == threadRoot) Column {
-                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }, onPerson) { menu = it }
+                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson) { menu = it }
                                 // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                                 RepliesBar(replies)
                             // The first reply starts under the replies bar, and the first unread under the New line, so
                             // each shows its sender again.
                             } else LiveMessageRow(if (row.id == firstReply || first) row.copy(grouped = false) else row, state.ownUserId,
                                 actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
-                                loadPicture, videos, row.id in opening, openFile, { attachment, shown -> viewing = attachment to shown }, onPerson) { menu = it }
+                                loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson) { menu = it }
                         }
                     }
                 }
@@ -416,7 +418,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
 @Composable
 private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
-    loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (MessageAttachment, ImageBitmap?) -> Unit,
+    loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit,
     onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
@@ -455,7 +457,7 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
                     if (attachment == null || message.caption != null) {
                         MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me, onPerson)
                     }
-                    attachment?.let { Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, { onMenu(message) }) { shown -> onView(it, shown) } }
+                    attachment?.let { Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, { onMenu(message) }, onView) }
                 }
                 // In the row's bottom padding, so the bar comes and goes without moving anything.
                 message.uploadProgress?.let {

@@ -27,6 +27,12 @@ import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isDialog
+import android.graphics.Bitmap
+import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.awaitCancellation
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -34,6 +40,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.hasAnySibling
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -333,6 +340,37 @@ class ChannelDetailsScreenTest {
         compose.onNodeWithText("spec.pdf").assertIsDisplayed()
         compose.onNodeWithText("office.jpg").assertIsDisplayed()
         compose.onNodeWithText("https://example.org/notes").assertDoesNotExist()
+    }
+
+    // capability: conversation.files
+    @Test fun aFilterWithNothingInItSaysWhatThereIsNone() {
+        details(room, ChannelDetailsActions(files = {
+            SharedFiles(ConversationState(listOf(pinned("Notes at https://example.org/notes")), loading = false))
+        }))
+        compose.onNodeWithText("Files").performClick()
+        compose.onNodeWithText("Images").performClick()
+        compose.onNodeWithText("No images yet").assertIsDisplayed()
+        compose.onNode(hasText("Files") and hasClickAction()).performClick()
+        compose.onNodeWithText("No files yet").assertIsDisplayed()
+    }
+
+    // capability: message.media-viewer
+    @Test fun theViewerHoldsTheTilesPictureInTheImagesOwnBoxUntilTheImageLoads() {
+        val square = Bitmap.createBitmap(10, 10, Bitmap.Config.ARGB_8888)
+        val tile = ByteArrayOutputStream().also { square.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        val photo = file("tiled.jpg", MessageAttachment.Kind.Image)
+        details(room, ChannelDetailsActions(files = {
+            SharedFiles(ConversationState(listOf(photo), loading = false),
+                loadPicture = { _, _, _, full -> if (full) awaitCancellation() else tile })
+        }))
+        compose.onNodeWithText("Files").performClick()
+        val row = hasText("tiled.jpg") and hasClickAction()
+        compose.onNode(row).performClick()
+        val viewer = hasContentDescription("tiled.jpg") and hasAnyAncestor(isDialog())
+        compose.waitUntil { compose.onAllNodes(viewer).fetchSemanticsNodes().isNotEmpty() }
+        val box = compose.onNode(viewer).fetchSemanticsNode().boundsInRoot
+        assertEquals("The image's own shape, not the tile's or the screen's", 900f / 1600f, box.height / box.width, 0.01f)
+        assertEquals("Fitted to the screen's width", with(compose.density) { 412.dp.toPx() }, box.width, 1f)
     }
 
     private fun file(name: String, kind: MessageAttachment.Kind) = pinned(name).copy(kind = MessageKind.Attachment,
