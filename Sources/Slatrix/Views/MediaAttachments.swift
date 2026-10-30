@@ -207,12 +207,12 @@ private struct InlineMedia: View {
         .accessibilityAction(named: "Download") {
             Task { await AttachmentFiles.shared.download(message, matrix: matrix) }
         }
-        .accessibilityActions { if inline != nil { Button("Full screen", action: fullScreen) } }
+        .accessibilityActions { if inline != nil { Button("Full screen", action: actions.open) } }
         .overlay(alignment: .topTrailing) {
             if hovering || downloading {
                 MediaActionsToolbar(
                     matrix: matrix, message: message, actions: actions, downloading: $downloading,
-                    fullScreen: inline == nil ? nil : fullScreen
+                    fullScreen: inline == nil ? nil : actions.open
                 ).padding(m.sp8)
             }
         }
@@ -266,11 +266,6 @@ private struct InlineMedia: View {
         } else {
             actions.open()
         }
-    }
-
-    /// The viewer, which holds the video where it was in its row.
-    private func fullScreen() {
-        actions.open()
     }
 
     private func load() async {
