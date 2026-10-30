@@ -99,4 +99,40 @@ struct DirectMessagesHostedTests {
                 matrix.selectedRoomID == channel && field("Find a conversation…") != nil && field("Find a DM") == nil
             })
     }
+
+    @Test("In a narrow window, DMs picked in the drawer from another page keeps the drawer open on the list")
+    func drawer() async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(AppearanceStore()))
+        let window = offscreenWindow(NSSize(width: 1_440, height: 900))
+        window.contentView = hosting
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        func shows(_ prompt: String) -> Bool {
+            hosting.layoutSubtreeIfNeeded()
+            return views(hosting).contains { ($0 as? NSTextField)?.placeholderString == prompt }
+        }
+        func menu(_ action: String) {
+            NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
+        }
+        #expect(await eventually { matrix.selectedRoomID != nil && shows("Find a conversation…") })
+        window.setContentSize(NSSize(width: 480, height: 900))
+        #expect(await eventually { !shows("Find a conversation…") })
+        menu("activity")
+        await drainMainActor()
+        menu("toggle-sidebar")
+        #expect(await eventually { shows("Find a conversation…") })
+        menu("dms")
+        let direct = Set(matrix.rooms.filter(\.isDirect).map(\.id))
+        #expect(await eventually { matrix.selectedRoomID.map(direct.contains) == true })
+        // The page change that closed it lands within a frame or two of the DM opening.
+        let closed = await eventually(timeout: .seconds(1)) { !shows("Find a DM") }
+        #expect(!closed)
+    }
 }
