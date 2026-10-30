@@ -37,7 +37,8 @@ fun LaterScreen(saved: List<SavedMessage>, rooms: List<RoomSummary>, load: suspe
     onOpen: (SavedMessage) -> Unit, onRemove: (SavedMessage) -> Unit, onBack: () -> Unit) {
     val newestFirst = remember(saved) { saved.sortedByDescending { it.savedAt } }
     // Read once per message while the page is open, so scrolling back to a card shows it at once.
-    val previews = remember { mutableStateMapOf<SavedMessage, SavedPreview?>() }
+    // Kept by message, so a save time merged from another device doesn't read a card again.
+    val previews = remember { mutableStateMapOf<Pair<String, String>, SavedPreview?>() }
     PushedPage("Later", onBack) {
         if (saved.isEmpty()) item {
             Text("Nothing saved for later", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyLarge,
@@ -51,12 +52,13 @@ fun LaterScreen(saved: List<SavedMessage>, rooms: List<RoomSummary>, load: suspe
 }
 
 @Composable
-private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: MutableMap<SavedMessage, SavedPreview?>,
+private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: MutableMap<Pair<String, String>, SavedPreview?>,
     load: suspend (SavedMessage) -> SavedPreview?, onOpen: () -> Unit, onRemove: () -> Unit) {
     val colors = SlatrixTheme.colors
-    LaunchedEffect(saved) { if (saved !in previews) previews[saved] = load(saved) }
-    val loaded = saved in previews
-    val preview = previews[saved]
+    val key = saved.roomId to saved.eventId
+    LaunchedEffect(key) { if (key !in previews) previews[key] = load(saved) }
+    val loaded = key in previews
+    val preview = previews[key]
     Column(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen)
         .padding(start = UiMetrics.GapLarge, bottom = UiMetrics.GapMedium)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
