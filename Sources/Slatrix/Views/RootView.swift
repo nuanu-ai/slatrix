@@ -1042,7 +1042,8 @@ struct RootView: View {
                         }
                     }, onJumpToLatest: { selectRoom(room.id) }, startsAtUnread: isResumingUnread,
                     editing: editTarget?.surface == .conversation, onForward: startForward, onEditCaption: startCaption,
-                    onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) }
+                    onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
+                    inlineVideo: viewer.inlineVideo
                 ).id("\(room.id):\(matrix.timelineSelectionID)")
                 VStack(spacing: 0) {
                     if room.canPostMessages == false {
@@ -1197,7 +1198,8 @@ struct RootView: View {
                 onBottomVisibilityChange: { [identity = matrix.threadReadIdentity] visible in
                     threadReadViewport.record(visible, from: identity, current: matrix.threadReadIdentity)
                 }, onForward: startForward, onEditCaption: startCaption,
-                onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) }
+                onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) },
+                inlineVideo: viewer.inlineVideo
             ).id(root.eventID)
             VStack(spacing: 0) {
                 if room.canPostMessages == false {
@@ -2490,6 +2492,7 @@ struct RootView: View {
         cancelMatrixLink()
         matrixJoin = nil
         viewer.close()
+        viewer.inlineVideo.stop()
         clearComposerState()
         workspaceID = nil
         workspaceInitialized = false
