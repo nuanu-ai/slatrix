@@ -736,6 +736,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var captionSaves = Set<UUID>()
     private var forwardingReviews = Set<UUID>()
     private var replyPreviewLoads = Set<MessageActionTarget.ReplyPreviewIdentity>()
+    /// Thread replies whose channel copy waits for them to be sent; signing out stops the wait.
+    @ObservationIgnored private var pendingCopies: [SentEcho] = []
+    /// By reply event ID, so a copy scrolled back into view names its thread at once.
+    @ObservationIgnored private var threadOrigins: [String: (root: ChatMessage, preview: String)] = [:]
     private var selection = UUID()
     private var sessionGeneration = UUID()
     @ObservationIgnored private lazy var roomListRefresher: RoomListRefresher = {
@@ -1065,6 +1069,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         searchIndexingState = .idle
         focusedEventID = nil
         jump = nil
+        for copy in pendingCopies { copy.cancel() }
+        threadOrigins = [:]
         sessionGeneration = UUID()
         selection = UUID()
         notificationRetries.reset()
@@ -1698,7 +1704,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let room = try requireRoom(roomID)
         let content = try MatrixMapping.content(message).withMentions(
             mentions: mentions(message))
-        let echo = alsoToChannel && threadRootID != nil ? await SentEcho(target) : nil
+        let echo = alsoToChannel && threadRootID != nil ? await SentEcho(target, body: message.body) : nil
         // Thread timelines infer their own relation. Extra JSON cannot override
         // that fallback relation, so an explicit quote must use sendReply.
         do {
@@ -1715,31 +1721,40 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         await returnToLive(after: token, threadRootID: threadRootID)
     }
 
-    /// The first message of the thread `replyID` is in, as one line of text, which a channel's copy of that reply
-    /// names.
-    func threadRootPreview(roomID: String, replyID: String) async -> String? {
+    /// The first message of the thread `replyID` is in, and its text on one line, which a channel's copy of that reply
+    /// names; nil when the reply isn't in a thread.
+    func threadOrigin(roomID: String, replyID: String) async -> (root: ChatMessage, preview: String)? {
+        if let known = threadOrigins[replyID] { return known }
         guard let room = try? requireRoom(roomID),
             let rootID = try? await room.loadOrFetchEvent(eventId: replyID).threadRootEventId()
         else { return nil }
         var root = messages.first { $0.roomID == roomID && $0.eventID == rootID }
         if root == nil { root = try? await messagePreview(roomID: roomID, eventID: rootID) }
         guard let root else { return nil }
-        return MatrixMapping.previewText(
-            root.body, formatted: root.formattedBody.map { FormattedBody(format: .html, body: $0) })
+        let origin = (
+            root,
+            MatrixMapping.previewText(
+                root.body, formatted: root.formattedBody.map { FormattedBody(format: .html, body: $0) })
+        )
+        threadOrigins[replyID] = origin
+        return origin
     }
 
     /// The channel's copy of a thread reply, sent once the reply has an event ID to quote. The send queue only takes
     /// replies that stay in the replied-to event's thread, so the copy goes out directly.
     private func copyToChannel(_ message: ComposerFormat.Message, once echo: SentEcho, room: Room) {
         let session = sessionGeneration
+        pendingCopies.append(echo)
         Task {
-            guard let replyID = await echo.sentEventID(), session == sessionGeneration else { return }
+            let replyID = await echo.sentEventID()
+            pendingCopies.removeAll { $0 === echo }
+            guard let replyID, session == sessionGeneration else { return }
             do {
                 _ = try await room.sendRaw(
                     eventType: "m.room.message", content: ChannelCopy.content(message, replyTo: replyID))
             } catch {
                 guard session == sessionGeneration else { return }
-                errorMessage = "Your reply is in the thread, but it couldn’t also be sent to the channel."
+                errorMessage = "Your reply is in the thread, but it couldn’t also be sent to the conversation."
             }
         }
     }

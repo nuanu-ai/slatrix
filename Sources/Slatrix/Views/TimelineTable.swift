@@ -1062,7 +1062,8 @@ struct TimelineRow: View, Equatable {
                     },
                     replyPreview: message.replyPreview.map {
                         ReplyPreviewView(
-                            matrix: matrix, message: message, preview: $0, origin: target, onOpen: context.onShowReply)
+                            matrix: matrix, message: message, preview: $0, origin: target, onOpen: context.onShowReply,
+                            onOpenThread: context.onThread)
                     },
                     attachment: message.attachment.map {
                         AttachmentView(
