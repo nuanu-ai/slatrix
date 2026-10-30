@@ -31,6 +31,8 @@ data class ComposerState(
     val mentions: List<ComposerMention> = emptyList(),
     val styles: List<ComposerStyle> = emptyList(),
     val typing: ComposerTyping? = null,
+    /** A thread's "Also send to #channel", checked for the next reply. */
+    val alsoToChannel: Boolean = false,
 )
 
 private const val SAVE_DELAY_MILLIS = 500L
@@ -161,10 +163,15 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
             mentions = draft?.mentions ?: mutableState.value.mentions, styles = draft?.styles ?: mutableState.value.styles, target = null)
     }
 
+    fun alsoToChannel(checked: Boolean) {
+        if (!mutableState.value.sending) mutableState.value = mutableState.value.copy(alsoToChannel = checked)
+    }
+
     fun send() {
         val current = mutableState.value
         if (!loaded || !lifetime.isActive || current.sending) return
-        val message = ComposerFormat.message(ComposerFormat.draft(current.text, current.mentions, current.styles)).copy(target = current.target)
+        val message = ComposerFormat.message(ComposerFormat.draft(current.text, current.mentions, current.styles))
+            .copy(target = current.target, alsoToChannel = current.alsoToChannel)
         if (message.body.isBlank()) return
         val sendingRevision = revision
         failure = null
@@ -178,7 +185,8 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
                         mentions = setAside?.mentions.orEmpty(), styles = setAside?.styles.orEmpty(), target = null)
                     setAside = null
                 } else if (accepted) {
-                    mutableState.value = mutableState.value.copy(target = null)
+                    // Slack unchecks "Also send to #channel" once a reply goes.
+                    mutableState.value = mutableState.value.copy(target = null, alsoToChannel = false)
                     if (revision == sendingRevision) {
                         revision++
                         mutableState.value = mutableState.value.copy(text = "", mentions = emptyList(), styles = emptyList(), typing = null)
