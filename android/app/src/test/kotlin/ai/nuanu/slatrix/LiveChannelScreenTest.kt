@@ -349,7 +349,7 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("replied to a thread:").assertIsDisplayed()
         val before = compose.onNodeWithText("On it").getUnclippedBoundsInRoot()
         // A message whose quote turns out not to be in a thread quotes it as any reply does.
-        compose.onNodeWithText("Sam").assertIsDisplayed()
+        compose.onAllNodesWithText("Done").assertCountEquals(2)
 
         origin.complete(ThreadOrigin("\$root", "Can we ship Friday?"))
         compose.onNodeWithText("Can we ship Friday?").assertIsDisplayed().performClick()
