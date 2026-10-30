@@ -1,0 +1,95 @@
+{
+  "about": "Slack's \"Also send to #channel\" under a thread's composer. The reply goes to its thread as any other. Once it has its event ID, the channel gets a copy: a rich reply to the thread reply, without rel_type m.thread, which MSC3440 says clients show in the main timeline to advertise a thread message. It carries the reply's body and formatting as composer.json makes them, and an empty m.mentions, so whoever the reply mentions hears about it once, from the thread. In send, draft is the composer's HTML, replyTo the thread reply's event ID and content the copy's event content. In shown, a channel message is taken for a copy when it quotes its own sender's message, word for word, outside a thread; quoted is null for a message that quotes nothing. A copy shows as Slack's \"replied to a thread\" row, naming the thread's first message, once the quoted message turns out to be in a thread, and as an ordinary quote if it isn't.",
+  "send": [
+    {
+      "name": "Plain text goes as a reply to the thread reply",
+      "draft": "On it",
+      "replyTo": "$reply",
+      "content": {
+        "msgtype": "m.text",
+        "body": "On it",
+        "m.mentions": {},
+        "m.relates_to": { "m.in_reply_to": { "event_id": "$reply" } }
+      }
+    },
+    {
+      "name": "Formatting goes with it",
+      "draft": "Ship it <strong>Friday</strong>",
+      "replyTo": "$reply",
+      "content": {
+        "msgtype": "m.text",
+        "body": "Ship it Friday",
+        "format": "org.matrix.custom.html",
+        "formatted_body": "Ship it <strong>Friday</strong>",
+        "m.mentions": {},
+        "m.relates_to": { "m.in_reply_to": { "event_id": "$reply" } }
+      }
+    },
+    {
+      "name": "A mention keeps its link but notifies only from the thread",
+      "draft": "Thanks <a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a>",
+      "replyTo": "$reply",
+      "content": {
+        "msgtype": "m.text",
+        "body": "Thanks @Alice Liddell",
+        "format": "org.matrix.custom.html",
+        "formatted_body": "Thanks <a href=\"https://matrix.to/#/@alice:example.org\">Alice Liddell</a>",
+        "m.mentions": {},
+        "m.relates_to": { "m.in_reply_to": { "event_id": "$reply" } }
+      }
+    },
+    {
+      "name": "@room notifies the room only from the thread",
+      "draft": "Heads up @room",
+      "replyTo": "$reply",
+      "content": {
+        "msgtype": "m.text",
+        "body": "Heads up @room",
+        "m.mentions": {},
+        "m.relates_to": { "m.in_reply_to": { "event_id": "$reply" } }
+      }
+    }
+  ],
+  "shown": [
+    {
+      "name": "A copy quotes its sender's own thread reply, word for word",
+      "sender": "@alice:example.org",
+      "body": "On it",
+      "inThread": false,
+      "quoted": { "sender": "@alice:example.org", "body": "On it" },
+      "repliedToThread": true
+    },
+    {
+      "name": "Quoting your own message with new words is an ordinary reply",
+      "sender": "@alice:example.org",
+      "body": "Still on it",
+      "inThread": false,
+      "quoted": { "sender": "@alice:example.org", "body": "On it" },
+      "repliedToThread": false
+    },
+    {
+      "name": "Quoting someone else's message is an ordinary reply",
+      "sender": "@alice:example.org",
+      "body": "On it",
+      "inThread": false,
+      "quoted": { "sender": "@bob:example.org", "body": "On it" },
+      "repliedToThread": false
+    },
+    {
+      "name": "Inside a thread, a reply stays a reply",
+      "sender": "@alice:example.org",
+      "body": "On it",
+      "inThread": true,
+      "quoted": { "sender": "@alice:example.org", "body": "On it" },
+      "repliedToThread": false
+    },
+    {
+      "name": "A message that quotes nothing is an ordinary message",
+      "sender": "@alice:example.org",
+      "body": "On it",
+      "inThread": false,
+      "quoted": null,
+      "repliedToThread": false
+    }
+  ]
+}
