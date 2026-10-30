@@ -60,6 +60,17 @@ private final class CopyRoom: Room, @unchecked Sendable {
         raw.append((eventType, content))
         return "$copy"
     }
+    /// Every event it holds is a reply in the thread of "$root".
+    override func loadOrFetchEvent(eventId: String) async throws -> TimelineEvent {
+        ThreadReplyEvent(noHandle: .init())
+    }
+    override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
+        throw ClientError.Generic(msg: "no timelines here", details: nil)
+    }
+}
+
+private final class ThreadReplyEvent: TimelineEvent, @unchecked Sendable {
+    override func threadRootEventId() -> String? { "$root" }
 }
 
 private final class CopyClient: Client, @unchecked Sendable {
@@ -107,5 +118,20 @@ struct SendToChannelServiceTests {
         }
         #expect(copy.type == "m.room.message" && fields["body"] == .string("On it"))
         #expect(relation["m.in_reply_to"] == .object(["event_id": .string("$reply")]))
+    }
+
+    @Test("A channel's copy names its thread by the thread's first message, as Slack's \"replied to a thread:\" does")
+    func threadRoot() async {
+        let service = MatrixService()
+        service.configureMessageActionsForChecks(
+            client: CopyClient(noHandle: .init()), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
+            selectionID: UUID(), threadID: UUID())
+        service.messages = [
+            ChatMessage(
+                id: "$root", roomID: "!room:example.org", senderID: "@bob:example.org", senderName: "Bob",
+                body: "Can we ship Friday?", timestamp: Date())
+        ]
+        let root = await service.threadRoot(roomID: "!room:example.org", replyID: "$reply")
+        #expect(root?.body == "Can we ship Friday?")
     }
 }
