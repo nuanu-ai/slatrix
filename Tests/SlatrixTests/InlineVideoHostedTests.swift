@@ -75,6 +75,26 @@ struct InlineVideoHostedTests {
         #expect(await eventually { video.player?.rate == 0 })
     }
 
+    @Test("The video pauses when its window is minimised or the app is hidden")
+    func pausesWhenHidden() async throws {
+        let folder = try TemporaryDirectory()
+        let player = AVPlayer(
+            url: try await folder.video("clip.mov", width: 32, height: 18, rotation: 0, seconds: 60))
+        let window = offscreenWindow(NSSize(width: 400, height: 300))
+        let view = InlinePlayerView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
+        view.player = player
+        window.contentView?.addSubview(view)
+        defer { window.close() }
+
+        // What AppKit posts as the window goes to the Dock and as the app hides.
+        player.play()
+        NotificationCenter.default.post(name: NSWindow.didMiniaturizeNotification, object: window)
+        #expect(player.rate == 0)
+        player.play()
+        NotificationCenter.default.post(name: NSApplication.didHideNotification, object: NSApp)
+        #expect(player.rate == 0)
+    }
+
     @Test("A copy of the row left behind in a reused cell never pauses the video being watched")
     func staleCopy() async throws {
         let folder = try TemporaryDirectory()

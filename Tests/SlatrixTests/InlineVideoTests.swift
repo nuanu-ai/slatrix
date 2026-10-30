@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import Foundation
 import MatrixRustSDK
 import Testing
@@ -103,6 +104,30 @@ struct InlineVideoTests {
         #expect(await eventually { (viewer.inlineVideo.player?.rate ?? 0) > 0 })
         viewer.open(try #require(service.messages.last), surface: .conversation)
         #expect(viewer.inlineVideo.player?.rate == 0)
+    }
+
+    @Test("The viewer opened on the video playing in its row carries on from where it was, and others start at the top")
+    func viewerCarriesOn() async throws {
+        let (service, _) = try await videoConversation()
+        let viewer = MediaViewerState()
+        let message = try #require(service.messages.first)
+        viewer.inlineVideo.play(message, matrix: service, from: timeline)
+        #expect(await eventually { (viewer.inlineVideo.player?.currentTime().seconds ?? 0) > 0.2 })
+        viewer.open(message, surface: .conversation)
+        let paused = try #require(viewer.inlineVideo.player).currentTime()
+        // Within a frame: the player drifts a little after pausing.
+        #expect(abs((viewer.videoStart(message) - paused).seconds) < 1.0 / 30)
+        #expect(viewer.videoStart(try #require(service.messages.last)) == .zero)
+    }
+
+    @Test("The viewer's video starts at the time it is given")
+    func stageStartsThere() async throws {
+        let folder = try TemporaryDirectory()
+        let url = try await folder.video("clip.mov", width: 32, height: 18, rotation: 0, seconds: 60)
+        let stage = MediaStageView()
+        stage.show(.video(url, from: CMTime(seconds: 30, preferredTimescale: 600)))
+        let view = try #require(stage.subviews.lazy.compactMap { $0 as? AVPlayerView }.first)
+        #expect(await eventually { (view.player?.currentTime().seconds ?? 0) >= 30 })
     }
 
     @Test("Leaving the timeline it plays in stops the video; leaving another doesn't")
