@@ -348,6 +348,22 @@ class MatrixConversationTest {
         }
     }
 
+    // capability: thread.send-to-channel
+    @Test fun aChannelsCopyOfAThreadReplyNamesItsThreadByTheThreadsFirstMessage() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("root", "\$root", "Can we ship Friday?")))
+        val room = JumpRoom(live, ConversationTimeline(listOf(conversationItem("older", "\$older", "Plan\nfirst"))),
+            threadRoots = mapOf("\$reply" to "\$root", "\$late" to "\$older"))
+        val conversation = MatrixConversation(backgroundScope, room)
+        conversation.state.first { !it.loading }
+
+        assertEquals(ThreadOrigin("\$root", "Can we ship Friday?"), conversation.threadOrigin("\$reply"))
+        // A root the channel hasn't loaded is read on its own, on one line.
+        assertEquals(ThreadOrigin("\$older", "Plan first"), conversation.threadOrigin("\$late"))
+        // The quoted message isn't in a thread, so the row is an ordinary quote after all.
+        assertNull(conversation.threadOrigin("\$plain"))
+        conversation.close()
+    }
+
     // capability: message.image
     // capability: message.file
     @Test fun attachmentsCarryWhatTheirRowNeedsAndACaptionIsTheirText() = runTest {
