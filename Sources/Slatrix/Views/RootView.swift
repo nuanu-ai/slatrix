@@ -460,7 +460,8 @@ struct RootView: View {
             }
             .onChange(of: sidebarCollapsed) { _, _ in sidebarDrawer = false }
             .onChange(of: route) { _, next in
-                sidebarDrawer = false
+                // DMs picked in the drawer keeps it open on the list.
+                if !(next == .home && directMessagesColumn) { sidebarDrawer = false }
                 if let request = pendingMatrixLink, request.route != next { cancelMatrixLink() }
                 if next != .home {
                     directMessagesColumn = false
