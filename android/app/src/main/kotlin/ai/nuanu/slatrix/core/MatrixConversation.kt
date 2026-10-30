@@ -99,6 +99,8 @@ data class ConversationMessage(
     val thread: MessageThread? = null,
     /** The message this one replies to, quoted above it. */
     val replyTo: ReplyPreview? = null,
+    /** A thread reply also sent to the channel: [replyTo] is the reply, in its thread. */
+    val repliedToThread: Boolean = false,
     val attachment: MessageAttachment? = null,
     /** How much of an attachment you're sending has gone up, from 0 to 1. */
     val uploadProgress: Float? = null,
@@ -766,6 +768,13 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
+    /** Slack's "Also send to #channel" copy quotes its sender's own thread reply word for word. */
+    private fun quotesOwnWords(sender: String, kind: MsgLikeKind, reply: InReplyToDetails): Boolean {
+        val quoted = reply.event() as? EmbeddedEventDetails.Ready ?: return false
+        val original = (quoted.content as? TimelineItemContent.MsgLike)?.content?.kind as? MsgLikeKind.Message ?: return false
+        return quoted.sender == sender && (kind as? MsgLikeKind.Message)?.content?.body == original.content.body
+    }
+
     private fun row(item: TimelineItem): Any? {
         val event = item.asEvent() ?: return when (val virtual = item.asVirtual()) {
             is VirtualTimelineItem.DateDivider -> DayDivider(item.uniqueId().id, virtual.ts.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
@@ -810,6 +819,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     (latest?.senderProfile as? ProfileDetails.Ready)?.avatarUrl)
             }?.takeIf { it.replies > 0 },
             replyTo = content.inReplyTo?.let(::replyPreview),
+            repliedToThread = content.threadRoot == null && content.inReplyTo?.let { quotesOwnWords(event.sender, content.kind, it) } == true,
             attachment = shown.attachment,
             avatarUrl = (event.senderProfile as? ProfileDetails.Ready)?.avatarUrl,
         ).also { it.runs }
