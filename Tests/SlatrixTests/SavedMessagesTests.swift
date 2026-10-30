@@ -275,6 +275,19 @@ struct SavedMessagesServiceTests {
         #expect(await eventually { later.list.saved.map(\.eventID) == ["$three"] })
     }
 
+    @Test("A Later service that is let go while attached is freed, though its client lives on")
+    func released() async {
+        let client = LaterClient(server: #"{"saved":[\#(one)],"removed":[]}"#)
+        weak var released: SavedMessagesService?
+        do {
+            let later = SavedMessagesService()
+            later.attach(client, accountID: owner)
+            #expect(await eventually { later.list.saved.map(\.eventID) == ["$one"] })
+            released = later
+        }
+        #expect(await eventually { released == nil })
+    }
+
     @Test("The preview starts with an empty Later, never the last account's")
     func preview() async {
         let matrix = MatrixService()
