@@ -107,6 +107,7 @@ struct RootView: View {
     @State private var editText = ""
     @State private var drafts = ComposerDrafts()
     @State private var viewer = MediaViewerState()
+    @State private var inlineVideo = InlineVideo()
     @StateObject private var attachmentDrafts = AttachmentDraftController()
     @State private var invitationResponseID: String?
     @State private var navigationNotice: String?
@@ -1041,7 +1042,7 @@ struct RootView: View {
                         }
                     }, onJumpToLatest: { selectRoom(room.id) }, startsAtUnread: isResumingUnread,
                     editing: editTarget?.surface == .conversation, onForward: startForward, onEditCaption: startCaption,
-                    onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) }
+                    onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) }, inlineVideo: inlineVideo
                 ).id("\(room.id):\(matrix.timelineSelectionID)")
                 VStack(spacing: 0) {
                     if room.canPostMessages == false {
@@ -1196,7 +1197,8 @@ struct RootView: View {
                 onBottomVisibilityChange: { [identity = matrix.threadReadIdentity] visible in
                     threadReadViewport.record(visible, from: identity, current: matrix.threadReadIdentity)
                 }, onForward: startForward, onEditCaption: startCaption,
-                onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) }
+                onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) },
+                inlineVideo: inlineVideo
             ).id(root.eventID)
             VStack(spacing: 0) {
                 if room.canPostMessages == false {
@@ -2494,6 +2496,7 @@ struct RootView: View {
         cancelMatrixLink()
         matrixJoin = nil
         viewer.close()
+        inlineVideo.stop()
         clearComposerState()
         workspaceID = nil
         workspaceInitialized = false

@@ -5,14 +5,14 @@ import Testing
 
 @testable import Slatrix
 
-/// Shows two playable videos in a conversation over the fake client.
+/// Shows two playable videos in a conversation over the fake client, each a minute long so none ends mid-test.
 @MainActor
 func videoConversation() async throws -> (MatrixService, TemporaryDirectory) {
     let roomID = "!videos:example.org"
     let folder = try TemporaryDirectory()
     let client = FakeClient(rooms: [FakeRoom(roomInfo(id: roomID))])
     client.file = try Data(
-        contentsOf: try await folder.video("clip.mov", width: 32, height: 18, rotation: 0, seconds: 2))
+        contentsOf: try await folder.video("clip.mov", width: 32, height: 18, rotation: 0, seconds: 60))
     let service = MatrixService()
     service.configureMessageActionsForChecks(
         client: client, main: nil, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())

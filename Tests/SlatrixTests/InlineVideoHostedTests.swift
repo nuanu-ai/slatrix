@@ -23,12 +23,16 @@ struct InlineVideoHostedTests {
         let attachment = try #require(message.attachment)
         let video = InlineVideo()
         let timeline = NSObject()
-        let row = NSHostingView(
+        // Measured at a width and its own height, as the timeline measures its rows.
+        let host = NSHostingController(
             rootView: AttachmentView(
                 matrix: matrix, message: message, attachment: attachment,
                 actions: AttachmentActions(video: video, play: { video.play(message, matrix: matrix, from: timeline) })
-            ).environmentObject(AppearanceStore()))
-        let height = row.fittingSize.height
+            ).fixedSize(horizontal: false, vertical: true).environmentObject(AppearanceStore()))
+        host.sizingOptions = []
+        let row = host.view
+        func measured() -> CGFloat { host.sizeThatFits(in: CGSize(width: 600, height: 0)).height }
+        let height = measured()
         row.frame = CGRect(x: 0, y: 0, width: 600, height: height)
         let document = Document(frame: CGRect(x: 0, y: 0, width: 600, height: height + 2_000))
         document.addSubview(row)
@@ -42,8 +46,9 @@ struct InlineVideoHostedTests {
             window.close()
         }
 
-        // Well inside the 320×180 box under the name.
-        let location = row.convert(CGPoint(x: 100, y: height - 90), to: nil)
+        row.layoutSubtreeIfNeeded()
+        // The middle of the 320×180 box under the name, which the row centers.
+        let location = row.convert(CGPoint(x: 300, y: height - 90), to: nil)
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             await drainMainActor()
             window.sendEvent(
@@ -63,7 +68,7 @@ struct InlineVideoHostedTests {
             })
         let frame = try #require(shown).convert(try #require(shown).bounds, to: row)
         #expect(abs(frame.width - 320) < 1 && abs(frame.height - 180) < 1)
-        #expect(row.fittingSize.height == height)
+        #expect(measured() == height)
 
         scroll.contentView.scroll(to: CGPoint(x: 0, y: 1_500))
         scroll.reflectScrolledClipView(scroll.contentView)

@@ -28,6 +28,8 @@ struct TimelineView: View {
     var onForward: ((MessageActionTarget) -> Void)? = nil
     var onEditCaption: ((MessageActionTarget) -> Void)? = nil
     var onOpenMedia: ((ChatMessage) -> Void)? = nil
+    /// The window's one inline video player.
+    var inlineVideo: InlineVideo? = nil
     @State private var loadingHistory = false
     @State private var deleting: MessageActionTarget?
     @State private var cancelling: ChatMessage?
@@ -113,6 +115,7 @@ struct TimelineView: View {
             cancelling = nil
             linkCopy = nil
             onBottomVisibilityChange?(false)
+            inlineVideo?.stop(from: rowContext)
         }
         .onChange(of: matrix.messageActionContext) { _, _ in
             if let deleting, !matrix.isCurrentMessageAction(deleting) { self.deleting = nil }
@@ -251,6 +254,7 @@ struct TimelineView: View {
         context.onForward = onForward
         context.onEditCaption = onEditCaption
         context.onOpenMedia = { onOpenMedia?($0) }
+        context.video = inlineVideo
         context.onPickEmoji = { [popovers] in popovers?.show(.emoji($0)) }
         return context
     }
@@ -895,7 +899,11 @@ extension TimelineRowContext {
             open: { self.onOpenMedia(message) },
             forward: ForwardMessageContent.supports(message)
                 ? target.flatMap { target in self.onForward.map { forward in { forward(target) } } } : nil,
-            copyLink: { if let link = self.permalinkTarget(for: message) { self.onCopyLink(link) } })
+            copyLink: { if let link = self.permalinkTarget(for: message) { self.onCopyLink(link) } },
+            video: video,
+            play: { [weak self] in
+                if let self, let matrix = self.matrix { self.video?.play(message, matrix: matrix, from: self) }
+            })
     }
 
     private func permalinkTarget(for message: ChatMessage) -> MessagePermalinkTarget? {
