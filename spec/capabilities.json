@@ -91,7 +91,7 @@
 
     {"id": "thread.open", "what": "Open a message's thread.", "mac": "done", "android": "done"},
     {"id": "thread.reply", "what": "Reply in a thread.", "mac": "done", "android": "done"},
-    {"id": "thread.send-to-channel", "what": "Send a thread reply to the channel too.", "mac": "missing", "android": "missing"},
+    {"id": "thread.send-to-channel", "what": "Send a thread reply to the channel too.", "mac": "missing", "android": "done"},
     {"id": "thread.read-state", "what": "Reading a thread marks it read.", "mac": "done", "android": "done"},
     {"id": "thread.from-notification", "what": "A notification for a thread reply opens it in its thread.", "mac": "done", "android": "done"},
     {"id": "threads.feed", "what": "Threads lists the threads you're in, newest reply first.", "mac": "done", "android": "done"},

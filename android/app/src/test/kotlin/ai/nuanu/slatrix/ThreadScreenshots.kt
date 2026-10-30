@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -69,6 +70,28 @@ class ThreadScreenshots(private val dark: Boolean) {
         compose.onNode(hasContentDescription("Add a reply") and hasSetTextAction()).performClick()
         compose.onNodeWithContentDescription("Formatting").performClick()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/Thread-formatting-${if (dark) "dark" else "light"}.png")
+    }
+
+    /** The open composer of a private channel's thread, with Slack's "Also send to" over the field. */
+    @Test fun renderAlsoSendToChannel() {
+        val room = RoomSummary("!ops:example.org", "launch-ops", false, "", UnreadBadge.None, "L", 0, isPrivate = true)
+        val root = ConversationMessage("root", "\$root", "@mira:example.org", "Mira",
+            "Booked a short call today to set priorities for the launch tasks at 14:00.", null,
+            Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 12); set(Calendar.MINUTE, 7) }.timeInMillis,
+            MessageKind.Text, MessageSendState.Sent, false, "M", 2)
+        var draft by mutableStateOf(ComposerState(loading = false))
+        compose.setContent {
+            SlatrixTheme(dark = dark) {
+                LiveChannelScreen(room, ConversationState(listOf(root), loading = false, hasMore = false), draft,
+                    {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root", composerActions = ComposerActions(onAttach = {},
+                        onFormat = { _, _, _, _ -> }, onAlsoToChannel = { draft = draft.copy(alsoToChannel = it) }))
+            }
+        }
+        val theme = if (dark) "dark" else "light"
+        compose.onNode(hasContentDescription("Add a reply") and hasSetTextAction()).performClick()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/Thread-also-send-$theme.png")
+        compose.onNode(isToggleable()).performClick()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/Thread-also-send-checked-$theme.png")
     }
 
     companion object {
