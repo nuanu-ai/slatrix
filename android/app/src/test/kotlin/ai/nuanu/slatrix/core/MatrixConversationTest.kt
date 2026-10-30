@@ -287,6 +287,31 @@ class MatrixConversationTest {
         assertTrue("Asked once for a parent two replies quote", timeline.fetched.tryReceive().isFailure)
     }
 
+    // capability: thread.send-to-channel
+    @Test fun aChannelMessageQuotingItsSendersOwnWordsIsACopyOfAThreadReplyAsTheSharedCasesSay() = runTest {
+        fun text(body: String) = MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null))
+        val spec = com.google.gson.JsonParser.parseString(java.io.File(System.getProperty("slatrix.root"), "spec/send-to-channel.json").readText())
+        for (item in spec.asJsonObject["shown"].asJsonArray) {
+            val case = item.asJsonObject
+            val quoted = case["quoted"].takeUnless { it.isJsonNull }?.asJsonObject?.let { quoted ->
+                object : InReplyToDetails(NoHandle) {
+                    override fun eventId(): String = "\$reply"
+                    override fun event(): EmbeddedEventDetails = EmbeddedEventDetails.Ready(
+                        TimelineItemContent.MsgLike(MsgLikeContent(text(quoted["body"].asString), null, null, null)), quoted["sender"].asString,
+                        ProfileDetails.Unavailable, 1_700_000_000_000u, EventOrTransactionId.EventId("\$reply"))
+                }
+            }
+            val body = case["body"].asString
+            val copy = TimelineItemContent.MsgLike(MsgLikeContent(text(body), quoted,
+                "\$root".takeIf { case["inThread"].asBoolean }, null))
+            val timeline = ConversationTimeline(listOf(conversationItem("copy", "\$copy", body, content = copy, sender = case["sender"].asString)))
+            val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+            val message = conversation.state.first { !it.loading }.rows.messages.single()
+            assertEquals(case["name"].asString, case["repliedToThread"].asBoolean, message.repliedToThread)
+            conversation.close()
+        }
+    }
+
     // capability: message.image
     // capability: message.file
     @Test fun attachmentsCarryWhatTheirRowNeedsAndACaptionIsTheirText() = runTest {
