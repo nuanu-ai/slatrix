@@ -1715,6 +1715,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         await returnToLive(after: token, threadRootID: threadRootID)
     }
 
+    /// The first message of the thread `replyID` is in, which a channel's copy of that reply names.
+    func threadRoot(roomID: String, replyID: String) async -> ChatMessage? {
+        guard let room = try? requireRoom(roomID),
+            let rootID = try? await room.loadOrFetchEvent(eventId: replyID).threadRootEventId()
+        else { return nil }
+        if let loaded = messages.first(where: { $0.roomID == roomID && $0.eventID == rootID }) { return loaded }
+        return try? await messagePreview(roomID: roomID, eventID: rootID)
+    }
+
     /// The channel's copy of a thread reply, sent once the reply has an event ID to quote. The send queue only takes
     /// replies that stay in the replied-to event's thread, so the copy goes out directly.
     private func copyToChannel(_ message: ComposerFormat.Message, once echo: SentEcho, room: Room) {
