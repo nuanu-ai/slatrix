@@ -36,4 +36,6 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 - **Device startup**: launch the real application and call the native SDK through its generated bindings. Catches missing entry points, startup failures and JNI packaging; misses authenticated server behavior.
 - **Android lint**: run the real detector on Kotlin fixtures. Catches off-system Compose colors and sizes; misses rendered layout and contrast.
 
+A device test whose screen collects state set on a background thread, as `MatrixAccount`'s is, gives its Compose rule a `StandardTestDispatcher`. The default dispatcher resumes effects on the thread that set the state, so the screen recomposes on that thread instead of the main one, which corrupts Compose's slot table.
+
 Run `./gradlew :lint-rules:test :app:testDebugUnitTest :app:lintDebug` from this folder after preparing the SDK package.

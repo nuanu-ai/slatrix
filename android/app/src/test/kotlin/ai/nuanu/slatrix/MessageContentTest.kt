@@ -27,6 +27,12 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.doubleClick
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.junit4.StateRestorationTester
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
@@ -66,8 +72,8 @@ class MessageContentTest {
     private val picture = CompletableDeferred<ByteArray?>()
     private val opening = CompletableDeferred<String?>()
 
-    private fun show(vararg messages: ConversationMessage) {
-        compose.setContent {
+    private fun show(vararg messages: ConversationMessage, set: (@Composable () -> Unit) -> Unit = { compose.setContent(it) }) {
+        set {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(messages.toList(), loading = false, hasMore = false, ownUserId = "@me:example.org"),
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
@@ -191,6 +197,29 @@ class MessageContentTest {
         compose.onNodeWithContentDescription("office.jpg").performClick()
         compose.onNodeWithContentDescription("Close").assertIsDisplayed().performClick()
         compose.onNodeWithContentDescription("Close").assertDoesNotExist()
+    }
+
+    // capability: message.media-viewer
+    @Test fun theViewerStaysOnTheSameImageAndZoomWhenThePhoneTurns() {
+        val restoration = StateRestorationTester(compose)
+        val turned = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/turned" }
+        show(message("office.jpg").copy(kind = MessageKind.Attachment,
+            attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, turned)),
+            set = { restoration.setContent(it) })
+        val png = ByteArrayOutputStream().also { Bitmap.createBitmap(16, 9, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        picture.complete(png.toByteArray())
+        compose.onNodeWithContentDescription("office.jpg").performClick()
+        val viewer = hasContentDescription("office.jpg") and hasAnyAncestor(isDialog())
+        compose.waitUntil { compose.onAllNodes(viewer).fetchSemanticsNodes().isNotEmpty() }
+        val fitted = compose.onNode(viewer).fetchSemanticsNode().boundsInRoot
+        compose.onNode(viewer).performTouchInput { doubleClick() }
+        compose.waitForIdle()
+        val zoomed = compose.onNode(viewer).fetchSemanticsNode().boundsInRoot
+        assertTrue("Double-tap zooms in", zoomed.width > fitted.width)
+
+        restoration.emulateSavedInstanceStateRestore()
+        compose.waitUntil { compose.onAllNodes(viewer).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(zoomed, compose.onNode(viewer).fetchSemanticsNode().boundsInRoot)
     }
 
     // capability: message.file
