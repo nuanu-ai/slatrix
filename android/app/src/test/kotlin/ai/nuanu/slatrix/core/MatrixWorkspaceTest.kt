@@ -187,6 +187,31 @@ class MatrixWorkspaceTest {
         workspace.close()
     }
 
+    // capability: thread.send-to-channel
+    @Test fun aThreadReplysCopyToTheChannelGoesAfterTheThreadClosesButNotAfterTheSessionEnds() = runTest {
+        for (signedOut in listOf(false, true)) {
+            val client = WorkspaceClient()
+            val workspace = MatrixWorkspace(backgroundScope, client)
+            workspace.open(workspaceRoom("!alpha:example.org", "Alpha"), threadRoot = "\$root")
+            runCurrent()
+            val thread = requireNotNull(workspace.selected.value?.conversation)
+            assertTrue(thread.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)))
+
+            if (signedOut) {
+                // Signing out closes the workspace before the reply is sent, so the copy's wait ends and lets go of the room.
+                workspace.close()
+                runCurrent()
+                assertTrue(client.handles.all { it.uniffiIsDestroyed })
+            } else {
+                workspace.back()
+                runCurrent()
+                client.emit(listOf(TimelineDiff.PushBack(conversationItem("reply", "\$reply", "On it", editable = true))))
+                assertTrue("\"event_id\":\"\$reply\"" in client.raw.receive())
+                workspace.close()
+            }
+        }
+    }
+
     // capability: conversation.jump-to-message
     // capability: activity.open-item
     @Test fun aJumpOpensTheChannelAtTheMessageAndAThreadReplyAtItsRoot() = runTest {
@@ -270,16 +295,27 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
     val handles = mutableListOf<Room>()
     val focuses = mutableListOf<TimelineFocus>()
     var failSaves = false
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<TimelineListener>()
+    fun emit(diff: List<TimelineDiff>) = listeners.forEach { it.onUpdate(diff) }
+    /** The content of events sent straight to a room, past its send queue. */
+    val raw = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
     override suspend fun getRecentEmojis(): List<RecentEmoji> = emptyList()
     override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
         override fun id(): String = roomId
         override fun ownUserId(): String = "@me:example.org"
         override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
             focuses.add(configuration.focus).let { object : Timeline(NoHandle) {
-                override suspend fun addListener(listener: TimelineListener): TaskHandle = object : TaskHandle(NoHandle) {
-                    override fun cancel() = Unit
+                override suspend fun addListener(listener: TimelineListener): TaskHandle {
+                    listeners += listener
+                    listener.onUpdate(listOf(TimelineDiff.Reset(emptyList())))
+                    return object : TaskHandle(NoHandle) { override fun cancel() = Unit }
                 }
                 override suspend fun paginateBackwards(numEvents: UShort): Boolean = true
+                override fun createMessageContent(msgType: MessageType): RoomMessageEventContentWithoutRelation =
+                    object : RoomMessageEventContentWithoutRelation(NoHandle) {
+                        override fun withMentions(mentions: Mentions): RoomMessageEventContentWithoutRelation = this
+                    }
+                override suspend fun send(msg: RoomMessageEventContentWithoutRelation): SendHandle = object : SendHandle(NoHandle) {}
             } }
         override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = drafts["$roomId $threadRoot"]
         override suspend fun saveComposerDraft(draft: ComposerDraft, threadRoot: String?) {
@@ -292,6 +328,12 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
             override fun threadRootEventId(): String? = threadRoots[eventId]
         }
         override suspend fun clearComposerDraft(threadRoot: String?) { drafts.remove("$roomId $threadRoot") }
+        override suspend fun sendRaw(eventType: String, content: String): String {
+            // As the bindings refuse a call on a closed room.
+            check(!uniffiIsDestroyed) { "Room object has already been destroyed" }
+            raw.send(content)
+            return "\$raw"
+        }
     }.also(handles::add)
 }
 
