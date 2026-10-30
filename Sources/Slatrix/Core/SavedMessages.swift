@@ -181,8 +181,11 @@ private final class AccountDataObserver: RawAccountDataListener {
             for await _ in stream {
                 guard let self, let published = self.published else { continue }
                 let next = self.list
-                guard let content = await Self.content(next, over: published) else { continue }
                 let heardCount = self.heardCount
+                // A reconnection or a list heard while encoding means the account's list is no longer `published`.
+                guard let content = await Self.content(next, over: published), self.published != nil,
+                    self.heardCount == heardCount
+                else { continue }
                 guard (try? await client.setAccountData(eventType: SavedMessages.eventType, content: content)) != nil,
                     self.session == session
                 else { continue }
