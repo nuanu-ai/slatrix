@@ -8,7 +8,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -20,7 +19,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -301,12 +299,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         } finally {
             ready.completeExceptionally(CancellationException())
             updates.close()
-            val release = { shown?.close(); pending?.close(); room.close() }
             // A reply waiting for its copy keeps the thread's timeline and room open until the copy goes.
-            val waiting = copies.children.toList()
-            if (waiting.isEmpty()) release()
-            else copying.launch(start = CoroutineStart.ATOMIC) { withContext(NonCancellable) { waiting.joinAll() } }
-                .invokeOnCompletion { release() }
+            copies.complete()
+            copies.invokeOnCompletion { shown?.close(); pending?.close(); room.close() }
         }
     }
 

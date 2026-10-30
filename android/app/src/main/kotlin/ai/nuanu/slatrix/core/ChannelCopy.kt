@@ -38,7 +38,7 @@ internal class SentEcho private constructor(private val body: String) : Timeline
     private val items = mutableListOf<Seen>()
     private var before: Set<String>? = null
     private var echo: String? = null
-    @Volatile private var handle: TaskHandle? = null
+    private var handle: TaskHandle? = null
 
     @Synchronized override fun onUpdate(diff: List<TimelineDiff>) {
         if (sent.isCompleted) return
@@ -55,8 +55,18 @@ internal class SentEcho private constructor(private val body: String) : Timeline
     /** For a message that never made it into the send queue, or a session that ended. */
     fun cancel() = finish(null)
 
-    private fun finish(eventId: String?) {
-        if (sent.complete(eventId)) handle?.let { runCatching { it.cancel() }; it.close() }
+    @Synchronized private fun finish(eventId: String?) {
+        if (sent.complete(eventId)) handle?.let(::stop)
+    }
+
+    @Synchronized private fun listening(handle: TaskHandle) {
+        this.handle = handle
+        if (sent.isCompleted) stop(handle)
+    }
+
+    private fun stop(handle: TaskHandle) {
+        runCatching { handle.cancel() }
+        handle.close()
     }
 
     private fun seen(item: TimelineItem): Seen {
@@ -70,9 +80,7 @@ internal class SentEcho private constructor(private val body: String) : Timeline
         /** Starts watching before the message is sent, so a message already there is never taken for it. */
         suspend fun watch(timeline: Timeline, body: String): SentEcho {
             val echo = SentEcho(body)
-            val handle = timeline.addListener(echo)
-            echo.handle = handle
-            if (echo.sent.isCompleted) handle.cancel()
+            echo.listening(timeline.addListener(echo))
             return echo
         }
     }

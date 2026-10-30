@@ -202,6 +202,9 @@ class MatrixWorkspaceTest {
                 workspace.close()
                 runCurrent()
                 assertTrue(client.handles.all { it.uniffiIsDestroyed })
+                client.emit(listOf(TimelineDiff.PushBack(conversationItem("reply", "\$reply", "On it", editable = true))))
+                runCurrent()
+                assertTrue(client.raw.isEmpty)
             } else {
                 workspace.back()
                 runCurrent()

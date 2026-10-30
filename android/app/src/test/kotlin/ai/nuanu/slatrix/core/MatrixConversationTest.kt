@@ -348,6 +348,25 @@ class MatrixConversationTest {
         }
     }
 
+    @Test fun aReplyWhoseSendIsCancelledIsNotCopiedAndItsClosedThreadLetsGoOfTheRoom() = runTest {
+        val timeline = ConversationTimeline(emptyList())
+        val room = ConversationRoom(timeline)
+        val conversation = MatrixConversation(backgroundScope, room, threadRoot = "\$root")
+        runCurrent()
+        val sending = async { conversation.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)) }
+        timeline.submissions.receive()
+        timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
+        assertTrue(sending.await())
+        conversation.close()
+
+        // Deleting the reply while it's still sending takes its echo away.
+        timeline.emit(listOf(TimelineDiff.PushBack(conversationItem("this", "this", "On it", local = true, editable = true))))
+        timeline.emit(listOf(TimelineDiff.Remove(0u)))
+        runCurrent()
+        assertTrue(room.uniffiIsDestroyed)
+        assertTrue(room.raw.isEmpty)
+    }
+
     // capability: thread.send-to-channel
     @Test fun aChannelsCopyOfAThreadReplyNamesItsThreadByTheThreadsFirstMessage() = runTest {
         val live = ConversationTimeline(listOf(conversationItem("root", "\$root", "Can we ship Friday?")))
