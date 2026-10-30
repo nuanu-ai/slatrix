@@ -117,7 +117,6 @@ struct RootView: View {
     @State private var invitationResponseID: String?
     @State private var navigationNotice: String?
     @State private var sendingComposers: [String: Bool] = [:]
-    @State private var saved: [SavedMessageReference] = []
     @State private var localAccess: ProtectedLocalStateAccess?
     @State private var localRevision: UInt64 = 0
     @State private var localLoadIdentity: ComposerIdentity?
@@ -189,7 +188,7 @@ struct RootView: View {
             .union(attachmentDrafts.files.filter { !$0.value.isEmpty }.keys)
     }
     private var draftRoomIDs: Set<String> { Set(draftAddresses.map(\.roomID)) }
-    private var savedIDs: Set<String> { Set(saved.map(\.id)) }
+    private var savedIDs: Set<String> { Set(matrix.savedMessages.list.saved.map(\.id)) }
     private struct ComposerIdentity: Equatable {
         var userID: String?
         var isPreview: Bool
@@ -459,6 +458,8 @@ struct RootView: View {
                 openPendingNotification()
             }
             .onChange(of: sidebarCollapsed) { _, _ in sidebarDrawer = false }
+            // Saved here or merged from another device, it reaches the vault either way.
+            .onChange(of: matrix.savedMessages.list) { _, _ in saveLocalData() }
             .onChange(of: route) { _, next in
                 // DMs picked in the drawer keeps it open on the list.
                 if !(next == .home && directMessagesColumn) { sidebarDrawer = false }
@@ -1328,12 +1329,11 @@ struct RootView: View {
     }
     private var savedCollection: some View {
         SavedMessagesView(
-            matrix: matrix, saved: saved,
+            matrix: matrix, saved: matrix.savedMessages.list.saved,
             onOpen: { item in selectRoom(item.roomID, record: true, eventID: item.eventID) },
             onRemove: { item in
-                saved.removeAll { $0.id == item.id }
+                matrix.savedMessages.set(roomID: item.roomID, eventID: item.eventID, saved: false)
                 toasts.show("Removed from Later")
-                saveLocalData()
             }, onOpenProfile: openProfile
         ).id(composerGeneration)
     }
@@ -2311,15 +2311,9 @@ struct RootView: View {
             matrix.errorMessage = "Wait for the message to send, then save it."
             return
         }
-        let reference = SavedMessageReference(roomID: message.roomID, eventID: message.eventID)
-        if savedIDs.contains(reference.id) {
-            saved.removeAll { $0.id == reference.id }
-            toasts.show("Removed from Later")
-        } else {
-            saved.insert(reference, at: 0)
-            toasts.show("Message saved for later")
-        }
-        saveLocalData()
+        let save = !savedIDs.contains(SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id)
+        matrix.savedMessages.set(roomID: message.roomID, eventID: message.eventID, saved: save)
+        toasts.show(save ? "Message saved for later" : "Removed from Later")
     }
     private func run(_ action: @escaping () async throws -> Void) {
         let session = matrix.notificationSessionID
@@ -2370,7 +2364,8 @@ struct RootView: View {
     private var storageKey: String { matrix.isPreview ? "preview" : matrix.user?.id ?? "signed-out" }
     private var localState: ProtectedLocalState {
         ProtectedLocalState(
-            drafts: drafts.conversations, threadDrafts: drafts.threads, saved: saved, recentSearches: recentSearches)
+            drafts: drafts.conversations, threadDrafts: drafts.threads, saved: matrix.savedMessages.list.saved,
+            recentSearches: recentSearches, savedRemovals: matrix.savedMessages.list.removed)
     }
     private func loadLocalData(retry: Bool = false) {
         if composerStateIdentity != composerIdentity { clearComposerState() }
@@ -2404,7 +2399,9 @@ struct RootView: View {
                 localRevision = 0
                 drafts.conversations = access.state.drafts
                 drafts.threads = access.state.threadDrafts
-                saved = access.state.saved
+                matrix.savedMessages.merge(
+                    SavedMessages(saved: access.state.saved, removed: access.state.savedRemovals ?? []),
+                    accountID: accountID)
                 recentSearches = access.state.recentSearches ?? []
                 localReady = true
                 localError = nil
@@ -2491,7 +2488,6 @@ struct RootView: View {
         localReady = false
         localError = nil
         drafts.conversations = [:]
-        saved = []
         recentSearches = []
         searchBar.text = ""
         searchBar.submitted = nil

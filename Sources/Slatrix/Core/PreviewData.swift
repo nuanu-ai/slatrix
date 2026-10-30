@@ -7,6 +7,7 @@ import Foundation
         isPreview = true
         status = .ready
         user = ChatUser(id: "preview.you", name: "You")
+        savedMessages.attach(nil, accountID: "preview.you")
         workspaces = [
             Workspace(id: "preview.workspace", name: "Harbor"), Workspace(id: "preview.studio", name: "Studio"),
         ]

@@ -11,6 +11,22 @@ import Testing
 @MainActor
 @Suite(.serialized, .tags(.budget), .enabled(if: budgetsEnabled))
 struct PerformanceBudgetTests {
+    @Test("Saving a message into a 1,000-message Later holds the main thread within budget")
+    func laterSaveBudget() async {
+        let saved = (1...1_000).map {
+            SavedMessageReference(
+                roomID: "!design:example.org", eventID: "$saved\($0)", savedAt: Date(timeIntervalSince1970: Double($0)))
+        }
+        let time = await fastest(of: 5) {
+            let later = SavedMessagesService()
+            later.merge(SavedMessages(saved: saved), accountID: "@owner:example.org")
+            let start = threadCPUTime()
+            later.set(roomID: "!general:example.org", eventID: "$new", saved: true)
+            return threadCPUTime() - start
+        }
+        #expect(time < .milliseconds(50), "\(time)")
+    }
+
     @Test("A room-list pass over 300 rooms in 20 workspaces publishes the sidebar within budget")
     func roomListBudget() async {
         var rooms: [ChatRoom] = []
