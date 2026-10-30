@@ -155,7 +155,7 @@ private const val NOTICE_MILLIS = 4_000L
 
 /** The relation that puts an attachment in a thread, as the Mac sends it. */
 private fun threadRelation(root: String): String {
-    val id = "\"" + root.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    val id = jsonString(root)
     return """{"m.relates_to":{"rel_type":"m.thread","event_id":$id,"is_falling_back":true,"m.in_reply_to":{"event_id":$id}}}"""
 }
 
