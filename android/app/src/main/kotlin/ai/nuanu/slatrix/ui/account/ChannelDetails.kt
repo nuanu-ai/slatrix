@@ -38,7 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
@@ -363,8 +362,13 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
     var filter by rememberSaveable { mutableStateOf(FilesFilter.All) }
     var opening by remember { mutableStateOf(emptySet<String>()) }
     var error by remember { mutableStateOf<String?>(null) }
-    var viewing by remember { mutableStateOf<Pair<MessageAttachment, ImageBitmap?>?>(null) }
-    viewing?.let { (attachment, placeholder) -> MediaViewer(attachment, placeholder, files.loadPicture) { viewing = null } }
+    val tile = with(LocalDensity.current) { UiMetrics.FileTile.roundToPx() }
+    // Saved, so the viewer stays open on the same image when the phone turns.
+    var viewing by rememberSaveable { mutableStateOf<String?>(null) }
+    viewing?.let { id ->
+        files.state.rows.find { it.id == id }?.let { (it as? ConversationMessage)?.attachment }
+            ?.let { MediaViewer(it, tile to tile, files.loadPicture) { viewing = null } }
+    }
     val shared = remember(files.state.rows) {
         files.state.rows.asReversed().filterIsInstance<ConversationMessage>().flatMap { message ->
             if (message.kind == MessageKind.Attachment) listOf(message to null)
@@ -397,13 +401,12 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
                 val file = message.attachment.takeIf { link == null }
                 val kind = file?.let { FileKind.of(it.name, it.mimeType) }
                 val thumbnail = if (file?.kind == MessageAttachment.Kind.Image) {
-                    val pixels = with(LocalDensity.current) { UiMetrics.FileTile.roundToPx() }
-                    picture(file, pixels, pixels, false, files.loadPicture)
+                    picture(file, tile, tile, false, files.loadPicture)
                 } else null
                 Row(Modifier.fillMaxWidth().clickable(enabled = message.id !in opening) {
                     when {
                         link != null -> uris.openUri(link)
-                        file?.kind == MessageAttachment.Kind.Image -> viewing = file to thumbnail
+                        file?.kind == MessageAttachment.Kind.Image -> viewing = message.id
                         // Marked before it starts, so a second tap before the row disables opens nothing more.
                         file != null -> if (message.id !in opening) {
                             opening = opening + message.id
@@ -453,7 +456,14 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
                     TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
                 }
                 else -> {
-                    if (shown.isEmpty() && !state.loadingHistory) item { NoteLine("Nothing shared yet", colors.textSecondary) }
+                    if (shown.isEmpty() && !state.loadingHistory) item {
+                        NoteLine(when (filter) {
+                            FilesFilter.All -> "Nothing shared yet"
+                            FilesFilter.Files -> "No files yet"
+                            FilesFilter.Images -> "No images yet"
+                            FilesFilter.Links -> "No links yet"
+                        }, colors.textSecondary)
+                    }
                     // Older history is asked for, as on the Mac, rather than paged through on its own in a long conversation. The
                     // button stays while a page loads, so the end of the list doesn't move.
                     if (state.hasMore) item {
