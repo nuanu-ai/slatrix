@@ -178,6 +178,27 @@ struct ProtectedLocalStateStoreTests {
         #expect(try await store.open(accountID: account).state.recentSearches == ["budget", "launch plan"])
     }
 
+    // capability: message.save.sync
+    @Test("Messages taken out of Later are kept with the account's other private state, so the removal can still sync")
+    func savedRemovalsPersist() async throws {
+        let access = try await store.open(accountID: account)
+        var state = original
+        state.savedRemovals = [
+            SavedMessageReference(
+                roomID: "!fixture:example.org", eventID: "$removed", savedAt: Date(timeIntervalSince1970: 2_000))
+        ]
+        try await store.save(state, access: access, revision: 1)
+        #expect(try await store.open(accountID: account).state.savedRemovals == state.savedRemovals)
+    }
+
+    @Test("A removal from Later that isn't a room and an event is refused, as a saved message would be")
+    func savedRemovalsValidated() {
+        let removal = SavedMessageReference(roomID: "fixture", eventID: "$removed", savedAt: Date())
+        #expect(throws: ProtectedLocalStateError.invalidData) {
+            try ProtectedLocalState(savedRemovals: [removal]).validate()
+        }
+    }
+
     @Test("An older save that finishes late does not replace a newer one")
     func newestSaveWins() async throws {
         let access = try await store.open(accountID: account)
