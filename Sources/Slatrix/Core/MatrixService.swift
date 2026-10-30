@@ -1669,10 +1669,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         return projected
     }
 
-    /// `draft` is the composer's Matrix HTML.
-    func sendMessage(_ draft: String, threadRootID: String? = nil, replyToID: String? = nil, roomID: String? = nil)
-        async throws
-    {
+    /// `draft` is the composer's Matrix HTML. `alsoToChannel` copies a thread reply to the channel once it's sent.
+    func sendMessage(
+        _ draft: String, threadRootID: String? = nil, replyToID: String? = nil, roomID: String? = nil,
+        alsoToChannel: Bool = false
+    ) async throws {
         try assertDestination(roomID)
         let message = ComposerFormat.message(draft: draft)
         guard !message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -1687,17 +1688,40 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         } else {
             target = try requireTimeline()
         }
-        _ = try requireRoom(roomID)
+        let room = try requireRoom(roomID)
         let content = try MatrixMapping.content(message).withMentions(
             mentions: mentions(message))
+        let echo = alsoToChannel && threadRootID != nil ? await SentEcho(target) : nil
         // Thread timelines infer their own relation. Extra JSON cannot override
         // that fallback relation, so an explicit quote must use sendReply.
-        if let reply = replyToID {
-            _ = try await target.sendReply(msg: content, eventId: reply)
-        } else {
-            _ = try await target.send(msg: content)
+        do {
+            if let reply = replyToID {
+                _ = try await target.sendReply(msg: content, eventId: reply)
+            } else {
+                _ = try await target.send(msg: content)
+            }
+        } catch {
+            echo?.cancel()
+            throw error
         }
+        if let echo { copyToChannel(message, once: echo, room: room) }
         await returnToLive(after: token, threadRootID: threadRootID)
+    }
+
+    /// The channel's copy of a thread reply, sent once the reply has an event ID to quote. The send queue only takes
+    /// replies that stay in the replied-to event's thread, so the copy goes out directly.
+    private func copyToChannel(_ message: ComposerFormat.Message, once echo: SentEcho, room: Room) {
+        let session = sessionGeneration
+        Task {
+            guard let replyID = await echo.sentEventID(), session == sessionGeneration else { return }
+            do {
+                _ = try await room.sendRaw(
+                    eventType: "m.room.message", content: ChannelCopy.content(message, replyTo: replyID))
+            } catch {
+                guard session == sessionGeneration else { return }
+                errorMessage = "Your reply is in the thread, but it couldn’t also be sent to the channel."
+            }
+        }
     }
 
     /// Any timeline sends into the room's queue; a message sent from one loaded around an older message then shows
