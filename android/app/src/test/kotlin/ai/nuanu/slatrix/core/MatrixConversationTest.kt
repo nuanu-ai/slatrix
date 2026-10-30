@@ -315,9 +315,11 @@ class MatrixConversationTest {
     // capability: thread.send-to-channel
     @Test fun aReplyAlsoSentToTheChannelGoesToItsThreadThenToTheChannelOnceSentEvenWithTheThreadClosed() = runTest {
         // The reader's own reply, still sending under a transaction ID or sent under an event ID; its row keeps its ID.
-        fun own(id: String, body: String, local: Boolean = false) = conversationItem(body, id, body, local = local, editable = true)
+        fun own(key: String, id: String, body: String, local: Boolean = false) =
+            conversationItem(key, id, body, local = local, editable = true)
         for (sentAtOnce in listOf(false, true)) {
-            val timeline = ConversationTimeline(emptyList())
+            // The same words, said before in the thread, are not this reply.
+            val timeline = ConversationTimeline(listOf(own("said", "\$said", "On it")))
             val room = ConversationRoom(timeline)
             val conversation = MatrixConversation(backgroundScope, room, threadRoot = "\$root")
             runCurrent()
@@ -329,12 +331,13 @@ class MatrixConversationTest {
             conversation.close()
 
             // An earlier reply's echo that lands only now must not be taken for this one.
-            timeline.emit(listOf(TimelineDiff.PushBack(own("earlier", "First", local = true))))
-            if (sentAtOnce) timeline.emit(listOf(TimelineDiff.Set(0u, own("\$earlier", "First")), TimelineDiff.PushBack(own("\$reply", "On it"))))
+            timeline.emit(listOf(TimelineDiff.PushBack(own("earlier", "earlier", "First", local = true))))
+            if (sentAtOnce) timeline.emit(listOf(TimelineDiff.Set(1u, own("earlier", "\$earlier", "First")),
+                TimelineDiff.PushBack(own("this", "\$reply", "On it"))))
             else {
-                timeline.emit(listOf(TimelineDiff.PushBack(own("this", "On it", local = true))))
-                timeline.emit(listOf(TimelineDiff.Set(0u, own("\$earlier", "First"))))
-                timeline.emit(listOf(TimelineDiff.Set(1u, own("\$reply", "On it"))))
+                timeline.emit(listOf(TimelineDiff.PushBack(own("this", "this", "On it", local = true))))
+                timeline.emit(listOf(TimelineDiff.Set(1u, own("earlier", "\$earlier", "First"))))
+                timeline.emit(listOf(TimelineDiff.Set(2u, own("this", "\$reply", "On it"))))
             }
 
             val (type, json) = room.raw.receive()
@@ -928,7 +931,7 @@ private class ConversationContent(val type: MessageType) : RoomMessageEventConte
     }
 }
 
-private fun conversationItem(
+internal fun conversationItem(
     stableId: String,
     eventId: String,
     body: String,

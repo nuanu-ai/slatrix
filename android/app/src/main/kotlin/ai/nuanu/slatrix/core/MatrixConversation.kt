@@ -5,8 +5,10 @@ import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -182,6 +185,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val root = root?.copy(id = ROOT_KEY, grouped = false)
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
+    /** Thread replies waiting to be copied to the channel: they outlast the thread, and end with the session's [scope]. */
+    private val copies = SupervisorJob(scope.coroutineContext[Job])
+    private val copying = CoroutineScope(scope.coroutineContext + copies)
     private val ownUserId = room.ownUserId()
     private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null,
         ownUserId = ownUserId, startsAtUnread = resume))
@@ -290,10 +296,13 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             mutableState.update { it.copy(loading = false, error = "Couldn’t load this conversation.") }
         } finally {
             ready.completeExceptionally(CancellationException())
-            shown?.close()
-            pending?.close()
-            room.close()
             updates.close()
+            val release = { shown?.close(); pending?.close(); room.close() }
+            // A reply waiting for its copy keeps the thread's timeline and room open until the copy goes.
+            val waiting = copies.children.toList()
+            if (waiting.isEmpty()) release()
+            else copying.launch(start = CoroutineStart.ATOMIC) { withContext(NonCancellable) { waiting.joinAll() } }
+                .invokeOnCompletion { release() }
         }
     }
 
@@ -436,16 +445,25 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val timeline = timeline()
                 val formatted = message.html?.let { FormattedBody(MessageFormat.Html, it) }
                 val content = checkNotNull(timeline.createMessageContent(MessageType.Text(TextMessageContent(message.body, formatted))))
-                content.use { raw ->
-                    raw.withMentions(Mentions(message.mentions, message.mentionsRoom)).use { outgoing ->
-                        when (val target = message.target) {
-                            is ComposerTarget.Reply -> timeline.sendReply(outgoing, target.eventId).close()
-                            is ComposerTarget.Edit ->
-                                timeline.edit(EventOrTransactionId.EventId(target.eventId), EditedContent.RoomMessage(outgoing))
-                            null -> timeline.send(outgoing).close()
+                val echo = if (message.alsoToChannel && threadRoot != null && message.target !is ComposerTarget.Edit) {
+                    SentEcho.watch(timeline, message.body)
+                } else null
+                try {
+                    content.use { raw ->
+                        raw.withMentions(Mentions(message.mentions, message.mentionsRoom)).use { outgoing ->
+                            when (val target = message.target) {
+                                is ComposerTarget.Reply -> timeline.sendReply(outgoing, target.eventId).close()
+                                is ComposerTarget.Edit ->
+                                    timeline.edit(EventOrTransactionId.EventId(target.eventId), EditedContent.RoomMessage(outgoing))
+                                null -> timeline.send(outgoing).close()
+                            }
                         }
                     }
+                } catch (failure: Throwable) {
+                    echo?.cancel()
+                    throw failure
                 }
+                echo?.let { copyToChannel(message, it) }
                 currentCoroutineContext().ensureActive()
                 // A message sent from an older place goes to the present, as sending in Slack takes you there.
                 if (shown?.focused == true) operations.launch {
@@ -472,6 +490,25 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             }
         }
         return try { task.await() } finally { task.cancel() }
+    }
+
+    /**
+     * The channel's copy of a thread reply, sent once the reply has an event ID to quote. The send queue only takes
+     * replies that stay in the replied-to event's thread, so the copy goes out directly.
+     */
+    private fun copyToChannel(message: ComposerMessage, echo: SentEcho) {
+        copying.launch {
+            try {
+                val reply = echo.sent.await() ?: return@launch
+                room.sendRaw("m.room.message", ChannelCopy.content(message, reply))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (lifetime.isActive) operations.launch { announce("Your reply is in the thread, but it couldn’t also be sent to the conversation.") }
+            } finally {
+                echo.cancel()
+            }
+        }
     }
 
     /** Resumes the original send rather than sending again, so a message never goes out twice. */
@@ -645,21 +682,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     suspend fun close() { lifetime.cancelAndJoin() }
 
-    private fun Source.apply(diff: TimelineDiff) {
-        when (diff) {
-            is TimelineDiff.Append -> items.addAll(diff.values.map(::row))
-            is TimelineDiff.Clear -> items.clear()
-            is TimelineDiff.PushFront -> items.add(0, row(diff.value))
-            is TimelineDiff.PushBack -> items.add(row(diff.value))
-            is TimelineDiff.PopFront -> items.removeAt(0)
-            is TimelineDiff.PopBack -> items.removeAt(items.lastIndex)
-            is TimelineDiff.Insert -> items.add(diff.index.toInt(), row(diff.value))
-            is TimelineDiff.Set -> items[diff.index.toInt()] = row(diff.value)
-            is TimelineDiff.Remove -> items.removeAt(diff.index.toInt())
-            is TimelineDiff.Truncate -> items.subList(diff.length.toInt(), items.size).clear()
-            is TimelineDiff.Reset -> { items.clear(); items.addAll(diff.values.map(::row)) }
-        }
-    }
+    private fun Source.apply(diff: TimelineDiff) = items.applyDiff(diff, ::row)
 
     /**
      * The visible rows, each message grouped under the one before it when the same sender sent it soon after. A day
