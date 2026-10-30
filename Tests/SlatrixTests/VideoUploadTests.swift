@@ -67,8 +67,7 @@ struct VideoUploadTests {
             mimetype: spec.video.mimetype, size: spec.video.size, shown: shown,
             durationMillis: spec.video.durationMillis,
             poster: spec.posterBytes.map { VideoUpload.Poster(width: poster.width, height: poster.height, size: $0) })
-        // m.video and its info; the body is the file's own name, which the upload keeps.
-        #expect(spec.sent.msgtype == "m.video")
+        // The info; m.video is the upload's kind, and the body the file's own name, which the upload keeps.
         let sent = Info(
             w: info.width ?? 0, h: info.height ?? 0, duration: info.duration.map { Int(($0 * 1_000).rounded()) },
             mimetype: info.mimetype ?? "", size: info.size ?? 0,

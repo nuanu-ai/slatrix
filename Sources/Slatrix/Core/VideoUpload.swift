@@ -47,10 +47,10 @@ enum VideoUpload {
             }, thumbnailSource: nil, blurhash: nil)
     }
 
-    /// The video's info and its poster, a JPEG of a frame near the start drawn upright at the poster's size in `folder`.
-    /// A video no frame can be read from goes without a poster; one that can't be read at all, as a plain video.
-    static func prepare(_ url: URL, mimetype: String, size: UInt64, posterFolder folder: URL) async -> (VideoInfo, URL?)
-    {
+    /// The video's info and its poster, a JPEG of a frame near the start drawn upright at the poster's size, in the
+    /// temporary folder for the caller to remove. A video no frame can be read from goes without a poster; one that can't
+    /// be read at all, as a plain video.
+    static func prepare(_ url: URL, mimetype: String, size: UInt64) async -> (VideoInfo, URL?) {
         let asset = AVURLAsset(url: url)
         guard let track = try? await asset.loadTracks(withMediaType: .video).first,
             let (natural, transform) = try? await track.load(.naturalSize, .preferredTransform)
@@ -64,7 +64,7 @@ enum VideoUpload {
         if let shown {
             poster = await posterFile(
                 asset, size: posterSize(width: shown.width, height: shown.height),
-                atMillis: posterAt(durationMillis: duration), folder: folder)
+                atMillis: posterAt(durationMillis: duration))
         }
         return (
             info(mimetype: mimetype, size: size, shown: shown, durationMillis: duration, poster: poster?.poster),
@@ -72,13 +72,16 @@ enum VideoUpload {
         )
     }
 
-    private static func posterFile(_ asset: AVURLAsset, size: (width: Int, height: Int), atMillis: Int, folder: URL)
+    private static func posterFile(_ asset: AVURLAsset, size: (width: Int, height: Int), atMillis: Int)
         async
         -> (poster: Poster, url: URL)?
     {
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: size.width, height: size.height)
+        // That very frame, not the nearest keyframe, which in a phone's video is often the black first one.
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
         let at = CMTime(value: CMTimeValue(atMillis), timescale: 1_000)
         var frame = try? await generator.image(at: at).image
         if frame == nil { frame = try? await generator.image(at: .zero).image }
@@ -90,7 +93,8 @@ enum VideoUpload {
         // Drawn at exactly the poster's size, which the generator only bounds.
         context.interpolationQuality = .high
         context.draw(frame, in: CGRect(x: 0, y: 0, width: size.width, height: size.height))
-        let url = folder.appendingPathComponent("poster-\(UUID().uuidString).jpg")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SlatrixPoster-\(UUID().uuidString).jpg")
         guard let image = context.makeImage(),
             let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil)
         else { return nil }
