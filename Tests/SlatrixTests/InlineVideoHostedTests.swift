@@ -27,7 +27,7 @@ struct InlineVideoHostedTests {
         let host = NSHostingController(
             rootView: AttachmentView(
                 matrix: matrix, message: message, attachment: attachment,
-                actions: AttachmentActions(video: video, play: { video.play(message, matrix: matrix, from: timeline) })
+                actions: AttachmentActions(inlineVideo: video.slot(message, matrix: matrix, in: timeline))
             ).fixedSize(horizontal: false, vertical: true).environmentObject(AppearanceStore()))
         host.sizingOptions = []
         let row = host.view
@@ -73,6 +73,27 @@ struct InlineVideoHostedTests {
         scroll.contentView.scroll(to: CGPoint(x: 0, y: 1_500))
         scroll.reflectScrolledClipView(scroll.contentView)
         #expect(await eventually { video.player?.rate == 0 })
+    }
+
+    @Test("A copy of the row left behind in a reused cell never pauses the video being watched")
+    func staleCopy() async throws {
+        let folder = try TemporaryDirectory()
+        let player = AVPlayer(
+            url: try await folder.video("clip.mov", width: 32, height: 18, rotation: 0, seconds: 60))
+        let window = offscreenWindow(NSSize(width: 400, height: 300))
+        let stale = InlinePlayerView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
+        let watched = InlinePlayerView(frame: CGRect(x: 0, y: 100, width: 160, height: 90))
+        stale.player = player
+        watched.player = player
+        window.contentView?.addSubview(stale)
+        window.contentView?.addSubview(watched)
+        defer { window.close() }
+        player.play()
+
+        stale.removeFromSuperview()
+        #expect(player.rate > 0)
+        watched.removeFromSuperview()
+        #expect(player.rate == 0)
     }
 
     private func playerView(in view: NSView) -> AVPlayerView? {

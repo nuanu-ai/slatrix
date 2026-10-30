@@ -43,7 +43,6 @@ struct InlineVideoTests {
         let first = try #require(service.messages.first { $0.eventID == "$first" })
         let second = try #require(service.messages.first { $0.eventID == "$second" })
         video.play(first, matrix: service, from: timeline)
-        #expect(video.eventID == "$first")
         #expect(await eventually { (video.player?.rate ?? 0) > 0 })
         let playing = try #require(video.player)
 
@@ -83,6 +82,27 @@ struct InlineVideoTests {
         #expect(view.alphaValue == 0)
         player.play()
         #expect(await eventually { view.alphaValue == 1 })
+    }
+
+    @Test("A video shown in both the channel and a thread plays only in the pane it was started from")
+    func onePane() async throws {
+        let (service, _) = try await videoConversation()
+        let message = try #require(service.messages.first)
+        let channel = video.slot(message, matrix: service, in: timeline)
+        let thread = video.slot(message, matrix: service, in: NSObject())
+        channel.play()
+        #expect(await eventually { channel.player != nil })
+        #expect(!thread.isPlaying && thread.player == nil)
+    }
+
+    @Test("Opening the viewer pauses the video playing in its row")
+    func viewerPauses() async throws {
+        let (service, _) = try await videoConversation()
+        let viewer = MediaViewerState()
+        viewer.inlineVideo.play(try #require(service.messages.first), matrix: service, from: timeline)
+        #expect(await eventually { (viewer.inlineVideo.player?.rate ?? 0) > 0 })
+        viewer.open(try #require(service.messages.last), surface: .conversation)
+        #expect(viewer.inlineVideo.player?.rate == 0)
     }
 
     @Test("Leaving the timeline it plays in stops the video; leaving another doesn't")
