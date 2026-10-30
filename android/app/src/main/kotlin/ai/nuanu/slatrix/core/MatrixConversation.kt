@@ -231,7 +231,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
-    private val updating = operations.launch {
+    // Atomic, so its cleanup closes the room even when the conversation closes before it starts.
+    private val updating = operations.launch(start = CoroutineStart.ATOMIC) {
         try {
             open(when {
                 view == ConversationView.Pins -> TimelineFocus.PinnedEvents
