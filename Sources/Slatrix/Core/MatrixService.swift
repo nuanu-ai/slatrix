@@ -1721,8 +1721,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard let room = try? requireRoom(roomID),
             let rootID = try? await room.loadOrFetchEvent(eventId: replyID).threadRootEventId()
         else { return nil }
-        let loaded = messages.first { $0.roomID == roomID && $0.eventID == rootID }
-        guard let root = try? await loaded ?? messagePreview(roomID: roomID, eventID: rootID) else { return nil }
+        var root = messages.first { $0.roomID == roomID && $0.eventID == rootID }
+        if root == nil { root = try? await messagePreview(roomID: roomID, eventID: rootID) }
+        guard let root else { return nil }
         return MatrixMapping.previewText(
             root.body, formatted: root.formattedBody.map { FormattedBody(format: .html, body: $0) })
     }

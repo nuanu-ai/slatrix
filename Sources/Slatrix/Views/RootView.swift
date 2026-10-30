@@ -89,6 +89,8 @@ struct RootView: View {
     @State private var pinPermissionRoomID: String?
     @State private var pinPermission = false
     @State private var threadRoot: ChatMessage?
+    /// The thread whose "Also send to #channel" is checked; another thread starts unchecked, as in Slack.
+    @State private var channelCopyRootID: String?
     @State private var navigationGeneration = UUID()
     @State private var composerGeneration = UUID()
     @State private var composerStateIdentity: ComposerIdentity?
@@ -1252,9 +1254,24 @@ struct RootView: View {
                             onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) }
                         )
                     }
-                    .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(m.sp12).disabled(
+                    .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding([.horizontal, .top], m.sp12)
+                    .disabled(
                         !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
                             || matrix.selectedRoomID != root.roomID)
+                    Toggle(
+                        isOn: Binding(
+                            get: { channelCopyRootID == root.eventID },
+                            set: { channelCopyRootID = $0 ? root.eventID : nil })
+                    ) {
+                        if room.isDirect {
+                            Text("Also send as direct message")
+                        } else {
+                            Text("Also send to ") + Text(Image(systemName: room.channelSymbol))
+                                + Text(room.name).fontWeight(.semibold)
+                        }
+                    }.toggleStyle(.checkbox).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(m.sp12)
+                        .disabled(threadReadyID != root.eventID)
                 }
             }
             .overlay(alignment: .top) {
@@ -2196,7 +2213,12 @@ struct RootView: View {
         else {
             throw MatrixServiceError.request("The reply changed. Check it and send again.")
         }
-        try await matrix.sendMessage(body, threadRootID: threadID, replyToID: reply?.message.eventID, roomID: room.id)
+        let alsoToChannel = threadID != nil && threadID == channelCopyRootID
+        try await matrix.sendMessage(
+            body, threadRootID: threadID, replyToID: reply?.message.eventID, roomID: room.id,
+            alsoToChannel: alsoToChannel)
+        // Slack unchecks "Also send to #channel" once a reply goes.
+        if alsoToChannel, isCurrentComposer(context), channelCopyRootID == threadID { channelCopyRootID = nil }
         if isCurrentComposer(context), let reply { reply.finish(current: &replyTarget, owner: replyOwner) }
     }
     private func sendFile(_ file: URL, room: ChatRoom, threadID: String? = nil, context: ComposerContext) async throws {

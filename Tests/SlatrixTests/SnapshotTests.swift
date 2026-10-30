@@ -16,6 +16,25 @@ private final class StartOfTimeline: Timeline, @unchecked Sendable {
     override func paginateBackwards(numEvents: UInt16) async throws -> Bool { true }
 }
 
+/// A room whose every event is a reply in the thread of "$root".
+private final class ThreadRoom: Room, @unchecked Sendable {
+    private let identifier: String
+    init(id: String) {
+        identifier = id
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func id() -> String { identifier }
+    override func membership() -> Membership { .joined }
+    override func loadOrFetchEvent(eventId: String) async throws -> TimelineEvent {
+        ThreadReplyEvent(noHandle: .init())
+    }
+}
+
+private final class ThreadReplyEvent: TimelineEvent, @unchecked Sendable {
+    override func threadRootEventId() -> String? { "$root" }
+}
+
 /// Julia has a photo and a status, Sam is in a call, and anyone else has only a name.
 private final class ProfileClient: Client, @unchecked Sendable {
     let photo: String
@@ -795,6 +814,40 @@ struct Snapshots {
         let frame = text.convert(text.bounds, to: nil)
         scroll.onPointer?(NSPoint(x: frame.midX, y: frame.midY))
         try write(await settledImage(hosting), "hovered-row-\(theme.rawValue)")
+    }
+
+    @Test("A thread reply also sent to the channel, under its thread's first message", arguments: Theme.allCases)
+    func channelCopy(theme: Theme) async throws {
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let room = try #require(matrix.selectedRoom)
+        matrix.isPreview = false
+        matrix.configureMessageActionsForChecks(
+            client: FakeClient(rooms: [ThreadRoom(id: room.id)]), main: StartOfTimeline(), thread: nil,
+            rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
+        let now = Date()
+        var root = ChatMessage(
+            id: "$root", roomID: room.id, senderID: "preview.julia", senderName: "Julia",
+            body: "Can we ship the release notes on Friday?", timestamp: now.addingTimeInterval(-600))
+        root.replyCount = 2
+        root.lastReply = ThreadReply(
+            senderID: "preview.alex", senderName: "Alex", timestamp: now.addingTimeInterval(-60))
+        var copy = ChatMessage(
+            id: "$copy", roomID: room.id, senderID: "preview.alex", senderName: "Alex",
+            body: "Yes, they're ready. I'll post them at noon.", timestamp: now.addingTimeInterval(-60))
+        copy.replyToID = "$reply"
+        copy.repliedToThread = true
+        copy.replyPreview = ChatReplyPreview(
+            state: .ready, eventID: "$reply", senderID: "preview.alex", senderName: "Alex", body: copy.body)
+        matrix.messages = [root, copy]
+        let (window, hosting) = try themedWindow(
+            TimelineView(
+                matrix: matrix, room: room, savedIDs: [], onThread: { _ in }, onReply: { _ in }, onEdit: { _ in },
+                onSave: { _ in }
+            ).environment(Popovers()).frame(width: 760, height: 480),
+            theme: theme)
+        defer { window.close() }
+        try write(await settledImage(hosting), "channel-copy-\(theme.rawValue)")
     }
 
     @Test("A channel with no messages, at its intro", arguments: Theme.allCases)
