@@ -52,32 +52,6 @@ struct SendToChannelTests {
     }
 }
 
-private final class CopyRoom: Room, @unchecked Sendable {
-    /// Raw events sent to the room, as their type and JSON content.
-    let raw = Recorder<(type: String, content: String)>()
-    override func membership() -> Membership { .joined }
-    override func sendRaw(eventType: String, content: String) async throws -> String {
-        raw.append((eventType, content))
-        return "$copy"
-    }
-    /// Every event it holds is a reply in the thread of "$root".
-    override func loadOrFetchEvent(eventId: String) async throws -> TimelineEvent {
-        ThreadReplyEvent(noHandle: .init())
-    }
-    override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
-        throw ClientError.Generic(msg: "no timelines here", details: nil)
-    }
-}
-
-private final class ThreadReplyEvent: TimelineEvent, @unchecked Sendable {
-    override func threadRootEventId() -> String? { "$root" }
-}
-
-private final class CopyClient: Client, @unchecked Sendable {
-    let room = CopyRoom(noHandle: .init())
-    override func getRoom(roomId: String) throws -> Room? { room }
-}
-
 /// The reader's own text message in a timeline, still sending under a transaction ID or sent under an event ID.
 private func own(_ id: EventOrTransactionId, body: String) -> FakeTimelineItem {
     var event = textEvent("$unused", body: body, sender: "@sender:example.org")
@@ -90,48 +64,65 @@ private func own(_ id: EventOrTransactionId, body: String) -> FakeTimelineItem {
 
 @MainActor
 struct SendToChannelServiceTests {
-    // capability: thread.send-to-channel
-    @Test("A reply also sent to the channel goes to its thread, then to the channel as a reply to it once it's sent")
-    func copiesOnceSent() async throws {
-        let service = MatrixService()
-        let client = CopyClient(noHandle: .init())
-        // An earlier reply still sending, which the copy must not mistake for this one.
-        let thread = FakeLiveTimeline([own(.transactionId(transactionId: "earlier"), body: "First")])
+    private let service = MatrixService()
+    private let room = FakeOpenRoom("!room:example.org", cached: [])
+
+    init() {
         service.user = ChatUser(id: "@sender:example.org", name: "Sender")
-        service.selectedRoomID = "!room:example.org"
+        service.selectedRoomID = room.id()
+    }
+
+    private func configure(thread: Timeline?) {
         service.configureMessageActionsForChecks(
-            client: client, main: nil, thread: thread, rootID: "$root", sessionID: UUID(), selectionID: UUID(),
-            threadID: UUID())
+            client: FakeClient(rooms: [room]), main: nil, thread: thread, rootID: thread == nil ? nil : "$root",
+            sessionID: UUID(), selectionID: UUID(), threadID: UUID())
+    }
 
-        try await service.sendMessage("On it", threadRootID: "$root", roomID: "!room:example.org", alsoToChannel: true)
-        thread.emit([.pushBack(value: own(.transactionId(transactionId: "this"), body: "On it"))])
-        thread.emit([.set(index: 0, value: own(.eventId(eventId: "$earlier"), body: "First"))])
-        thread.emit([.set(index: 1, value: own(.eventId(eventId: "$reply"), body: "On it"))])
+    // capability: thread.send-to-channel
+    @Test(
+        "A reply also sent to the channel goes to its thread, then to the channel as a reply to it once it's sent",
+        arguments: [false, true])
+    func copiesOnceSent(sentAtOnce: Bool) async throws {
+        let thread = FakeLiveTimeline([])
+        configure(thread: thread)
 
-        #expect(thread.sent.all.count == 1)
-        #expect(await eventually { client.room.raw.all.count == 1 })
-        let copy = try #require(client.room.raw.all.first)
+        try await service.sendMessage("On it", threadRootID: "$root", roomID: room.id(), alsoToChannel: true)
+        // An earlier reply's echo that lands only now must not be taken for this one.
+        thread.emit([.pushBack(value: own(.transactionId(transactionId: "earlier"), body: "First"))])
+        if sentAtOnce {
+            thread.emit([
+                .set(index: 0, value: own(.eventId(eventId: "$earlier"), body: "First")),
+                .pushBack(value: own(.eventId(eventId: "$reply"), body: "On it")),
+            ])
+        } else {
+            thread.emit([.pushBack(value: own(.transactionId(transactionId: "this"), body: "On it"))])
+            thread.emit([.set(index: 0, value: own(.eventId(eventId: "$earlier"), body: "First"))])
+            thread.emit([.set(index: 1, value: own(.eventId(eventId: "$reply"), body: "On it"))])
+        }
+
+        #expect(await eventually { room.raw.all.count == 1 })
+        let copy = try #require(room.raw.all.first)
+        #expect(copy.type == "m.room.message")
         let content = try JSONDecoder().decode(JSON.self, from: Data(copy.content.utf8))
         guard case .object(let fields) = content, case .object(let relation) = fields["m.relates_to"] else {
             Issue.record("the copy isn't a reply: \(copy.content)")
             return
         }
-        #expect(copy.type == "m.room.message" && fields["body"] == .string("On it"))
+        #expect(fields["body"] == .string("On it"))
         #expect(relation["m.in_reply_to"] == .object(["event_id": .string("$reply")]))
     }
 
     @Test("A channel's copy names its thread by the thread's first message, as Slack's \"replied to a thread:\" does")
-    func threadRoot() async {
-        let service = MatrixService()
-        service.configureMessageActionsForChecks(
-            client: CopyClient(noHandle: .init()), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
-            selectionID: UUID(), threadID: UUID())
+    func threadOrigin() async {
+        configure(thread: nil)
+        room.threadRoots = ["$reply": "$root"]
         service.messages = [
             ChatMessage(
-                id: "$root", roomID: "!room:example.org", senderID: "@bob:example.org", senderName: "Bob",
+                id: "$root", roomID: room.id(), senderID: "@bob:example.org", senderName: "Bob",
                 body: "Can we ship Friday?", timestamp: Date())
         ]
-        let root = await service.threadRootPreview(roomID: "!room:example.org", replyID: "$reply")
-        #expect(root == "Can we ship Friday?")
+        let origin = await service.threadOrigin(roomID: room.id(), replyID: "$reply")
+        #expect(origin?.root.eventID == "$root")
+        #expect(origin?.preview == "Can we ship Friday?")
     }
 }

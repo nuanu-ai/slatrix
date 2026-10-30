@@ -16,25 +16,6 @@ private final class StartOfTimeline: Timeline, @unchecked Sendable {
     override func paginateBackwards(numEvents: UInt16) async throws -> Bool { true }
 }
 
-/// A room whose every event is a reply in the thread of "$root".
-private final class ThreadRoom: Room, @unchecked Sendable {
-    private let identifier: String
-    init(id: String) {
-        identifier = id
-        super.init(noHandle: .init())
-    }
-    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
-    override func id() -> String { identifier }
-    override func membership() -> Membership { .joined }
-    override func loadOrFetchEvent(eventId: String) async throws -> TimelineEvent {
-        ThreadReplyEvent(noHandle: .init())
-    }
-}
-
-private final class ThreadReplyEvent: TimelineEvent, @unchecked Sendable {
-    override func threadRootEventId() -> String? { "$root" }
-}
-
 /// Julia has a photo and a status, Sam is in a call, and anyone else has only a name.
 private final class ProfileClient: Client, @unchecked Sendable {
     let photo: String
@@ -821,9 +802,11 @@ struct Snapshots {
         let matrix = MatrixService()
         matrix.enterPreview()
         let room = try #require(matrix.selectedRoom)
+        let threads = FakeOpenRoom(room.id, cached: [])
+        threads.threadRoots = ["$reply": "$root"]
         matrix.isPreview = false
         matrix.configureMessageActionsForChecks(
-            client: FakeClient(rooms: [ThreadRoom(id: room.id)]), main: StartOfTimeline(), thread: nil,
+            client: FakeClient(rooms: [threads]), main: StartOfTimeline(), thread: nil,
             rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
         let now = Date()
         var root = ChatMessage(

@@ -93,6 +93,12 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
         guard let root = threadRoots[eventId] else { throw URLError(.resourceUnavailable) }
         return FakeThreadReply(root: root)
     }
+    /// Events sent straight to the room, past its send queue, as their type and JSON content.
+    let raw = Recorder<(type: String, content: String)>()
+    override func sendRaw(eventType: String, content: String) async throws -> String {
+        raw.append((eventType, content))
+        return "$raw"
+    }
     override func members() async throws -> RoomMembersIterator {
         await membersGate.wait()
         return FakeMembers(memberList)
