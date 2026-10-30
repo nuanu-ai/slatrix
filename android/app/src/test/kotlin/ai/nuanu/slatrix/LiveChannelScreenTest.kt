@@ -6,6 +6,8 @@ import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
+import ai.nuanu.slatrix.core.ReplyPreview
+import ai.nuanu.slatrix.core.ThreadOrigin
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
@@ -34,6 +36,7 @@ import ai.nuanu.slatrix.ui.account.LocalAvatarLoader
 import kotlinx.coroutines.CompletableDeferred
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasProgressBarRangeInfo
 import androidx.compose.ui.test.hasScrollToIndexAction
@@ -326,6 +329,32 @@ class LiveChannelScreenTest {
         compose.onAllNodesWithContentDescription("Private channel").assertCountEquals(2)
         // Slack's composer names a private channel without a hash too.
         compose.onNodeWithContentDescription("Message design").assertIsDisplayed()
+    }
+
+    // capability: thread.send-to-channel
+    @Test fun aCopyOfAThreadReplySaysItRepliedToAThreadAndOpensIt() {
+        fun copy(id: String, body: String, reply: String) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", body, null,
+            0L, MessageKind.Text, MessageSendState.Sent, false, "S", 0,
+            replyTo = ReplyPreview(reply, ReplyPreview.State.Ready, "Sam", body), repliedToThread = true)
+        val origin = CompletableDeferred<ThreadOrigin?>()
+        var opened: String? = null
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(copy("copy", "On it", "\$reply"), copy("quote", "Done", "\$plain")),
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    onOpenThread = { opened = it }, loadThreadOrigin = { if (it == "\$reply") origin.await() else null })
+            }
+        }
+        // Until the thread is known its line holds its place, so the row keeps its height when it lands.
+        compose.onNodeWithText("replied to a thread:").assertIsDisplayed()
+        val before = compose.onNodeWithText("On it").getUnclippedBoundsInRoot()
+        // A message whose quote turns out not to be in a thread quotes it as any reply does.
+        compose.onNodeWithText("Sam").assertIsDisplayed()
+
+        origin.complete(ThreadOrigin("\$root", "Can we ship Friday?"))
+        compose.onNodeWithText("Can we ship Friday?").assertIsDisplayed().performClick()
+        assertEquals(before, compose.onNodeWithText("On it").getUnclippedBoundsInRoot())
+        compose.runOnIdle { assertEquals("\$root", opened) }
     }
 
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
