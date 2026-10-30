@@ -8,14 +8,29 @@ struct ReplyPreviewView: View {
     let origin: MessageActionTarget?
     var onOpen: ((String) -> Void)?
     @EnvironmentObject private var appearance: AppearanceStore
+    @State private var threadRoot: String?
 
     var body: some View {
         HStack(spacing: m.sp8) {
-            RoundedRectangle(cornerRadius: 2).fill(appearance.colors.textSecondary.opacity(0.4)).frame(width: 3)
+            // Slack's copy of a thread reply names its thread instead of quoting the same words.
+            if !message.repliedToThread {
+                RoundedRectangle(cornerRadius: 2).fill(appearance.colors.textSecondary.opacity(0.4)).frame(width: 3)
+            }
             // Every state takes the loaded preview's two lines, so the row keeps its height when the original lands.
             ZStack(alignment: .leading) {
                 lines(sender: " ", body: " ").hidden()
-                if preview.state == .ready {
+                if message.repliedToThread {
+                    Button {
+                        onOpen?(preview.eventID)
+                    } label: {
+                        VStack(alignment: .leading, spacing: m.sp4) {
+                            Text("replied to a thread:").font(m.font(.caption))
+                                .foregroundStyle(appearance.colors.textSecondary)
+                            Text(threadRoot ?? " ").font(m.font(.meta, .medium))
+                                .foregroundStyle(appearance.colors.accent)
+                        }.lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }.buttonStyle(.row).disabled(onOpen == nil).help("View thread")
+                } else if preview.state == .ready {
                     Button {
                         onOpen?(preview.eventID)
                     } label: {
@@ -42,6 +57,10 @@ struct ReplyPreviewView: View {
                 // task. Let the captured request finish so a thrown SDK error
                 // can still replace Pending, even when no terminal diff arrives.
                 Task { await matrix.loadReplyPreview(for: target) }
+            }
+            .task(id: message.repliedToThread ? preview.eventID : nil) {
+                guard message.repliedToThread else { return }
+                threadRoot = await matrix.threadRootPreview(roomID: message.roomID, replyID: preview.eventID)
             }
     }
 

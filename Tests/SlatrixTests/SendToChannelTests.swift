@@ -131,7 +131,7 @@ struct SendToChannelServiceTests {
                 id: "$root", roomID: "!room:example.org", senderID: "@bob:example.org", senderName: "Bob",
                 body: "Can we ship Friday?", timestamp: Date())
         ]
-        let root = await service.threadRoot(roomID: "!room:example.org", replyID: "$reply")
-        #expect(root?.body == "Can we ship Friday?")
+        let root = await service.threadRootPreview(roomID: "!room:example.org", replyID: "$reply")
+        #expect(root == "Can we ship Friday?")
     }
 }
