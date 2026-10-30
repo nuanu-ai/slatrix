@@ -18,7 +18,7 @@ enum ConversationNavigation {
     }
 
     /// The conversation `direction` away from `currentID` in a list as it is shown.
-    static func step(_ ordered: [ChatRoom], from currentID: String?, unreadOnly: Bool = false, direction: Int)
+    static func step(_ ordered: [ChatRoom], from currentID: String?, unreadOnly: Bool, direction: Int)
         -> String?
     {
         guard direction == -1 || direction == 1 else { return nil }

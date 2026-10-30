@@ -1287,7 +1287,6 @@ struct RootView: View {
             // Search results title themselves with the query.
             if route != .search {
                 HStack {
-                    // Slack's rail says "DMs" and its page "Direct messages".
                     Text(route.title).font(m.font(.title, .bold))
                     Spacer()
                     if route == .directory {
@@ -1646,9 +1645,8 @@ struct RootView: View {
         directMessagesColumn = true
         route = .home
         guard room?.isDirect != true else { return }
-        let direct = ChatRoom.directMessages(matrix.rooms)
-        let last = history.last { id in direct.contains { $0.id == id } }
-        guard let id = last ?? direct.first?.id else { return }
+        guard let id = ChatRoom.directMessageToOpen(matrix.rooms, visited: Array(history.prefix(historyIndex + 1)))
+        else { return }
         // Picked in the drawer, the list stays open there.
         let drawer = sidebarDrawer
         selectRoom(id)
@@ -2537,6 +2535,9 @@ struct RootView: View {
         history = []
         historyIndex = -1
         sidebarSearch = ""
+        directMessagesColumn = false
+        directMessageSearch = ""
+        unreadDirectMessagesOnly = false
         modals.current = nil
         publicDirectory = nil
         showRecovery = false
@@ -2670,17 +2671,22 @@ struct RootView: View {
             let direction = action.hasPrefix("previous") ? -1 : 1
             let currentID = pendingRoomID ?? matrix.selectedRoomID
             let unreadOnly = action.hasSuffix("unread")
-            // Through the list the sidebar column shows.
-            let target =
-                route == .home && directMessagesColumn
-                ? ConversationNavigation.step(
-                    ChatRoom.directMessages(
-                        matrix.rooms, matching: directMessageSearch, unreadOnly: unreadDirectMessagesOnly,
-                        keeping: matrix.selectedRoomID), from: currentID, unreadOnly: unreadOnly, direction: direction)
-                : ConversationNavigation.target(
-                    rooms: matrix.rooms.filter {
-                        sidebarSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(sidebarSearch)
-                    }, currentID: currentID, workspaceID: workspaceID, unreadOnly: unreadOnly, direction: direction)
+            let target: String?
+            if route == .home && directMessagesColumn {
+                // Through the DMs list, as the sidebar column shows it.
+                let shown = ChatRoom.directMessages(
+                    matrix.rooms, matching: directMessageSearch, unreadOnly: unreadDirectMessagesOnly,
+                    keeping: matrix.selectedRoomID)
+                target = ConversationNavigation.step(
+                    shown, from: currentID, unreadOnly: unreadOnly, direction: direction)
+            } else {
+                let shown = matrix.rooms.filter {
+                    sidebarSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(sidebarSearch)
+                }
+                target = ConversationNavigation.target(
+                    rooms: shown, currentID: currentID, workspaceID: workspaceID, unreadOnly: unreadOnly,
+                    direction: direction)
+            }
             if let target { selectRoom(target) }
         default: break
         }

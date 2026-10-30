@@ -47,6 +47,12 @@ struct ChatRoom: Identifiable, Hashable {
     /// channel reads as its bare name, like a person.
     var writtenName: String { isDirect || isPrivate ? name : "#" + name }
 
+    /// The direct message DMs opens beside its list: the one read last, else the newest.
+    static func directMessageToOpen(_ rooms: [ChatRoom], visited: [String]) -> String? {
+        let direct = directMessages(rooms)
+        return visited.last { id in direct.contains { $0.id == id } } ?? direct.first?.id
+    }
+
     /// The DMs list: the newest conversation first, then those with nothing to show yet by name. "Find a DM" narrows
     /// it by name, and Unreads to unread conversations and the one open.
     static func directMessages(

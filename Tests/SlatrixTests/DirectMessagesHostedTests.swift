@@ -46,6 +46,11 @@ struct DirectMessagesHostedTests {
         }
 
         #expect(await eventually { field("Find a conversation…") != nil })
+        // A channel read first, for going back to later.
+        let first = matrix.selectedRoomID
+        menu("next-conversation")
+        #expect(await eventually { matrix.selectedRoomID != first })
+        let channel = matrix.selectedRoomID
         menu("dms")
         let column = metrics.rail + SidebarLayout.defaultWidth
         #expect(await eventually { field("Find a DM").map { $0.maxX <= column } == true })
@@ -79,5 +84,19 @@ struct DirectMessagesHostedTests {
         // Switching workspace brings its conversations back.
         menu("workspace-1")
         #expect(await eventually { field("Find a conversation…") != nil && field("Find a DM") == nil })
+
+        // Back in DMs, the direct message read last stays open; going back to a channel leaves the list.
+        menu("dms")
+        #expect(await eventually { field("Find a DM") != nil })
+        #expect(matrix.selectedRoomID == id("Alex"))
+        for name in ["Julia", "Sam"] {
+            menu("back")
+            #expect(await eventually { matrix.selectedRoomID == id(name) && field("Find a DM") != nil })
+        }
+        menu("back")
+        #expect(
+            await eventually {
+                matrix.selectedRoomID == channel && field("Find a conversation…") != nil && field("Find a DM") == nil
+            })
     }
 }
