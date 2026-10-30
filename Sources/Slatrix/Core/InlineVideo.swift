@@ -11,6 +11,7 @@ import Foundation
     @ObservationIgnored private var owner: ObjectIdentifier?
     @ObservationIgnored private var lease: AttachmentPreviewLease?
     @ObservationIgnored private var loading: Task<Void, Never>?
+    @ObservationIgnored private var failure: NSKeyValueObservation?
 
     /// Plays `message` in the timeline `owner` shows, stopping whatever played before.
     func play(_ message: ChatMessage, matrix: MatrixService, from owner: AnyObject) {
@@ -26,6 +27,17 @@ import Foundation
                 self.lease = lease
                 let player = AVPlayer(url: lease.url)
                 self.player = player
+                // A file AVFoundation can't play ends it, back at the poster.
+                failure = player.currentItem?.observe(\.status) { [weak self] item, _ in
+                    guard item.status == .failed else { return }
+                    Task { @MainActor in
+                        guard let self, self.player === player else { return }
+                        self.stop()
+                        if matrix.notificationSessionID == session {
+                            matrix.errorMessage = "This video can’t be played."
+                        }
+                    }
+                }
                 player.play()
             } catch {
                 guard let self, !Task.isCancelled, self.eventID == eventID else { return }
@@ -40,6 +52,7 @@ import Foundation
     func stop() {
         loading?.cancel()
         loading = nil
+        failure = nil
         player?.pause()
         player = nil
         lease = nil

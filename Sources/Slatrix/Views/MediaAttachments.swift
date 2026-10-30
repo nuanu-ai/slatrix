@@ -464,6 +464,19 @@ private struct InlinePlayer: NSViewRepresentable {
 
 final class InlinePlayerView: AVPlayerView {
     private var scrolling: NSObjectProtocol?
+    private var started: NSKeyValueObservation?
+
+    /// Clear until its video plays, or shows where it was paused, so the poster shows meanwhile, not a black box.
+    override var player: AVPlayer? {
+        didSet {
+            guard player !== oldValue else { return }
+            alphaValue = 0
+            started = player?.observe(\.timeControlStatus, options: [.initial]) { [weak self] player, _ in
+                guard player.timeControlStatus == .playing || player.currentTime() > .zero else { return }
+                DispatchQueue.main.async { self?.alphaValue = 1 }
+            }
+        }
+    }
 
     override var mouseDownCanMoveWindow: Bool { false }
 
