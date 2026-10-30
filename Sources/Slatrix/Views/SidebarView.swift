@@ -8,6 +8,9 @@ struct SidebarView: View {
     @Binding var route: AppRoute
     @Binding var workspaceID: String?
     @Binding var search: String
+    /// "Find a DM" and the Unreads switch of the DMs list, which takes the column while DMs is picked.
+    @Binding var directMessageSearch: String
+    @Binding var unreadDirectMessagesOnly: Bool
     var draftRoomIDs: Set<String>
     var draftCount: Int? = nil
     var onSelect: (String) -> Void
@@ -45,7 +48,14 @@ struct SidebarView: View {
     var body: some View {
         HStack(spacing: 0) {
             rail
-            list
+            if route == .directMessages {
+                DirectMessagesColumn(
+                    matrix: matrix, search: $directMessageSearch, unreadOnly: $unreadDirectMessagesOnly,
+                    onSelect: onSelect, onCompose: { onCreate(.directMessage) }
+                ).frame(width: listWidth).background(colors.sidebar)
+            } else {
+                list
+            }
         }.foregroundStyle(colors.textBody)
     }
     private var list: some View {
@@ -365,7 +375,7 @@ private struct SidebarRoomRow: View, Equatable {
 
 /// A sidebar row's fill: Slack's strong selection, or a tint under the pointer. Hover is the row's own state, so
 /// moving the pointer redraws one row, never the list.
-private struct SidebarRowFill: ViewModifier {
+struct SidebarRowFill: ViewModifier {
     let selected: Bool
     @State private var hovering = false
     @Environment(\.metrics) private var m

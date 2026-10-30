@@ -185,6 +185,8 @@ struct Snapshots {
         }
         menu("toggle-sidebar")
         try write(await settledImage(hosting), "width-480-drawer-\(theme.rawValue)")
+        menu("dms")
+        try write(await settledImage(hosting), "width-480-drawer-dms-\(theme.rawValue)")
         menu("mark-read")
 
         // The same widths with a thread open, from the newest message's own context menu.
@@ -325,7 +327,8 @@ struct Snapshots {
         let sidebar = WithState(Set<String>()) { collapsed in
             SidebarView(
                 matrix: matrix, route: .constant(.home), workspaceID: .constant("preview.workspace"),
-                search: .constant(""), draftRoomIDs: ["preview.room.3"], onSelect: { _ in }, onCreate: { _ in },
+                search: .constant(""), directMessageSearch: .constant(""), unreadDirectMessagesOnly: .constant(false),
+                draftRoomIDs: ["preview.room.3"], onSelect: { _ in }, onCreate: { _ in },
                 onPreferences: {}, onProfile: {}, onSignOut: {}, onMarkUnread: { _ in }, onMarkRead: { _ in },
                 onInviteWorkspace: { _ in }, onEditWorkspace: { _ in }, onNotifications: { _ in },
                 onBrowseChannels: {}, collapsed: collapsed)

@@ -52,13 +52,14 @@ struct DirectMessagesHostedTests {
         // Beside the list, the newest direct message opens.
         #expect(await eventually { matrix.selectedRoomID == id("Sam") })
 
-        // The second row, Julia's, a row and a half under the field.
-        let below = try #require(field("Find a DM"))
+        // The second row, Julia's, a row and a half under the Unreads switch.
+        let below = try #require(
+            views(hosting).compactMap { $0 as? NSSwitch }.first.map { $0.convert($0.bounds, to: nil) })
         let row = NSHostingView(
             rootView: DirectMessageRow(room: ChatRoom(id: "!r:example.org", name: "Row", isDirect: true))
                 .frame(width: SidebarLayout.defaultWidth).environmentObject(appearance).environment(\.metrics, metrics)
         ).fittingSize.height
-        let point = NSPoint(x: below.midX, y: below.minY - metrics.sp16 - row * 1.5)
+        let point = NSPoint(x: metrics.rail + SidebarLayout.defaultWidth / 2, y: below.minY - metrics.sp8 - row * 1.5)
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             await drainMainActor()
             window.sendEvent(

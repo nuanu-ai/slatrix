@@ -41,9 +41,15 @@ struct ChatRoom: Identifiable, Hashable {
     /// Read for direct messages only, which the DMs page lists with it.
     var latest: LatestMessage? = nil
 
-    /// The DMs page: the newest conversation first, then those with nothing to show yet by name.
-    static func directMessages(_ rooms: [ChatRoom]) -> [ChatRoom] {
-        rooms.filter(\.isDirect).sorted {
+    /// The DMs list: the newest conversation first, then those with nothing to show yet by name. "Find a DM" narrows
+    /// it by name, and Unreads to unread conversations and the one open.
+    static func directMessages(
+        _ rooms: [ChatRoom], matching search: String = "", unreadOnly: Bool = false, keeping openID: String? = nil
+    ) -> [ChatRoom] {
+        rooms.filter {
+            $0.isDirect && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search))
+                && (!unreadOnly || UnreadBadge($0) != .none || $0.id == openID)
+        }.sorted {
             let (first, second) = ($0.latest?.timestamp ?? .distantPast, $1.latest?.timestamp ?? .distantPast)
             if first != second { return first > second }
             let names = $0.name.localizedStandardCompare($1.name)
