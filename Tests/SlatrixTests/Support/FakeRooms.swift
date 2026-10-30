@@ -125,12 +125,15 @@ final class FakeClient: Client, @unchecked Sendable {
 
     private var downloadCount = 0
     var downloads: Int { lock.withLock { downloadCount } }
+    /// What every downloaded file holds, under the name asked for, so a player knows its type.
+    var file = Data("downloaded".utf8)
     override func getMediaFile(
         mediaSource: MediaSource, filename: String?, mimeType: String, useCache: Bool, tempDir: String?
     ) async throws -> MediaFileHandle {
         lock.withLock { downloadCount += 1 }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("fake-media-" + UUID().uuidString)
-        try Data("downloaded".utf8).write(to: url)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "fake-media-" + UUID().uuidString + "-" + (filename ?? "file"))
+        try file.write(to: url)
         return FakeMediaFile(url)
     }
 
