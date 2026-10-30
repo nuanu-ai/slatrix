@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.FileKind
 import ai.nuanu.slatrix.core.ChannelMember
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.NotificationChoice
 import ai.nuanu.slatrix.core.NotificationSetting
@@ -35,6 +36,13 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -68,7 +76,8 @@ data class ChannelDetailsActions(
 )
 
 /** Every message in a conversation, threads included, to find what was shared, and asking for older ones. */
-data class SharedFiles(val state: ConversationState = ConversationState(), val onLoadMore: () -> Unit = {})
+data class SharedFiles(val state: ConversationState = ConversationState(), val loadPicture: PictureLoader = { _, _, _, _ -> null },
+    val onOpenFile: suspend (MessageAttachment) -> String? = { null }, val onLoadMore: () -> Unit = {})
 
 /** A conversation's pinned messages as they load, and unpinning one. */
 data class PinnedMessages(val state: ConversationState = ConversationState(), val onUnpin: (ConversationMessage) -> Unit = {})
@@ -91,19 +100,21 @@ fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetails
     LaunchedEffect(room.id, loads) { notifications = attempt { actions.notifications() } }
     // Outlives the pages, so going back doesn't cancel a change on its way.
     val scope = rememberCoroutineScope()
-    val open = { next: DetailsPage -> opener = page; page = next }
-    val details = { page = DetailsPage.Details }
-    when (page) {
+    // Whether the page showing came back from one over it, so it shows at once rather than easing in.
+    var returning by remember { mutableStateOf(false) }
+    val open = { next: DetailsPage -> opener = page; page = next; returning = false }
+    val details = { page = DetailsPage.Details; returning = true }
+    CompositionLocalProvider(LocalReturning provides returning) { when (page) {
         DetailsPage.Details -> DetailsPage(room, notifications?.getOrNull(), actions, scope, onLeft, onBack, open, spaces.isNotEmpty())
         DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, onPerson, details)
         DetailsPage.Edit -> EditPage(room, actions, scope, details)
         DetailsPage.Notifications -> NotificationsPage(notifications, actions, scope, { notifications = Result.success(it) },
             { loads++ }, details)
-        DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener }
+        DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener; returning = true }
         DetailsPage.Pins -> PinsPage(room, me, actions.pins(), onOpenMessage, details)
         DetailsPage.Files -> FilesPage(actions.files(), onOpenMessage, details)
         DetailsPage.Workspaces -> WorkspacesPage(room, spaces, actions, scope, details)
-    }
+    } }
 }
 
 private fun noun(room: RoomSummary) = if (room.direct) "conversation" else "channel"
@@ -336,14 +347,24 @@ private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpe
     }
 }
 
+/** What Files shows, as the Mac's filter does: every file (images too), only images, or only links. */
+private enum class FilesFilter { All, Files, Images, Links }
+
 /**
- * The files and links shared in the conversation, newest first, as the Mac's Files lists them: a file opens its message
- * where it is, and a link opens in the browser.
+ * The files and links shared in the conversation, newest first, as the Mac's Files lists them. An image opens in the
+ * viewer, another file with the phone's app for it, a link in the browser; a message whose file isn't known opens where
+ * it is.
  */
 @Composable
 private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBack: () -> Unit) {
     val colors = SlatrixTheme.colors
     val uris = LocalUriHandler.current
+    val scope = rememberCoroutineScope()
+    var filter by rememberSaveable { mutableStateOf(FilesFilter.All) }
+    var opening by remember { mutableStateOf(emptySet<String>()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var viewing by remember { mutableStateOf<Pair<MessageAttachment, ImageBitmap?>?>(null) }
+    viewing?.let { (attachment, placeholder) -> MediaViewer(attachment, placeholder, files.loadPicture) { viewing = null } }
     val shared = remember(files.state.rows) {
         files.state.rows.asReversed().filterIsInstance<ConversationMessage>().flatMap { message ->
             if (message.kind == MessageKind.Attachment) listOf(message to null)
@@ -351,44 +372,100 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
                 .distinct().map { message to it }
         }
     }
-    PushedPage("Files", onBack) {
-        items(shared, key = { (message, link) -> message.id + (link ?: "") }) { (message, link) ->
-            Row(Modifier.fillMaxWidth().clickable { if (link != null) uris.openUri(link) else message.eventId?.let(onOpenMessage) }
-                .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+    val shown = remember(shared, filter) {
+        shared.filter { (message, link) ->
+            when (filter) {
+                FilesFilter.All -> true
+                FilesFilter.Files -> link == null && message.attachment != null
+                FilesFilter.Images -> link == null && message.attachment?.kind == MessageAttachment.Kind.Image
+                FilesFilter.Links -> link != null
+            }
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        PushedPage("Files", onBack) {
+            // Stays above the list as it scrolls, as the Mac's filter bar does.
+            stickyHeader(key = "filters") {
+                Row(Modifier.fillMaxWidth().background(colors.canvas).horizontalScroll(rememberScrollState())
+                    .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
+                    horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                    FilesFilter.entries.forEach { ChoiceChip(it.name, it == filter) { filter = it } }
+                }
+            }
+            items(shown, key = { (message, link) -> message.id + (link ?: "") }) { (message, link) ->
                 // A file shows by its name and type, as its row in the conversation does, not by its caption.
                 val file = message.attachment.takeIf { link == null }
                 val kind = file?.let { FileKind.of(it.name, it.mimeType) }
-                if (kind != null) FileTile(kind)
-                else Box(Modifier.size(UiMetrics.Avatar).background(colors.raised, MaterialTheme.shapes.small), contentAlignment = Alignment.Center) {
-                    Icon(if (link != null) Icons.Outlined.Link else Icons.Outlined.Description, null, Modifier.size(UiMetrics.Icon),
-                        tint = colors.textSecondary)
+                val thumbnail = if (file?.kind == MessageAttachment.Kind.Image) {
+                    val pixels = with(LocalDensity.current) { UiMetrics.FileTile.roundToPx() }
+                    picture(file, pixels, pixels, false, files.loadPicture)
+                } else null
+                Row(Modifier.fillMaxWidth().clickable(enabled = message.id !in opening) {
+                    when {
+                        link != null -> uris.openUri(link)
+                        file?.kind == MessageAttachment.Kind.Image -> viewing = file to thumbnail
+                        // Marked before it starts, so a second tap before the row disables opens nothing more.
+                        file != null -> if (message.id !in opening) {
+                            opening = opening + message.id
+                            scope.launch {
+                                try { files.onOpenFile(file)?.let { error = it } } finally { opening = opening - message.id }
+                            }
+                        }
+                        else -> message.eventId?.let(onOpenMessage)
+                    }
+                }.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+                    when {
+                        // An image shows its own small picture over its kind's tile, which holds the place while it loads.
+                        file?.kind == MessageAttachment.Kind.Image -> Box(Modifier.size(UiMetrics.FileTile).clip(MaterialTheme.shapes.medium)) {
+                            FileTile(kind ?: FileKind.Image)
+                            thumbnail?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                        }
+                        kind != null -> FileTile(kind)
+                        else -> Box(Modifier.size(UiMetrics.FileTile).background(colors.raised, MaterialTheme.shapes.medium),
+                            contentAlignment = Alignment.Center) {
+                            Icon(if (link != null) Icons.Outlined.Link else Icons.Outlined.Description, null, Modifier.size(UiMetrics.Icon),
+                                tint = colors.textSecondary)
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(link ?: file?.name ?: message.body, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold,
+                            color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(listOfNotNull(file?.let { kind?.label(it.name) }, "Shared by ${message.senderName}", dayLabel(message.timestamp))
+                            .joinToString(" · "), style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    // A file downloading to open shows it after the usual wait, in space the row always holds, as its row in the
+                    // conversation does.
+                    if (file != null && file.kind != MessageAttachment.Kind.Image) Box(Modifier.size(UiMetrics.Icon)) {
+                        val busy = message.id in opening
+                        var late by remember { mutableStateOf(false) }
+                        LaunchedEffect(busy) { late = false; if (busy) { delay(UiMetrics.ProgressDelayMillis); late = true } }
+                        if (busy && late) CircularProgressIndicator(Modifier.fillMaxSize())
+                    }
                 }
-                Column(Modifier.weight(1f)) {
-                    Text(link ?: file?.name ?: message.body, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold,
-                        color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(listOfNotNull(file?.let { kind?.label(it.name) }, "Shared by ${message.senderName}", dayLabel(message.timestamp))
-                        .joinToString(" · "), style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            val state = files.state
+            when {
+                state.loading -> item { DelayedProgress() }
+                state.error != null -> item {
+                    NoteLine(state.error, colors.textSecondary)
+                    TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
+                }
+                else -> {
+                    if (shown.isEmpty() && !state.loadingHistory) item { NoteLine("Nothing shared yet", colors.textSecondary) }
+                    // Older history is asked for, as on the Mac, rather than paged through on its own in a long conversation. The
+                    // button stays while a page loads, so the end of the list doesn't move.
+                    if (state.hasMore) item {
+                        TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall),
+                            enabled = !state.loadingHistory) { Text("Load more") }
+                    }
                 }
             }
         }
-        val state = files.state
-        when {
-            state.loading -> item { DelayedProgress() }
-            state.error != null -> item {
-                NoteLine(state.error, colors.textSecondary)
-                TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
-            }
-            else -> {
-                if (shared.isEmpty() && !state.loadingHistory) item { NoteLine("Nothing shared yet", colors.textSecondary) }
-                // Older history is asked for, as on the Mac, rather than paged through on its own in a long conversation. The
-                // button stays while a page loads, so the end of the list doesn't move.
-                if (state.hasMore) item {
-                    TextButton(onClick = files.onLoadMore, Modifier.padding(horizontal = UiMetrics.GapSmall),
-                        enabled = !state.loadingHistory) { Text("Load more") }
-                }
-            }
+        error?.let { message ->
+            LaunchedEffect(message) { delay(UiMetrics.NoticeMillis); error = null }
+            Snackbar(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(UiMetrics.GapLarge)) { Text(message) }
         }
     }
 }

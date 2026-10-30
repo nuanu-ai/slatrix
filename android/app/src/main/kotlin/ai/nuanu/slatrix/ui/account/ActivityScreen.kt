@@ -68,7 +68,7 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
             .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapLarge),
             horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-            ActivityFilter.entries.forEach { ActivityChip(it.label, it == filter) { filter = it } }
+            ActivityFilter.entries.forEach { ChoiceChip(it.label, it == filter) { filter = it } }
         }
         // Threads lists the threads you're in, as Slack's Threads view does, rather than only the replies that notified you.
         if (filter == ActivityFilter.Threads) threads(onOpenThread)
@@ -91,7 +91,7 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit
 }
 
 @Composable
-private fun ActivityChip(label: String, selected: Boolean, onClick: () -> Unit) {
+internal fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val colors = SlatrixTheme.colors
     Surface(onClick = onClick, Modifier.semantics { this.selected = selected }, shape = MaterialTheme.shapes.medium,
         color = if (selected) colors.textPrimary else colors.canvas, contentColor = if (selected) colors.canvas else colors.textPrimary,

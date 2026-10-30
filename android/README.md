@@ -24,16 +24,19 @@ Android lint rejects raw Compose colors and literal sizes outside that package.
 Choose a homeserver, sign in with the method it offers, and verify the device with
 another device or a recovery key. Home lists starred conversations, channels and direct
 messages. Long-press a conversation to star or unstar it. The Search tab
-finds channels and people as you type, and messages when you search, with Slack's
+finds channels and people as you type, people in the server's directory too,, and messages when you search, with Slack's
 `in:` and `from:`. An empty search field lists your recent searches. Tap the workspace
 icon or name to switch workspaces; direct messages remain available in every workspace.
 Invitations to channels, direct messages and workspaces lead Home; open one to join or
 decline it.
 Tap Channels to browse the open workspace's channels, or the server's public ones,
 and join one; Add channel offers that or creating a private channel in the workspace.
-Tap a name, a picture or a mention to open that person's profile, and Message to open
+The + on Home and DMs starts a new message: find someone by name or Matrix ID and open
+your direct message with them. Tap a name, a picture or a mention to open that person's profile, and Message to open
 your direct message with them, made if there is none; a direct message's header opens
 the other person.
+In You, View profile opens your profile; Edit profile there changes your display name and
+photo, cropped to a square.
 Open You, then Preferences, to change the color mode and sidebar palette.
 Color mode follows the system until you choose Light or Dark.
 

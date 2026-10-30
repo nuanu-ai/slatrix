@@ -11,6 +11,7 @@ import ai.nuanu.slatrix.core.MatrixMedia
 import java.io.File
 import ai.nuanu.slatrix.core.MatrixChannel
 import ai.nuanu.slatrix.core.MatrixForward
+import ai.nuanu.slatrix.core.MatrixLinks
 import org.matrix.rustcomponents.sdk.MessageType
 import ai.nuanu.slatrix.core.MatrixSaved
 import ai.nuanu.slatrix.core.SavedMessage
@@ -24,6 +25,7 @@ import ai.nuanu.slatrix.core.MatrixAvatars
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.MatrixSearch
 import ai.nuanu.slatrix.core.MatrixPeople
+import ai.nuanu.slatrix.core.PeopleSearchState
 import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.core.MessageSearchState
 import ai.nuanu.slatrix.core.RecentSearchStore
@@ -97,10 +99,13 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
     var preferences by rememberSaveable { mutableStateOf(false) }
+    var returning by remember { mutableStateOf(false) }
     // An invitation opened from Home, pushed over it.
     var invitation by rememberSaveable { mutableStateOf<String?>(null) }
     // Someone's profile, pushed over whatever is open, and the name to show until theirs loads.
     var person by rememberSaveable { mutableStateOf<Pair<String, String?>?>(null) }
+    var editingProfile by rememberSaveable { mutableStateOf(false) }
+    var newMessage by rememberSaveable { mutableStateOf(false) }
     // Browse channels or Create a channel, pushed over Home; null while neither is open.
     var channels by rememberSaveable { mutableStateOf<ChannelPage?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -182,25 +187,29 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         channels = null
                         person = null
                         later = false
+                        editingProfile = false
+                        newMessage = false
                         jump(room, target.eventId, target.threadRoot)
                         onNotificationHandled(target)
                     }
                 }
                 CompositionLocalProvider(LocalAvatarLoader provides avatars) { Box(Modifier.fillMaxSize()) {
-                    ConnectedAccountScreen(identityState,
+                    ProvideOffline(rooms?.offline) { ConnectedAccountScreen(identityState,
                         { identity?.requestVerification() }, { identity?.acceptVerification() },
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {
                         LiveWorkspace(when {
                             preferences -> { val client = (state as AccountState.Connected).client; { LivePreferencesScreen(dark, darkOverride, palette,
                                 { darkOverride = it; appearance.darkMode = it },
-                                { palette = it; appearance.paletteName = it.name }, { preferences = false }) {
+                                { palette = it; appearance.paletteName = it.name }, { preferences = false; returning = true }) {
                                     LiveNotificationSettings(userId) { client.getNotificationSettings() }
                                 } } }
                             invitation != null -> { { invitation?.let { id ->
                                 LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
                                     { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
                             } } }
+                            editingProfile -> { { LiveEditProfile((state as? AccountState.Connected)?.client, userId) { editingProfile = false } } }
+                            newMessage -> { { LiveNewMessage(userId, people, rooms, { room -> newMessage = false; workspace?.open(room) }) { newMessage = false } } }
                             person != null -> { { person?.let { (id, name) ->
                                 LivePersonProfile(id, name, userId, people, rooms?.state, { room ->
                                     person = null
@@ -208,7 +217,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     threads?.back()
                                     // Message from the conversation already open just goes back to it, where you were.
                                     if (selected?.room?.id != room.id) workspace?.open(room)
-                                }) { person = null }
+                                }, onEdit = { editingProfile = true }) { person = null }
                             } } }
                             channels != null -> { {
                                 val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
@@ -216,8 +225,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
                                     openChannel, { notice = it }) { channels = null }
                             } }
-                            you -> { { LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() }, { preferences = true }, account::signOut,
-                                onBack = { you = false }, avatarUrl = userAvatarUrl) } }
+                            // Back from Preferences shows You at once.
+                            you -> { { CompositionLocalProvider(LocalReturning provides returning) {
+                                LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() },
+                                    { preferences = true; returning = false }, account::signOut, onViewProfile = { person = userId to null },
+                                    onBack = { you = false }, avatarUrl = userAvatarUrl)
+                            } } }
                             later -> { { LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
                                 { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
                                     // A saved reply opens in its thread, so it is looked up first, with Later still up.
@@ -238,14 +251,14 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } } } }
                             else -> null
                         }) {
-                            LiveHome(userId, userAvatarUrl, rooms, workspace, search, jump, { you = true }, selectedSpaceId, chooseSpace, { channels = it },
-                                saved.size, { later = true }, { invitation = it }) {
+                            LiveHome(userId, userAvatarUrl, rooms, workspace, search, people, jump, { you = true }, selectedSpaceId, chooseSpace,
+                                { channels = it }, saved.size, { later = true }, { invitation = it }, { newMessage = true }, { id, name -> person = id to name }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
                             }
                         }
-                    }
+                    } }
                     notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
                     // One place for both, so a notice never sits on top of the account's warning.
                     (notice ?: (state as AccountState.Connected).warning)?.let { text ->
@@ -303,9 +316,15 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     val profile = { id: String -> onPerson(id, timeline.rows.firstNotNullOfOrNull { (it as? ConversationMessage)?.takeIf { row -> row.senderId == id }?.senderName }) }
     // The message and the copy read when Forward was tapped, so the copy is the message the page shows.
     var forwarding by remember { mutableStateOf<Pair<ConversationMessage, MessageType>?>(null) }
-    var forwarded by remember { mutableStateOf<String?>(null) }
-    forwarded?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); forwarded = null } }
+    var notice by remember { mutableStateOf<String?>(null) }
+    notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
     Box(Modifier.fillMaxSize()) {
+        // A Matrix link in a message opens here; a message in a thread opens in its thread, so it is looked up first.
+        ProvideMatrixLinks({ roomList?.value?.rooms.orEmpty() }, { alias -> rooms?.client?.let { MatrixLinks.roomIdOf(it, alias) } },
+            { target, event ->
+                if (event != null) scope.launch { jump(target, event, main?.threadRootOf(target.id, event)) }
+                else { if (open.threadRoot != null) owner?.back(); main?.open(target) }
+            }, profile, { notice = it }) {
         LiveChannelScreen(room, timeline, draft, { composer?.edit(it); if (draft.target !is ComposerTarget.Edit) open.typing?.changed(it) }, { composer?.send(); open.typing?.stopped() },
             { owner?.back() }, { conversation?.loadOlder() },
             { event ->
@@ -324,7 +343,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                     actions.copy(saved = savedHere, onSave = { message, save ->
                         message.eventId?.takeIf { (it in savedHere) != save }?.let { onToggleSaved(open.room.id, it) }
                     }, onForward = { m ->
-                        scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { forwarded = "This message can’t be forwarded." } }
+                        scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { notice = "This message can’t be forwarded." } }
                     }, onMarkUnread = markUnread.takeIf { open.threadRoot == null })
                 }
             },
@@ -338,6 +357,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { attachment, width, height, full -> media.picture(attachment, width, height, full) },
             { openAttachment(context, media, it) }, { media.file(it) }, { counterpart?.let { onPerson(it.id, it.name) } ?: run { details = true } },
             typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty(), onPerson = profile)
+        }
         val actions = remember(rooms, open.room.id, conversation) {
             rooms?.client?.let { client ->
                 val channel = MatrixChannel(client, open.room.id)
@@ -355,7 +375,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                     val files = rememberConversation(client, open.room.id, ConversationView.Files)
                     val state = files?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load files")
                     // Asks for the next page, which after a failed one is that page again.
-                    SharedFiles(state) { files?.loadOlder() }
+                    SharedFiles(state, { attachment, width, height, full -> media.picture(attachment, width, height, full) },
+                        { openAttachment(context, media, it) }) { files?.loadOlder() }
                 })
             }
         }
@@ -373,10 +394,10 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 rooms?.client?.let { MatrixForward(it).forward(content, open.room.id, destination.id) } ?: "Couldn’t forward this message."
             }, { destination ->
                 forwarding = null
-                forwarded = if (destination.direct) "Forwarded to ${destination.name}." else "Forwarded to #${destination.name}."
+                notice = if (destination.direct) "Forwarded to ${destination.name}." else "Forwarded to #${destination.name}."
             }) { forwarding = null }
         }
-        forwarded?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
+        notice?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
     }
 }
 
@@ -390,8 +411,10 @@ private fun rememberConversation(client: Client, roomId: String, view: Conversat
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
 @Composable
 private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
+    people: MatrixPeople?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, laterCount: Int, onLater: () -> Unit, onInvitation: (String) -> Unit,
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, laterCount: Int, onLater: () -> Unit, onInvitation: (String) -> Unit, onNewMessage: () -> Unit,
+    onPerson: (userId: String, name: String?) -> Unit,
     activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
@@ -402,6 +425,7 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
         onInvitation = onInvitation,
+        onNewMessage = onNewMessage,
         onBrowseChannels = { onChannels(ChannelPage.Browse) }, onCreateChannel = { onChannels(ChannelPage.Create) },
         onMarkUnread = { id, unread ->
             (rooms?.setUnread(id, unread) ?: false).also { if (it && !unread) PushNotifications(context).clear(id) }
@@ -424,7 +448,8 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
                     state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
                         scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
-                }, recents, { recents = recentStore.add(it) }, open)
+                }, recents, { recents = recentStore.add(it) }, people?.results?.collectAsState()?.value ?: PeopleSearchState(),
+                { people?.search(it) }, { onPerson(it.id, it.name) }, open)
         }, userAvatarUrl = userAvatarUrl, activity = activity)
 }
 

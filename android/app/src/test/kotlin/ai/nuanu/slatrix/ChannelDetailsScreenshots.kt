@@ -3,7 +3,10 @@ package ai.nuanu.slatrix
 import ai.nuanu.slatrix.core.ChannelMember
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
+import org.matrix.rustcomponents.sdk.MediaSource
+import org.matrix.rustcomponents.sdk.NoHandle
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.NotificationChoice
 import ai.nuanu.slatrix.core.NotificationSetting
@@ -58,9 +61,15 @@ class ChannelDetailsScreenshots(private val dark: Boolean, private val fontScale
             notifications = { NotificationSetting(NotificationChoice.Default, NotificationChoice.Mentions) },
             pins = { PinnedMessages(ConversationState(pinned, loading = false)) },
             files = {
-                SharedFiles(ConversationState(listOf(message("c", "Jordan", "onboarding-v3.fig", 40).copy(kind = MessageKind.Attachment),
+                fun shared(id: String, sender: String, name: String, minutes: Int, kind: MessageAttachment.Kind, mime: String) =
+                    message(id, sender, name, minutes).copy(kind = MessageKind.Attachment, attachment = MessageAttachment(kind, name, mime,
+                        240_000, 1600, 900, object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/$id" }))
+                SharedFiles(ConversationState(listOf(shared("c", "Jordan", "onboarding-v3.key", 40, MessageAttachment.Kind.File,
+                    "application/x-iwork-keynote-sffkey"),
                     message("d", "Mira", "Research notes: https://example.org/research/onboarding", 50),
-                    message("e", "Avery", "Q3 roadmap.pdf", 60).copy(kind = MessageKind.Attachment)), loading = false, hasMore = true))
+                    shared("f", "Mira", "whiteboard.jpg", 55, MessageAttachment.Kind.Image, "image/jpeg"),
+                    shared("e", "Avery", "Q3 roadmap.pdf", 60, MessageAttachment.Kind.File, "application/pdf")),
+                    loading = false, hasMore = true))
             })
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {

@@ -10,6 +10,7 @@ import ai.nuanu.slatrix.core.WorkspaceRail
 import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.StatusBarOverWorkspaceBar
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -77,6 +78,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     onMarkAllRead: suspend (List<String>) -> List<String> = { emptyList() },
     /** How many messages wait in Later, for its card at the top of Home; null leaves the card out. */
     laterCount: Int? = null, onLater: () -> Unit = {},
+    onNewMessage: (() -> Unit)? = null,
     search: @Composable () -> Unit = {}, userAvatarUrl: String? = null, activity: @Composable () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     var actions by remember { mutableStateOf<String?>(null) }
@@ -131,13 +133,24 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                 HomeHeader(tab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
                 Surface(Modifier.weight(1f).fillMaxWidth(), shape = SlatrixTheme.topPanelShape, color = colors.canvas) {
                     Box(Modifier.fillMaxSize()) {
+                        // The lists end clear of the +, so it never covers their last row.
+                        val bottom = if (onNewMessage == null) UiMetrics.GapSmall else UiMetrics.Fab + UiMetrics.GapLarge
                         when (tab) {
                             HomeTab.Home -> HomeList(homeList, shown, selectedSpaceId, onRoom, onBrowseChannels,
                                 (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } },
-                                laterCount?.let { count -> { LaterCard(count, onLater) } }, onInvitation) { actions = it.id }
-                            HomeTab.Dms -> DirectList(directList, shown, onRoom) { actions = it.id }
+                                laterCount?.let { count -> { LaterCard(count, onLater) } }, onInvitation, bottom) { actions = it.id }
+                            HomeTab.Dms -> DirectList(directList, shown, onRoom, bottom) { actions = it.id }
                             HomeTab.Activity -> activity()
                             HomeTab.Search -> search()
+                        }
+                        OfflineBanner()
+                        // Slack's + on Home and DMs, which starts a new message.
+                        if (onNewMessage != null && (tab == HomeTab.Home || tab == HomeTab.Dms)) {
+                            FloatingActionButton(onNewMessage, Modifier.align(Alignment.BottomEnd)
+                                .padding(end = UiMetrics.GapLarge, bottom = UiMetrics.GapSmall).semantics { contentDescription = "New message" },
+                                shape = MaterialTheme.shapes.large, containerColor = colors.textPrimary, contentColor = colors.canvas) {
+                                Icon(SlackIcons.Plus, null, Modifier.size(UiMetrics.LargeIcon))
+                            }
                         }
                         val failure = notice
                         if (failure != null) {
@@ -243,14 +256,10 @@ private fun HomeHeader(tab: HomeTab, userId: String, userAvatarUrl: String?, sta
 }
 
 /** Slack's workspace switcher: each workspace's icon and name, the open one checked. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, onSpace: (String?) -> Unit, onDismiss: () -> Unit) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
     val entries = remember(state.spaces, state.rooms) { WorkspaceRail.entries(state.spaces, state.rooms) }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, shape = SlatrixTheme.topPanelShape,
-        containerColor = SlatrixTheme.colors.overlay) {
+    BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             Text("Workspaces", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
                 style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -259,7 +268,7 @@ private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, on
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow)
                     .selectable(selected, role = Role.RadioButton) {
                         onSpace(space?.id)
-                        scope.launch { sheet.hide() }.invokeOnCompletion { onDismiss() }
+                        onDismiss()
                     }.padding(horizontal = UiMetrics.GapLarge),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
                     WorkspaceIcon(space, UiMetrics.ListAvatar)
@@ -298,7 +307,7 @@ private enum class HomeSection(val label: String, val icon: ImageVector) {
 
 @Composable
 private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId: String?, onRoom: (String) -> Unit,
-    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, cards: (@Composable () -> Unit)?, onInvitation: (String) -> Unit,
+    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, cards: (@Composable () -> Unit)?, onInvitation: (String) -> Unit, bottom: Dp,
     onActions: (RoomSummary) -> Unit) {
     // A saved workspace's channels are known only with its spaces, so its list waits for them rather than filling in.
     val waiting = state.loading || (selectedSpaceId != null && !state.spacesKnown)
@@ -312,7 +321,7 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
         )
     }
     var collapsed by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
+    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(top = UiMetrics.GapSmall, bottom = bottom)) {
         // Slack's cards above the sections; they're kept on this device, so they show while the list loads.
         if (cards != null) item(key = "cards") {
             Column {
@@ -386,9 +395,9 @@ private fun SectionDivider() {
 }
 
 @Composable
-private fun DirectList(list: LazyListState, state: RoomListState, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) {
+private fun DirectList(list: LazyListState, state: RoomListState, onRoom: (String) -> Unit, bottom: Dp, onActions: (RoomSummary) -> Unit) {
     val direct = remember(state.rooms) { state.rooms.filter { it.direct } }
-    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
+    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(top = UiMetrics.GapSmall, bottom = bottom)) {
         if (state.loading) item { ConnectionIndicator(true, null) }
         items(direct, key = { it.id }) { LiveDirectRow(it, onRoom, onActions) }
         if (!state.loading && direct.isEmpty()) item { EmptyList("No direct messages") }
@@ -455,17 +464,13 @@ private fun LiveDirectRow(room: RoomSummary, onRoom: (String) -> Unit, onActions
 }
 
 /** Slack's long-press sheet for a conversation: its name, then what can be done with it. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConversationActions(room: RoomSummary, anyUnread: Boolean, onStar: (Boolean) -> Unit, onMarkUnread: (Boolean) -> Unit,
     onMarkAllRead: () -> Unit, onDismiss: () -> Unit) {
     val noun = if (room.direct) "conversation" else "channel"
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
-    // Applied once the sheet is gone, so its labels don't flip while it eases out.
-    fun afterHiding(action: () -> Unit) { scope.launch { sheet.hide() }.invokeOnCompletion { action(); onDismiss() } }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, shape = SlatrixTheme.topPanelShape,
-        containerColor = SlatrixTheme.colors.overlay) {
+    // The sheet closes at once, so an action applies as it goes.
+    fun afterHiding(action: () -> Unit) { action(); onDismiss() }
+    BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             Text(room.name, Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
                 style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)

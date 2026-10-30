@@ -28,7 +28,6 @@ import org.matrix.rustcomponents.sdk.FileInfo
 import org.matrix.rustcomponents.sdk.ImageInfo
 import org.matrix.rustcomponents.sdk.UploadParameters
 import org.matrix.rustcomponents.sdk.UploadSource
-import org.matrix.rustcomponents.sdk.VideoInfo
 import org.matrix.rustcomponents.sdk.EditedContent
 import org.matrix.rustcomponents.sdk.EmbeddedEventDetails
 import org.matrix.rustcomponents.sdk.EventOrTransactionId
@@ -530,9 +529,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                         val params = UploadParameters(UploadSource.File(attachment.path), null, null, null, null,
                             threadRoot?.let(::threadRelation))
                         val size = attachment.size.toULong()
-                        val kind = if (attachment.mimeType.startsWith("video/")) AttachmentKind.Video(VideoInfo(
-                            attachment.durationMillis?.let(java.time.Duration::ofMillis), attachment.height?.toULong(),
-                            attachment.width?.toULong(), attachment.mimeType, size, null, null, null), null)
+                        val kind = if (attachment.mimeType.startsWith("video/")) VideoUpload.kind(attachment)
                         else if (attachment.width != null && attachment.height != null) AttachmentKind.Image(
                             ImageInfo(attachment.height.toULong(), attachment.width.toULong(), attachment.mimeType, size, null, null, null, null),
                             null)
@@ -620,6 +617,15 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      * Marks the conversation unread, as Slack's Mark unread on a message does. Matrix can't move the fully-read marker
      * back, so it sets the room's unread flag; while the conversation stays open, its newest message doesn't read it again.
      */
+    /**
+     * Coming back to this conversation kept open: last visit's jump, its start at the New line and any Mark unread hold
+     * stay behind, so it opens where the reader left it and reads as usual.
+     */
+    fun revisit() {
+        mutableState.update { it.copy(highlight = null, startsAtUnread = false) }
+        operations.launch { readLock.withLock { heldUnread = false } }
+    }
+
     suspend fun markUnread(): Boolean {
         if (!lifetime.isActive) return false
         val task = operations.async {

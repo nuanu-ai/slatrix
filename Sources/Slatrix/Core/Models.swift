@@ -19,6 +19,8 @@ struct ChatRoom: Identifiable, Hashable {
     var topic: String = ""
     var isDirect = false
     var isEncrypted = false
+    /// Slack's private channel: no one joins without an invitation.
+    var isPrivate = false
     var unread = 0
     var unreadMessages = 0
     var isMarkedUnread = false
@@ -40,6 +42,10 @@ struct ChatRoom: Identifiable, Hashable {
     var canPostMessages: Bool? = nil
     /// Read for direct messages only, which the DMs page lists with it.
     var latest: LatestMessage? = nil
+
+    /// The name in running text: Slack's "#design" for a channel anyone can join. Text has no lock, so a private
+    /// channel reads as its bare name, like a person.
+    var writtenName: String { isDirect || isPrivate ? name : "#" + name }
 
     /// The DMs list: the newest conversation first, then those with nothing to show yet by name. "Find a DM" narrows
     /// it by name, and Unreads to unread conversations and the one open.

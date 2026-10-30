@@ -10,6 +10,8 @@ object UiMetrics {
     val GapSection = 24.dp
     val Avatar = 40.dp
     val ProfileAvatar = 56.dp
+    /** Slack's floating + button. */
+    val Fab = 56.dp
     /** A profile page's picture. */
     val ProfilePhoto = 120.dp
     val Touch = 48.dp
@@ -21,6 +23,13 @@ object UiMetrics {
     val Icon = 20.dp
     val LargeIcon = 24.dp
     val Divider = 1.dp
+    /** The grab handle atop a bottom sheet. */
+    val SheetHandleWidth = 32.dp
+    val SheetHandleHeight = 4.dp
+    /** How far down a sheet is dragged, as a share of its height, before letting go closes it. */
+    const val SheetDismissShare = 0.25f
+    /** How fast a flick down closes a sheet, per second. */
+    val SheetDismissVelocity = 1_000.dp
     val CompactAvatar = 24.dp
     val ListAvatar = 36.dp
     val HeaderAvatar = 32.dp
@@ -31,6 +40,8 @@ object UiMetrics {
     val HomeCard = 100.dp
     const val ProgressDelayMillis = 400L
     const val NoticeMillis = 4_000L
+    /** How long the connection must be down before the offline banner shows, as on the Mac. */
+    const val ConnectionNoticeMillis = 2_000L
     /** How long a message jumped to stays highlighted, as on the Mac. */
     const val HighlightMillis = 1_500L
     val ExpandedWidth = 600.dp

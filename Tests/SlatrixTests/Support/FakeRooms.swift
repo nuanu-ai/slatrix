@@ -10,7 +10,7 @@ final class FakeCancellableHandle: TaskHandle, @unchecked Sendable {
 
 func roomInfo(
     id: String, name: String? = nil, membership: Membership = .joined, isSpace: Bool = false, isDirect: Bool = false,
-    unread: UInt64 = 0
+    unread: UInt64 = 0, joinRule: JoinRule? = nil
 ) -> RoomInfo {
     RoomInfo(
         id: id, encryptionState: .encrypted, creators: nil, displayName: name ?? id, rawName: name, topic: nil,
@@ -21,7 +21,8 @@ func roomInfo(
         cachedUserDefinedNotificationMode: nil, hasRoomCall: false, activeRoomCallParticipants: [],
         activeRoomCallConsensusIntent: .none, isMarkedUnread: false, numUnreadMessages: unread,
         numUnreadNotifications: unread, numUnreadMentions: 0, fullyReadEventId: nil, pinnedEventIds: [],
-        joinRule: nil, historyVisibility: .joined, powerLevels: nil, roomVersion: "10", privilegedCreatorsRole: false)
+        joinRule: joinRule, historyVisibility: .joined, powerLevels: nil, roomVersion: "10",
+        privilegedCreatorsRole: false)
 }
 
 final class FakeRoom: Room, @unchecked Sendable {

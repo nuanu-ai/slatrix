@@ -144,7 +144,9 @@ private struct ThreadFeedRow: View {
         } label: {
             VStack(alignment: .leading, spacing: m.sp12) {
                 HStack(spacing: m.sp8) {
-                    Image(systemName: item.isDirect ? "bubble.left.and.bubble.right" : "number").font(
+                    Image(
+                        systemName: item.isDirect ? "bubble.left.and.bubble.right" : item.isPrivate ? "lock" : "number"
+                    ).font(
                         m.font(.caption))
                     Text(item.roomName).font(m.font(.meta, .semibold)).lineLimit(1)
                     Spacer()

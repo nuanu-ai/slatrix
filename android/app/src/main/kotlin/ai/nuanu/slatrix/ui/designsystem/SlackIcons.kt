@@ -30,6 +30,7 @@ object SlackIcons {
     val ChevronRight = outline("chevron-right", "M9.5 6.5 L15 12 L9.5 17.5", width = 2f)
     val ChevronUp = outline("chevron-up", "M6.5 14.75 L12 9.25 L17.5 14.75", width = 2f)
     val ChevronDown = outline("chevron-down", "M6.5 9.25 L12 14.75 L17.5 9.25", width = 2f)
+    val Person = outline("person", "M12 4.5 A3.5 3.5 0 1 1 12 11.5 A3.5 3.5 0 1 1 12 4.5 Z M5 20 A7 7 0 0 1 19 20")
     val Preferences = outline("preferences", "M4 7.5 H8.5 M12.5 7.5 H20 M4 12 H14 M18 12 H20 M4 16.5 H6.5 M10.5 16.5 H20 " +
         "M10.5 5.5 A2 2 0 1 1 10.5 9.5 A2 2 0 1 1 10.5 5.5 Z M16 10 A2 2 0 1 1 16 14 A2 2 0 1 1 16 10 Z " +
         "M8.5 14.5 A2 2 0 1 1 8.5 18.5 A2 2 0 1 1 8.5 14.5 Z")
@@ -45,6 +46,8 @@ object SlackIcons {
     val MarkAllRead = outline("mark-all-read", "M3.5 12.5 L7.5 16.5 L15 8 M11.5 15.5 L12.5 16.5 L20 8")
     /** A clock with a turning-back arrow, for recent searches. */
     val History = outline("history", "M4.75 12 A7.25 7.25 0 1 0 6.9 6.85 M4.75 4.5 V8.25 H8.5 M12 8.25 V12 L14.75 14")
+    val Offline = outline("offline", "M2.5 8.75 A13.5 13.5 0 0 1 21.5 8.75 M5.5 12.25 A9 9 0 0 1 18.5 12.25 " +
+        "M8.75 15.75 A4.5 4.5 0 0 1 15.25 15.75 M12 19.5 L12 19.5 M4 4 L20 20")
     val Plus = outline("plus", "M12 5 V19 M5 12 H19")
     /** Slack's forward: an arrow that turns off to the right. */
     val Forward = outline("forward", "M14 5.5 L19.5 10.75 L14 16 M19.5 10.75 H11.5 A6.5 6.5 0 0 0 5 17.25 V18.5")
