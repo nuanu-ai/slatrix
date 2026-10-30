@@ -221,7 +221,14 @@ enum MatrixMapping {
         message.threadRootID = content.threadRoot
         message.replyToID = content.inReplyTo?.eventId()
         if let reply = content.inReplyTo {
-            message.replyPreview = replyPreview(eventID: reply.eventId(), details: reply.event())
+            let quoted = reply.event()
+            message.replyPreview = replyPreview(eventID: reply.eventId(), details: quoted)
+            // Slack's "Also send to #channel" copy quotes its sender's own thread reply word for word.
+            if content.threadRoot == nil, case .ready(.msgLike(let original), senderID, _, _, _) = quoted,
+                case .message(let copy) = content.kind, case .message(let reply) = original.kind
+            {
+                message.repliedToThread = copy.body == reply.body
+            }
         }
         if let summary = content.threadSummary {
             message.replyCount = Int(summary.numReplies())

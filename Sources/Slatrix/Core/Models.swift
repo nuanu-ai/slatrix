@@ -69,6 +69,8 @@ struct ChatMessage: Identifiable, Hashable {
     var sendState = "sent"
     var attachment: MessageAttachment? = nil
     var replyToID: String? = nil
+    /// A thread reply also sent to the channel: `replyToID` is the reply, in its thread.
+    var repliedToThread = false
     var avatarURL: String? = nil
     var replyPreview: ChatReplyPreview? = nil
     var mediaCaption: String? = nil
