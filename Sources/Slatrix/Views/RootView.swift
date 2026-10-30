@@ -1054,7 +1054,7 @@ struct RootView: View {
                         BindingScope({ draftBinding(room.id) }) { text in
                             MessageComposer(
                                 text: text,
-                                placeholder: room.isDirect ? "Message \(room.name)" : "Message #\(room.name)",
+                                placeholder: "Message \(room.writtenName)",
                                 members: matrix.members,
                                 recentSenders: { [matrix] in matrix.messages.reversed().map(\.senderID) },
                                 canMentionRoom: matrix.canMentionRoom,
@@ -1112,7 +1112,7 @@ struct RootView: View {
                 TypingLine(matrix: matrix)
             }
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
-            .dropToUpload(room.isDirect ? "Upload to \(room.name)" : "Upload to #\(room.name)")
+            .dropToUpload("Upload to \(room.writtenName)")
     }
     private static let cannotPost = "You don’t have permission to post in this channel."
     private func openChannelTab(_ tab: ChannelTab) {

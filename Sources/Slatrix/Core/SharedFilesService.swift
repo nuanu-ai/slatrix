@@ -32,7 +32,7 @@ enum SharedContentMapping {
     static func caption(
         sender: String, room: ChatRoom?, date: Date, now: Date = .now, calendar: Calendar = .current
     ) -> String {
-        let place = room.flatMap { $0.isDirect ? nil : " in #\($0.name)" } ?? ""
+        let place = room.flatMap { $0.isDirect ? nil : " in \($0.writtenName)" } ?? ""
         var day = Date.FormatStyle(
             date: .omitted, time: .omitted, locale: calendar.locale ?? .current, calendar: calendar,
             timeZone: calendar.timeZone

@@ -160,19 +160,17 @@ struct SharedFilesView: View {
         let room = rooms.first { $0.id == roomID }
         return Menu {
             Picker("Conversation", selection: Binding(get: { roomID ?? "" }, set: { selectedRoomID = $0 })) {
-                ForEach(rooms) { Text(Self.title($0)).tag($0.id) }
+                ForEach(rooms) { Text($0.writtenName).tag($0.id) }
             }.pickerStyle(.inline).labelsHidden()
         } label: {
             HStack(spacing: m.sp4) {
-                Text("In: \(room.map(Self.title) ?? "")").lineLimit(1)
+                Text("In: \(room?.writtenName ?? "")").lineLimit(1)
                 Image(systemName: "chevron.down").font(m.font(.caption, .semibold))
             }.font(m.font(.secondary, .medium))
         }
         .menuStyle(.button).buttonStyle(.secondary).menuIndicator(.hidden).fixedSize()
         .disabled(rooms.isEmpty).accessibilityLabel("Conversation")
     }
-
-    private static func title(_ room: ChatRoom) -> String { room.isDirect ? room.name : "#" + room.name }
 }
 
 /// A row of the Files list: a file, image or video opens in the viewer, a link in the browser.
