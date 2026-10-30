@@ -8,10 +8,28 @@ import Foundation
     private(set) var eventID: String?
     /// Its player, once the file is ready; the only one the window has.
     private(set) var player: AVPlayer?
-    @ObservationIgnored private var owner: ObjectIdentifier?
+    /// The timeline it plays in, since a thread's root also shows in the channel.
+    private var owner: ObjectIdentifier?
     @ObservationIgnored private var lease: AttachmentPreviewLease?
     @ObservationIgnored private var loading: Task<Void, Never>?
     @ObservationIgnored private var failure: NSKeyValueObservation?
+
+    /// A video row's view of the player, for the timeline `owner` shows.
+    @MainActor struct Slot {
+        let video: InlineVideo
+        let message: ChatMessage
+        let matrix: MatrixService
+        let owner: AnyObject
+
+        /// Whether this row's video plays, or is about to once its file is down.
+        var isPlaying: Bool { video.eventID == message.eventID && video.owner == ObjectIdentifier(owner) }
+        var player: AVPlayer? { isPlaying ? video.player : nil }
+        func play() { video.play(message, matrix: matrix, from: owner) }
+    }
+
+    func slot(_ message: ChatMessage, matrix: MatrixService, in owner: AnyObject) -> Slot {
+        Slot(video: self, message: message, matrix: matrix, owner: owner)
+    }
 
     /// Plays `message` in the timeline `owner` shows, stopping whatever played before.
     func play(_ message: ChatMessage, matrix: MatrixService, from owner: AnyObject) {
@@ -48,6 +66,9 @@ import Foundation
             }
         }
     }
+
+    /// Holds it where it is, as when the viewer takes over.
+    func pause() { player?.pause() }
 
     func stop() {
         loading?.cancel()

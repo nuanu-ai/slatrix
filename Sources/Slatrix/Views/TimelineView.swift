@@ -254,7 +254,7 @@ struct TimelineView: View {
         context.onForward = onForward
         context.onEditCaption = onEditCaption
         context.onOpenMedia = { onOpenMedia?($0) }
-        context.video = inlineVideo
+        context.inlineVideo = inlineVideo
         context.onPickEmoji = { [popovers] in popovers?.show(.emoji($0)) }
         return context
     }
@@ -900,10 +900,7 @@ extension TimelineRowContext {
             forward: ForwardMessageContent.supports(message)
                 ? target.flatMap { target in self.onForward.map { forward in { forward(target) } } } : nil,
             copyLink: { if let link = self.permalinkTarget(for: message) { self.onCopyLink(link) } },
-            video: video,
-            play: { [weak self] in
-                if let self, let matrix = self.matrix { self.video?.play(message, matrix: matrix, from: self) }
-            })
+            inlineVideo: matrix.flatMap { matrix in inlineVideo?.slot(message, matrix: matrix, in: self) })
     }
 
     private func permalinkTarget(for message: ChatMessage) -> MessagePermalinkTarget? {

@@ -9,10 +9,8 @@ struct AttachmentActions {
     var open: () -> Void = {}
     var forward: (() -> Void)?
     var copyLink: (() -> Void)?
-    /// The window's inline player, when a video here plays in place rather than in the viewer.
-    var video: InlineVideo?
-    /// Plays this video in place.
-    var play: () -> Void = {}
+    /// Where a video here plays in place rather than in the viewer.
+    var inlineVideo: InlineVideo.Slot?
 }
 
 /// An attachment as Slack shows it: images, GIFs and videos inline under their name, other files as a card.
@@ -163,9 +161,9 @@ private struct InlineMedia: View {
     private var colors: AppColors { appearance.colors }
     private var isVideo: Bool { message.kind == "m.video" }
     private var animates: Bool { attachment.animated && (playing || !reduceMotion) }
-    /// The player a video plays in, in place; nil where a click opens the viewer instead.
-    private var inline: InlineVideo? { isVideo ? actions.video : nil }
-    private var playsHere: Bool { inline?.eventID == message.eventID }
+    /// Where a video plays in place; nil where a click opens the viewer instead.
+    private var inline: InlineVideo.Slot? { isVideo ? actions.inlineVideo : nil }
+    private var playsHere: Bool { inline?.isPlaying == true }
 
     var body: some View {
         VStack(alignment: .leading, spacing: m.sp4) {
@@ -264,15 +262,14 @@ private struct InlineMedia: View {
         if attachment.animated && !animates {
             playing = true
         } else if inline != nil {
-            if !playsHere { actions.play() }
+            if !playsHere { inline?.play() }
         } else {
             actions.open()
         }
     }
 
-    /// The viewer, with the video held where it was in its row.
+    /// The viewer, which holds the video where it was in its row.
     private func fullScreen() {
-        if playsHere { inline?.player?.pause() }
         actions.open()
     }
 
@@ -457,12 +454,15 @@ private struct InlinePlayer: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ view: InlinePlayerView, coordinator: ()) {
-        view.player?.pause()
+        view.hide()
         view.player = nil
     }
 }
 
 final class InlinePlayerView: AVPlayerView {
+    /// The view each player shows in now. A reused cell can hold a stale copy of the row, and that copy leaving
+    /// mustn't pause the video being watched.
+    private static let showing = NSMapTable<AVPlayer, InlinePlayerView>.weakToWeakObjects()
     private var scrolling: NSObjectProtocol?
     private var started: NSKeyValueObservation?
 
@@ -470,6 +470,7 @@ final class InlinePlayerView: AVPlayerView {
     override var player: AVPlayer? {
         didSet {
             guard player !== oldValue else { return }
+            if let player, window != nil { Self.showing.setObject(self, forKey: player) }
             alphaValue = 0
             started = player?.observe(\.timeControlStatus, options: [.initial]) { [weak self] player, _ in
                 guard player.timeControlStatus == .playing || player.currentTime() > .zero else { return }
@@ -484,18 +485,21 @@ final class InlinePlayerView: AVPlayerView {
         super.viewDidMoveToWindow()
         if let scrolling { NotificationCenter.default.removeObserver(scrolling) }
         scrolling = nil
-        guard window != nil else {
-            player?.pause()
-            return
-        }
+        guard window != nil else { return hide() }
+        if let player { Self.showing.setObject(self, forKey: player) }
         guard let clip = enclosingScrollView?.contentView else { return }
         scrolling = NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                if let self, self.visibleRect.isEmpty { self.player?.pause() }
+                if let self, self.visibleRect.isEmpty { self.hide() }
             }
         }
+    }
+
+    /// Pauses its video, unless another view shows it now.
+    func hide() {
+        if let player, Self.showing.object(forKey: player) === self { player.pause() }
     }
 }
 
