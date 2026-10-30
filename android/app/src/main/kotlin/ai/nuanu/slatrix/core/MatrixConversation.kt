@@ -122,6 +122,9 @@ data class ReplyPreview(val eventId: String, val state: State, val senderName: S
     enum class State { Loading, Ready, Unavailable }
 }
 
+/** The thread a channel's copy of a reply came from: its first message, by event ID and as one line of text. */
+data class ThreadOrigin(val rootId: String, val preview: String)
+
 /** Slack's "N replies" line under a thread's root. */
 data class MessageThread(val replies: Int, val lastReplier: String?, val lastReplyAt: Long?, val lastReplierAvatarUrl: String? = null)
 
@@ -602,6 +605,29 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
+    /** By reply event ID, so a copy scrolled back into view names its thread at once. */
+    private val origins = java.util.concurrent.ConcurrentHashMap<String, ThreadOrigin>()
+
+    /**
+     * The thread [replyId] is in, by its first message, which a channel's copy of that reply names; null when the reply
+     * isn't in a thread or can't be read.
+     */
+    suspend fun threadOrigin(replyId: String): ThreadOrigin? = origins[replyId] ?: withContext(Dispatchers.Default) {
+        quietly {
+            val rootId = room.loadOrFetchEvent(replyId).use { it.threadRootEventId() } ?: return@quietly null
+            val loaded = mutableState.value.rows.firstOrNull { (it as? ConversationMessage)?.eventId == rootId } as? ConversationMessage
+            val root = loaded?.let { Shown(it.kind, it.body, it.formattedBody) } ?: room.timelineWithConfiguration(TimelineConfiguration(
+                // Opened at the root alone, as the Mac's preview is, so an edit shows as it reads now.
+                focus = TimelineFocus.Event(rootId, 0u, TimelineEventFocusThreadMode.Automatic(false)), filter = TimelineFilter.All,
+                internalIdPrefix = null, dateDividerMode = DateDividerMode.DAILY,
+                trackReadReceipts = TimelineReadReceiptTracking.DISABLED, reportUtds = false,
+            )).use { timeline ->
+                (timeline.getEventTimelineItemByEventId(rootId).content as? TimelineItemContent.MsgLike)?.content?.kind?.let(::shown)
+            } ?: return@quietly null
+            ThreadOrigin(rootId, oneLine(root))
+        }?.also { origins[replyId] = it }
+    }
+
     suspend fun link(message: ConversationMessage): String? {
         val id = message.eventId ?: return null
         return quietly { room.matrixToEventPermalink(id) }
@@ -765,16 +791,21 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     /** Parents asked for once each, since the SDK updates every reply that quotes one when it arrives. */
     private val askedFor = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /** A message's text on one line, as a quote shows it. */
+    private fun oneLine(shown: Shown): String {
+        val text = if (shown.kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)) {
+            MessageBodyRenderer.render(shown.body, shown.html).joinToString("") { it.text }
+        } else shown.body
+        return text.replace('\n', ' ')
+    }
+
     private fun replyPreview(reply: InReplyToDetails): ReplyPreview {
         val id = reply.eventId()
         return when (val parent = reply.event()) {
             is EmbeddedEventDetails.Ready -> {
                 val shown = (parent.content as? TimelineItemContent.MsgLike)?.content?.kind?.let(::shown)
                     ?: Shown(MessageKind.Unsupported, "Unsupported message")
-                val text = if (shown.kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)) {
-                    MessageBodyRenderer.render(shown.body, shown.html).joinToString("") { it.text }
-                } else shown.body
-                ReplyPreview(id, ReplyPreview.State.Ready, name(parent.senderProfile, parent.sender), text.replace('\n', ' '))
+                ReplyPreview(id, ReplyPreview.State.Ready, name(parent.senderProfile, parent.sender), oneLine(shown))
             }
             is EmbeddedEventDetails.Error -> ReplyPreview(id, ReplyPreview.State.Unavailable)
             is EmbeddedEventDetails.Pending -> ReplyPreview(id, ReplyPreview.State.Loading)
