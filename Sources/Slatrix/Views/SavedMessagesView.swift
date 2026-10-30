@@ -55,7 +55,10 @@ private struct SavedMessageCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: m.sp16) {
             HStack(spacing: m.sp8) {
-                Image(systemName: room?.isDirect == true ? "bubble.left.and.bubble.right" : "number").font(
+                Image(
+                    systemName: room?.isDirect == true
+                        ? "bubble.left.and.bubble.right" : room?.channelSymbol ?? "number"
+                ).font(
                     m.font(.caption))
                 Text(room?.name ?? "Conversation unavailable").font(m.font(.meta, .semibold)).lineLimit(1)
                 Spacer()

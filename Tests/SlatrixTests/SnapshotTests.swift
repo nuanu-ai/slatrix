@@ -252,6 +252,9 @@ struct Snapshots {
             window.close()
         }
         try write(await settledImage(hosting), "header-channel-\(theme.rawValue)")
+        // Planning and Demos is the sample's private channel.
+        matrix.selectPreviewRoom("preview.room.5")
+        try write(await settledImage(hosting), "header-private-channel-\(theme.rawValue)")
         matrix.selectPreviewRoom("preview.dm.0")
         try write(await settledImage(hosting), "header-dm-\(theme.rawValue)")
     }

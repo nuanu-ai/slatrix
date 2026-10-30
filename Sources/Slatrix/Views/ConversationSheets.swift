@@ -187,7 +187,7 @@ struct CreationSheet: View {
                         }.foregroundStyle(colors.textSecondary)
                     } else if kind == .invite, let room = inviteRoom {
                         HStack(spacing: m.sp8) {
-                            Image(systemName: room.isDirect ? "bubble.left.and.bubble.right" : "number")
+                            Image(systemName: room.isDirect ? "bubble.left.and.bubble.right" : room.channelSymbol)
                             Text("To \(room.name)")
                         }.font(m.font(.meta)).foregroundStyle(colors.textSecondary)
                     } else if kind == .invite, let roomID {

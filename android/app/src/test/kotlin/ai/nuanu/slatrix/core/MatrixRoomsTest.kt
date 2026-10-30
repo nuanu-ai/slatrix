@@ -17,6 +17,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Test
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import java.io.File
 import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_base.EncryptionState
 import uniffi.ruma_events.MessageLikeEventType
@@ -139,21 +142,43 @@ class MatrixRoomsTest {
     }
 
     // capability: home.starred
-    @Test fun starredAndPrivateChannelsFollowTheirTagAndJoinRule() = runTest {
-        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha").copy(isFavourite = true, isPublic = false, joinRule = JoinRule.Invite))
-        val client = RoomsClient(listOf(alpha, TestRoom(roomInfo("!b:example.org", "Beta").copy(isPublic = true, joinRule = JoinRule.Public)),
-            // Slack's public channel: anyone in the workspace can join.
-            TestRoom(roomInfo("!c:example.org", "Gamma").copy(isPublic = false, joinRule = JoinRule.Restricted(emptyList()))),
-            TestRoom(roomInfo("!d:example.org", "Delta"))))
+    @Test fun starredChannelsFollowTheirTag() = runTest {
+        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha").copy(isFavourite = true))
+        val client = RoomsClient(listOf(alpha, TestRoom(roomInfo("!b:example.org", "Beta"))))
         val rooms = MatrixRooms(backgroundScope, client)
         val state = rooms.state.first { !it.loading }
 
         assertEquals(listOf("Alpha"), state.rooms.filter { it.starred }.map { it.name })
-        assertEquals(listOf("Alpha"), state.rooms.filter { it.isPrivate }.map { it.name })
 
         // Another client unstars it.
         alpha.emit(alpha.info.copy(isFavourite = false))
         rooms.state.first { state -> state.rooms.none { it.starred } }
+        rooms.close()
+    }
+
+    @Test fun aChannelIsPrivateAsItsJoinRuleSaysInEverySharedCase() = runTest {
+        val spec = JsonParser.parseString(File(System.getProperty("slatrix.root"), "spec/channel-privacy.json").readText()).asJsonObject
+        val cases = spec["cases"].asJsonArray.map { it.asJsonObject }
+        fun rule(case: JsonObject) = when (val value = case["joinRule"].takeUnless { it.isJsonNull }?.asString) {
+            null -> null
+            "public" -> JoinRule.Public
+            "invite" -> JoinRule.Invite
+            "knock" -> JoinRule.Knock
+            "private" -> JoinRule.Private
+            "restricted" -> JoinRule.Restricted(emptyList())
+            "knock_restricted" -> JoinRule.KnockRestricted(emptyList())
+            else -> JoinRule.Custom(value)
+        }
+        val client = RoomsClient(cases.mapIndexed { index, case ->
+            TestRoom(roomInfo("!$index:example.org", case["name"].asString).copy(joinRule = rule(case)))
+        })
+        val rooms = MatrixRooms(backgroundScope, client)
+        val state = rooms.state.first { !it.loading }
+
+        for (case in cases) {
+            val name = case["name"].asString
+            assertEquals(name, case["private"].asBoolean, state.rooms.single { it.name == name }.isPrivate)
+        }
         rooms.close()
     }
 
