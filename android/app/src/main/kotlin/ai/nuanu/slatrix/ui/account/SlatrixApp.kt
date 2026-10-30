@@ -13,6 +13,7 @@ import ai.nuanu.slatrix.core.MatrixChannel
 import ai.nuanu.slatrix.core.MatrixForward
 import ai.nuanu.slatrix.core.MatrixLinks
 import org.matrix.rustcomponents.sdk.MessageType
+import ai.nuanu.slatrix.core.MatrixLater
 import ai.nuanu.slatrix.core.MatrixSaved
 import ai.nuanu.slatrix.core.SavedMessage
 import ai.nuanu.slatrix.core.SavedMessageStore
@@ -51,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -81,6 +83,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -131,12 +135,17 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 val client = (state as AccountState.Connected).client
                 val media = remember(client) { MatrixMedia(client, File(context.cacheDir, "media")) }
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
-                // Later lives on this device, as on the Mac; Home's card, the message sheet and the Later page share it.
-                val savedStore = remember(userId, context) { SavedMessageStore(context, userId) }
-                var saved by remember(savedStore) { mutableStateOf(savedStore.saved) }
-                val toggleSaved: (String, String) -> Unit = { roomId, eventId -> saved = savedStore.toggle(roomId, eventId) }
                 var later by rememberSaveable(userId) { mutableStateOf(false) }
                 val laterScope = rememberCoroutineScope()
+                // Later is the account's list, shared with the Mac through account data; Home's card, the message sheet
+                // and the Later page read it here. Once sync is back it reads the account again and writes what waited.
+                val laterSync = remember(client, userId, rooms) {
+                    MatrixLater(laterScope, client, SavedMessageStore(context, userId),
+                        rooms?.offline?.map { !it } ?: flowOf(true))
+                }
+                DisposableEffect(laterSync) { onDispose { laterSync.close() } }
+                val saved = laterSync.list.collectAsState().value.saved
+                val setSaved: (String, String, Boolean) -> Unit = { roomId, eventId, save -> laterSync.set(roomId, eventId, save) }
                 var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
@@ -239,13 +248,13 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                         later = false
                                         jump(room, item.eventId, root)
                                     }
-                                } }, { item -> toggleSaved(item.roomId, item.eventId) }) { later = false } } }
+                                } }, { item -> setSaved(item.roomId, item.eventId, false) }) { later = false } } }
                             thread != null -> { { covered.SaveableStateProvider("${thread.room.id} ${thread.threadRoot}") { key(thread.room.id, thread.threadRoot) {
-                                LiveConversation(thread, threads, workspace, jump, rooms, media, saved, toggleSaved, people, { id, name -> person = id to name })
+                                LiveConversation(thread, threads, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name })
                             } } } }
                             // Kept while a thread or a profile covers it, so Back returns to the same place.
                             selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace, jump, rooms, media, saved, toggleSaved, people, { id, name -> person = id to name }) { root, row ->
+                                LiveConversation(selected, workspace, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name }) { root, row ->
                                     threads?.open(selected.room, root, root = row)
                                 }
                             } } } }
@@ -294,7 +303,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 @Composable
 private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
     jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?, media: MatrixMedia, saved: List<SavedMessage>,
-    onToggleSaved: (String, String) -> Unit, people: MatrixPeople?, onPerson: (userId: String, name: String?) -> Unit,
+    onSetSaved: (String, String, Boolean) -> Unit, people: MatrixPeople?, onPerson: (userId: String, name: String?) -> Unit,
     onOpenThread: (root: String, row: ConversationMessage?) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     // The room as the list follows it, so a change of name, topic or permissions shows while it's open; read only
@@ -341,7 +350,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                     // Marking a channel unread leaves it, as in Slack, so it shows unread in the list; a thread has its own read state.
                     val markUnread = fun() { scope.launch { if (conversation?.markUnread() == true) owner?.back() } }
                     actions.copy(saved = savedHere, onSave = { message, save ->
-                        message.eventId?.takeIf { (it in savedHere) != save }?.let { onToggleSaved(open.room.id, it) }
+                        message.eventId?.let { onSetSaved(open.room.id, it, save) }
                     }, onForward = { m ->
                         scope.launch { conversation?.forwardable(m)?.let { forwarding = m to it } ?: run { notice = "This message can’t be forwarded." } }
                     }, onMarkUnread = markUnread.takeIf { open.threadRoot == null })
