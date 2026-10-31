@@ -287,6 +287,102 @@ class MatrixConversationTest {
         assertTrue("Asked once for a parent two replies quote", timeline.fetched.tryReceive().isFailure)
     }
 
+    // capability: thread.send-to-channel
+    @Test fun aChannelMessageQuotingItsSendersOwnWordsIsACopyOfAThreadReplyAsTheSharedCasesSay() = runTest {
+        fun text(body: String) = MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null))
+        val spec = com.google.gson.JsonParser.parseString(java.io.File(System.getProperty("slatrix.root"), "spec/send-to-channel.json").readText())
+        for (item in spec.asJsonObject["shown"].asJsonArray) {
+            val case = item.asJsonObject
+            val quoted = case["quoted"].takeUnless { it.isJsonNull }?.asJsonObject?.let { quoted ->
+                object : InReplyToDetails(NoHandle) {
+                    override fun eventId(): String = "\$reply"
+                    override fun event(): EmbeddedEventDetails = EmbeddedEventDetails.Ready(
+                        TimelineItemContent.MsgLike(MsgLikeContent(text(quoted["body"].asString), null, null, null)), quoted["sender"].asString,
+                        ProfileDetails.Unavailable, 1_700_000_000_000u, EventOrTransactionId.EventId("\$reply"))
+                }
+            }
+            val body = case["body"].asString
+            val copy = TimelineItemContent.MsgLike(MsgLikeContent(text(body), quoted,
+                "\$root".takeIf { case["inThread"].asBoolean }, null))
+            val timeline = ConversationTimeline(listOf(conversationItem("copy", "\$copy", body, content = copy, sender = case["sender"].asString)))
+            val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+            val message = conversation.state.first { !it.loading }.rows.messages.single()
+            assertEquals(case["name"].asString, case["repliedToThread"].asBoolean, message.repliedToThread)
+            conversation.close()
+        }
+    }
+
+    // capability: thread.send-to-channel
+    @Test fun aReplyAlsoSentToTheChannelGoesToItsThreadThenToTheChannelOnceSentEvenWithTheThreadClosed() = runTest {
+        // The reader's own reply, still sending under a transaction ID or sent under an event ID; its row keeps its ID.
+        fun own(key: String, id: String, body: String, local: Boolean = false) =
+            conversationItem(key, id, body, local = local, editable = true)
+        for (sentAtOnce in listOf(false, true)) {
+            // The same words, said before in the thread, are not this reply.
+            val timeline = ConversationTimeline(listOf(own("said", "\$said", "On it")))
+            val room = ConversationRoom(timeline)
+            val conversation = MatrixConversation(backgroundScope, room, threadRoot = "\$root")
+            runCurrent()
+            val sending = async { conversation.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)) }
+            assertEquals("On it", (timeline.submissions.receive().type as MessageType.Text).content.body)
+            timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
+            assertTrue(sending.await())
+            // Leaving the thread closes it; the copy still goes.
+            conversation.close()
+
+            // An earlier reply's echo that lands only now must not be taken for this one.
+            timeline.emit(listOf(TimelineDiff.PushBack(own("earlier", "earlier", "First", local = true))))
+            if (sentAtOnce) timeline.emit(listOf(TimelineDiff.Set(1u, own("earlier", "\$earlier", "First")),
+                TimelineDiff.PushBack(own("this", "\$reply", "On it"))))
+            else {
+                timeline.emit(listOf(TimelineDiff.PushBack(own("this", "this", "On it", local = true))))
+                timeline.emit(listOf(TimelineDiff.Set(1u, own("earlier", "\$earlier", "First"))))
+                timeline.emit(listOf(TimelineDiff.Set(2u, own("this", "\$reply", "On it"))))
+            }
+
+            val (type, json) = room.raw.receive()
+            assertEquals("m.room.message", type)
+            val content = com.google.gson.JsonParser.parseString(json).asJsonObject
+            assertEquals("On it", content["body"].asString)
+            assertEquals("\$reply", content["m.relates_to"].asJsonObject["m.in_reply_to"].asJsonObject["event_id"].asString)
+        }
+    }
+
+    @Test fun aReplyWhoseSendIsCancelledIsNotCopiedAndItsClosedThreadLetsGoOfTheRoom() = runTest {
+        val timeline = ConversationTimeline(emptyList())
+        val room = ConversationRoom(timeline)
+        val conversation = MatrixConversation(backgroundScope, room, threadRoot = "\$root")
+        runCurrent()
+        val sending = async { conversation.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)) }
+        timeline.submissions.receive()
+        timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
+        assertTrue(sending.await())
+        conversation.close()
+
+        // Deleting the reply while it's still sending takes its echo away.
+        timeline.emit(listOf(TimelineDiff.PushBack(conversationItem("this", "this", "On it", local = true, editable = true))))
+        timeline.emit(listOf(TimelineDiff.Remove(0u)))
+        runCurrent()
+        assertTrue(room.uniffiIsDestroyed)
+        assertTrue(room.raw.isEmpty)
+    }
+
+    // capability: thread.send-to-channel
+    @Test fun aChannelsCopyOfAThreadReplyNamesItsThreadByTheThreadsFirstMessage() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("root", "\$root", "Can we ship Friday?")))
+        val room = JumpRoom(live, ConversationTimeline(listOf(conversationItem("older", "\$older", "Plan\nfirst"))),
+            threadRoots = mapOf("\$reply" to "\$root", "\$late" to "\$older"))
+        val conversation = MatrixConversation(backgroundScope, room)
+        conversation.state.first { !it.loading }
+
+        assertEquals(ThreadOrigin("\$root", "Can we ship Friday?"), conversation.threadOrigin("\$reply"))
+        // A root the channel hasn't loaded is read on its own, on one line.
+        assertEquals(ThreadOrigin("\$older", "Plan first"), conversation.threadOrigin("\$late"))
+        // The quoted message isn't in a thread, so the row is an ordinary quote after all.
+        assertNull(conversation.threadOrigin("\$plain"))
+        conversation.close()
+    }
+
     // capability: message.image
     // capability: message.file
     @Test fun attachmentsCarryWhatTheirRowNeedsAndACaptionIsTheirText() = runTest {
@@ -761,6 +857,14 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
     override suspend fun setUnreadFlag(newValue: Boolean) { markedUnread = newValue }
     override suspend fun timeline(): Timeline = value
     override suspend fun matrixToEventPermalink(eventId: String): String = "https://matrix.to/#/!design:example.org/$eventId"
+    /** Events sent straight to the room, past its send queue, as their type and JSON content. */
+    val raw = Channel<Pair<String, String>>(Channel.UNLIMITED)
+    override suspend fun sendRaw(eventType: String, content: String): String {
+        // As the bindings refuse a call on a closed room.
+        check(!uniffiIsDestroyed) { "Room object has already been destroyed" }
+        raw.send(eventType to content)
+        return "\$raw"
+    }
     var openFailure: Exception? = null
     override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline {
         openFailure?.let { throw it }
@@ -770,7 +874,7 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
 }
 
 private class ConversationTimeline(private val cached: List<TimelineItem>) : Timeline(NoHandle) {
-    private var listener: TimelineListener? = null
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<TimelineListener>()
     val page = CompletableDeferred<Boolean>()
     val pageStarted = CompletableDeferred<Unit>()
     val pageCancelled = CompletableDeferred<Unit>()
@@ -809,7 +913,7 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     val fetched = Channel<String>(Channel.UNLIMITED)
     override suspend fun fetchDetailsForEvent(eventId: String) { fetched.send(eventId) }
     override suspend fun addListener(listener: TimelineListener): TaskHandle {
-        this.listener = listener
+        listeners += listener
         listener.onUpdate(listOf(TimelineDiff.Reset(cached)))
         return object : TaskHandle(NoHandle) { override fun cancel() { listenerCancelled.complete(Unit) } }
     }
@@ -827,7 +931,7 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         receiptFailure?.let { throw it }
         receipts.send(receiptType to eventId)
     }
-    fun emit(diff: List<TimelineDiff>) { listener?.onUpdate(diff) }
+    fun emit(diff: List<TimelineDiff>) { listeners.forEach { it.onUpdate(diff) } }
     override fun createMessageContent(msgType: MessageType): RoomMessageEventContentWithoutRelation = ConversationContent(msgType)
     override suspend fun send(msg: RoomMessageEventContentWithoutRelation): SendHandle {
         submissions.send(msg as ConversationContent)
@@ -862,7 +966,7 @@ private class ConversationContent(val type: MessageType) : RoomMessageEventConte
     }
 }
 
-private fun conversationItem(
+internal fun conversationItem(
     stableId: String,
     eventId: String,
     body: String,

@@ -5,6 +5,7 @@ import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -99,6 +100,8 @@ data class ConversationMessage(
     val thread: MessageThread? = null,
     /** The message this one replies to, quoted above it. */
     val replyTo: ReplyPreview? = null,
+    /** A thread reply also sent to the channel: [replyTo] is the reply, in its thread. */
+    val repliedToThread: Boolean = false,
     val attachment: MessageAttachment? = null,
     /** How much of an attachment you're sending has gone up, from 0 to 1. */
     val uploadProgress: Float? = null,
@@ -116,6 +119,9 @@ data class MessageReaction(val key: String, val count: Int, val mine: Boolean, v
 data class ReplyPreview(val eventId: String, val state: State, val senderName: String = "", val body: String = "") {
     enum class State { Loading, Ready, Unavailable }
 }
+
+/** The thread a channel's copy of a reply came from: its first message, by event ID and as one line of text. */
+data class ThreadOrigin(val rootId: String, val preview: String)
 
 /** Slack's "N replies" line under a thread's root. */
 data class MessageThread(val replies: Int, val lastReplier: String?, val lastReplyAt: Long?, val lastReplierAvatarUrl: String? = null)
@@ -155,7 +161,7 @@ private const val NOTICE_MILLIS = 4_000L
 
 /** The relation that puts an attachment in a thread, as the Mac sends it. */
 private fun threadRelation(root: String): String {
-    val id = "\"" + root.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    val id = jsonString(root)
     return """{"m.relates_to":{"rel_type":"m.thread","event_id":$id,"is_falling_back":true,"m.in_reply_to":{"event_id":$id}}}"""
 }
 
@@ -180,6 +186,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val root = root?.copy(id = ROOT_KEY, grouped = false)
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
+    /** Thread replies waiting to be copied to the channel: they outlast the thread, and end with the session's [scope]. */
+    private val copies = SupervisorJob(scope.coroutineContext[Job])
+    private val copying = CoroutineScope(scope.coroutineContext + copies)
     private val ownUserId = room.ownUserId()
     private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null,
         ownUserId = ownUserId, startsAtUnread = resume))
@@ -223,7 +232,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
-    private val updating = operations.launch {
+    // Atomic, so its cleanup closes the room even when the conversation closes before it starts.
+    private val updating = operations.launch(start = CoroutineStart.ATOMIC) {
         try {
             open(when {
                 view == ConversationView.Pins -> TimelineFocus.PinnedEvents
@@ -288,10 +298,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             mutableState.update { it.copy(loading = false, error = "Couldn’t load this conversation.") }
         } finally {
             ready.completeExceptionally(CancellationException())
-            shown?.close()
-            pending?.close()
-            room.close()
             updates.close()
+            // A reply waiting for its copy keeps the thread's timeline and room open until the copy goes.
+            copies.complete()
+            copies.invokeOnCompletion { shown?.close(); pending?.close(); room.close() }
         }
     }
 
@@ -434,16 +444,25 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val timeline = timeline()
                 val formatted = message.html?.let { FormattedBody(MessageFormat.Html, it) }
                 val content = checkNotNull(timeline.createMessageContent(MessageType.Text(TextMessageContent(message.body, formatted))))
-                content.use { raw ->
-                    raw.withMentions(Mentions(message.mentions, message.mentionsRoom)).use { outgoing ->
-                        when (val target = message.target) {
-                            is ComposerTarget.Reply -> timeline.sendReply(outgoing, target.eventId).close()
-                            is ComposerTarget.Edit ->
-                                timeline.edit(EventOrTransactionId.EventId(target.eventId), EditedContent.RoomMessage(outgoing))
-                            null -> timeline.send(outgoing).close()
+                val echo = if (message.alsoToChannel && threadRoot != null && message.target !is ComposerTarget.Edit) {
+                    SentEcho.watch(timeline, message.body)
+                } else null
+                try {
+                    content.use { raw ->
+                        raw.withMentions(Mentions(message.mentions, message.mentionsRoom)).use { outgoing ->
+                            when (val target = message.target) {
+                                is ComposerTarget.Reply -> timeline.sendReply(outgoing, target.eventId).close()
+                                is ComposerTarget.Edit ->
+                                    timeline.edit(EventOrTransactionId.EventId(target.eventId), EditedContent.RoomMessage(outgoing))
+                                null -> timeline.send(outgoing).close()
+                            }
                         }
                     }
+                } catch (failure: Throwable) {
+                    echo?.cancel()
+                    throw failure
                 }
+                echo?.let { copyToChannel(message, it) }
                 currentCoroutineContext().ensureActive()
                 // A message sent from an older place goes to the present, as sending in Slack takes you there.
                 if (shown?.focused == true) operations.launch {
@@ -470,6 +489,25 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             }
         }
         return try { task.await() } finally { task.cancel() }
+    }
+
+    /**
+     * The channel's copy of a thread reply, sent once the reply has an event ID to quote. The send queue only takes
+     * replies that stay in the replied-to event's thread, so the copy goes out directly.
+     */
+    private fun copyToChannel(message: ComposerMessage, echo: SentEcho) {
+        copying.launch {
+            try {
+                val reply = echo.sent.await() ?: return@launch
+                room.sendRaw("m.room.message", ChannelCopy.content(message, reply))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (lifetime.isActive) operations.launch { announce("Your reply is in the thread, but it couldn’t also be sent to the conversation.") }
+            } finally {
+                echo.cancel()
+            }
+        }
     }
 
     /** Resumes the original send rather than sending again, so a message never goes out twice. */
@@ -562,6 +600,29 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
+    /** By reply event ID, so a copy scrolled back into view names its thread at once. */
+    private val origins = java.util.concurrent.ConcurrentHashMap<String, ThreadOrigin>()
+
+    /**
+     * The thread [replyId] is in, by its first message, which a channel's copy of that reply names; null when the reply
+     * isn't in a thread or can't be read.
+     */
+    suspend fun threadOrigin(replyId: String): ThreadOrigin? = origins[replyId] ?: withContext(Dispatchers.Default) {
+        quietly {
+            val rootId = room.loadOrFetchEvent(replyId).use { it.threadRootEventId() } ?: return@quietly null
+            val loaded = mutableState.value.rows.firstOrNull { (it as? ConversationMessage)?.eventId == rootId } as? ConversationMessage
+            val root = loaded?.let { Shown(it.kind, it.body, it.formattedBody) } ?: room.timelineWithConfiguration(TimelineConfiguration(
+                // Opened at the root alone, as the Mac's preview is, so an edit shows as it reads now.
+                focus = TimelineFocus.Event(rootId, 0u, TimelineEventFocusThreadMode.Automatic(false)), filter = TimelineFilter.All,
+                internalIdPrefix = null, dateDividerMode = DateDividerMode.DAILY,
+                trackReadReceipts = TimelineReadReceiptTracking.DISABLED, reportUtds = false,
+            )).use { timeline ->
+                (timeline.getEventTimelineItemByEventId(rootId).content as? TimelineItemContent.MsgLike)?.content?.kind?.let(::shown)
+            } ?: return@quietly null
+            ThreadOrigin(rootId, oneLine(root))
+        }?.also { origins[replyId] = it }
+    }
+
     suspend fun link(message: ConversationMessage): String? {
         val id = message.eventId ?: return null
         return quietly { room.matrixToEventPermalink(id) }
@@ -643,21 +704,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     suspend fun close() { lifetime.cancelAndJoin() }
 
-    private fun Source.apply(diff: TimelineDiff) {
-        when (diff) {
-            is TimelineDiff.Append -> items.addAll(diff.values.map(::row))
-            is TimelineDiff.Clear -> items.clear()
-            is TimelineDiff.PushFront -> items.add(0, row(diff.value))
-            is TimelineDiff.PushBack -> items.add(row(diff.value))
-            is TimelineDiff.PopFront -> items.removeAt(0)
-            is TimelineDiff.PopBack -> items.removeAt(items.lastIndex)
-            is TimelineDiff.Insert -> items.add(diff.index.toInt(), row(diff.value))
-            is TimelineDiff.Set -> items[diff.index.toInt()] = row(diff.value)
-            is TimelineDiff.Remove -> items.removeAt(diff.index.toInt())
-            is TimelineDiff.Truncate -> items.subList(diff.length.toInt(), items.size).clear()
-            is TimelineDiff.Reset -> { items.clear(); items.addAll(diff.values.map(::row)) }
-        }
-    }
+    private fun Source.apply(diff: TimelineDiff) = items.applyDiff(diff, ::row)
 
     /**
      * The visible rows, each message grouped under the one before it when the same sender sent it soon after. A day
@@ -739,16 +786,21 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     /** Parents asked for once each, since the SDK updates every reply that quotes one when it arrives. */
     private val askedFor = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /** A message's text on one line, as a quote shows it. */
+    private fun oneLine(shown: Shown): String {
+        val text = if (shown.kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)) {
+            MessageBodyRenderer.render(shown.body, shown.html).joinToString("") { it.text }
+        } else shown.body
+        return text.replace('\n', ' ')
+    }
+
     private fun replyPreview(reply: InReplyToDetails): ReplyPreview {
         val id = reply.eventId()
         return when (val parent = reply.event()) {
             is EmbeddedEventDetails.Ready -> {
                 val shown = (parent.content as? TimelineItemContent.MsgLike)?.content?.kind?.let(::shown)
                     ?: Shown(MessageKind.Unsupported, "Unsupported message")
-                val text = if (shown.kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)) {
-                    MessageBodyRenderer.render(shown.body, shown.html).joinToString("") { it.text }
-                } else shown.body
-                ReplyPreview(id, ReplyPreview.State.Ready, name(parent.senderProfile, parent.sender), text.replace('\n', ' '))
+                ReplyPreview(id, ReplyPreview.State.Ready, name(parent.senderProfile, parent.sender), oneLine(shown))
             }
             is EmbeddedEventDetails.Error -> ReplyPreview(id, ReplyPreview.State.Unavailable)
             is EmbeddedEventDetails.Pending -> ReplyPreview(id, ReplyPreview.State.Loading)
@@ -764,6 +816,13 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 ReplyPreview(id, ReplyPreview.State.Loading)
             }
         }
+    }
+
+    /** Slack's "Also send to #channel" copy quotes its sender's own thread reply word for word. */
+    private fun quotesOwnWords(sender: String, kind: MsgLikeKind, reply: InReplyToDetails): Boolean {
+        val quoted = reply.event() as? EmbeddedEventDetails.Ready ?: return false
+        val original = (quoted.content as? TimelineItemContent.MsgLike)?.content?.kind as? MsgLikeKind.Message ?: return false
+        return quoted.sender == sender && (kind as? MsgLikeKind.Message)?.content?.body == original.content.body
     }
 
     private fun row(item: TimelineItem): Any? {
@@ -810,6 +869,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     (latest?.senderProfile as? ProfileDetails.Ready)?.avatarUrl)
             }?.takeIf { it.replies > 0 },
             replyTo = content.inReplyTo?.let(::replyPreview),
+            repliedToThread = content.threadRoot == null && content.inReplyTo?.let { quotesOwnWords(event.sender, content.kind, it) } == true,
             attachment = shown.attachment,
             avatarUrl = (event.senderProfile as? ProfileDetails.Ready)?.avatarUrl,
         ).also { it.runs }

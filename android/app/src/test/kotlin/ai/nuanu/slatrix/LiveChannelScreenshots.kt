@@ -6,6 +6,9 @@ import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
+import ai.nuanu.slatrix.core.MessageThread
+import ai.nuanu.slatrix.core.ReplyPreview
+import ai.nuanu.slatrix.core.ThreadOrigin
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
@@ -74,6 +77,30 @@ class LiveChannelScreenshots(private val dark: Boolean, private val fontScale: F
         // Slack's composer once you tap into it: the field over its toolbar.
         compose.onNode(androidx.compose.ui.test.hasContentDescription("Message design") and androidx.compose.ui.test.hasSetTextAction()).performClick()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/LiveChannel-focused-$theme-$fontScale.png")
+    }
+
+    /** A thread reply also sent to the channel, under Slack's "replied to a thread:". */
+    @Test fun renderThreadReplyCopy() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0, memberCount = 7)
+        val now = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 12); set(Calendar.MINUTE, 7) }.timeInMillis
+        val root = ConversationMessage("root", "\$root", "@mira:example.org", "Mira", "Can we ship the onboarding flow on Friday?",
+            null, now, MessageKind.Text, MessageSendState.Sent, false, "M", 2,
+            thread = MessageThread(2, "Jordan", now + 9 * 60_000L))
+        val copy = ConversationMessage("copy", "\$copy", "@jordan:example.org", "Jordan", "Yes, once QA signs off this afternoon.",
+            null, now + 9 * 60_000L, MessageKind.Text, MessageSendState.Sent, false, "J", 5,
+            replyTo = ReplyPreview("\$reply", ReplyPreview.State.Ready, "Jordan", "Yes, once QA signs off this afternoon."),
+            repliedToThread = true)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
+                SlatrixTheme(dark = dark) {
+                    LiveChannelScreen(room, ConversationState(listOf(root, copy), loading = false, hasMore = false),
+                        ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                        loadThreadOrigin = { ThreadOrigin("\$root", "Can we ship the onboarding flow on Friday?") })
+                }
+            }
+        }
+        compose.onNodeWithText("replied to a thread:").assertIsDisplayed()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/LiveChannel-thread-reply-copy-${if (dark) "dark" else "light"}-$fontScale.png")
     }
 
     @Test fun renderReadOnly() {
