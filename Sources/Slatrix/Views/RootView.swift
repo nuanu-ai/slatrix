@@ -3,6 +3,8 @@ import Combine
 import QuickLook
 import SwiftUI
 
+/// What the window shows. The window never sits on `directMessages`: that is the sidebar's DMs list, beside a
+/// conversation on `home`.
 enum AppRoute: String, CaseIterable {
     case home, directMessages, activity, files, saved, threads, drafts, directory, search
     var title: String {
@@ -46,6 +48,10 @@ struct RootView: View {
     @State private var pendingRoomID: String?
     @State private var preferredRoomID: String?
     @State private var sidebarSearch = ""
+    /// The sidebar column lists direct messages, as Slack's DMs view does, while the one open shows beside it.
+    @State private var directMessagesColumn = false
+    @State private var directMessageSearch = ""
+    @State private var unreadDirectMessagesOnly = false
     @AppStorage("layout.sidebarWidth") private var preferredSidebarWidth = 280.0
     @AppStorage("layout.sidebarHidden") private var sidebarHidden = false
     /// The rail and sidebar over the conversation while they are collapsed.
@@ -455,9 +461,11 @@ struct RootView: View {
             // Saved here or merged from another device, it reaches the vault either way.
             .onChange(of: matrix.savedMessages.list) { _, _ in saveLocalData() }
             .onChange(of: route) { _, next in
-                sidebarDrawer = false
+                // DMs picked in the drawer keeps it open on the list.
+                if !(next == .home && directMessagesColumn) { sidebarDrawer = false }
                 if let request = pendingMatrixLink, request.route != next { cancelMatrixLink() }
                 if next != .home {
+                    directMessagesColumn = false
                     cancelCurrentEdit()
                     cancelReply()
                     channelTab = .messages
@@ -919,14 +927,23 @@ struct RootView: View {
     /// The workspace rail and conversation list, beside the conversation or in the drawer.
     private var sidebar: some View {
         SidebarView(
-            matrix: matrix, route: Binding(get: { screen.route }, set: { route = $0 }),
+            matrix: matrix,
+            route: Binding(
+                get: { screen.route == .home && directMessagesColumn ? .directMessages : screen.route },
+                set: { next in
+                    if next == .directMessages { return openDirectMessages() }
+                    directMessagesColumn = false
+                    route = next
+                }),
             workspaceID: Binding(
                 get: { workspaceID },
                 set: {
                     Performance.start(.workspaceSwitch)
+                    directMessagesColumn = false
                     workspaceID = $0
                     workspaceInitialized = true
-                }), search: $sidebarSearch, draftRoomIDs: draftRoomIDs,
+                }), search: $sidebarSearch, directMessageSearch: $directMessageSearch,
+            unreadDirectMessagesOnly: $unreadDirectMessagesOnly, draftRoomIDs: draftRoomIDs,
             draftCount: draftAddresses.count,
             onSelect: selectRoom, onCreate: presentCreation,
             onPreferences: { handleMenu("preferences") },
@@ -1276,7 +1293,7 @@ struct RootView: View {
                 HStack {
                     Text(route.title).font(m.font(.title, .bold))
                     Spacer()
-                    if route == .directMessages || route == .directory {
+                    if route == .directory {
                         Button {
                             creation = .directMessage
                         } label: {
@@ -1287,7 +1304,6 @@ struct RootView: View {
                 Divider().overlay(colors.border)
             }
             switch route {
-            case .directMessages: RoomDirectory(matrix: matrix, onSelect: selectRoom)
             case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
             case .threads:
                 ThreadsFeedView(
@@ -1308,7 +1324,7 @@ struct RootView: View {
                     matrix: matrix, bar: searchBar,
                     onOpenMessage: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
                     onOpenRoom: selectRoom, onOpenProfile: openProfile)
-            case .home: EmptyView()
+            case .home, .directMessages: EmptyView()
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .bottom) { ToastHost(toasts: toasts).padding(.bottom, m.sp24) }
@@ -1626,6 +1642,19 @@ struct RootView: View {
     }
 
     private func selectRoom(_ id: String) { selectRoom(id, record: true) }
+
+    /// Slack's DMs view: the list takes the sidebar column, beside the direct message read last, or the newest.
+    private func openDirectMessages() {
+        directMessagesColumn = true
+        route = .home
+        guard room?.isDirect != true else { return }
+        guard let id = ChatRoom.directMessageToOpen(matrix.rooms, visited: Array(history.prefix(historyIndex + 1)))
+        else { return }
+        // Picked in the drawer, the list stays open there.
+        let drawer = sidebarDrawer
+        selectRoom(id)
+        sidebarDrawer = drawer
+    }
     private func selectRoom(
         _ id: String, record: Bool, eventID: String? = nil, thread: ChatMessage? = nil,
         keepPendingNotification: Bool = false, restoringReply: MessageReplyTarget? = nil
@@ -1660,6 +1689,7 @@ struct RootView: View {
         pickedFrom = screen
         pendingRoomID = id
         if let target = matrix.rooms.first(where: { $0.id == id }) {
+            if !target.isDirect { directMessagesColumn = false }
             if !target.isDirect, let current = workspaceID, !target.spaceIDs.contains(current) {
                 workspaceID = WorkspaceRail.home(of: target, current: current, workspaces: matrix.workspaces)
                 workspaceInitialized = true
@@ -2505,6 +2535,9 @@ struct RootView: View {
         history = []
         historyIndex = -1
         sidebarSearch = ""
+        directMessagesColumn = false
+        directMessageSearch = ""
+        unreadDirectMessagesOnly = false
         modals.current = nil
         publicDirectory = nil
         showRecovery = false
@@ -2587,7 +2620,7 @@ struct RootView: View {
         case "back": navigateHistory(-1)
         case "forward": navigateHistory(1)
         case "threads": route = .threads
-        case "dms": route = .directMessages
+        case "dms": openDirectMessages()
         case "activity": route = .activity
         case "later": route = .saved
         case "people": route = .directory
@@ -2598,6 +2631,7 @@ struct RootView: View {
                 return
             }
             Performance.start(.workspaceSwitch)
+            directMessagesColumn = false
             workspaceID = rail[index - 1]?.id
             workspaceInitialized = true
             route = .home
@@ -2635,15 +2669,25 @@ struct RootView: View {
             popovers.show(.emoji(EmojiPick { key in run { try await matrix.toggleReaction(target, key: key) } }))
         case "previous-conversation", "next-conversation", "previous-unread", "next-unread":
             let direction = action.hasPrefix("previous") ? -1 : 1
-            let rooms = matrix.rooms.filter {
-                sidebarSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(sidebarSearch)
+            let currentID = pendingRoomID ?? matrix.selectedRoomID
+            let unreadOnly = action.hasSuffix("unread")
+            let target: String?
+            if route == .home && directMessagesColumn {
+                // Through the DMs list, as the sidebar column shows it.
+                let shown = ChatRoom.directMessages(
+                    matrix.rooms, matching: directMessageSearch, unreadOnly: unreadDirectMessagesOnly,
+                    keeping: matrix.selectedRoomID)
+                target = ConversationNavigation.step(
+                    shown, from: currentID, unreadOnly: unreadOnly, direction: direction)
+            } else {
+                let shown = matrix.rooms.filter {
+                    sidebarSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(sidebarSearch)
+                }
+                target = ConversationNavigation.target(
+                    rooms: shown, currentID: currentID, workspaceID: workspaceID, unreadOnly: unreadOnly,
+                    direction: direction)
             }
-            if let id = ConversationNavigation.target(
-                rooms: rooms, currentID: pendingRoomID ?? matrix.selectedRoomID, workspaceID: workspaceID,
-                unreadOnly: action.hasSuffix("unread"), direction: direction)
-            {
-                selectRoom(id)
-            }
+            if let target { selectRoom(target) }
         default: break
         }
     }
@@ -2879,49 +2923,6 @@ private struct RoomName: View {
     let matrix: MatrixService
     let roomID: String
     var body: some View { Text(matrix.rooms.first { $0.id == roomID }?.name ?? "Conversation") }
-}
-
-/// Every direct message, for the DMs page.
-private struct RoomDirectory: View {
-    let matrix: MatrixService
-    let onSelect: (String) -> Void
-    @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
-    private var colors: AppColors { appearance.colors }
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(matrix.rooms.filter(\.isDirect)) { room in
-                    Button {
-                        onSelect(room.id)
-                    } label: {
-                        HStack(spacing: m.sp12) {
-                            AvatarView(name: room.name, size: m.avatar, matrix: matrix, source: room.avatarURL)
-                            VStack(alignment: .leading, spacing: m.sp4) {
-                                Text(room.name).font(m.font(.body, .semibold))
-                                Text(
-                                    room.topic.isEmpty
-                                        ? room.isDirect ? "Direct message" : "\(room.memberCount) members" : room.topic
-                                ).font(m.font(.meta)).foregroundStyle(colors.textSecondary).lineLimit(1)
-                            }
-                            Spacer()
-                            if room.hasUnread {
-                                Text(
-                                    room.unreadMessages > 0 || room.unread > 0
-                                        ? "\(max(room.unreadMessages, room.unread))" : "•"
-                                ).font(m.font(.caption, .semibold)).padding(m.sp4).background(
-                                    colors.selection, in: Circle()
-                                ).accessibilityLabel("Unread conversation")
-                            }
-                            Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(
-                                colors.textSecondary)
-                        }.padding(m.sp20).contentShape(Rectangle())
-                    }.buttonStyle(.row)
-                    Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)
-                }
-            }
-        }
-    }
 }
 
 /// Makes a binding inside its own body: SwiftUI reads a binding when it compares a view's inputs, and what the

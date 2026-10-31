@@ -4,7 +4,6 @@ enum ConversationNavigation {
     static func target(
         rooms: [ChatRoom], currentID: String?, workspaceID: String?, unreadOnly: Bool = false, direction: Int
     ) -> String? {
-        guard direction == -1 || direction == 1 else { return nil }
         let ordered = rooms.enumerated().filter { _, room in
             room.membership == "join" && (room.isDirect || workspaceID == nil || room.spaceIDs.contains(workspaceID!))
         }.sorted { left, right in
@@ -15,7 +14,14 @@ enum ConversationNavigation {
             let comparison = left.element.name.localizedStandardCompare(right.element.name)
             return comparison == .orderedSame ? left.offset < right.offset : comparison == .orderedAscending
         }.map(\.element)
+        return step(ordered, from: currentID, unreadOnly: unreadOnly, direction: direction)
+    }
 
+    /// The conversation `direction` away from `currentID` in a list as it is shown.
+    static func step(_ ordered: [ChatRoom], from currentID: String?, unreadOnly: Bool, direction: Int)
+        -> String?
+    {
+        guard direction == -1 || direction == 1 else { return nil }
         // Anchor in the full list: the currently read room may not be an unread candidate.
         let selected = currentID.flatMap { id in ordered.firstIndex { $0.id == id } }
         var index = selected.map { $0 + direction } ?? (direction == 1 ? 0 : ordered.count - 1)

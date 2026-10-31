@@ -15,7 +15,7 @@
 
     {"id": "home.workspace-switcher", "what": "Switch between workspaces, which are Matrix spaces.", "mac": "done", "android": "done"},
     {"id": "home.conversations", "what": "See a workspace's channels and direct messages together.", "mac": "done", "android": "done"},
-    {"id": "home.dms", "what": "See every direct message, newest first, with its latest message.", "mac": "missing", "android": "done"},
+    {"id": "home.dms", "what": "See every direct message, newest first, with its latest message.", "mac": "done", "android": "done"},
     {"id": "home.unread-badges", "what": "Unread conversations show in bold, and mentions show a count.", "mac": "done", "android": "done"},
     {"id": "home.starred", "what": "Starred conversations sit in their own section at the top.", "mac": "done", "android": "done"},
     {"id": "home.star-toggle", "what": "Star or unstar a conversation.", "mac": "done", "android": "done"},

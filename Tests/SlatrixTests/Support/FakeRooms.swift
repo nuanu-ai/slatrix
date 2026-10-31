@@ -9,12 +9,12 @@ final class FakeCancellableHandle: TaskHandle, @unchecked Sendable {
 }
 
 func roomInfo(
-    id: String, name: String? = nil, membership: Membership = .joined, isSpace: Bool = false, unread: UInt64 = 0,
-    joinRule: JoinRule? = nil
+    id: String, name: String? = nil, membership: Membership = .joined, isSpace: Bool = false, isDirect: Bool = false,
+    unread: UInt64 = 0, joinRule: JoinRule? = nil
 ) -> RoomInfo {
     RoomInfo(
         id: id, encryptionState: .encrypted, creators: nil, displayName: name ?? id, rawName: name, topic: nil,
-        avatarUrl: nil, isDirect: false, isDm: false, isPublic: false, isSpace: isSpace, successorRoom: nil,
+        avatarUrl: nil, isDirect: isDirect, isDm: isDirect, isPublic: false, isSpace: isSpace, successorRoom: nil,
         isFavourite: false, isLowPriority: false, canonicalAlias: nil, alternativeAliases: [], membership: membership,
         inviter: nil, heroes: [], activeMembersCount: 2, invitedMembersCount: 0, joinedMembersCount: 2,
         activeServiceMembersCount: 0, serviceMembers: [], highlightCount: 0, notificationCount: unread,
@@ -29,6 +29,7 @@ final class FakeRoom: Room, @unchecked Sendable {
     private let lock = NSLock()
     private let identifier: String
     private var current: RoomInfo?
+    private var newest: LatestEventValue = .none
     private var listeners: [RoomInfoListener] = []
     private var subscriptions: [FakeCancellableHandle] = []
     private var reads = 0
@@ -50,7 +51,12 @@ final class FakeRoom: Room, @unchecked Sendable {
         get { lock.withLock { current } }
         set { lock.withLock { current = newValue } }
     }
+    var latest: LatestEventValue {
+        get { lock.withLock { newest } }
+        set { lock.withLock { newest = newValue } }
+    }
     var memberList: RoomMembersIterator?
+    override func latestEvent() async -> LatestEventValue { latest }
     override func id() -> String { identifier }
     override func members() async throws -> RoomMembersIterator {
         guard let memberList else { throw ClientError.Generic(msg: "fixture members failed", details: nil) }
