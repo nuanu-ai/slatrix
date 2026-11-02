@@ -23,8 +23,11 @@ import kotlinx.coroutines.launch
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.OAuthConfiguration
 
-/** The main thread, for everything that calls the SDK. */
-val MatrixMain: CoroutineDispatcher = Dispatchers.Main.immediate
+/**
+ * The main thread, for everything that calls the SDK. Never `Main.immediate`: the bindings wake an awaiting call from
+ * inside the SDK call in progress, so it would run there and wait on that call's locks forever.
+ */
+val MatrixMain: CoroutineDispatcher = Dispatchers.Main
 
 class AccountRuntime private constructor(application: Application) {
     private val scope = CoroutineScope(SupervisorJob() + MatrixMain)
