@@ -12,6 +12,7 @@ import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.ThreadOrigin
+import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -24,6 +25,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,6 +35,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -82,6 +87,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     threadRoot: String? = null, actions: MessageActions = MessageActions(), composerActions: ComposerActions = ComposerActions(),
     /** Asked, with the oldest message on screen, once the reader reaches the newest of a conversation opened at an older one. */
     onLoadNewer: (anchor: String?) -> Unit = {},
+    /** Takes a conversation opened at an older message to its newest, live. */
+    onShowNewest: () -> Unit = {},
     /** Opens a message where it is, highlighted, as a tap on a reply's quote does. */
     onOpenMessage: (eventId: String) -> Unit = {},
     loadPicture: PictureLoader = { _, _, _, _ -> null },
@@ -300,6 +307,19 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                         threadRoot != null -> if (state.rows.isEmpty()) HistoryProgress(true)
                         state.rows.isNotEmpty() -> HistoryProgress(state.loadingHistory)
                     }
+                }
+            }
+            // Slack's way back to the newest message, once the reader scrolls up or opened an older one.
+            val away by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
+            val jumps = rememberCoroutineScope()
+            androidx.compose.animation.AnimatedVisibility(jumped && (state.focused || away), Modifier.align(Alignment.BottomEnd).padding(UiMetrics.GapLarge),
+                enter = fadeIn(Motion.pane()), exit = ExitTransition.None) {
+                Surface({
+                    following = true
+                    if (state.focused) onShowNewest() else jumps.launch { list.scrollToItem(0) }
+                }, Modifier.size(UiMetrics.Touch).semantics { contentDescription = "Jump to recent messages" }, shape = CircleShape,
+                    color = colors.raised, contentColor = colors.textPrimary, border = BorderStroke(UiMetrics.Divider, colors.border)) {
+                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.ArrowDownward, null, Modifier.size(UiMetrics.Icon)) }
                 }
             }
             OfflineBanner()
