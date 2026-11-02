@@ -10,6 +10,8 @@ applied in order:
 - `0003-bounded-cached-search-replay`: replays a bounded slice of already-cached room events into a newly configured search index, so history cached before indexing becomes searchable.
 - `0004-focused-cache-freshness`: forwards later edits, reactions and redactions into event-focused (jump-to-message) timelines, which otherwise show stale content.
 - `0005-focused-initialization-retry`: lets a failed or cancelled event-focused timeline initialization be retried instead of failing with `CacheStateAlreadyExists`.
+- `0006-custom-account-data`: lets the bindings observe and fetch account data of a custom type, which Later syncs through.
+- `0007-unread-counts-catch-up-with-stored-receipts`: while a room counts anything as unread, the event cache also checks the store for the user's newer receipts, so a room read on another device clears.
 
 Send each patch upstream and drop it once an SDK release includes it.
 
