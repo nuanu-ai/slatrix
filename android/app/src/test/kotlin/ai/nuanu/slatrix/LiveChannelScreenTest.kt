@@ -144,6 +144,19 @@ class LiveChannelScreenTest {
         compose.onNode(progress).assertExists()
     }
 
+    // A conversation with nothing cached waits for its first page with no message to sit above, which showed a blank screen.
+    @Test fun aConversationWithNothingCachedShowsTheIndicatorWhileItsFirstPageLoads() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(emptyList(), loading = false, loadingHistory = true),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.mainClock.advanceTimeBy(600)
+        compose.onNode(progress).assertExists()
+    }
+
     // capability: conversation.intro
     @Test fun theStartOfAChannelOrDirectMessageShowsItsIntro() {
         val state = mutableStateOf(ConversationState(listOf(message("Hello", minutes = 0)), loading = false))
