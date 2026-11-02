@@ -305,7 +305,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                         !state.hasMore && !state.loading -> if (threadRoot == null) ConversationIntro(room)
                         // A thread with its root on screen waits in its replies bar; one opened without it shows the wait.
                         threadRoot != null -> if (state.rows.isEmpty()) HistoryProgress(true)
-                        state.rows.isNotEmpty() -> HistoryProgress(state.loadingHistory)
+                        // With nothing cached, the first page loads with no message to sit above.
+                        else -> HistoryProgress(state.loadingHistory || state.rows.isEmpty() && state.loading)
                     }
                 }
             }
