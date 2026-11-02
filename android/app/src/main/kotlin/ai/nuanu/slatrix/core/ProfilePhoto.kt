@@ -14,6 +14,9 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.Client
 
@@ -105,6 +108,26 @@ sealed interface PhotoChange {
 
 /** Your own profile, which every client shows: a display name and a photo. */
 class MatrixProfile(private val client: Client) {
+    /**
+     * The address of your photo, or null without one: the one saved last time at once, then the server's. At launch the
+     * connection can fail for a few seconds, so it asks again until the server answers.
+     */
+    fun photo(): Flow<String?> = flow {
+        try { client.cachedAvatarUrl() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+            ?.let { emit(it) }
+        var failures = 0
+        while (true) {
+            try {
+                emit(client.avatarUrl())
+                return@flow
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                delay(1_000L shl minOf(failures++, 5))
+            }
+        }
+    }
+
     /**
      * Saves a new [name], if any, then the [photo] change, if any; null once both are saved, else what failed. A name already
      * saved matches the account afterwards, so trying again sends only the photo.

@@ -26,6 +26,7 @@ import ai.nuanu.slatrix.core.MatrixAvatars
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.MatrixSearch
 import ai.nuanu.slatrix.core.MatrixPeople
+import ai.nuanu.slatrix.core.MatrixProfile
 import ai.nuanu.slatrix.core.PeopleSearchState
 import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.core.MessageSearchState
@@ -58,7 +59,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
-import kotlinx.coroutines.CancellationException
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -150,9 +150,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
                 val avatars = remember(client) { SessionAvatars(MatrixAvatars(client)) }
-                val userAvatarUrl by produceState<String?>(null, client) {
-                    value = try { client.avatarUrl() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
-                }
+                val userAvatarUrl by remember(client) { MatrixProfile(client).photo() }.collectAsState(null)
                 // Read inside derivedStateOf, so room list updates recompose the app only when the workspace changes.
                 // Only a pick is saved: a fallback while spaces still load must not replace what the person chose.
                 val roomList = rooms?.state?.collectAsState()
