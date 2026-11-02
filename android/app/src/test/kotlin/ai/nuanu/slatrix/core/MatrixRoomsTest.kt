@@ -7,12 +7,12 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -412,7 +412,7 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
-    @Test fun retryReplacesFailedSyncAndIgnoresItsLateErrorsAndRooms() = runTest {
+    @Test fun retryReplacesTheSyncAndIgnoresTheOldOnesLateErrorsAndRooms() = runTest {
         val room = TestRoom(roomInfo("!a:example.org", "Alpha"))
         val client = RoomsClient(listOf(room))
         val failed = RoomsSync()
@@ -421,8 +421,6 @@ class MatrixRoomsTest {
         client.services.trySend(replacement)
         val rooms = MatrixRooms(backgroundScope, client)
         failed.started.await()
-        failed.emitState(SyncServiceState.ERROR)
-        assertNotNull(rooms.state.first { it.error != null }.error)
 
         rooms.retry()
         replacement.started.await()
@@ -542,6 +540,21 @@ class MatrixRoomsTest {
         sync.running.first { !it }
         rooms.close()
     }
+
+    @Test fun aSyncThatEndsWhileTheAppIsOpenRunsAgain() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        sync.running.first { it }
+
+        // Offline mode covers a lost network; a sync that stopped on its own or failed otherwise waits for nobody.
+        for (end in listOf(SyncServiceState.TERMINATED, SyncServiceState.ERROR)) {
+            sync.end(end)
+            withContext(Dispatchers.Default) { withTimeout(5_000) { sync.running.first { it } } }
+        }
+        rooms.close()
+    }
 }
 
 // About three times the 14–38 ms measured locally; rebuilding the whole list per message took 400–750 ms.
@@ -642,6 +655,10 @@ private class RoomsSync : SyncService(NoHandle) {
         stopped.complete(Unit)
     }
     fun emitState(state: SyncServiceState) { stateListener?.onUpdate(state) }
+    fun end(state: SyncServiceState) {
+        running.value = false
+        emitState(state)
+    }
     fun emitEntries(updates: List<RoomListEntriesUpdate>) {
         if (activeFilter) entriesListener?.onUpdate(updates)
     }
