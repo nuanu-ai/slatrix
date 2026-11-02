@@ -378,6 +378,21 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
     }
 
+    /** Takes a conversation opened at an older message to its newest, live, as Slack's jump to recent messages does. */
+    fun showNewest() {
+        operations.launch {
+            pageLock.withLock {
+                try {
+                    if (shown?.focused == true && pending == null) goLive(null)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // It stays where it is, and the button is still there to try again.
+                }
+            }
+        }
+    }
+
     /** Opens the live timeline and shows it once it holds [anchor]; at once, with none. */
     private suspend fun goLive(anchor: String?) {
         var next: Source? = null

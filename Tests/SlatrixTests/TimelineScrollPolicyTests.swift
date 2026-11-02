@@ -93,6 +93,7 @@ struct TimelineScrollPolicyTests {
                 contains: loaded.contains) == .bottom)
     }
 
+    // capability: conversation.jump-to-newest
     @Test(
         "Jump to recent shows once the reader scrolls more than two screens from the newest message themselves",
         arguments: [
