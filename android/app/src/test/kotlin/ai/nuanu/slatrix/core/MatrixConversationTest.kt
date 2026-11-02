@@ -752,6 +752,18 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.jump-to-newest
+    @Test fun showingTheNewestTurnsAConversationOpenedAtAnOlderMessageLive() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
+        val around = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier")))
+        val conversation = MatrixConversation(backgroundScope, JumpRoom(live, around), at = "\$old")
+        assertTrue(conversation.state.first { !it.loading }.focused)
+
+        conversation.showNewest()
+        assertEquals(listOf("Latest"), conversation.state.first { !it.focused }.rows.messages.map { it.body })
+        conversation.close()
+    }
+
     // capability: conversation.jump-to-message
     @Test fun aMessageWhoseSurroundingsCantLoadStillOpensTheConversationLive() = runTest {
         val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))

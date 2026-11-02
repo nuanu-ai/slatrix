@@ -400,6 +400,44 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("New").assertIsDisplayed()
     }
 
+    // capability: conversation.jump-to-newest
+    @Test fun aReaderWhoScrolledUpGetsBackToTheNewestFromAButtonOverTheComposer() {
+        val many = (1..200).map { message("Message $it", minutes = it) }
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(many, loading = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithContentDescription("Jump to recent messages").assertDoesNotExist()
+        repeat(3) { compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown() } }
+        compose.onNodeWithText("Message 200").assertIsNotDisplayed()
+        val button = compose.onNodeWithContentDescription("Jump to recent messages").assertIsDisplayed()
+        assertTrue("It never covers the composer", button.fetchSemanticsNode().boundsInRoot.bottom <=
+            compose.onNodeWithContentDescription("Message #design").fetchSemanticsNode().boundsInRoot.top)
+
+        button.performClick()
+        compose.onNodeWithText("Message 200").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Jump to recent messages").assertDoesNotExist()
+    }
+
+    // capability: conversation.jump-to-newest
+    @Test fun theButtonTakesAConversationOpenedAtAnOlderMessageLiveToItsNewest() {
+        val state = mutableStateOf(ConversationState((1..60).map { message("Message $it", minutes = it) }, loading = false,
+            highlight = "\$Message 20", focused = true))
+        var live = 0
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    onShowNewest = { live++ })
+            }
+        }
+        compose.onNodeWithText("Message 20").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Jump to recent messages").performClick()
+        compose.runOnIdle { assertEquals(1, live) }
+        compose.runOnIdle { state.value = ConversationState((1..200).map { message("Message $it", minutes = it) }, loading = false) }
+        compose.onNodeWithText("Message 200").assertIsDisplayed()
+    }
+
     @Test fun aConversationWithNothingToResumeOpensAtItsNewestEvenWithAReadMarkerBehind() {
         // The fully-read marker can trail the read receipt, so the SDK's marker alone doesn't make a conversation unread.
         val many = (1..200).map { message("Message $it", minutes = it) }

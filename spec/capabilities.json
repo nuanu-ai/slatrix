@@ -41,6 +41,7 @@
     {"id": "conversation.mark-unread", "what": "Mark a conversation unread.", "mac": "done", "android": "done"},
     {"id": "conversation.keep-position", "what": "Coming back to a conversation returns to where you were reading.", "mac": "done", "android": "done"},
     {"id": "conversation.jump-to-message", "what": "A message opened from search or a link shows highlighted in its conversation.", "mac": "done", "android": "done"},
+    {"id": "conversation.jump-to-newest", "what": "A button over the composer takes you back to the newest message once you scroll up or open an older one.", "mac": "done", "android": "done"},
     {"id": "conversation.members", "what": "See a conversation's members from its header.", "mac": "done", "android": "done"},
     {"id": "conversation.files", "what": "See the files and links shared in a conversation.", "mac": "done", "android": "done"},
     {"id": "conversation.pins", "what": "See a conversation's pinned messages.", "mac": "done", "android": "done"},
