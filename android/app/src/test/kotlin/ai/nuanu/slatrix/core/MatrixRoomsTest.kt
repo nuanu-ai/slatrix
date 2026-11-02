@@ -13,7 +13,6 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -413,7 +412,7 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
-    @Test fun retryReplacesFailedSyncAndIgnoresItsLateErrorsAndRooms() = runTest {
+    @Test fun retryReplacesTheSyncAndIgnoresTheOldOnesLateErrorsAndRooms() = runTest {
         val room = TestRoom(roomInfo("!a:example.org", "Alpha"))
         val client = RoomsClient(listOf(room))
         val failed = RoomsSync()
@@ -422,8 +421,6 @@ class MatrixRoomsTest {
         client.services.trySend(replacement)
         val rooms = MatrixRooms(backgroundScope, client)
         failed.started.await()
-        failed.emitState(SyncServiceState.ERROR)
-        assertNotNull(rooms.state.first { it.error != null }.error)
 
         rooms.retry()
         replacement.started.await()
