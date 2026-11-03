@@ -190,3 +190,40 @@ struct ReplyPreviewMappingTests {
         #expect(MatrixMapping.replyPreview(eventID: "$spoiler", details: ready(spoiler)).body == "[Spoiler hidden]")
     }
 }
+
+struct RepliedToThreadMappingTests {
+    struct Quoted: Decodable {
+        var sender: String
+        var body: String
+    }
+
+    struct Shown: Decodable, CustomTestStringConvertible {
+        var name: String
+        var sender: String
+        var body: String
+        var inThread: Bool
+        var quoted: Quoted?
+        var repliedToThread: Bool
+        var testDescription: String { name }
+    }
+
+    struct Spec: Decodable { var shown: [Shown] }
+
+    // capability: thread.send-to-channel
+    @Test(
+        "A channel's copy of a thread reply reads as Slack's \"replied to a thread\", from spec/send-to-channel.json",
+        arguments: try SharedSpec.decode("spec/send-to-channel.json", as: Spec.self).shown)
+    func shown(spec: Shown) {
+        let quote = spec.quoted.map { quoted in
+            ReplyDetails(
+                id: "$reply",
+                details: .ready(
+                    content: .msgLike(content: content(quoted.body)), sender: quoted.sender,
+                    senderProfile: .unavailable, timestamp: 1_000, eventOrTransactionId: .eventId(eventId: "$reply")))
+        }
+        let message = MatrixMapping.project(
+            content(spec.body, threadRoot: spec.inThread ? "$root" : nil, replyTo: quote), id: "$copy",
+            roomID: "!room:example.org", senderID: spec.sender, senderName: "Sender", timestamp: 2_000)
+        #expect(message.repliedToThread == spec.repliedToThread)
+    }
+}

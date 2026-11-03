@@ -95,6 +95,8 @@ struct RootView: View {
     @State private var pinPermissionRoomID: String?
     @State private var pinPermission = false
     @State private var threadRoot: ChatMessage?
+    /// The thread whose "Also send to #channel" is checked; another thread starts unchecked, as in Slack.
+    @State private var channelCopyRootID: String?
     @State private var navigationGeneration = UUID()
     @State private var composerGeneration = UUID()
     @State private var composerStateIdentity: ComposerIdentity?
@@ -1272,9 +1274,29 @@ struct RootView: View {
                             onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) }
                         )
                     }
-                    .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(m.sp12).disabled(
+                    .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding([.horizontal, .top], m.sp12)
+                    .disabled(
                         !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
                             || matrix.selectedRoomID != root.roomID)
+                    // Only text is copied, so the box sits out a reply with files.
+                    let withFiles =
+                        attachmentDrafts.queues[
+                            AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID)]?.isEmpty == false
+                    Toggle(
+                        isOn: Binding(
+                            get: { channelCopyRootID == root.eventID && !withFiles },
+                            set: { channelCopyRootID = $0 ? root.eventID : nil })
+                    ) {
+                        if room.isDirect {
+                            Text("Also send as direct message")
+                        } else {
+                            Text(
+                                "Also send to \(Image(systemName: room.channelSymbol))\(Text(room.name).fontWeight(.semibold))"
+                            )
+                        }
+                    }.toggleStyle(.checkbox).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(m.sp12)
+                        .disabled(threadReadyID != root.eventID || withFiles)
                 }
             }
             .overlay(alignment: .top) {
@@ -2206,11 +2228,13 @@ struct RootView: View {
         _ body: String, files: [URL], room: ChatRoom, threadID: String? = nil, context: ComposerContext,
         reply: MessageReplyTarget?
     ) async throws {
-        try await sendText(body, room: room, threadID: threadID, context: context, reply: reply)
+        try await sendText(body, room: room, threadID: threadID, context: context, reply: reply, copies: files.isEmpty)
         for file in files { try await sendFile(file, room: room, threadID: threadID, context: context) }
     }
+    /// `copies` lets a checked "Also send to #channel" copy the text, which it can't for a reply with files.
     private func sendText(
-        _ body: String, room: ChatRoom, threadID: String? = nil, context: ComposerContext, reply: MessageReplyTarget?
+        _ body: String, room: ChatRoom, threadID: String? = nil, context: ComposerContext, reply: MessageReplyTarget?,
+        copies: Bool = true
     ) async throws {
         try assertComposerContext(context)
         guard !matrix.isPreview else { throw MatrixServiceError.preview }
@@ -2228,7 +2252,12 @@ struct RootView: View {
         else {
             throw MatrixServiceError.request("The reply changed. Check it and send again.")
         }
-        try await matrix.sendMessage(body, threadRootID: threadID, replyToID: reply?.message.eventID, roomID: room.id)
+        let alsoToChannel = copies && threadID != nil && threadID == channelCopyRootID
+        try await matrix.sendMessage(
+            body, threadRootID: threadID, replyToID: reply?.message.eventID, roomID: room.id,
+            alsoToChannel: alsoToChannel)
+        // Slack unchecks "Also send to #channel" once a reply goes.
+        if threadID != nil, isCurrentComposer(context), channelCopyRootID == threadID { channelCopyRootID = nil }
         if isCurrentComposer(context), let reply { reply.finish(current: &replyTarget, owner: replyOwner) }
     }
     private func sendFile(_ file: URL, room: ChatRoom, threadID: String? = nil, context: ComposerContext) async throws {

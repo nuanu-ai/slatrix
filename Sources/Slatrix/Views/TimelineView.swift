@@ -518,7 +518,8 @@ struct MessageRow: View {
                         colors.textSecondary
                     )
                 } else {
-                    if let replyPreview { replyPreview }
+                    // State of its own per message, so a reused cell never names another copy's thread.
+                    if let replyPreview { replyPreview.id(message.id) }
                     if message.kind == "m.room.encrypted" {
                         // One quiet line per message; the header offers the recovery key once for all of them.
                         Label(message.body, systemImage: "lock").font(m.font(.secondary)).italic()

@@ -7,7 +7,12 @@ struct ReplyPreviewView: View {
     let preview: ChatReplyPreview
     let origin: MessageActionTarget?
     var onOpen: ((String) -> Void)?
+    var onOpenThread: ((ChatMessage) -> Void)?
     @EnvironmentObject private var appearance: AppearanceStore
+    /// The thread a channel's copy of a thread reply came from; nil while it loads.
+    @State private var thread: (root: ChatMessage, preview: String)?
+    /// A message that only looked like a copy: its quote isn't in a thread.
+    @State private var notInThread = false
 
     var body: some View {
         HStack(spacing: m.sp8) {
@@ -15,7 +20,19 @@ struct ReplyPreviewView: View {
             // Every state takes the loaded preview's two lines, so the row keeps its height when the original lands.
             ZStack(alignment: .leading) {
                 lines(sender: " ", body: " ").hidden()
-                if preview.state == .ready {
+                if message.repliedToThread && !notInThread {
+                    // Slack's copy of a thread reply names its thread instead of quoting the same words.
+                    Button {
+                        if let thread { onOpenThread?(thread.root) }
+                    } label: {
+                        VStack(alignment: .leading, spacing: m.sp4) {
+                            Text("replied to a thread:").font(m.font(.caption))
+                                .foregroundStyle(appearance.colors.textSecondary)
+                            Text(thread?.preview ?? " ").font(m.font(.meta, .medium))
+                                .foregroundStyle(appearance.colors.accent)
+                        }.lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }.buttonStyle(.row).disabled(thread == nil || onOpenThread == nil).help("View thread")
+                } else if preview.state == .ready {
                     Button {
                         onOpen?(preview.eventID)
                     } label: {
@@ -42,6 +59,13 @@ struct ReplyPreviewView: View {
                 // task. Let the captured request finish so a thrown SDK error
                 // can still replace Pending, even when no terminal diff arrives.
                 Task { await matrix.loadReplyPreview(for: target) }
+            }
+            .task(id: message.repliedToThread ? preview.eventID : nil) {
+                guard message.repliedToThread else { return }
+                let found = await matrix.threadOrigin(roomID: message.roomID, replyID: preview.eventID)
+                guard !Task.isCancelled else { return }
+                thread = found
+                notInThread = found == nil
             }
     }
 
