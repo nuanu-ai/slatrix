@@ -3,6 +3,7 @@ package ai.nuanu.slatrix
 import android.app.Application
 import ai.nuanu.slatrix.core.AccountRuntime
 import ai.nuanu.slatrix.core.AccountState
+import ai.nuanu.slatrix.core.MatrixMain
 import ai.nuanu.slatrix.core.MatrixSearch
 import ai.nuanu.slatrix.core.MatrixPeople
 import ai.nuanu.slatrix.core.MatrixWorkspace
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.Client
 
@@ -41,8 +43,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         if (mutableNotificationTarget.value == target) mutableNotificationTarget.value = null
     }
 
+    private val scope = viewModelScope + MatrixMain
+
     init {
-        viewModelScope.launch {
+        scope.launch {
             var client: Client? = null
             try {
                 account.state.collect { state ->
@@ -52,11 +56,11 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                         mutableWorkspace.value?.close()
                         mutableSearch.value?.close()
                         client = next
-                        mutableWorkspace.value = next?.let { MatrixWorkspace(viewModelScope, it) }
-                        mutableThreads.value = next?.let { MatrixWorkspace(viewModelScope, it) }
-                        mutableSearch.value = next?.let { MatrixSearch(viewModelScope, it) }
+                        mutableWorkspace.value = next?.let { MatrixWorkspace(scope, it) }
+                        mutableThreads.value = next?.let { MatrixWorkspace(scope, it) }
+                        mutableSearch.value = next?.let { MatrixSearch(scope, it) }
                         mutablePeople.value?.close()
-                        mutablePeople.value = next?.let { MatrixPeople(viewModelScope, it) }
+                        mutablePeople.value = next?.let { MatrixPeople(scope, it) }
                     }
                 }
             } finally {

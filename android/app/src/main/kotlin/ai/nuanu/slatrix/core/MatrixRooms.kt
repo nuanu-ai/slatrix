@@ -11,10 +11,12 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
@@ -435,6 +437,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private suspend fun sync() {
         while (currentCoroutineContext().isActive) {
             val generation = syncGeneration.incrementAndGet()
+            val ended = Channel<Unit>(Channel.CONFLATED)
             var service: SyncService? = null
             var list: RoomList? = null
             var entries: RoomListEntriesWithDynamicAdaptersResult? = null
@@ -448,7 +451,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                 stateHandle = current.state(object : SyncServiceStateObserver {
                     override fun onUpdate(state: SyncServiceState) {
                         val error = when (state) {
-                            SyncServiceState.ERROR, SyncServiceState.TERMINATED -> "Couldn’t sync conversations."
+                            SyncServiceState.ERROR, SyncServiceState.TERMINATED -> "Couldn’t sync conversations.".also { ended.trySend(Unit) }
                             else -> null
                         }
                         events.trySend(Event.Connection(error, generation, state == SyncServiceState.RUNNING,
@@ -468,7 +471,20 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                 syncLock.withLock { activeSync.value = current }
                 coroutineScope {
                     // While the app is hidden, a push lookup runs its own short encryption sync through this service.
-                    val visibility = launch { foreground.collect { if (it) current.start() else current.stop() } }
+                    // Offline mode covers a lost network; a sync that ended otherwise starts again while the app is open,
+                    // as the Mac's ConnectionRecovery does. A stop is never cut short, or a start could land before it ends.
+                    val visibility = launch {
+                        foreground.collectLatest { visible ->
+                            if (!visible) return@collectLatest withContext(NonCancellable) { current.stop() }
+                            current.start()
+                            var restarts = 0
+                            for (end in ended) {
+                                if (restarts > 0) delay(1_000L shl minOf(restarts - 1, 5))
+                                restarts++
+                                current.start()
+                            }
+                        }
+                    }
                     retries.receive()
                     visibility.cancel()
                 }

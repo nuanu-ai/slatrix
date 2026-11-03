@@ -103,17 +103,21 @@ enum MediaViewerNavigation {
 /// The message the media viewer shows, if it is open.
 @Observable @MainActor final class MediaViewerState {
     private(set) var message: ChatMessage?
+    /// The window's video playing in its row, which holds while the viewer shows anything full size.
+    let inlineVideo = InlineVideo()
     private(set) var surface = MessageActionTarget.Surface.conversation
     /// The Files list it was opened from, in the list's order; nil for a timeline.
     private(set) var files: [ChatMessage]?
 
     func open(_ message: ChatMessage, surface: MessageActionTarget.Surface) {
+        inlineVideo.pause()
         self.surface = surface
         files = nil
         self.message = message
     }
 
     func open(_ message: ChatMessage, files: [ChatMessage]) {
+        inlineVideo.pause()
         surface = .conversation
         self.files = files
         self.message = message

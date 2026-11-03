@@ -40,10 +40,59 @@ struct ChatRoom: Identifiable, Hashable {
     var canInvite: Bool? = nil
     /// nil until the room's power levels are known; the composer shows until then.
     var canPostMessages: Bool? = nil
+    /// Read for direct messages only, which the DMs page lists with it.
+    var latest: LatestMessage? = nil
 
     /// The name in running text: Slack's "#design" for a channel anyone can join. Text has no lock, so a private
     /// channel reads as its bare name, like a person.
     var writtenName: String { isDirect || isPrivate ? name : "#" + name }
+
+    /// The direct message DMs opens beside its list: the one read last, else the newest.
+    static func directMessageToOpen(_ rooms: [ChatRoom], visited: [String]) -> String? {
+        let direct = directMessages(rooms)
+        return visited.last { id in direct.contains { $0.id == id } } ?? direct.first?.id
+    }
+
+    /// The DMs list: the newest conversation first, then those with nothing to show yet by name. "Find a DM" narrows
+    /// it by name, and Unreads to unread conversations and the one open.
+    static func directMessages(
+        _ rooms: [ChatRoom], matching search: String = "", unreadOnly: Bool = false, keeping openID: String? = nil
+    ) -> [ChatRoom] {
+        rooms.filter {
+            $0.isDirect && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search))
+                && (!unreadOnly || UnreadBadge($0) != .none || $0.id == openID)
+        }.sorted {
+            let (first, second) = ($0.latest?.timestamp ?? .distantPast, $1.latest?.timestamp ?? .distantPast)
+            if first != second { return first > second }
+            let names = $0.name.localizedStandardCompare($1.name)
+            return names != .orderedSame ? names == .orderedAscending : $0.id < $1.id
+        }
+    }
+}
+
+/// A conversation's newest event; `body` is nil when there is nothing to preview, such as a membership change.
+struct LatestMessage: Hashable {
+    var body: String?
+    var timestamp: Date
+    var isOwn: Bool
+
+    /// Slack marks your own message.
+    var preview: String? { body.map { isOwn ? "You: \($0)" : $0 } }
+
+    /// The time today, "Yesterday" the day before, and the date before that.
+    func time(now: Date = Date(), calendar: Calendar = .current) -> String {
+        var style = Date.FormatStyle(
+            locale: calendar.locale ?? .current, calendar: calendar, timeZone: calendar.timeZone)
+        if calendar.isDate(timestamp, inSameDayAs: now) { return timestamp.formatted(style.hour().minute()) }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+            calendar.isDate(timestamp, inSameDayAs: yesterday)
+        {
+            return "Yesterday"
+        }
+        style = style.month(.abbreviated).day()
+        let sameYear = calendar.isDate(timestamp, equalTo: now, toGranularity: .year)
+        return timestamp.formatted(sameYear ? style : style.year())
+    }
 }
 
 struct ChatUser: Identifiable, Hashable {

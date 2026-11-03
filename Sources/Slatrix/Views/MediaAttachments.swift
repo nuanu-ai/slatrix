@@ -1,3 +1,4 @@
+import AVKit
 import AppKit
 import ImageIO
 import SwiftUI
@@ -8,6 +9,8 @@ struct AttachmentActions {
     var open: () -> Void = {}
     var forward: (() -> Void)?
     var copyLink: (() -> Void)?
+    /// Where a video here plays in place rather than in the viewer.
+    var inlineVideo: InlineVideo.Slot?
 }
 
 /// An attachment as Slack shows it: images, GIFs and videos inline under their name, other files as a card.
@@ -158,6 +161,9 @@ private struct InlineMedia: View {
     private var colors: AppColors { appearance.colors }
     private var isVideo: Bool { message.kind == "m.video" }
     private var animates: Bool { attachment.animated && (playing || !reduceMotion) }
+    /// Where a video plays in place; nil where a click opens the viewer instead.
+    private var inline: InlineVideo.Slot? { isVideo ? actions.inlineVideo : nil }
+    private var playsHere: Bool { inline?.isPlaying == true }
 
     var body: some View {
         VStack(alignment: .leading, spacing: m.sp4) {
@@ -189,21 +195,24 @@ private struct InlineMedia: View {
                         MediaImage(image: NSImage(cgImage: shown, size: .zero)).transition(.opacity)
                     }
                 }
-                .overlay { if isVideo { playBadge } }
-                .overlay(alignment: .bottomLeading) { badge.padding(m.sp8) }
+                .overlay { if isVideo { videoOverlay } }
+                .overlay(alignment: .bottomLeading) { if !playsHere { badge.padding(m.sp8) } }
                 .clipShape(shape)
                 .overlay(shape.strokeBorder(colors.border))
                 .aspectRatio(box.width / box.height, contentMode: .fit)
                 .frame(maxWidth: box.width)
         }
-        .buttonStyle(.row).help(attachment.name).accessibilityLabel("Open \(attachment.name)")
+        .buttonStyle(.row).help(attachment.name)
+        .accessibilityLabel("\(inline == nil ? "Open" : "Play") \(attachment.name)")
         .accessibilityAction(named: "Download") {
             Task { await AttachmentFiles.shared.download(message, matrix: matrix) }
         }
+        .accessibilityActions { if inline != nil { Button("Full screen", action: actions.open) } }
         .overlay(alignment: .topTrailing) {
             if hovering || downloading {
                 MediaActionsToolbar(
-                    matrix: matrix, message: message, actions: actions, downloading: $downloading
+                    matrix: matrix, message: message, actions: actions, downloading: $downloading,
+                    fullScreen: inline == nil ? nil : actions.open
                 ).padding(m.sp8)
             }
         }
@@ -233,6 +242,17 @@ private struct InlineMedia: View {
             .background(colors.mediaControl, in: Capsule())
     }
 
+    /// Over a video's poster: the play button, then the wait for its file, then the video itself.
+    @ViewBuilder private var videoOverlay: some View {
+        if playsHere, let player = inline?.player {
+            InlinePlayer(player: player)
+        } else if playsHere {
+            DelayedProgress().environment(\.colorScheme, .dark)
+        } else {
+            playBadge
+        }
+    }
+
     private var playBadge: some View {
         Image(systemName: "play.fill").font(m.font(.title)).foregroundStyle(colors.onMedia)
             .frame(width: m.sp40 + m.sp8, height: m.sp40 + m.sp8).background(colors.mediaControl, in: Circle())
@@ -241,6 +261,8 @@ private struct InlineMedia: View {
     private func click() {
         if attachment.animated && !animates {
             playing = true
+        } else if inline != nil {
+            if !playsHere { inline?.play() }
         } else {
             actions.open()
         }
@@ -271,11 +293,18 @@ private struct MediaActionsToolbar: View {
     let message: ChatMessage
     let actions: AttachmentActions
     @Binding var downloading: Bool
+    /// Opens a video that plays in place in the viewer.
+    var fullScreen: (() -> Void)?
 
     var body: some View {
         let colors = appearance.colors
         let side = MessageToolbar.button
         HStack(spacing: 0) {
+            if let fullScreen {
+                IconButton(
+                    symbol: "arrow.up.left.and.arrow.down.right", label: "Full screen", role: .body, side: side,
+                    action: fullScreen)
+            }
             if downloading {
                 DelayedProgress().frame(width: m(side), height: m(side))
             } else {
@@ -401,6 +430,71 @@ extension FileKind {
         case .image: "photo.fill"
         case .generic: "doc.fill"
         }
+    }
+}
+
+/// The playing video's AVKit view, in its row's box. Out of sight, scrolled away or gone from the window, it pauses.
+private struct InlinePlayer: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> InlinePlayerView {
+        let view = InlinePlayerView()
+        view.controlsStyle = .floating
+        view.showsFullScreenToggleButton = false
+        return view
+    }
+
+    func updateNSView(_ view: InlinePlayerView, context: Context) {
+        if view.player !== player { view.player = player }
+    }
+
+    static func dismantleNSView(_ view: InlinePlayerView, coordinator: ()) {
+        view.hide()
+        view.player = nil
+    }
+}
+
+final class InlinePlayerView: AVPlayerView {
+    /// The view each player shows in now. A reused cell can hold a stale copy of the row, and that copy leaving
+    /// mustn't pause the video being watched.
+    private static let showing = NSMapTable<AVPlayer, InlinePlayerView>.weakToWeakObjects()
+    private var scrolling: NSObjectProtocol?
+    private var started: NSKeyValueObservation?
+
+    /// Clear until its video plays, or shows where it was paused, so the poster shows meanwhile, not a black box.
+    override var player: AVPlayer? {
+        didSet {
+            guard player !== oldValue else { return }
+            if let player, window != nil { Self.showing.setObject(self, forKey: player) }
+            alphaValue = 0
+            started = player?.observe(\.timeControlStatus, options: [.initial]) { [weak self] player, _ in
+                guard player.timeControlStatus == .playing || player.currentTime() > .zero else { return }
+                DispatchQueue.main.async { self?.alphaValue = 1 }
+            }
+        }
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let scrolling { NotificationCenter.default.removeObserver(scrolling) }
+        scrolling = nil
+        guard window != nil else { return hide() }
+        if let player { Self.showing.setObject(self, forKey: player) }
+        guard let clip = enclosingScrollView?.contentView else { return }
+        scrolling = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                if let self, self.visibleRect.isEmpty { self.hide() }
+            }
+        }
+    }
+
+    /// Pauses its video, unless another view shows it now.
+    func hide() {
+        if let player, Self.showing.object(forKey: player) === self { player.pause() }
     }
 }
 

@@ -4,7 +4,9 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
@@ -43,6 +45,9 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
     val selected: StateFlow<OpenChannel?> = mutableSelected.asStateFlow()
     private val requests = Channel<Pair<Long, OpenChannel?>>(Channel.CONFLATED)
     private val generation = AtomicLong()
+    /** Conversations run here, so what they do after closing, such as a thread reply's copy, ends with the workspace. */
+    private val sessionJob = SupervisorJob(scope.coroutineContext[Job])
+    private val session = CoroutineScope(scope.coroutineContext + sessionJob)
     private var conversationRoom: Room? = null
     private var composerRoom: Room? = null
     private var conversation: MatrixConversation? = null
@@ -73,14 +78,14 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                         val state = conversation.state.value
                         if (requested.at == null && requested.threadRoot == null && requested.room.unread == UnreadBadge.None &&
                             !state.focused && state.error == null) conversation to room
-                        else { closeKept(conversation, room); null }
+                        else { closeKept(conversation); null }
                     }
                     // Held at once, so a failure below closes a kept timeline along with the rest.
                     conversation = kept?.first
                     conversationRoom = kept?.second ?: checkNotNull(client.getRoom(requested.room.id))
                     composerRoom = checkNotNull(client.getRoom(requested.room.id))
                     currentCoroutineContext().ensureActive()
-                    val timeline = kept?.first?.also { it.revisit() } ?: MatrixConversation(scope, checkNotNull(conversationRoom),
+                    val timeline = kept?.first?.also { it.revisit() } ?: MatrixConversation(session, checkNotNull(conversationRoom),
                         requested.threadRoot, requested.at, requested.root, requested.resume)
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
@@ -101,7 +106,7 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
             }
         } finally {
             release()
-            withContext(NonCancellable) { recent.values.forEach { (conversation, room) -> closeKept(conversation, room) } }
+            withContext(NonCancellable) { recent.values.forEach { (conversation) -> closeKept(conversation) } }
             recent.clear()
             mutableSelected.value = null
             requests.close()
@@ -145,6 +150,7 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
         generation.incrementAndGet()
         mutableSelected.value = null
         worker.cancelAndJoin()
+        sessionJob.cancelAndJoin()
     }
 
     private suspend fun release() = withContext(NonCancellable) {
@@ -166,12 +172,12 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
             runCatching { room?.close() }
         } else if (channel != null && !left.state.value.focused && left.state.value.error == null) {
             recent[channel] = left to room
-            while (recent.size > RECENT) recent.remove(recent.keys.first())?.let { (conversation, kept) -> closeKept(conversation, kept) }
-        } else closeKept(left, room)
+            while (recent.size > RECENT) recent.remove(recent.keys.first())?.let { (conversation) -> closeKept(conversation) }
+        } else closeKept(left)
     }
 
-    private suspend fun closeKept(conversation: MatrixConversation, room: Room) {
+    /** The conversation closes its room, once a thread reply's copy to the channel no longer needs it. */
+    private suspend fun closeKept(conversation: MatrixConversation) {
         runCatching { conversation.close() }
-        runCatching { room.close() }
     }
 }

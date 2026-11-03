@@ -49,6 +49,27 @@ func fileEvent(_ id: String, source: MediaSource?, sender: String = "@owner:exam
         lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
 }
 
+/// A remote 2 s, 320×180 video named clip.mov, without a poster.
+func videoEvent(_ id: String, source: MediaSource) -> EventTimelineItem {
+    let video = VideoMessageContent(
+        filename: "clip.mov", caption: nil, formattedCaption: nil, source: source,
+        info: VideoInfo(
+            duration: 2, height: 180, width: 320, mimetype: "video/quicktime", size: 10_000, thumbnailInfo: nil,
+            thumbnailSource: nil, blurhash: nil))
+    return EventTimelineItem(
+        isRemote: true, eventOrTransactionId: .eventId(eventId: id), sender: "@alice:example.org",
+        senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil, isOwn: false, isEditable: false,
+        content: .msgLike(
+            content: MsgLikeContent(
+                kind: .message(
+                    content: MessageContent(
+                        msgType: .video(content: video), body: "clip.mov", isEdited: false, mentions: nil)),
+                inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
+        reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000, localSendState: nil, editSendState: nil,
+        redactionSendState: nil, localCreatedAt: nil, readReceipts: [:], origin: nil, canBeRepliedTo: true,
+        lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
+}
+
 /// A 160×90 PNG.
 func pngData() throws -> Data {
     let image = try #require(

@@ -9,6 +9,8 @@ import android.graphics.Paint
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.io.File
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -93,6 +95,17 @@ class ProfilePhotoTest {
         assertEquals(listOf("remove"), client.calls)
     }
 
+    // At launch the first requests can fail before the connection is ready, as on a real phone, and the photo stayed blank.
+    @Test fun aPhotoTheServerCouldntSendAtLaunchShowsOnceItAnswers() = runTest {
+        val client = ProfileClient().apply { photoFailures = 3 }
+        assertEquals(PHOTO, MatrixProfile(client).photo().last())
+    }
+
+    @Test fun theSavedPhotoShowsBeforeTheServerAnswers() = runTest {
+        val client = ProfileClient().apply { saved = PHOTO; photoFailures = Int.MAX_VALUE }
+        assertEquals(PHOTO, MatrixProfile(client).photo().first())
+    }
+
     @Test fun aPhotoThatFailsToUploadSaysSoAfterTheNameIsSaved() = runTest {
         val client = ProfileClient().apply { uploadFails = true }
         assertEquals("Couldn’t save your photo.", MatrixProfile(client).save("Alex Doe", PhotoChange.Upload(byteArrayOf(1), "image/jpeg")))
@@ -100,9 +113,18 @@ class ProfilePhotoTest {
     }
 }
 
+private const val PHOTO = "mxc://example.org/photo"
+
 private class ProfileClient : Client(NoHandle) {
     val calls = mutableListOf<String>()
     var uploadFails = false
+    var saved: String? = null
+    var photoFailures = 0
+    override suspend fun cachedAvatarUrl(): String? = saved
+    override suspend fun avatarUrl(): String? {
+        if (photoFailures-- > 0) throw IllegalStateException("Connection reset")
+        return PHOTO
+    }
     override suspend fun setDisplayName(name: String) { calls += "name $name" }
     override suspend fun uploadAvatar(mimeType: String, data: ByteArray) {
         if (uploadFails) throw IllegalStateException("Too large")

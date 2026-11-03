@@ -10,6 +10,9 @@ import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.ComposerTarget
+import ai.nuanu.slatrix.core.ThreadOrigin
+import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -20,7 +23,11 @@ import androidx.compose.foundation.border
 import android.content.ClipData
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -28,6 +35,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -79,6 +87,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     threadRoot: String? = null, actions: MessageActions = MessageActions(), composerActions: ComposerActions = ComposerActions(),
     /** Asked, with the oldest message on screen, once the reader reaches the newest of a conversation opened at an older one. */
     onLoadNewer: (anchor: String?) -> Unit = {},
+    /** Takes a conversation opened at an older message to its newest, live. */
+    onShowNewest: () -> Unit = {},
     /** Opens a message where it is, highlighted, as a tap on a reply's quote does. */
     onOpenMessage: (eventId: String) -> Unit = {},
     loadPicture: PictureLoader = { _, _, _, _ -> null },
@@ -89,7 +99,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Who else is typing, by name. */
     typing: List<String> = emptyList(),
     /** Opens someone's profile, from a sender's name or picture or a mention. */
-    onPerson: (userId: String) -> Unit = {}) {
+    onPerson: (userId: String) -> Unit = {},
+    /** The thread a copy of a thread reply came from, which its row names; null when the reply isn't in a thread. */
+    loadThreadOrigin: suspend (replyEventId: String) -> ThreadOrigin? = { null }) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val videos = rememberVideoPlayback(loadFile)
@@ -276,14 +288,14 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val first = line != null && row.eventId == line
                             if (first) NewLine()
                             if (threadRoot != null && row.eventId == threadRoot) Column {
-                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson) { menu = it }
+                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson, loadThreadOrigin) { menu = it }
                                 // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                                 RepliesBar(replies)
                             // The first reply starts under the replies bar, and the first unread under the New line, so
                             // each shows its sender again.
                             } else LiveMessageRow(if (row.id == firstReply || first) row.copy(grouped = false) else row, state.ownUserId,
                                 actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
-                                loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson) { menu = it }
+                                loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson, loadThreadOrigin) { menu = it }
                         }
                     }
                 }
@@ -293,8 +305,22 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                         !state.hasMore && !state.loading -> if (threadRoot == null) ConversationIntro(room)
                         // A thread with its root on screen waits in its replies bar; one opened without it shows the wait.
                         threadRoot != null -> if (state.rows.isEmpty()) HistoryProgress(true)
-                        state.rows.isNotEmpty() -> HistoryProgress(state.loadingHistory)
+                        // With nothing cached, the first page loads with no message to sit above.
+                        else -> HistoryProgress(state.loadingHistory || state.rows.isEmpty() && state.loading)
                     }
+                }
+            }
+            // Slack's way back to the newest message, once the reader scrolls up or opened an older one.
+            val away by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
+            val jumps = rememberCoroutineScope()
+            androidx.compose.animation.AnimatedVisibility(jumped && (state.focused || away), Modifier.align(Alignment.BottomEnd).padding(UiMetrics.GapLarge),
+                enter = fadeIn(Motion.pane()), exit = ExitTransition.None) {
+                Surface({
+                    following = true
+                    if (state.focused) onShowNewest() else jumps.launch { list.scrollToItem(0) }
+                }, Modifier.size(UiMetrics.Touch).semantics { contentDescription = "Jump to recent messages" }, shape = CircleShape,
+                    color = colors.raised, contentColor = colors.textPrimary, border = BorderStroke(UiMetrics.Divider, colors.border)) {
+                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.ArrowDownward, null, Modifier.size(UiMetrics.Icon)) }
                 }
             }
             OfflineBanner()
@@ -311,7 +337,34 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
         val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
         TypingLine(typing)
-        if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders) else CannotPost()
+        if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders,
+            aboveField = if (threadRoot != null && composer.target !is ComposerTarget.Edit) {
+                { AlsoSendTo(room, composer.alsoToChannel, composerActions.onAlsoToChannel) }
+            } else null) else CannotPost()
+    }
+}
+
+/** Slack's checkbox over a thread's composer that sends the reply to its channel too. */
+@Composable
+private fun AlsoSendTo(room: RoomSummary, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val colors = SlatrixTheme.colors
+    val style = MaterialTheme.typography.bodyLarge
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).toggleable(checked, role = Role.Checkbox, onValueChange = onChange)
+        .padding(horizontal = UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+        Checkbox(checked, null, colors = CheckboxDefaults.colors(checkedColor = colors.accent, uncheckedColor = colors.textSecondary,
+            checkmarkColor = colors.canvas))
+        if (room.direct) Text("Also send as direct message", style = style, color = colors.textPrimary)
+        else {
+            Text("Also send to", style = style, color = colors.textPrimary)
+            // The channel as its header names it: a private one by its lock.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (room.isPrivate) SlackIcons.Lock else SlackIcons.Hash, if (room.isPrivate) "Private channel" else null,
+                    Modifier.size(UiMetrics.SmallIcon), tint = colors.textPrimary)
+                Text(room.name, style = style, fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
 }
 
@@ -419,7 +472,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
 private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
-    onPerson: (String) -> Unit,
+    onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?,
     onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
@@ -449,7 +502,17 @@ private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: (
                     MessageSendState.Failed -> "Not sent"
                 }, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = if (failed) colors.destructive else colors.textSecondary)
             }
-            message.replyTo?.let { reply -> ReplyQuote(reply) { onOpenReply(reply.eventId) } }
+            message.replyTo?.let { reply ->
+                // A copy of a thread reply names its thread, and turns out an ordinary quote if its reply isn't in one.
+                var origin by remember(message.id) { mutableStateOf<ThreadOrigin?>(null) }
+                var notInThread by remember(message.id) { mutableStateOf(false) }
+                if (message.repliedToThread) LaunchedEffect(message.id, reply.eventId) {
+                    origin = loadThreadOrigin(reply.eventId)
+                    notInThread = origin == null
+                }
+                if (message.repliedToThread && !notInThread) ThreadCopyQuote(origin, onOpenThread)
+                else ReplyQuote(reply) { onOpenReply(reply.eventId) }
+            }
             Box {
                 Column {
                     val attachment = message.attachment

@@ -86,6 +86,8 @@ data class ComposerActions(
     val onMention: (start: Int, end: Int, candidate: MentionCandidate) -> Unit = { _, _, _ -> },
     val onAttach: ((List<Uri>) -> Unit)? = null,
     val onFormat: ((start: Int, end: Int, kind: ComposerStyle.Kind, href: String?) -> Unit)? = null,
+    /** A thread's "Also send to #channel" checked or not. */
+    val onAlsoToChannel: (Boolean) -> Unit = {},
 )
 
 /**
@@ -95,7 +97,9 @@ data class ComposerActions(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (String) -> Unit, onSend: () -> Unit,
-    actions: ComposerActions, recentSenders: List<String> = emptyList()) {
+    actions: ComposerActions, recentSenders: List<String> = emptyList(),
+    /** Over the field while the composer is open, as Slack's thread puts "Also send to #channel" there. */
+    aboveField: (@Composable () -> Unit)? = null) {
     val colors = SlatrixTheme.colors
     val editing = composer.target is ComposerTarget.Edit
     // As BasicTextField(String) does: the text always comes from the composer, the caret from here.
@@ -183,6 +187,7 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
             if (keyboardShown && !keyboard && !picking && linking == null) { focus.clearFocus(); formatting = false }
             keyboardShown = keyboard
         }
+        if (expanded) aboveField?.invoke()
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (!expanded) attach?.let { Box(Modifier.padding(start = UiMetrics.GapTiny)) { AttachButton { attaching = true } } }
             Box(Modifier.weight(1f)) { ReceiveKeyboardMedia(attach) {

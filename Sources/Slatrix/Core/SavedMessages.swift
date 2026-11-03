@@ -166,10 +166,10 @@ private final class AccountDataObserver: RawAccountDataListener {
         let session = session
         handle = client.observeRawAccountDataEvent(
             eventType: SavedMessages.eventType,
-            listener: AccountDataObserver { content in
+            listener: AccountDataObserver { [weak self] content in
                 // Read here, off the main thread, so a long list costs the window nothing.
                 let remote = SavedMessages(json: content)
-                Task { @MainActor [weak self] in
+                Task { @MainActor in
                     guard let self, self.session == session else { return }
                     self.receive(remote)
                 }

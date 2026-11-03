@@ -185,6 +185,8 @@ struct Snapshots {
         }
         menu("toggle-sidebar")
         try write(await settledImage(hosting), "width-480-drawer-\(theme.rawValue)")
+        menu("dms")
+        try write(await settledImage(hosting), "width-480-drawer-dms-\(theme.rawValue)")
         menu("mark-read")
 
         // The same widths with a thread open, from the newest message's own context menu.
@@ -328,7 +330,8 @@ struct Snapshots {
         let sidebar = WithState(Set<String>()) { collapsed in
             SidebarView(
                 matrix: matrix, route: .constant(.home), workspaceID: .constant("preview.workspace"),
-                search: .constant(""), draftRoomIDs: ["preview.room.3"], onSelect: { _ in }, onCreate: { _ in },
+                search: .constant(""), directMessageSearch: .constant(""), unreadDirectMessagesOnly: .constant(false),
+                draftRoomIDs: ["preview.room.3"], onSelect: { _ in }, onCreate: { _ in },
                 onPreferences: {}, onProfile: {}, onSignOut: {}, onMarkUnread: { _ in }, onMarkRead: { _ in },
                 onInviteWorkspace: { _ in }, onEditWorkspace: { _ in }, onNotifications: { _ in },
                 onBrowseChannels: {}, collapsed: collapsed)
@@ -602,6 +605,32 @@ struct Snapshots {
         try await render(RootView(matrix: matrix), theme: theme, name: "activity") {
             matrix.errorMessage = nil
             NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "activity"])
+        }
+    }
+
+    @Test("The DMs page", arguments: Theme.allCases)
+    func directMessages(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let now = Date()
+        let samples: [(String, String?, TimeInterval, Bool, Int)] = [
+            ("Julia", "Can you look at the launch notes before standup?", 4 * 60, false, 2),
+            ("Alex", "Sounds good, I’ll push the fix tonight", 3 * 3_600, true, 0),
+            ("Sam", "Here’s the deck from Thursday", 26 * 3_600, false, 0),
+            ("Priya Raman", "Thanks!", 4 * 86_400, false, 0),
+            ("Marcus Lee", nil, 0, false, 0),
+        ]
+        matrix.rooms.removeAll(where: \.isDirect)
+        matrix.rooms += samples.enumerated().map { index, sample in
+            let (name, body, age, own, unread) = sample
+            return ChatRoom(
+                id: "preview.dm.\(index)", name: name, isDirect: true, unreadMessages: unread,
+                latest: body.map { LatestMessage(body: $0, timestamp: now - age, isOwn: own) })
+        }
+        try await render(RootView(matrix: matrix), theme: theme, name: "dms") {
+            matrix.errorMessage = nil
+            NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "dms"])
         }
     }
 

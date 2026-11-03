@@ -7,6 +7,7 @@ import ai.nuanu.slatrix.push.PushRegistrationWorker
 import android.app.NotificationManager
 import java.io.File
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,8 +23,14 @@ import kotlinx.coroutines.launch
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.OAuthConfiguration
 
+/**
+ * The main thread, for everything that calls the SDK. Never `Main.immediate`: the bindings wake an awaiting call from
+ * inside the SDK call in progress, so it would run there and wait on that call's locks forever.
+ */
+val MatrixMain: CoroutineDispatcher = Dispatchers.Main
+
 class AccountRuntime private constructor(application: Application) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val scope = CoroutineScope(SupervisorJob() + MatrixMain)
     private val callbackScheme = "com.github.nuanu-ai.slatrix" + if (application.packageName.endsWith(".dev")) ".dev" else ""
     val account = MatrixAccount(scope, SessionStore(application), File(application.noBackupFilesDir, "matrix"),
         OAuthConfiguration(clientName = "Slatrix", redirectUri = "$callbackScheme:/oauth/callback",

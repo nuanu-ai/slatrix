@@ -6,6 +6,8 @@ import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
+import ai.nuanu.slatrix.core.ReplyPreview
+import ai.nuanu.slatrix.core.ThreadOrigin
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
@@ -34,6 +36,7 @@ import ai.nuanu.slatrix.ui.account.LocalAvatarLoader
 import kotlinx.coroutines.CompletableDeferred
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasProgressBarRangeInfo
 import androidx.compose.ui.test.hasScrollToIndexAction
@@ -138,6 +141,19 @@ class LiveChannelScreenTest {
         compose.mainClock.advanceTimeBy(100)
         compose.runOnIdle { state.value = state.value.copy(loadingHistory = true) }
         compose.mainClock.advanceTimeBy(100)
+        compose.onNode(progress).assertExists()
+    }
+
+    // A conversation with nothing cached waits for its first page with no message to sit above, which showed a blank screen.
+    @Test fun aConversationWithNothingCachedShowsTheIndicatorWhileItsFirstPageLoads() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(emptyList(), loading = false, loadingHistory = true),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.mainClock.advanceTimeBy(600)
         compose.onNode(progress).assertExists()
     }
 
@@ -328,6 +344,32 @@ class LiveChannelScreenTest {
         compose.onNodeWithContentDescription("Message design").assertIsDisplayed()
     }
 
+    // capability: thread.send-to-channel
+    @Test fun aCopyOfAThreadReplySaysItRepliedToAThreadAndOpensIt() {
+        fun copy(id: String, body: String, reply: String) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", body, null,
+            0L, MessageKind.Text, MessageSendState.Sent, false, "S", 0,
+            replyTo = ReplyPreview(reply, ReplyPreview.State.Ready, "Sam", body), repliedToThread = true)
+        val origin = CompletableDeferred<ThreadOrigin?>()
+        var opened: String? = null
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(copy("copy", "On it", "\$reply"), copy("quote", "Done", "\$plain")),
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    onOpenThread = { opened = it }, loadThreadOrigin = { if (it == "\$reply") origin.await() else null })
+            }
+        }
+        // Until the thread is known its line holds its place, so the row keeps its height when it lands.
+        compose.onNodeWithText("replied to a thread:").assertIsDisplayed()
+        val before = compose.onNodeWithText("On it").getUnclippedBoundsInRoot()
+        // A message whose quote turns out not to be in a thread quotes it as any reply does.
+        compose.onAllNodesWithText("Done").assertCountEquals(2)
+
+        origin.complete(ThreadOrigin("\$root", "Can we ship Friday?"))
+        compose.onNodeWithText("Can we ship Friday?").assertIsDisplayed().performClick()
+        assertEquals(before, compose.onNodeWithText("On it").getUnclippedBoundsInRoot())
+        compose.runOnIdle { assertEquals("\$root", opened) }
+    }
+
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
 
     private val progress = hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate)
@@ -369,6 +411,44 @@ class LiveChannelScreenTest {
         // Reading moves the SDK's marker after the newest message; the line stays until the reader leaves.
         compose.runOnIdle { state.value = state.value.copy(firstUnread = null) }
         compose.onNodeWithText("New").assertIsDisplayed()
+    }
+
+    // capability: conversation.jump-to-newest
+    @Test fun aReaderWhoScrolledUpGetsBackToTheNewestFromAButtonOverTheComposer() {
+        val many = (1..200).map { message("Message $it", minutes = it) }
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(many, loading = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithContentDescription("Jump to recent messages").assertDoesNotExist()
+        repeat(3) { compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown() } }
+        compose.onNodeWithText("Message 200").assertIsNotDisplayed()
+        val button = compose.onNodeWithContentDescription("Jump to recent messages").assertIsDisplayed()
+        assertTrue("It never covers the composer", button.fetchSemanticsNode().boundsInRoot.bottom <=
+            compose.onNodeWithContentDescription("Message #design").fetchSemanticsNode().boundsInRoot.top)
+
+        button.performClick()
+        compose.onNodeWithText("Message 200").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Jump to recent messages").assertDoesNotExist()
+    }
+
+    // capability: conversation.jump-to-newest
+    @Test fun theButtonTakesAConversationOpenedAtAnOlderMessageLiveToItsNewest() {
+        val state = mutableStateOf(ConversationState((1..60).map { message("Message $it", minutes = it) }, loading = false,
+            highlight = "\$Message 20", focused = true))
+        var live = 0
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    onShowNewest = { live++ })
+            }
+        }
+        compose.onNodeWithText("Message 20").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Jump to recent messages").performClick()
+        compose.runOnIdle { assertEquals(1, live) }
+        compose.runOnIdle { state.value = ConversationState((1..200).map { message("Message $it", minutes = it) }, loading = false) }
+        compose.onNodeWithText("Message 200").assertIsDisplayed()
     }
 
     @Test fun aConversationWithNothingToResumeOpensAtItsNewestEvenWithAReadMarkerBehind() {

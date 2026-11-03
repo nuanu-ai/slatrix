@@ -1,3 +1,4 @@
+import Foundation
 import MatrixRustSDK
 import Testing
 
@@ -204,5 +205,59 @@ extension RoomListRefresherTests {
         room.info = info
         room.notifyInfoChanged()
         #expect(await eventually { refresher.rooms.first?.canPostMessages == true })
+    }
+}
+
+extension RoomListRefresherTests {
+    private func text(_ body: String, html: String? = nil) -> TimelineItemContent {
+        .msgLike(
+            content: MsgLikeContent(
+                kind: .message(
+                    content: MessageContent(
+                        msgType: .text(
+                            content: TextMessageContent(
+                                body: body, formatted: html.map { FormattedBody(format: .html, body: $0) })),
+                        body: body, isEdited: false, mentions: nil)), inReplyTo: nil, threadRoot: nil,
+                threadSummary: nil))
+    }
+
+    // capability: home.dms
+    @Test("A direct message carries its newest message as plain text, and the next one you send replaces it")
+    func directMessageLatest() async {
+        let direct = FakeRoom(roomInfo(id: "!avery:example.org", isDirect: true))
+        direct.latest = .remote(
+            timestamp: 1_000, sender: "@avery:example.org", isOwn: false, profile: .unavailable,
+            content: text("See you at **noon**", html: "See you at <strong>noon</strong>"))
+        let refresher = RoomListRefresher()
+        refresher.attach(FakeClient(rooms: [direct]))
+        refresher.request()
+        #expect(
+            await eventually {
+                refresher.rooms.first?.latest
+                    == LatestMessage(body: "See you at noon", timestamp: Date(timeIntervalSince1970: 1), isOwn: false)
+            })
+        direct.latest = .local(
+            timestamp: 2_000, sender: "@me:example.org", profile: .unavailable, content: text("Shipped it"),
+            state: .isSending)
+        direct.notifyInfoChanged()
+        #expect(
+            await eventually {
+                refresher.rooms.first?.latest
+                    == LatestMessage(body: "Shipped it", timestamp: Date(timeIntervalSince1970: 2), isOwn: true)
+            })
+    }
+
+    @Test("A direct message without a picture of its own shows the other person's")
+    func directMessagePicture() async {
+        var info = roomInfo(id: "!avery:example.org", isDirect: true)
+        info.heroes = [
+            RoomHero(
+                userId: "@avery:example.org", displayName: "Avery", avatarUrl: "mxc://example.org/avery", status: nil,
+                call: nil)
+        ]
+        let refresher = RoomListRefresher()
+        refresher.attach(FakeClient(rooms: [FakeRoom(info)]))
+        refresher.request()
+        #expect(await eventually { refresher.rooms.first?.avatarURL == "mxc://example.org/avery" })
     }
 }

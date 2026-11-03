@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -109,6 +110,30 @@ class MatrixComposerTest {
         composer.send()
         assertEquals(target, sent.receive().target)
         assertNull(composer.state.first { !it.sending }.target)
+        composer.close()
+    }
+
+    // capability: thread.send-to-channel
+    @Test fun alsoSendToTheChannelGoesWithTheNextReplyAndUnchecksOnceItIsSent() = runTest {
+        val sent = Channel<ComposerMessage>(Channel.UNLIMITED)
+        val results = Channel<Boolean>(Channel.UNLIMITED)
+        val composer = MatrixComposer(backgroundScope, ComposerRoom(), "\$root") { sent.send(it); results.receive() }
+        composer.state.first { !it.loading }
+        composer.alsoToChannel(true)
+        composer.edit("On it")
+        composer.send()
+        assertTrue(sent.receive().alsoToChannel)
+        results.send(false)
+        assertTrue("A reply that didn't go keeps it checked", composer.state.first { !it.sending }.alsoToChannel)
+
+        composer.retry()
+        assertTrue(sent.receive().alsoToChannel)
+        results.send(true)
+        assertFalse("Slack unchecks it once a reply goes", composer.state.first { !it.sending }.alsoToChannel)
+        composer.edit("Thanks")
+        composer.send()
+        assertFalse(sent.receive().alsoToChannel)
+        results.send(true)
         composer.close()
     }
 

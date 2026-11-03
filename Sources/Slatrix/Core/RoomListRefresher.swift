@@ -124,7 +124,7 @@ final class RoomListRefresher {
     }
 
     private enum Fetched {
-        case listed(RoomInfo, isEncrypted: Bool, parents: [String])
+        case listed(RoomInfo, isEncrypted: Bool, parents: [String], latest: LatestMessage?)
         case ignored
         case failed(Error)
     }
@@ -154,14 +154,14 @@ final class RoomListRefresher {
         let fetched = await fetch(targets, spaces: spaces, knownParents: only == nil ? [:] : state.parents)
         if Task.isCancelled { return Outcome(state: state, read: targets.count) }
         if only != nil,
-            fetched.values.contains(where: { if case .listed(let info, _, _) = $0 { info.isSpace } else { false } })
+            fetched.values.contains(where: { if case .listed(let info, _, _, _) = $0 { info.isSpace } else { false } })
                 || targets.contains(where: { if case .workspace = state.entries[$0.id] { true } else { false } })
         {
             return await pass(client, state, only: nil, published: published, listen: listen)
         }
 
         var failure: Error?
-        var infos: [String: (RoomInfo, Bool)] = [:]
+        var infos: [String: (RoomInfo, Bool, LatestMessage?)] = [:]
         if only == nil {
             state.order = []
             state.entries = [:]
@@ -169,8 +169,8 @@ final class RoomListRefresher {
         }
         for (id, room) in targets {
             switch fetched[id] {
-            case .listed(let info, let isEncrypted, let parents):
-                infos[id] = (info, isEncrypted)
+            case .listed(let info, let isEncrypted, let parents, let latest):
+                infos[id] = (info, isEncrypted, latest)
                 state.parents[id] = parents
                 if only == nil || previous.entries[id] == nil { state.order.append(id) }
                 if state.handles[id] == nil {
@@ -196,8 +196,8 @@ final class RoomListRefresher {
             let listed = Set(state.order)
             for id in state.handles.keys where !listed.contains(id) { state.handles.removeValue(forKey: id)?.cancel() }
         }
-        for (id, (info, isEncrypted)) in infos {
-            state.entries[id] = entry(info, isEncrypted: isEncrypted, parents: state.parents)
+        for (id, (info, isEncrypted, latest)) in infos {
+            state.entries[id] = entry(info, isEncrypted: isEncrypted, parents: state.parents, latest: latest)
         }
 
         var rooms: [ChatRoom] = []
@@ -243,15 +243,21 @@ final class RoomListRefresher {
                 return .ignored
             }
             let isEncrypted = await room.isEncrypted()
-            if let knownParents { return .listed(info, isEncrypted: isEncrypted, parents: knownParents) }
+            // A room's info changes with its newest event, so this pass sees each new one.
+            let latest = info.isDirect ? MatrixMapping.latestMessage(await room.latestEvent()) : nil
+            if let knownParents {
+                return .listed(info, isEncrypted: isEncrypted, parents: knownParents, latest: latest)
+            }
             let parents = try await spaces.joinedParentIdsOfChild(childId: id)
-            return .listed(info, isEncrypted: isEncrypted, parents: parents)
+            return .listed(info, isEncrypted: isEncrypted, parents: parents, latest: latest)
         } catch {
             return .failed(error)
         }
     }
 
-    nonisolated private static func entry(_ info: RoomInfo, isEncrypted: Bool, parents: [String: [String]]) -> Entry {
+    nonisolated private static func entry(
+        _ info: RoomInfo, isEncrypted: Bool, parents: [String: [String]], latest: LatestMessage?
+    ) -> Entry {
         let directParents = parents[info.id] ?? []
         if InvitationRoomPlacement.classify(isSpace: info.isSpace, membership: info.membership) == .workspace {
             return .workspace(
@@ -280,10 +286,12 @@ final class RoomListRefresher {
                 isMarkedUnread: info.isMarkedUnread, mentions: Int(info.numUnreadMentions),
                 favorite: info.isFavourite, muted: info.cachedUserDefinedNotificationMode == .mute,
                 memberCount: Int(info.activeMembersCount), spaceIDs: ancestors.sorted(),
-                membership: info.membership == .invited ? "invite" : "join", avatarURL: info.avatarUrl,
+                membership: info.membership == .invited ? "invite" : "join",
+                // A direct message without a picture of its own shows the other person's.
+                avatarURL: info.avatarUrl ?? (info.isDirect && info.heroes.count == 1 ? info.heroes[0].avatarUrl : nil),
                 pinnedEventIDs: info.pinnedEventIds, canPinMessages: info.powerLevels?.canOwnUserPinUnpin(),
                 fullyReadEventID: info.fullyReadEventId, isSpace: info.isSpace,
                 directParentSpaceIDs: directParents.sorted(), canInvite: info.powerLevels?.canOwnUserInvite(),
-                canPostMessages: info.powerLevels?.canOwnUserSendMessage(message: .roomMessage)))
+                canPostMessages: info.powerLevels?.canOwnUserSendMessage(message: .roomMessage), latest: latest))
     }
 }

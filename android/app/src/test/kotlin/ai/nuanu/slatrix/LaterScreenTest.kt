@@ -9,6 +9,9 @@ import ai.nuanu.slatrix.ui.account.LaterScreen
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -52,6 +55,19 @@ class LaterScreenTest {
             assertEquals(listOf("\$two"), opened)
             assertEquals(listOf("\$one"), removed)
         }
+    }
+
+    @Test fun aSaveTimeMergedFromAnotherDeviceKeepsTheCardAsItShows() {
+        var saved by mutableStateOf(listOf(SavedMessage("!design:example.org", "\$one", 1_000)))
+        var reads = 0
+        // Only the first read finds the message, so a card read again would say it's unavailable.
+        val load: suspend (SavedMessage) -> SavedPreview? = { if (reads++ == 0) SavedPreview("Mira Chen", "Ship it on Thursday", 1_700_000_000_000L) else null }
+        compose.setContent { SlatrixTheme { LaterScreen(saved, rooms, load, {}, {}) {} } }
+        compose.onNodeWithText("Ship it on Thursday").assertIsDisplayed()
+
+        saved = listOf(SavedMessage("!design:example.org", "\$one", 2_000))
+        compose.waitForIdle()
+        compose.onNodeWithText("Ship it on Thursday").assertIsDisplayed()
     }
 
     @Test fun nothingSavedSaysSo() {

@@ -7,11 +7,19 @@ import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
+import ai.nuanu.slatrix.ui.account.ComposerActions
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -62,5 +70,32 @@ class ThreadScreenTest {
         compose.runOnIdle { assertEquals("Shipping it", sent) }
         compose.onNodeWithContentDescription("Back").performClick()
         compose.runOnIdle { assertTrue(back) }
+    }
+
+    // capability: thread.send-to-channel
+    @Test fun theThreadComposerOffersToAlsoSendTheReplyToItsChannel() {
+        val channel = RoomSummary("!ops:example.org", "ops", false, "", UnreadBadge.None, "O", 0, isPrivate = true)
+        val root = ConversationMessage("root", "\$root", "@sam:example.org", "Sam", "Ship on Friday?", null, 0L, MessageKind.Text,
+            MessageSendState.Sent, false, "S", 0)
+        val room = mutableStateOf(channel)
+        val draft = mutableStateOf(ComposerState(loading = false))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room.value, ConversationState(listOf(root), loading = false, hasMore = false), draft.value,
+                    { draft.value = draft.value.copy(text = it) }, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root",
+                    composerActions = ComposerActions(onAlsoToChannel = { draft.value = draft.value.copy(alsoToChannel = it) }))
+            }
+        }
+        compose.onNode(hasContentDescription("Add a reply") and hasSetTextAction()).performClick()
+
+        // Slack names the channel as its header does: a private one by its lock.
+        val box = compose.onNode(isToggleable())
+        box.assert(hasText("Also send to") and hasText("ops") and hasContentDescription("Private channel")).assertIsOff()
+        box.performClick()
+        compose.runOnIdle { assertTrue(draft.value.alsoToChannel) }
+        box.assertIsOn()
+
+        room.value = channel.copy(name = "Mira", direct = true, isPrivate = false)
+        compose.onNode(isToggleable()).assert(hasText("Also send as direct message"))
     }
 }

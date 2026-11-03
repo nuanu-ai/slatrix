@@ -1,0 +1,186 @@
+diff --git a/crates/matrix-sdk/src/event_cache/caches/read_receipts.rs b/crates/matrix-sdk/src/event_cache/caches/read_receipts.rs
+index b2a1b88..016470b 100644
+--- a/crates/matrix-sdk/src/event_cache/caches/read_receipts.rs
++++ b/crates/matrix-sdk/src/event_cache/caches/read_receipts.rs
+@@ -298,12 +298,13 @@ pub trait EventFilter {
+     /// expectation of possible `ReceiptThread` for `Self`.
+     fn receipt_thread_matches(&self, receipt_thread: &ReceiptThread) -> bool;
+ 
+-    /// Find the receipt event for a specific user in the store.
+-    async fn stored_receipt_event_for_user(
++    /// Find the receipt events for a specific user in the store, most
++    /// preferred first.
++    async fn stored_receipt_events_for_user(
+         &self,
+         user_id: &UserId,
+         receipt_type: ReceiptType,
+-    ) -> Option<(OwnedEventId, Receipt)>;
++    ) -> Vec<(OwnedEventId, Receipt)>;
+ }
+ 
+ /// Type to filter room events that are candidates for read receipts.
+@@ -348,15 +349,18 @@ impl<'cache> EventFilter for RoomReadReceiptEventFilter<'cache> {
+         matches!(receipt_thread, ReceiptThread::Unthreaded | ReceiptThread::Main)
+     }
+ 
+-    async fn stored_receipt_event_for_user(
++    async fn stored_receipt_events_for_user(
+         &self,
+         user_id: &UserId,
+         receipt_type: ReceiptType,
+-    ) -> Option<(OwnedEventId, Receipt)> {
++    ) -> Vec<(OwnedEventId, Receipt)> {
+         // We want to prioritize an `Unthreaded` receipt over a `Main`-threaded
+-        // one, for better compatibility with thread-unaware clients.
++        // one, for better compatibility with thread-unaware clients. The other
++        // one may still be the more recent.
++        let mut receipt_events = Vec::new();
++
+         for receipt_thread in [ReceiptThread::Unthreaded, ReceiptThread::Main] {
+-            let receipt_event = self
++            if let Some(receipt_event) = self
+                 .state_store
+                 .get_user_room_receipt_event(
+                     self.room_id,
+@@ -366,14 +370,13 @@ impl<'cache> EventFilter for RoomReadReceiptEventFilter<'cache> {
+                 )
+                 .await
+                 .ok()
+-                .flatten();
+-
+-            if receipt_event.is_some() {
+-                return receipt_event;
++                .flatten()
++            {
++                receipt_events.push(receipt_event);
+             }
+         }
+ 
+-        None
++        receipt_events
+     }
+ }
+ 
+@@ -417,11 +420,11 @@ impl<'cache> EventFilter for ThreadReadReceiptEventFilter<'cache> {
+         )
+     }
+ 
+-    async fn stored_receipt_event_for_user(
++    async fn stored_receipt_events_for_user(
+         &self,
+         user_id: &UserId,
+         receipt_type: ReceiptType,
+-    ) -> Option<(OwnedEventId, Receipt)> {
++    ) -> Vec<(OwnedEventId, Receipt)> {
+         self.state_store
+             .get_user_room_receipt_event(
+                 self.room_id,
+@@ -432,6 +435,8 @@ impl<'cache> EventFilter for ThreadReadReceiptEventFilter<'cache> {
+             .await
+             .ok()
+             .flatten()
++            .into_iter()
++            .collect()
+     }
+ }
+ 
+@@ -560,9 +565,18 @@ async fn try_find_stored_receipts<T>(
+     T: EventFilter,
+ {
+     for receipt_type in ALL_RECEIPT_TYPES {
+-        if let Some((event_id, _receipt)) =
+-            event_filter.stored_receipt_event_for_user(user_id, receipt_type).await
++        for (event_id, _receipt) in
++            event_filter.stored_receipt_events_for_user(user_id, receipt_type).await
+         {
++            let known = read_receipts
++                .latest_active
++                .as_ref()
++                .is_some_and(|active| active.event_id == event_id)
++                || read_receipts.pending.iter().any(|pending| *pending == event_id);
++            if known {
++                continue;
++            }
++
+             trace!(%event_id, "Found a dormant receipt in the store");
+ 
+             if read_receipts.latest_active.is_none() {
+@@ -597,8 +611,14 @@ pub(crate) async fn compute_unread_counts<T>(
+     debug!(?read_receipts, "Starting");
+ 
+     // If we don't have a latest active receipt for this timeline, try to reload
+-    // one from the state store into the `ReadReceipts`.
+-    if read_receipts.latest_active.is_none() {
++    // one from the state store into the `ReadReceipts`. While anything counts
++    // as unread, a newer receipt may also be there: one that reached the store
++    // while its event wasn't loaded, from another device, and that the pending
++    // receipts have since lost.
++    if read_receipts.latest_active.is_none()
++        || read_receipts.num_unread > 0
++        || read_receipts.num_notifications > 0
++    {
+         try_find_stored_receipts(user_id, event_filter, read_receipts).await;
+     }
+ 
+@@ -1527,4 +1547,61 @@ mod tests {
+         assert_eq!(receipt_event_content.len(), 1);
+         assert!(receipt_event_content.contains_key(event_id!("$ev")));
+     }
++
++    #[matrix_sdk_test::async_test]
++    async fn test_compute_unread_counts_catches_up_with_a_newer_stored_receipt() {
++        use matrix_sdk_base::{
++            StateChanges, StateStore as _, read_receipts::LatestReadReceipt,
++        };
++
++        let room_id = room_id!("!roomid:example.org");
++        let own_user_id = user_id!("@not_alice:example.org");
++        let f = EventFactory::new().room(room_id).sender(*ALICE);
++
++        let mut linked_chunk = EventLinkedChunk::new();
++        linked_chunk.push_events(vec![
++            f.text_msg("Event 1").event_id(event_id!("$1")).into_event(),
++            f.text_msg("Event 2").event_id(event_id!("$2")).into_event(),
++        ]);
++
++        // Another device read up to $2 while this one counted from $1, and the
++        // receipt reached the store without moving the count. An older
++        // unthreaded receipt sits on an event this chunk doesn't hold.
++        let state_store = MemoryStore::new();
++        let mut changes = StateChanges::default();
++        changes.add_receipts(
++            room_id,
++            f.read_receipts()
++                .add(
++                    event_id!("$elsewhere"),
++                    own_user_id,
++                    ReceiptType::Read,
++                    ReceiptThread::Unthreaded,
++                )
++                .add(event_id!("$2"), own_user_id, ReceiptType::Read, ReceiptThread::Main)
++                .into_content(),
++        );
++        state_store.save_changes(&changes).await.unwrap();
++
++        let event_filter = RoomReadReceiptEventFilter {
++            room_id,
++            with_threading_support: true,
++            state_store: &state_store,
++        };
++        let mut receipts = ReadReceipts::default();
++        receipts.latest_active = Some(LatestReadReceipt { event_id: owned_event_id!("$1") });
++        receipts.num_unread = 1;
++
++        super::compute_unread_counts(
++            own_user_id,
++            None,
++            &linked_chunk,
++            &event_filter,
++            &mut receipts,
++            None,
++        )
++        .await;
++
++        assert_eq!(receipts.num_unread, 0);
++    }
+ }
