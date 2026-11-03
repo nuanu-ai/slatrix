@@ -55,11 +55,11 @@ final class SentEcho: TimelineListener, @unchecked Sendable {
     /// The message's event ID once sent, or nil if it never will be.
     func sentEventID() async -> String? {
         await withCheckedContinuation { continuation in
-            let outcome: Outcome? = lock.withLock {
+            let known: Outcome? = lock.withLock {
                 if outcome == nil { waiters.append(continuation) }
                 return outcome
             }
-            switch outcome {
+            switch known {
             case .sent(let id): continuation.resume(returning: id)
             case .lost: continuation.resume(returning: nil)
             case nil: break
