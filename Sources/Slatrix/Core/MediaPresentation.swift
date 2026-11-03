@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreMedia
 import Foundation
 
 /// What a file is, for the colored tile and the type on its card.
@@ -108,22 +109,37 @@ enum MediaViewerNavigation {
     private(set) var surface = MessageActionTarget.Surface.conversation
     /// The Files list it was opened from, in the list's order; nil for a timeline.
     private(set) var files: [ChatMessage]?
+    /// Where the row's video was as the viewer opened on it.
+    @ObservationIgnored private var carried: (eventID: String, time: CMTime)?
 
     func open(_ message: ChatMessage, surface: MessageActionTarget.Surface) {
-        inlineVideo.pause()
+        carry(message)
         self.surface = surface
         files = nil
         self.message = message
     }
 
     func open(_ message: ChatMessage, files: [ChatMessage]) {
-        inlineVideo.pause()
+        carry(message)
         surface = .conversation
         self.files = files
         self.message = message
     }
 
     func close() { message = nil }
+
+    /// Where the viewer starts `message`'s video: where its row left it, as Slack carries a video on, or the top.
+    func videoStart(_ message: ChatMessage) -> CMTime {
+        carried.flatMap { $0.eventID == message.eventID ? $0.time : nil } ?? .zero
+    }
+
+    /// Holds the row's video while the viewer shows anything, noting where it was if the viewer shows that video.
+    private func carry(_ message: ChatMessage) {
+        inlineVideo.pause()
+        carried =
+            inlineVideo.eventID == message.eventID
+            ? inlineVideo.player.map { (message.eventID, $0.currentTime()) } : nil
+    }
 
     /// The file `offset` steps away: in the Files list it came from, or else in `messages`, its timeline.
     func neighbor(_ offset: Int, in messages: [ChatMessage]) -> ChatMessage? {

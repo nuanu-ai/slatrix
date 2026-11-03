@@ -458,7 +458,7 @@ final class InlinePlayerView: AVPlayerView {
     /// The view each player shows in now. A reused cell can hold a stale copy of the row, and that copy leaving
     /// mustn't pause the video being watched.
     private static let showing = NSMapTable<AVPlayer, InlinePlayerView>.weakToWeakObjects()
-    private var scrolling: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
     private var started: NSKeyValueObservation?
 
     /// Clear until its video plays, or shows where it was paused, so the poster shows meanwhile, not a black box.
@@ -478,17 +478,21 @@ final class InlinePlayerView: AVPlayerView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if let scrolling { NotificationCenter.default.removeObserver(scrolling) }
-        scrolling = nil
-        guard window != nil else { return hide() }
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        observers = []
+        guard let window else { return hide() }
         if let player { Self.showing.setObject(self, forKey: player) }
-        guard let clip = enclosingScrollView?.contentView else { return }
-        scrolling = NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                if let self, self.visibleRect.isEmpty { self.hide() }
-            }
+        // Out of sight: scrolled away, the window in the Dock, or the app hidden.
+        func pause(on name: Notification.Name, from object: AnyObject?, when: @escaping (InlinePlayerView) -> Bool) {
+            observers.append(
+                NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { if let self, when(self) { self.hide() } }
+                })
+        }
+        pause(on: NSWindow.didMiniaturizeNotification, from: window) { _ in true }
+        pause(on: NSApplication.didHideNotification, from: nil) { _ in true }
+        if let clip = enclosingScrollView?.contentView {
+            pause(on: NSView.boundsDidChangeNotification, from: clip) { $0.visibleRect.isEmpty }
         }
     }
 

@@ -66,7 +66,9 @@ private struct MediaViewerPage: View {
         let size = attachment.width.flatMap { width in
             attachment.height.map { CGSize(width: CGFloat(width), height: CGFloat($0)) }
         }
-        if message.kind == "m.video", let url = loaded?.lease?.url { return .video(url) }
+        if message.kind == "m.video", let url = loaded?.lease?.url {
+            return .video(url, from: viewer.videoStart(message))
+        }
         if !message.isViewerMedia {
             return loaded?.lease.map { .file($0.url) } ?? .empty
         }
@@ -244,7 +246,7 @@ final class MediaStageView: NSView {
         case empty
         /// `id` names the picture: a new one fits the window, the same one in full resolution keeps its zoom.
         case image(id: String, NSImage, size: CGSize, animates: Bool)
-        case video(URL)
+        case video(URL, from: CMTime)
         case file(URL)
 
         static func == (a: Self, b: Self) -> Bool {
@@ -252,7 +254,8 @@ final class MediaStageView: NSView {
             case (.empty, .empty): true
             case (.image(let a, let x, let s, let p), .image(let b, let y, let t, let q)):
                 a == b && x === y && s == t && p == q
-            case (.video(let a), .video(let b)), (.file(let a), .file(let b)): a == b
+            case (.video(let a, let s), .video(let b, let t)): a == b && s == t
+            case (.file(let a), .file(let b)): a == b
             default: false
             }
         }
@@ -362,14 +365,16 @@ final class MediaStageView: NSView {
             picture.frame = CGRect(origin: .zero, size: size)
             fitted = true
             fit()
-        case .video(let url):
+        case .video(let url, let start):
             let view = player ?? AVPlayerView(frame: bounds)
             view.autoresizingMask = [.width, .height]
             view.controlsStyle = .floating
-            view.player = AVPlayer(url: url)
+            let video = AVPlayer(url: url)
+            if start > .zero { video.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero) }
+            view.player = video
             if player == nil { addSubview(view) }
             player = view
-            view.player?.play()
+            video.play()
         case .file(let url):
             guard let view = preview ?? QLPreviewView(frame: bounds, style: .normal) else { return }
             view.autoresizingMask = [.width, .height]
