@@ -65,7 +65,7 @@ class NewMessageScreenTest {
             }
         }
         compose.onNode(hasText("DMs") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
-        repeat(10) { compose.onNode(hasScrollAction()).performTouchInput { swipeUp() } }
+        repeat(10) { compose.onNode(hasScrollAction() and SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange)).performTouchInput { swipeUp() } }
         val last = compose.onNodeWithText("Person 30").fetchSemanticsNode().boundsInRoot
         val plus = compose.onNodeWithContentDescription("New message").fetchSemanticsNode().boundsInRoot
         assertTrue("The last row ends above the +", last.bottom <= plus.top)

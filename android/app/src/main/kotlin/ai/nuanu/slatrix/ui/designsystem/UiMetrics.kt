@@ -51,6 +51,8 @@ object UiMetrics {
     /** Theirs leave a gutter that grows with the phone, from narrow at 320 dp to wide at 412 dp, past their picture's room. */
     val IncomingGutterNarrow = 24.dp
     val IncomingGutterWide = 56.dp
+    /** How far a message is swiped right to reply. */
+    val SwipeReply = 64.dp
     val NarrowPhone = 320.dp
     val WidePhone = 412.dp
     val GlassBlur = 24.dp

@@ -3,6 +3,7 @@
   "capabilities": [
     {"id": "app.icon", "what": "The app has its own icon in the Dock or launcher.", "mac": "done", "android": "done"},
     {"id": "app.appearance", "what": "Choose light, dark or the system's appearance, and a color theme.", "mac": "done", "android": "done"},
+    {"id": "app.text-size", "what": "Make message text larger or smaller than the rest of the app.", "mac": "n/a: the Mac zooms everything with ⌘= and ⌘-", "android": "done"},
     {"id": "app.zoom", "what": "Zoom the whole interface from 80% to 200% with ⌘= and ⌘-.", "mac": "done", "android": "n/a: Android scales with the system font size instead"},
     {"id": "app.updates", "what": "The app updates itself to new releases.", "mac": "done", "android": "n/a: an Android app updates through the store or installer it came from"},
     {"id": "app.offline-banner", "what": "A banner says when you're offline and leaves when the connection returns.", "mac": "done", "android": "done"},
@@ -18,6 +19,7 @@
     {"id": "home.conversations", "what": "See a workspace's channels and direct messages together.", "mac": "done", "android": "done"},
     {"id": "home.dms", "what": "See every direct message, newest first, with its latest message.", "mac": "done", "android": "done"},
     {"id": "home.channels", "what": "Home lists channels and conversations one to a line, channels by name, with the newest message kept for the DMs list.", "mac": "n/a: the sidebar lists channels by name alone, as Slack's does", "android": "done"},
+    {"id": "home.swipe-tabs", "what": "Swipe sideways between Home, DMs, Activity and Later.", "mac": "n/a: the Mac shows these in its sidebar, not as tabs", "android": "done"},
     {"id": "home.unread-badges", "what": "Unread conversations show in bold, and mentions show a count.", "mac": "done", "android": "done"},
     {"id": "home.starred", "what": "Starred conversations sit in their own section at the top.", "mac": "done", "android": "done"},
     {"id": "home.star-toggle", "what": "Star or unstar a conversation.", "mac": "done", "android": "done"},

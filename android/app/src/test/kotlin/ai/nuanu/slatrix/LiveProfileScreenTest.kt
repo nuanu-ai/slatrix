@@ -3,7 +3,14 @@ package ai.nuanu.slatrix
 import android.app.Application
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
+import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
+import ai.nuanu.slatrix.ui.account.MessagePreview
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.TextUnit
+import org.junit.Assert.assertTrue
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
@@ -56,5 +63,28 @@ class LiveProfileScreenTest {
         compose.runOnIdle { assertEquals(true, wallpaper.value) }
         compose.onNodeWithContentDescription("Back").performClick()
         compose.runOnIdle { assertEquals(true, returned) }
+    }
+
+    // capability: app.text-size
+    @Test fun theTextSizeSliderGrowsMessageTextAndNothingElse() {
+        val scale = mutableStateOf(1f)
+        compose.setContent {
+            SlatrixTheme(messageScale = scale.value) {
+                LivePreferencesScreen(false, null, false, {}, {}, {}, messageScale = scale.value, onMessageScale = { scale.value = it })
+            }
+        }
+        val preview = fontSize(MessagePreview)
+        val label = fontSize("Color mode")
+        compose.onNodeWithContentDescription("Message text size").performScrollTo()
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(AppearancePreferences.MessageScales.lastIndex.toFloat()) }
+        compose.runOnIdle { assertEquals(AppearancePreferences.MessageScales.last(), scale.value) }
+        assertTrue("The preview grows", fontSize(MessagePreview) > preview)
+        assertEquals("The rest of the app keeps its size", label, fontSize("Color mode"))
+    }
+
+    private fun fontSize(text: String): TextUnit {
+        val layout = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(text).fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(layout)
+        return layout.single().layoutInput.style.fontSize
     }
 }

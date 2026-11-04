@@ -31,6 +31,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotEquals
 import org.junit.Rule
+import ai.nuanu.slatrix.ui.account.LiveWorkspace
+import ai.nuanu.slatrix.ui.account.WorkspaceCover
+import androidx.compose.material3.Text
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -60,6 +63,34 @@ class MotionTest {
             SlatrixTheme { if (shown) MessageActionsHost(message, MessageActions(), null, {}, {}) {} }
         }
         settles("Copy text") { shown = true }
+    }
+
+    @Test fun aConversationSlidesInOverHomeAndBackIsInstant() {
+        var open by mutableStateOf(false)
+        compose.setContent {
+            SlatrixTheme { LiveWorkspace(if (open) WorkspaceCover("design", 1) { Text("Conversation") } else null) { Text("Home") } }
+        }
+        settles("Conversation") { open = true }
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread { open = false; Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("Conversation").assertDoesNotExist()
+        compose.onNodeWithText("Home").assertExists()
+    }
+
+    @Test fun whileAConversationSlidesInWhatItCoversStaysUnderIt() {
+        var open by mutableStateOf(false)
+        compose.setContent {
+            SlatrixTheme { LiveWorkspace(if (open) WorkspaceCover("design", 1) { Text("Conversation") } else null) { Text("Home") } }
+        }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread { open = true; Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("Home").assertExists()
+        compose.mainClock.advanceTimeBy(2_000)
+        compose.onNodeWithText("Home").assertDoesNotExist()
     }
 
     @Test fun goingBackToAPageIsInstant() {

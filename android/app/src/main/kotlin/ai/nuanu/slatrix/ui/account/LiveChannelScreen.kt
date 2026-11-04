@@ -44,6 +44,11 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.material.icons.automirrored.outlined.Reply
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -314,7 +319,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                                 LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId,
                                     actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
                                     loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
-                                    loadThreadOrigin, onMenu)
+                                    loadThreadOrigin, actions.onQuote, onMenu)
                             }
                             draw { message, top -> menu = message to top?.let { LiftedMessage(it) { draw { _, _ -> } } } }
                             // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
@@ -536,7 +541,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
 private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
-    onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?,
+    onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?, onReply: ((ConversationMessage) -> Unit)?,
     onMenu: (ConversationMessage, top: Float?) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
@@ -544,11 +549,42 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
     // Kept without state, so scrolling never recomposes for it; read only when the menu opens over the row.
     val placed = remember { arrayOfNulls<LayoutCoordinates>(1) }
     fun menu() = onMenu(message, placed[0]?.takeIf { it.isAttached }?.positionInWindow()?.y)
-    Row(Modifier.fillMaxWidth().onPlaced { placed[0] = it }
-        // Only a failed message answers a tap, as in Slack; any message opens its menu on a long press.
+    val haptics = LocalHapticFeedback.current
+    // A swipe right replies, as in a messenger: the bubble follows the finger, the reply sign fades in behind it, and
+    // crossing the threshold ticks once; read while drawing, so the drag never recomposes the row.
+    val drag = remember(message.id) { Animatable(0f) }
+    val reach = with(LocalDensity.current) { UiMetrics.SwipeReply.toPx() }
+    val swipes = rememberCoroutineScope()
+    val reply = onReply?.takeIf { message.eventId != null && !failed }
+    Box(Modifier.fillMaxWidth().then(if (reply == null) Modifier else Modifier.pointerInput(message, reply) {
+        var past = false
+        fun settle() { swipes.launch { drag.animateTo(0f, Motion.pane()) } }
+        detectHorizontalDragGestures(onDragStart = { past = false }, onDragCancel = ::settle, onDragEnd = {
+            if (past) reply(message)
+            settle()
+        }) { change, amount ->
+            // Only rightwards, and stiffer past the threshold, so the bubble never runs off with the finger.
+            val next = (drag.value + amount * if (drag.value > reach) 0.3f else 1f).coerceIn(0f, reach * 1.5f)
+            if (next != drag.value) change.consume()
+            swipes.launch { drag.snapTo(next) }
+            if (next >= reach && !past) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+            past = next >= reach
+        }
+    })) {
+    if (reply != null) Icon(Icons.AutoMirrored.Outlined.Reply, null, Modifier.align(Alignment.CenterStart).padding(start = UiMetrics.GapLarge)
+        .size(UiMetrics.Icon).graphicsLayer {
+            val shown = (drag.value / reach).coerceIn(0f, 1f)
+            alpha = shown
+            scaleX = 0.6f + 0.4f * shown
+            scaleY = scaleX
+        }, tint = colors.textSecondary)
+    Row(Modifier.fillMaxWidth().graphicsLayer { translationX = drag.value }.onPlaced { placed[0] = it }
+        // Only a failed message answers a tap, as in Slack; any message opens its menu on a long press, with a tick.
         .then(if (failed) Modifier.combinedClickable(onClickLabel = "Message actions", onLongClickLabel = "Message actions",
             onLongClick = ::menu, onClick = ::menu)
-        else Modifier.pointerInput(message) { detectTapGestures(onLongPress = { menu() }) }
+        else Modifier.pointerInput(message) {
+            detectTapGestures(onLongPress = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); menu() })
+        }
             .semantics(mergeDescendants = true) { onLongClick("Message actions") { menu(); true } })
         .padding(top = if (message.grouped) UiMetrics.Hairline * 4 else UiMetrics.GapSmall)
         .layout { measurable, constraints ->
@@ -642,6 +678,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             }
         }
         if (own) OnAccentFill(bubble) else bubble()
+    }
     }
 }
 

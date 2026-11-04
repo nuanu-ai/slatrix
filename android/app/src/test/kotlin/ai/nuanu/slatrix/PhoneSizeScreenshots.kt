@@ -99,6 +99,7 @@ class PhoneSizeScreenshots(private val screen: String, private val width: Int, p
             message("a", "Mira", "Morning! The new onboarding flow is up on staging.\n\nWould love eyes on the empty states before Friday.", 0)
                 .copy(thread = MessageThread(3, "Jordan", now + 20 * 60_000L)),
             message("b", "Dev", "I'll take the first pass.", 2),
+            message("b2", "Dev", "Starting with the empty states, then the copy on step two.", 3).copy(grouped = true),
             message("c", "Jordan", "Looking now. The illustrations read well in dark mode too.", 4),
             message("d", "Jordan", "One more pass after lunch.", 5).copy(grouped = true),
         )

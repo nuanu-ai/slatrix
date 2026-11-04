@@ -147,6 +147,7 @@ object SlatrixTheme {
 fun SlatrixTheme(
     dark: Boolean = isSystemInDarkTheme(),
     wallpaperColors: Boolean = false,
+    messageScale: Float = 1f,
     content: @Composable () -> Unit,
 ) {
     val activity = LocalActivity.current
@@ -212,7 +213,7 @@ fun SlatrixTheme(
             extraLarge = RoundedCornerShape(DesignTokens.radii.getValue("extraLarge").dp),
         )
     }
-    CompositionLocalProvider(LocalColors provides colors, LocalContentColor provides colors.textPrimary) {
+    CompositionLocalProvider(LocalColors provides colors, LocalContentColor provides colors.textPrimary, LocalMessageScale provides messageScale) {
         MaterialTheme(colorScheme = scheme, typography = SlatrixTypography, shapes = shapes, content = content)
     }
 }

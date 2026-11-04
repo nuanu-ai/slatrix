@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.core
 
 import android.app.Application
 import android.app.UiModeManager
+import android.content.Context
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -27,6 +28,16 @@ class AppearancePreferencesTest {
 
         reopened.darkMode = null
         assertNull(AppearancePreferences(context).darkMode)
+    }
+
+    @Test fun messageTextSizeSurvivesReopeningAndAPlantedSizeFallsBackToTheDefault() {
+        val context = RuntimeEnvironment.getApplication()
+        val bigger = AppearancePreferences.MessageScales.last()
+        AppearancePreferences(context).messageScale = bigger
+        assertEquals(bigger, AppearancePreferences(context).messageScale)
+
+        context.getSharedPreferences("appearance", Context.MODE_PRIVATE).edit().putFloat("messageScale", 40f).commit()
+        assertEquals(1f, AppearancePreferences(context).messageScale)
     }
 
     @Test fun theSystemStartsTheAppInTheChosenColorMode() {
