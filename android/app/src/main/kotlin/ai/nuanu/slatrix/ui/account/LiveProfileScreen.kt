@@ -65,22 +65,24 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
                     Text(name ?: localpart, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(userId, style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
+                    // On one line, cut in the middle so both its name and its server stay readable.
+                    Text(userId, style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary, maxLines = 1,
+                        overflow = TextOverflow.MiddleEllipsis)
                 }
             }
             onViewProfile?.let { view ->
-                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button, onClick = view)
+                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button, onClick = view)
                     .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
                     Icon(SlackIcons.Person, null, Modifier.size(UiMetrics.Icon))
                     Text("View profile", style = MaterialTheme.typography.bodyLarge)
                 }
             }
-            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button, onClick = onPreferences)
+            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button, onClick = onPreferences)
                 .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
                 Icon(SlackIcons.Preferences, null, Modifier.size(UiMetrics.Icon))
                 Text("Preferences", style = MaterialTheme.typography.bodyLarge)
             }
-            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button) { confirming = true }
+            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button) { confirming = true }
                 .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
                 Icon(SlackIcons.SignOut, null, Modifier.size(UiMetrics.Icon))
                 Text("Sign out", style = MaterialTheme.typography.bodyLarge)
@@ -162,22 +164,16 @@ fun LivePreferencesScreen(
     PushedPage("Preferences", onBack) {
             item {
                 notifications()
-                Text("Appearance", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ComposerMinHeight).clickable(role = Role.Button) { choosingMode = true }
-                    .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-                    Icon(Icons.Outlined.Brush, null, Modifier.size(UiMetrics.GapSection))
-                    Column {
-                        Text("Color mode", style = MaterialTheme.typography.bodyLarge)
-                        Text(colorMode, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
-                    }
+                PreferenceHeading("Appearance")
+                PreferenceRow(Icons.Outlined.Brush, "Color mode", Modifier.clickable(role = Role.Button) { choosingMode = true }) {
+                    Text(colorMode, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
                 }
-                Text("Colors", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                PreferenceHeading("Colors")
                 Column(Modifier.selectableGroup()) {
                     listOf("Slatrix" to false, "From your wallpaper" to true).forEach { (label, choice) ->
                         Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
                             .selectable(selected = wallpaperColors == choice, role = Role.RadioButton, onClick = { onWallpaperColors(choice) })
-                            .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+                            .padding(start = PreferenceInset, end = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
                             Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                             RadioButton(selected = wallpaperColors == choice, onClick = null)
                         }
