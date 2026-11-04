@@ -499,6 +499,20 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Message 200").assertIsDisplayed()
     }
 
+    @Test fun theJumpButtonLeavesTheNewestLoadedMessageClear() {
+        // Opened at an older message, the button shows from the start, over the bottom of what has loaded.
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState((1..3).map { message("Message $it with enough words to run the width", minutes = it, sender = "Jordan") },
+                    loading = false, hasMore = false, highlight = "\$Message 2 with enough words to run the width", focused = true),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        val button = compose.onNodeWithContentDescription("Jump to recent messages").getUnclippedBoundsInRoot()
+        val newest = compose.onNodeWithText("Message 3 with enough words to run the width", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("The newest message $newest ends above the button $button", newest.bottom <= button.top)
+    }
+
     @Test fun aConversationWithNothingToResumeOpensAtItsNewestEvenWithAReadMarkerBehind() {
         // The fully-read marker can trail the read receipt, so the SDK's marker alone doesn't make a conversation unread.
         val many = (1..200).map { message("Message $it", minutes = it) }
@@ -569,7 +583,8 @@ class LiveChannelScreenTest {
         val width = compose.onRoot().getUnclippedBoundsInRoot().width
         val theirs = compose.onNodeWithText(long, useUnmergedTree = true).getUnclippedBoundsInRoot()
         val mine = compose.onNodeWithText("$long Agreed.", useUnmergedTree = true).getUnclippedBoundsInRoot()
-        assertTrue("Theirs reaches past 80% of the width, ending at ${theirs.right}", theirs.right >= width * 0.8f)
+        // At 320 dp theirs leaves a narrow gutter, as Telegram's do, not the room a wide phone gives it.
+        assertTrue("Theirs reaches past 87% of the width, ending at ${theirs.right}", theirs.right >= width * 0.87f)
         assertTrue("Mine starts within the first 20%, at ${mine.left}", mine.left <= width * 0.2f)
     }
 

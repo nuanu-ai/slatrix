@@ -98,6 +98,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
+import androidx.compose.ui.unit.lerp
 import kotlin.math.roundToInt
 
 @Composable
@@ -287,11 +288,17 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             }
             // A row that starts a run again: after the replies bar or the New line, so it shows its sender.
             fun restarts(row: ConversationMessage) = row.id == firstReply || line != null && row.eventId == line
+            // Slack's way back to the newest message, once the reader scrolls up or opened an older one.
+            val away by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
+            val jumpShows = jumped && (state.focused || away)
+            // Opened at an older message, the button stays over the newest loaded one, so the list keeps room for it from its
+            // first rows. Scrolled away, the newest is off screen and the room would only move what the reader is looking at.
+            val jumpRoom = if (state.focused) UiMetrics.Touch + UiMetrics.GapLarge else UiMetrics.GapSmall
             // A thread reads down from its root, as in Slack, so a short one sits at the top, right under the header.
             LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none(::opens)) 1f else 0f),
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
-                contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = UiMetrics.GapSmall)) {
+                contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = jumpRoom)) {
                 itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row ->
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
@@ -326,10 +333,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     }
                 }
             }
-            // Slack's way back to the newest message, once the reader scrolls up or opened an older one.
-            val away by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
             val jumps = rememberCoroutineScope()
-            androidx.compose.animation.AnimatedVisibility(jumped && (state.focused || away), Modifier.align(Alignment.BottomEnd).padding(UiMetrics.GapLarge),
+            androidx.compose.animation.AnimatedVisibility(jumpShows, Modifier.align(Alignment.BottomEnd).padding(UiMetrics.GapLarge),
                 enter = fadeIn(Motion.pane()), exit = ExitTransition.None) {
                 Surface({
                     following = true
@@ -546,13 +551,16 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
         else Modifier.pointerInput(message) { detectTapGestures(onLongPress = { menu() }) }
             .semantics(mergeDescendants = true) { onLongClick("Message actions") { menu(); true } })
         .padding(top = if (message.grouped) UiMetrics.Hairline * 4 else UiMetrics.GapSmall)
-        .padding(horizontal = UiMetrics.GapSmall)
         .layout { measurable, constraints ->
-            val gutter = (constraints.maxWidth * UiMetrics.BubbleGutter).roundToInt()
+            val gutter = if (own) (constraints.maxWidth * UiMetrics.BubbleGutter).roundToInt()
+            else lerp(UiMetrics.IncomingGutterNarrow, UiMetrics.IncomingGutterWide,
+                ((constraints.maxWidth.toDp() - UiMetrics.NarrowPhone) / (UiMetrics.WidePhone - UiMetrics.NarrowPhone)).coerceIn(0f, 1f)).roundToPx()
             val width = (constraints.maxWidth - gutter).coerceAtLeast(0)
             val row = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
             layout(constraints.maxWidth, row.height) { row.placeRelative(if (own) gutter else 0, 0) }
-        },
+        }
+        // The inset sits only on the author's side; the far side is the gutter alone.
+        .then(if (own) Modifier.padding(end = UiMetrics.GapSmall) else Modifier.padding(start = UiMetrics.GapSmall)),
         horizontalArrangement = if (own) Arrangement.spacedBy(UiMetrics.GapSmall, Alignment.End) else Arrangement.spacedBy(UiMetrics.GapSmall),
         verticalAlignment = Alignment.Bottom) {
         if (own && failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.padding(bottom = UiMetrics.GapSmall).size(UiMetrics.Icon),
