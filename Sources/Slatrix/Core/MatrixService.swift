@@ -1925,7 +1925,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var threadPage: (selection: UUID, task: Task<Bool, Error>)?
     /// A thread timeline opened ahead of a click, with its first page read; at most one, for the thread last
     /// pointed at in the open conversation.
-    private var preparedThread: (rootID: String, selection: UUID, threadToken: UUID, task: Task<PreparedTimeline?, Never>)?
+    private var preparedThread:
+        (rootID: String, selection: UUID, threadToken: UUID, task: Task<PreparedTimeline?, Never>)?
 
     /// Opens a thread's timeline as the pointer rests on its replies, so the pane opens with them. The SDK reads a
     /// thread's replies from the server, which takes a few hundred milliseconds.
