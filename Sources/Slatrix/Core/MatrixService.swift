@@ -1147,6 +1147,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadHandle?.cancel()
         for kept in recentTimelines.removeAll() { kept.listener.cancel() }
         dropPrepared()
+        dropPreparedThread()
         liveTimeline = nil
         mainProjections = [:]
         threadProjections = [:]
@@ -1922,6 +1923,62 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// The page a thread is loading, shared by the pane's first page and its history row.
     private var threadPage: (selection: UUID, task: Task<Bool, Error>)?
+    /// A thread timeline opened ahead of a click, with its first page read; at most one, for the thread last
+    /// pointed at in the open conversation.
+    private var preparedThread: (rootID: String, selection: UUID, threadToken: UUID, task: Task<PreparedTimeline?, Never>)?
+
+    /// Opens a thread's timeline as the pointer rests on its replies, so the pane opens with them. The SDK reads a
+    /// thread's replies from the server, which takes a few hundred milliseconds.
+    func prepareThread(_ root: ChatMessage) {
+        guard connectionStopTask == nil, !isPreview, selectedRoomID == root.roomID,
+            preparedThread?.rootID != root.eventID, loadedThreadRootID != root.eventID,
+            let room = try? requireRoom(root.roomID)
+        else { return }
+        dropPreparedThread()
+        let token = selection
+        let threadToken = UUID()
+        let observer = threadObserver(root, token: token, threadToken: threadToken)
+        let task = Task { [weak self] () -> PreparedTimeline? in
+            // A pointer passing over a row on its way elsewhere opens nothing.
+            try? await Task.sleep(for: .milliseconds(50))
+            guard await self?.preparedThread?.threadToken == threadToken,
+                let timeline = try? await room.timelineWithConfiguration(
+                    configuration: Self.timelineConfiguration(.thread(rootEventId: root.eventID)))
+            else { return nil }
+            let listener = await timeline.addListener(listener: observer)
+            let endReached = (try? await timeline.paginateBackwards(numEvents: 50)) ?? false
+            guard await self?.preparedThread?.threadToken == threadToken else {
+                listener.cancel()
+                return nil
+            }
+            return (timeline, observer, listener, endReached)
+        }
+        preparedThread = (root.eventID, token, threadToken, task)
+    }
+
+    private func dropPreparedThread() {
+        guard let preparedThread else { return }
+        self.preparedThread = nil
+        Task { await preparedThread.task.value?.listener.cancel() }
+    }
+
+    private func threadObserver(_ root: ChatMessage, token: UUID, threadToken: UUID) -> TimelineObserver {
+        TimelineObserver { [weak self] items, revision in
+            Task { @MainActor [weak self] in
+                guard let self, token == self.selection, threadToken == self.threadSelection,
+                    revision > self.threadRevision
+                else { return }
+                self.threadRevision = revision
+                var messages = Performance.measure(.timelineProject, ["items": items.count]) {
+                    self.project(items, roomID: root.roomID, inThread: true)
+                }
+                if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
+                    messages[index].id = root.eventID
+                }
+                self.threadMessages = messages
+            }
+        }
+    }
     func loadMoreThread(rootID: String) async throws -> Bool {
         guard loadedThreadRootID == rootID, let threadTimeline else { throw MatrixServiceError.noRoom }
         let token = threadSelection
@@ -1954,31 +2011,42 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         loadedThreadRootID = nil
         hasMoreThreadHistory = true
         let token = selection
-        let threadToken = UUID()
-        threadSelection = threadToken
+        var ahead: Task<PreparedTimeline?, Never>?
+        if let preparedThread, preparedThread.rootID == root.eventID, preparedThread.selection == token {
+            ahead = preparedThread.task
+            threadSelection = preparedThread.threadToken
+            self.preparedThread = nil
+        } else {
+            dropPreparedThread()
+            threadSelection = UUID()
+        }
+        let threadToken = threadSelection
         threadSendFailures = [:]
         sendFailures = mainSendFailures
+        if let ready = await ahead?.value {
+            guard token == selection, threadToken == threadSelection else { return ready.listener.cancel() }
+            threadTimeline = ready.timeline
+            loadedThreadRootID = root.eventID
+            threadHandle = ready.listener
+            hasMoreThreadHistory = !ready.endReached
+            readyThreadReadSelection = threadToken
+            // Updates that came before the pane opened were dropped; its snapshot holds them.
+            let snapshot = ready.observer.snapshot
+            threadRevision = snapshot.revision
+            var messages = project(snapshot.items, roomID: root.roomID, inThread: true)
+            if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
+                messages[index].id = root.eventID
+            }
+            if !messages.isEmpty { threadMessages = messages }
+            return
+        }
         let next = try await requireRoom(root.roomID).timelineWithConfiguration(
             configuration: Self.timelineConfiguration(.thread(rootEventId: root.eventID)))
         guard token == selection, threadToken == threadSelection else { return }
         threadTimeline = next
         loadedThreadRootID = root.eventID
         let listenerHandle = await next.addListener(
-            listener: TimelineObserver { [weak self] items, revision in
-                Task { @MainActor [weak self] in
-                    guard let self, token == self.selection, threadToken == self.threadSelection,
-                        revision > self.threadRevision
-                    else { return }
-                    self.threadRevision = revision
-                    var messages = Performance.measure(.timelineProject, ["items": items.count]) {
-                        self.project(items, roomID: root.roomID, inThread: true)
-                    }
-                    if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
-                        messages[index].id = root.eventID
-                    }
-                    self.threadMessages = messages
-                }
-            })
+            listener: threadObserver(root, token: token, threadToken: threadToken))
         guard token == selection, threadToken == threadSelection else {
             listenerHandle.cancel()
             return
