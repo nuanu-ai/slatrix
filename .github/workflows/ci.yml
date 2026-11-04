@@ -56,8 +56,14 @@ jobs:
   mac:
     needs: changes
     if: needs.changes.outputs.mac == 'true'
+    name: mac (${{ matrix.task }})
     runs-on: macos-26
     timeout-minutes: 90
+    # Red-check runs beside the tests on its own runner: it builds base sources, which main's build already has.
+    strategy:
+      fail-fast: false
+      matrix:
+        task: ${{ fromJSON(github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'refactor') && '["test", "red-check"]' || '["test"]') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -110,18 +116,23 @@ jobs:
               rm -rf .build/slatrix-spm
             fi
           fi
-          # Refreshes the index's file times, so red-check's checkout rewrites only the files that differ.
-          git update-index -q --refresh || true
 
       - name: Lint
+        if: matrix.task == 'test'
         run: scripts/lint.sh
 
       - name: Test
+        if: matrix.task == 'test'
         run: scripts/test.sh --quiet
 
       # Alone and one at a time, so other tests do not skew the clock.
       - name: Speed budgets
+        if: matrix.task == 'test'
         run: SLATRIX_BUDGETS=1 scripts/test.sh --quiet --filter Budget --no-parallel
+
+      - name: Red-green
+        if: matrix.task == 'red-check'
+        run: scripts/red-check.sh origin/${{ github.base_ref }}
 
       - name: Record the built commit
         if: github.event_name == 'push'
@@ -139,7 +150,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: crash-reports
+          name: crash-reports-${{ matrix.task }}
           path: ~/Library/Logs/DiagnosticReports/
           if-no-files-found: ignore
 
@@ -147,10 +158,6 @@ jobs:
       - name: Build app
         if: github.event_name != 'pull_request'
         run: scripts/build-app.sh
-
-      - name: Red-green
-        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'refactor')
-        run: scripts/red-check.sh origin/${{ github.base_ref }}
 
   push-gateway:
     needs: changes
@@ -217,12 +224,27 @@ jobs:
         run: |
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
           scripts/build-sdk.sh --android
+      # Robolectric fetches Android's framework jars from Maven Central as tests start, which can fail mid-run.
+      - name: Restore Robolectric's Android jars
+        id: robolectric
+        if: matrix.name == 'checks'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('android/app/build.gradle.kts') }}
+          restore-keys: robolectric-
       - name: Build
         working-directory: android
         run: ./gradlew ${{ matrix.tasks }} --console=plain
       - name: Check build configuration and the release APK
         if: matrix.python
         run: python3 -m unittest discover -s android/tests -p '${{ matrix.python }}'
+      - name: Save Robolectric's Android jars
+        if: matrix.name == 'checks' && github.event_name == 'push' && steps.robolectric.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: ${{ steps.robolectric.outputs.cache-primary-key }}
       - name: Enable hardware acceleration
         if: matrix.device
         run: |
