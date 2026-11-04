@@ -247,6 +247,37 @@ struct TimelineHostedTests {
         #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
     }
 
+    @Test("Narrowing the window keeps the message you are reading where it was, even one scrolled mostly past")
+    func readingStaysStillThroughResize() async throws {
+        let harness = Harness(
+            messages: Self.messages(0..<30) + [Self.longMessage(30)] + Self.messages(31..<70), height: 800)
+        defer { harness.close() }
+        harness.window.setContentSize(NSSize(width: 1_381, height: 800))
+        await settle(harness)
+        _ = await eventually {
+            harness.scroll(toTop: harness.clip.bounds.minY - 200)
+            return harness.cell(showing: "Long-30") != nil
+        }
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        let row = table.row(for: try #require(harness.cell(showing: "Long-30")))
+        // Only its last 100 points on screen.
+        harness.scroll(toTop: table.rect(ofRow: row).maxY - 100)
+        /// The message's edges from the top of the screen.
+        func edges() -> (top: CGFloat, bottom: CGFloat) {
+            let rect = table.rect(ofRow: row)
+            return (rect.minY - harness.clip.bounds.minY, rect.maxY - harness.clip.bounds.minY)
+        }
+        let before = edges().top
+        #expect(before < 0)
+        // Its lines wrap more and it grows, from the top edge it keeps.
+        harness.window.setContentSize(NSSize(width: 736, height: 800))
+        harness.layout()
+        #expect(edges().top == before && edges().bottom >= 100)
+        await drainMainActor()
+        await settle(harness)
+        #expect(edges().top == before && edges().bottom >= 100)
+    }
+
     @Test("New messages do not move what you are reading further up")
     func readingStaysStill() async throws {
         let harness = Harness(messages: Self.messages(0..<40))

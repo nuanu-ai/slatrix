@@ -664,6 +664,12 @@ struct TimelineTable: NSViewRepresentable {
     }
 
     private func scroll(to position: Policy.Position) {
+        // A row the reader has mostly scrolled past is off screen to the settle that follows, so an estimate of its
+        // height would move everything after it.
+        if case .anchored(let id, _) = position, estimated.contains(id), let row = index[id] {
+            prepare(row)
+            noteHeights([row])
+        }
         table.tile()
         let viewport = viewport
         guard
