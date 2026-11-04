@@ -1,17 +1,17 @@
 import SwiftUI
 
+/// Browse channels, a page in place of the conversation: a workspace's channels, or the server's public directory.
 struct PublicRoomDirectoryView: View {
-    private static let height: CGFloat = 620
-    private static let searchHeight: CGFloat = 40
+    private static let membersWidth: CGFloat = 52
     @Environment(\.metrics) private var m
     let matrix: MatrixService
     let service: PublicRoomDirectoryService
     /// Lists this workspace's channels; nil browses the server's public directory.
     var workspace: Workspace? = nil
     var onResolve: (MatrixLinkResolution) -> Void
-    var onClose: () -> Void
     @EnvironmentObject private var appearance: AppearanceStore
     @State private var query = ""
+    @State private var hovered: String?
     @State private var retryRevision = 0
     @State private var owner: Context?
     @State private var openedContext: Context?
@@ -46,23 +46,24 @@ struct PublicRoomDirectoryView: View {
     private var entries: [PublicDirectoryRoom] { activeRequest == request ? service.entries : [] }
     private var searching: Bool { current && (activeRequest != request || service.isLoading) }
     private var displayedError: String? { error ?? (activeRequest == request ? service.errorMessage : nil) }
-    private var serverName: String {
-        matrix.homeserverURL.flatMap { URL(string: $0)?.host } ?? matrix.homeserverURL ?? "your homeserver"
-    }
 
     var body: some View {
-        Modal(title: "Browse channels", size: .large, height: Self.height, padded: false, onClose: close) {
-            VStack(spacing: 0) {
-                header
-                Divider().overlay(colors.border)
-                directoryContent.frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+        VStack(spacing: 0) {
+            controls
+            directoryContent.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background(colors.canvas)
         .onAppear {
             owner = context
             isPresented = true
+            searchFocused = true
         }
-        .onChange(of: context) { _, _ in close() }
+        .onChange(of: context) { _, next in
+            // Another account: start over with its channels.
+            service.close()
+            openedContext = nil
+            owner = next
+        }
         .onChange(of: query) { _, _ in
             resolutionRequest = UUID()
             resolvingID = nil
@@ -76,28 +77,21 @@ struct PublicRoomDirectoryView: View {
         .task(id: request) { await search(request) }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: m.sp16) {
-            Text(workspace?.name ?? serverName).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                .lineLimit(2).textSelection(.enabled)
-            HStack(spacing: m.sp8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
-                TextField("Search by channel name or topic", text: $query).textFieldStyle(.plain).font(
-                    m.font(.reading)
-                ).focused($searchFocused)
-                    .accessibilityLabel("Search channels")
-                if searching { DelayedProgress().accessibilityLabel("Searching") }
-                if !query.isEmpty {
-                    IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body) {
-                        query = ""
-                        searchFocused = true
-                    }
+    private var controls: some View {
+        HStack(spacing: m.sp8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
+            TextField("Search by name or topic", text: $query).textFieldStyle(.plain).font(m.font(.reading))
+                .focused($searchFocused).accessibilityLabel("Search channels")
+            if searching { DelayedProgress().accessibilityLabel("Searching") }
+            if !query.isEmpty {
+                IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body) {
+                    query = ""
+                    searchFocused = true
                 }
-            }.padding(.horizontal, m.sp12).frame(height: m(Self.searchHeight)).background(
-                colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge)
-            )
-            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
-        }.padding([.horizontal, .bottom], m.sp24)
+            }
+        }.padding(.horizontal, m(14)).frame(height: m(36))
+            .background(colors.control, in: Capsule()).elevation(.e1, cornerRadius: m(18))
+            .padding(.horizontal, m.sp24).padding(.top, m.sp4).padding(.bottom, m.sp8)
     }
 
     @ViewBuilder private var directoryContent: some View {
@@ -108,13 +102,12 @@ struct PublicRoomDirectoryView: View {
                 Button("Try again", action: retry).disabled(searching)
             }
         } else if entries.isEmpty && searching {
-            SkeletonRows()
+            SkeletonRows().padding(.horizontal, m.sp24).padding(.top, m.sp16)
+                .frame(maxHeight: .infinity, alignment: .top)
+        } else if entries.isEmpty && !request.query.isEmpty && !service.hasMore {
+            EmptyStateView(symbol: "magnifyingglass", title: "No channels match \u{201C}\(request.query)\u{201D}")
         } else if entries.isEmpty {
-            EmptyStateView(
-                symbol: workspace == nil ? "globe" : "number",
-                title: request.query.isEmpty
-                    ? (workspace == nil ? "No public channels" : "No channels yet") : "No channels found"
-            ) {
+            EmptyStateView(symbol: "number", title: workspace == nil ? "No public channels" : "No channels yet") {
                 if service.hasMore { loadMoreButton }
             }
         } else {
@@ -127,12 +120,9 @@ struct PublicRoomDirectoryView: View {
                                 Button(failedLoadingMore ? "Retry loading more" : "Try again", action: retry)
                                     .buttonStyle(.textLink).disabled(searching)
                             }
-                        }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16)
+                        }.padding(.horizontal, m.sp12).padding(.vertical, m.sp16)
                     }
-                    ForEach(entries) { entry in
-                        directoryRow(entry)
-                        Divider().overlay(colors.border).padding(.leading, m.sp24 + m.avatar + m.sp12)
-                    }
+                    ForEach(entries) { directoryRow($0) }
                     if service.hasMore {
                         HStack {
                             Spacer()
@@ -140,50 +130,53 @@ struct PublicRoomDirectoryView: View {
                             Spacer()
                         }.padding(.vertical, m.sp20)
                     }
-                }.padding(.bottom, m.sp12)
+                }.padding(.horizontal, m.sp12).padding(.bottom, m.sp12)
             }
         }
     }
 
     private func directoryRow(_ entry: PublicDirectoryRoom) -> some View {
         let joined = isJoined(entry.id)
-        return HStack(alignment: .top, spacing: m.sp12) {
-            AvatarView(name: entry.displayName, size: m.avatar, matrix: matrix, source: entry.avatarURL)
-            VStack(alignment: .leading, spacing: m.sp8) {
-                Text(entry.displayName).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
-                    .lineLimit(2).help(entry.displayName)
-                // A workspace's own channels need no address unless they have a readable one.
-                if workspace == nil || entry.alias != nil {
-                    Text(entry.alias ?? entry.id).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                        .lineLimit(1)
-                        .help(entry.alias ?? entry.id)
-                }
-                if let topic = entry.topic, !topic.isEmpty {
-                    Text(topic).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).lineLimit(2)
-                }
-                HStack(spacing: m.sp12) {
-                    Label(
-                        "\(entry.joinedMembers.formatted()) \(entry.joinedMembers == 1 ? "member" : "members")",
-                        systemImage: "person.2")
+        let opens = joined || entry.canJoin
+        return HStack(spacing: m.sp12) {
+            Image(systemName: entry.joinRule == .invite ? "lock" : "number").font(m.font(.reading))
+                .foregroundStyle(colors.textSecondary).frame(width: m(20))
+            VStack(alignment: .leading, spacing: m(1)) {
+                HStack(spacing: m.sp8) {
+                    Text(entry.displayName).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
                     if joined {
-                        Text("Joined")
-                    } else if workspace == nil || !entry.canJoin {
-                        Text(ruleLabel(entry.joinRule))
+                        HStack(spacing: m(3)) {
+                            Image(systemName: "checkmark").foregroundStyle(colors.accent)
+                            Text("Joined")
+                        }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     }
-                }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                }.lineLimit(1)
+                // A space until there is a topic, so every row keeps its height.
+                Text(entry.topic ?? (workspace == nil ? entry.alias ?? " " : " ")).font(m.font(.body))
+                    .foregroundStyle(colors.textSecondary).lineLimit(1)
             }.frame(maxWidth: .infinity, alignment: .leading)
-            if joined || entry.canJoin {
-                Button {
-                    review(entry)
-                } label: {
-                    HStack(spacing: m.sp8) {
-                        if resolvingID == entry.id { DelayedProgress() }
-                        Text(joined ? "Open" : "Join")
-                    }.font(m.font(.subheadline, .medium))
-                }.buttonStyle(.secondary).disabled(!current || searching || resolvingID != nil)
-                    .accessibilityLabel("\(joined ? "Open" : "Join") \(entry.displayName)")
+            if resolvingID == entry.id {
+                DelayedProgress()
+            } else if hovered == entry.id && !joined && entry.canJoin {
+                Button("Join") { review(entry) }.buttonStyle(.primary).controlSize(.small)
+                    .accessibilityLabel("Join \(entry.displayName)")
             }
-        }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: m(5)) {
+                Image(systemName: "person.2")
+                Text(entry.joinedMembers.formatted())
+            }.font(m.font(.body)).foregroundStyle(colors.textSecondary)
+                .frame(width: m(Self.membersWidth), alignment: .trailing)
+                .accessibilityLabel("\(entry.joinedMembers) \(entry.joinedMembers == 1 ? "member" : "members")")
+        }
+        .padding(.horizontal, m.sp12).frame(height: m(52))
+        .background(hovered == entry.id && opens ? colors.hover : .clear, in: RoundedRectangle(cornerRadius: m.radius))
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 ? entry.id : hovered == entry.id ? nil : hovered }
+        .onTapGesture { if opens { review(entry) } }
+        .help(opens ? "" : ruleLabel(entry.joinRule))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(opens ? .isButton : [])
+        .accessibilityAction { if opens { review(entry) } }
     }
 
     private var loadMoreButton: some View {
@@ -272,7 +265,6 @@ struct PublicRoomDirectoryView: View {
                 else { return }
                 guard resolution.sessionID == context.session, resolution.accountID == context.accountID else { return }
                 resolvingID = nil
-                isPresented = false
                 resolutionRequest = UUID()
                 onResolve(resolution)
             } catch is CancellationError {
@@ -286,12 +278,5 @@ struct PublicRoomDirectoryView: View {
                 self.error = MatrixService.safeError(error)
             }
         }
-    }
-
-    private func close() {
-        isPresented = false
-        resolutionRequest = UUID()
-        service.close()
-        onClose()
     }
 }

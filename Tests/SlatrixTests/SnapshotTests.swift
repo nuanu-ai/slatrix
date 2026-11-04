@@ -683,6 +683,15 @@ struct Snapshots {
         _ = try await settledImage(hosting)
         window.firstResponder?.insertText("a")
         try write(await settledImage(hosting), "people-\(name)")
+
+        for message in matrix.messages.suffix(4) {
+            matrix.savedMessages.set(roomID: message.roomID, eventID: message.eventID, saved: true)
+        }
+        NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "later"])
+        try write(await settledImage(hosting), "later-\(name)")
+
+        NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "browse-channels"])
+        try write(await settledImage(hosting), "channels-\(name)")
     }
 
     /// The window at 1440 × 900 and 100% with `view` as its content, after `prepare`.

@@ -9,28 +9,21 @@ struct SavedMessagesView: View {
     @EnvironmentObject private var appearance: AppearanceStore
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                Text("\(saved.count) \(saved.count == 1 ? "message" : "messages")").font(m.font(.subheadline))
-                    .foregroundStyle(appearance.colors.textSecondary)
-            }.padding(.horizontal, m.sp24).frame(height: m.control + m.sp16)
-            Divider().overlay(appearance.colors.border)
+        Group {
             if saved.isEmpty {
                 EmptyStateView(symbol: "bookmark", title: "Nothing saved for later")
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    LazyVStack(spacing: m.sp2) {
                         ForEach(saved.sorted { $0.savedAt > $1.savedAt }) { reference in
                             SavedMessageRow(
                                 matrix: matrix, reference: reference, onOpen: { onOpen(reference) },
                                 onRemove: { onRemove(reference) })
-                            Divider().overlay(appearance.colors.border)
                         }
-                    }
+                    }.padding(.horizontal, m.sp12).padding(.vertical, m.sp4)
                 }
             }
-        }.background(appearance.colors.canvas)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity).background(appearance.colors.canvas)
     }
 }
 
@@ -49,41 +42,45 @@ private struct SavedMessageRow: View {
     private var colors: AppColors { appearance.colors }
     private var room: ChatRoom? { matrix.rooms.first { $0.id == reference.roomID } }
 
+    /// Where it was said: the channel, or a direct message.
+    private var location: String {
+        guard let room else { return "Conversation unavailable" }
+        return room.isDirect ? "Direct message" : "#\(room.name)"
+    }
+
     var body: some View {
         Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: m.sp8) {
-                HStack(spacing: m.sp4) {
-                    Image(
-                        systemName: room?.isDirect == true
-                            ? "bubble.left.and.bubble.right" : room?.channelSymbol ?? "number")
-                    Text(room?.name ?? "Conversation unavailable").lineLimit(1)
-                }.font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
-                HStack(alignment: .top, spacing: m.sp12) {
-                    AvatarView(
-                        name: message?.senderName ?? "", size: m.avatar, matrix: matrix, source: message?.avatarURL)
-                    VStack(alignment: .leading, spacing: m.sp4) {
-                        HStack(spacing: m.sp8) {
-                            Text(message?.senderName ?? "Placeholder name").font(m.font(.reading, .semibold))
-                                .foregroundStyle(colors.textPrimary)
-                            Text(
-                                message?.timestamp ?? reference.savedAt,
-                                format: .dateTime.month(.abbreviated).day().hour().minute()
-                            ).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                        }
-                        content
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .top, spacing: m.sp12) {
+                AvatarView(name: message?.senderName ?? "", size: m.avatar, matrix: matrix, source: message?.avatarURL)
+                    .padding(.top, m(18))
+                VStack(alignment: .leading, spacing: m.sp2) {
+                    Text(location).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
+                        .lineLimit(1).frame(height: m(16))
+                    HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
+                        Text(message?.senderName ?? "Placeholder name").font(m.font(.reading, .semibold))
+                            .foregroundStyle(colors.textPrimary)
+                        Text(
+                            message?.timestamp ?? reference.savedAt,
+                            format: .dateTime.month(.abbreviated).day().hour().minute()
+                        ).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                    }.lineLimit(1)
+                    content
                 }
-                // Until the message arrives, its outline holds the row's place.
-                .redacted(reason: message == nil && error == nil ? .placeholder : [])
-            }.padding(.horizontal, m.sp24).padding(.vertical, m.sp12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(hovered ? colors.hover : .clear)
+                // Room for the actions that show on hover, so they never cover the text.
+                .padding(.trailing, m(120)).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            // Until the message arrives, its outline holds the row's place.
+            .redacted(reason: message == nil && error == nil ? .placeholder : [])
+            .padding(.horizontal, m.sp12).padding(.top, m(10)).padding(.bottom, m.sp12)
+            .background(hovered ? colors.hover : .clear, in: RoundedRectangle(cornerRadius: m(10)))
+            .contentShape(Rectangle())
         }.buttonStyle(.row).disabled(room?.membership != "join")
             .onHover { hovered = $0 }
             .overlay(alignment: .topTrailing) {
                 if hovered {
-                    IconButton(symbol: "bookmark.fill", label: "Remove from Later", role: .body, action: onRemove)
-                        .padding(.trailing, m.sp16).padding(.top, m.sp8)
+                    ToolbarCapsule(padding: m.sp2) {
+                        IconButton(symbol: "checkmark", label: "Remove from Later", role: .body, action: onRemove)
+                    }.padding(.trailing, m.sp12).padding(.top, m(10))
                 }
             }
             .accessibilityAction(named: "Remove from Later", onRemove)
