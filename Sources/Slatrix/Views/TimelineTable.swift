@@ -458,7 +458,7 @@ struct TimelineTable: NSViewRepresentable {
         case .day: return m(38)
         case .unread: return m(40)
         case .message(let row):
-            let line = m.size(.reading) * 1.4
+            let line = m.lineHeight(.reading)
             let perLine = max(20, (width - m(100)) / (m.size(.reading) * 0.5))
             // Characters counted as UTF-8 lead bytes: a whole room is estimated at once, and grapheme breaking costs
             // more than this guess is worth.
@@ -712,7 +712,8 @@ struct TimelineTable: NSViewRepresentable {
     private func updateSpacer() {
         guard !rows.isEmpty, configuration?.bottomAligned == true else { return }
         let content = table.rect(ofRow: rows.count - 1).maxY - table.rect(ofRow: 0).height
-        let height = max(0, viewportHeight - content)
+        // Whole points, so every row below it stays on the pixel grid.
+        let height = max(0, (viewportHeight - content).rounded(.down))
         guard abs(height - spacerHeight) > 0.25 else { return }
         spacerHeight = height
         noteHeights([0])

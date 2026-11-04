@@ -707,7 +707,9 @@ extension TimelineHostedTests {
         await drainMainActor()
         harness.layout()
         #expect(heights() == before)
-        #expect(bodies.map(harness.top) == tops)
+        // On the pixel grid: converting a frame to the window leaves rounding far below a pixel.
+        func pixels(_ tops: [CGFloat?]) -> [CGFloat?] { tops.map { $0.map { ($0 * 2).rounded() } } }
+        #expect(pixels(bodies.map(harness.top)) == pixels(tops))
         // Leaving the timeline takes the toolbar with it.
         harness.scrollView?.onPointer?(nil)
         #expect(toolbar(harness) == nil)
