@@ -71,8 +71,6 @@ struct RootView: View {
     @State private var recentSearches: [String] = []
     /// Any modal at all, such as a confirmation the timeline opened; read outside the body only.
     @State private var modalShown = false
-    /// What a new channel starts out named, when Browse channels found nothing by that name.
-    @State private var creationName = ""
     @State private var showRecovery = false
     @State private var editingProfile = false
     @State private var creation: CreationKind?
@@ -557,7 +555,6 @@ struct RootView: View {
                 CreationSheet(
                     matrix: matrix, kind: kind, workspaceID: workspaceID,
                     roomID: kind == .invite ? inviteTargetRoomID : matrix.selectedRoomID,
-                    initialName: kind == .channel ? creationName : "",
                     onCreated: { id, isWorkspace, notice in
                         if kind != .invite {
                             if isWorkspace {
@@ -1300,7 +1297,8 @@ struct RootView: View {
                 if route == .channels {
                     VStack(alignment: .leading, spacing: m(1)) {
                         Text(route.title).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
-                        Text(browsedWorkspace?.name ?? "").font(m.font(.subheadline))
+                        Text(browsedWorkspace?.name ?? matrix.homeserverURL.flatMap { URL(string: $0)?.host } ?? "")
+                            .font(m.font(.subheadline))
                             .foregroundStyle(colors.textSecondary)
                     }.lineLimit(1)
                 } else if route != .search {
@@ -1308,13 +1306,7 @@ struct RootView: View {
                     Text(route.title).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
                 }
             } trailing: {
-                if route == .channels {
-                    Button {
-                        handleMenu("new-channel")
-                    } label: {
-                        Label("Create Channel", systemImage: "plus")
-                    }.buttonStyle(.secondary).controlSize(.small)
-                } else if route == .directory {
+                if route == .directory {
                     Button {
                         creation = .directMessage
                     } label: {
@@ -1326,11 +1318,7 @@ struct RootView: View {
             case .channels:
                 PublicRoomDirectoryView(
                     matrix: matrix, service: matrix.publicDirectory, workspace: browsedWorkspace,
-                    onResolve: openBrowsedChannel,
-                    onCreate: { name in
-                        creationName = name
-                        creation = .channel
-                    }
+                    onResolve: openBrowsedChannel
                 ).id(workspaceID)
             case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
             case .threads:
@@ -2634,9 +2622,7 @@ struct RootView: View {
             let name = room.map { $0.name.contains(" ") ? "\"\($0.name)\"" : ($0.isDirect ? "@" : "#") + $0.name }
             searchBar.focus(text: route == .home ? name.map { "in:\($0) " } : nil)
         case "new-message": creation = .directMessage
-        case "new-channel":
-            creationName = ""
-            creation = .channel
+        case "new-channel": creation = .channel
         case "back": navigateHistory(-1)
         case "forward": navigateHistory(1)
         case "threads": route = .threads

@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Browse channels, a page in place of the conversation: a workspace's channels grouped by the space that lists them,
-/// or the server's public directory.
+/// Browse channels, a page in place of the conversation: a workspace's channels, or the server's public directory.
 struct PublicRoomDirectoryView: View {
     private static let membersWidth: CGFloat = 52
     @Environment(\.metrics) private var m
@@ -10,12 +9,8 @@ struct PublicRoomDirectoryView: View {
     /// Lists this workspace's channels; nil browses the server's public directory.
     var workspace: Workspace? = nil
     var onResolve: (MatrixLinkResolution) -> Void
-    /// Starts a channel, named after the search when nothing matched it.
-    var onCreate: (String) -> Void
     @EnvironmentObject private var appearance: AppearanceStore
     @State private var query = ""
-    @State private var sort = ChannelBrowser.Sort.name
-    @State private var hideJoined = false
     @State private var hovered: String?
     @State private var retryRevision = 0
     @State private var owner: Context?
@@ -51,9 +46,6 @@ struct PublicRoomDirectoryView: View {
     private var entries: [PublicDirectoryRoom] { activeRequest == request ? service.entries : [] }
     private var searching: Bool { current && (activeRequest != request || service.isLoading) }
     private var displayedError: String? { error ?? (activeRequest == request ? service.errorMessage : nil) }
-    private var serverName: String {
-        matrix.homeserverURL.flatMap { URL(string: $0)?.host } ?? matrix.homeserverURL ?? "your homeserver"
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -86,38 +78,23 @@ struct PublicRoomDirectoryView: View {
     }
 
     private var controls: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: m.sp8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
-                TextField("Search by name or topic", text: $query).textFieldStyle(.plain).font(m.font(.reading))
-                    .focused($searchFocused).accessibilityLabel("Search channels")
-                if searching { DelayedProgress().accessibilityLabel("Searching") }
-                if !query.isEmpty {
-                    IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body) {
-                        query = ""
-                        searchFocused = true
-                    }
+        HStack(spacing: m.sp8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
+            TextField("Search by name or topic", text: $query).textFieldStyle(.plain).font(m.font(.reading))
+                .focused($searchFocused).accessibilityLabel("Search channels")
+            if searching { DelayedProgress().accessibilityLabel("Searching") }
+            if !query.isEmpty {
+                IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body) {
+                    query = ""
+                    searchFocused = true
                 }
-            }.padding(.horizontal, m(14)).frame(height: m(36))
-                .background(colors.control, in: Capsule()).elevation(.e1, cornerRadius: m(18))
-            HStack(spacing: m.sp16) {
-                Text(entries.isEmpty ? "" : "\(entries.count) \(entries.count == 1 ? "channel" : "channels")")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Toggle("Hide my channels", isOn: $hideJoined).toggleStyle(.checkbox).foregroundStyle(colors.textPrimary)
-                Menu {
-                    Picker("Sort", selection: $sort) {
-                        ForEach(ChannelBrowser.Sort.allCases, id: \.self) { Text($0.rawValue) }
-                    }.pickerStyle(.inline).labelsHidden()
-                } label: {
-                    FilterChip(title: "Sort: \(sort.rawValue)", active: false)
-                }.menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden).fixedSize()
-            }.font(m.font(.body)).foregroundStyle(colors.textSecondary).frame(height: m(44))
-        }.padding(.horizontal, m.sp24).padding(.top, m.sp4)
+            }
+        }.padding(.horizontal, m(14)).frame(height: m(36))
+            .background(colors.control, in: Capsule()).elevation(.e1, cornerRadius: m(18))
+            .padding(.horizontal, m.sp24).padding(.top, m.sp4).padding(.bottom, m.sp8)
     }
 
     @ViewBuilder private var directoryContent: some View {
-        let groups = ChannelBrowser.groups(
-            entries, sort: sort, hiding: hideJoined ? Set(entries.map(\.id).filter(isJoined)) : [])
         if context.preview || context.accountID == nil {
             EmptyStateView(symbol: "globe", title: "Sign in to browse channels")
         } else if entries.isEmpty, let displayedError {
@@ -127,15 +104,9 @@ struct PublicRoomDirectoryView: View {
         } else if entries.isEmpty && searching {
             SkeletonRows().padding(.horizontal, m.sp24).padding(.top, m.sp16)
                 .frame(maxHeight: .infinity, alignment: .top)
-        } else if groups.isEmpty && !request.query.isEmpty && !service.hasMore {
-            VStack(spacing: m.sp12) {
-                Image(systemName: "magnifyingglass").font(m.font(.title1)).foregroundStyle(colors.textTertiary)
-                Text("No channels match \u{201C}\(request.query)\u{201D}").font(m.font(.title3, .semibold))
-                    .foregroundStyle(colors.textPrimary)
-                Button("Create #\(request.query)") { onCreate(request.query) }.buttonStyle(.secondary)
-                    .controlSize(.small)
-            }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(.bottom, m(96))
-        } else if groups.isEmpty {
+        } else if entries.isEmpty && !request.query.isEmpty && !service.hasMore {
+            EmptyStateView(symbol: "magnifyingglass", title: "No channels match \u{201C}\(request.query)\u{201D}")
+        } else if entries.isEmpty {
             EmptyStateView(symbol: "number", title: workspace == nil ? "No public channels" : "No channels yet") {
                 if service.hasMore { loadMoreButton }
             }
@@ -151,10 +122,7 @@ struct PublicRoomDirectoryView: View {
                             }
                         }.padding(.horizontal, m.sp12).padding(.vertical, m.sp16)
                     }
-                    ForEach(groups, id: \.spaceName) { group in
-                        groupHeader(group.spaceName ?? workspace?.name ?? serverName)
-                        ForEach(group.channels) { directoryRow($0) }
-                    }
+                    ForEach(entries) { directoryRow($0) }
                     if service.hasMore {
                         HStack {
                             Spacer()
@@ -165,16 +133,6 @@ struct PublicRoomDirectoryView: View {
                 }.padding(.horizontal, m.sp12).padding(.bottom, m.sp12)
             }
         }
-    }
-
-    private func groupHeader(_ name: String) -> some View {
-        HStack(spacing: m.sp8) {
-            Text(name.prefix(1).uppercased()).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.onAccent)
-                .frame(width: m(16), height: m(16)).background(
-                    avatarColor(name), in: RoundedRectangle(cornerRadius: m(5)))
-            Text(name).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary).lineLimit(1)
-        }.padding(.horizontal, m.sp12).padding(.top, m.sp8).frame(height: m(36))
-            .accessibilityAddTraits(.isHeader)
     }
 
     private func directoryRow(_ entry: PublicDirectoryRoom) -> some View {
