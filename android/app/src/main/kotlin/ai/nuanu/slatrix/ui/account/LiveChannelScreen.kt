@@ -288,11 +288,17 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             }
             // A row that starts a run again: after the replies bar or the New line, so it shows its sender.
             fun restarts(row: ConversationMessage) = row.id == firstReply || line != null && row.eventId == line
+            // Slack's way back to the newest message, once the reader scrolls up or opened an older one.
+            val away by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
+            val jumpShows = jumped && (state.focused || away)
+            // Opened at an older message, the button stays over the newest loaded one, so the list keeps room for it from its
+            // first rows. Scrolled away, the newest is off screen and the room would only move what the reader is looking at.
+            val jumpRoom = if (state.focused) UiMetrics.Touch + UiMetrics.GapLarge else UiMetrics.GapSmall
             // A thread reads down from its root, as in Slack, so a short one sits at the top, right under the header.
             LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none(::opens)) 1f else 0f),
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
-                contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = UiMetrics.GapSmall)) {
+                contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = jumpRoom)) {
                 itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row ->
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
@@ -327,10 +333,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     }
                 }
             }
-            // Slack's way back to the newest message, once the reader scrolls up or opened an older one.
-            val away by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
             val jumps = rememberCoroutineScope()
-            androidx.compose.animation.AnimatedVisibility(jumped && (state.focused || away), Modifier.align(Alignment.BottomEnd).padding(UiMetrics.GapLarge),
+            androidx.compose.animation.AnimatedVisibility(jumpShows, Modifier.align(Alignment.BottomEnd).padding(UiMetrics.GapLarge),
                 enter = fadeIn(Motion.pane()), exit = ExitTransition.None) {
                 Surface({
                     following = true
