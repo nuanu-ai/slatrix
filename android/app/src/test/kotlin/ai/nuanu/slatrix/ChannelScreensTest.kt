@@ -16,6 +16,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -83,6 +84,20 @@ class ChannelScreensTest {
             assertEquals(listOf(design.id, general.id), picked)
             assertEquals("des", searched.last())
         }
+    }
+
+    // capability: home.browse-channels
+    @Test fun aJoinedChannelsLongNameKeepsAsMuchRoomAsAnyOther() {
+        val name = "engineering-announcements-and-release-coordination"
+        compose.setContent {
+            SlatrixTheme {
+                BrowseChannelsScreen("Harbor", ChannelDirectoryState(listOf(DirectoryChannel("!a:example.org", name, null, 12, canJoin = true),
+                    DirectoryChannel("!b:example.org", name, null, 12, canJoin = true))), joined = setOf("!a:example.org"), joining = null,
+                    error = null, onSearch = {}, onMore = {}, onChannel = {}, onBack = {})
+            }
+        }
+        val (joined, other) = compose.onAllNodesWithText(name, useUnmergedTree = true).fetchSemanticsNodes().map { it.boundsInRoot.width }
+        assertEquals(other, joined)
     }
 
     // capability: home.browse-channels

@@ -421,7 +421,7 @@ private fun AddChannelRow(onClick: () -> Unit) {
 
 /** The narrow column ahead of a row's name: a channel's #, a person's picture or a section's arrow. */
 @Composable
-private fun Lead(content: @Composable () -> Unit) {
+internal fun Lead(content: @Composable () -> Unit) {
     Box(Modifier.widthIn(min = UiMetrics.RowLead), contentAlignment = Alignment.Center) { content() }
 }
 
@@ -519,17 +519,6 @@ private fun preview(room: RoomSummary): AnnotatedString {
             if (latest.own) withStyle(SpanStyle(color = color)) { append("You: ") }
             append(body)
         }
-    }
-}
-
-/** A channel's rounded tile: its # or, for a private one, its lock, on the accent's tint. */
-@Composable
-internal fun ChannelTile(private: Boolean, size: Dp) {
-    val colors = SlatrixTheme.colors
-    Box(Modifier.size(size).clip(if (size >= UiMetrics.RowAvatar) MaterialTheme.shapes.large else MaterialTheme.shapes.medium)
-        .background(colors.accentTint), contentAlignment = Alignment.Center) {
-        Icon(if (private) SlackIcons.Lock else SlackIcons.Hash, if (private) "Private channel" else null, Modifier.size(UiMetrics.LargeIcon),
-            tint = colors.accent)
     }
 }
 

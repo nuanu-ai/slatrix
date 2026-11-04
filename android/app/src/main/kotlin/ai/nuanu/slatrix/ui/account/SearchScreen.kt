@@ -168,9 +168,8 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<St
             item { SearchSection("Channels") }
             items(channels, key = { it.id }) { room ->
                 SearchRow({ onRoom(room.id) }) {
-                    Icon(if (room.isPrivate) SlackIcons.Lock else SlackIcons.Hash, if (room.isPrivate) "Private channel" else null,
-                        Modifier.size(UiMetrics.Icon))
-                    Spacer(Modifier.width(UiMetrics.GapLarge))
+                    Lead { ChannelGlyph(room.isPrivate, SlatrixTheme.colors.textSecondary) }
+                    Spacer(Modifier.width(UiMetrics.GapMedium))
                     RowTitle(room.name)
                 }
             }
@@ -178,14 +177,14 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<St
         if (people.isNotEmpty() || others.isNotEmpty()) item { SearchSection("People") }
         items(people, key = { it.id }) { room ->
             SearchRow({ onRoom(room.id) }) {
-                LiveAvatar(room.initials, room.colorIndex, UiMetrics.CompactAvatar, room.avatarUrl)
+                Lead { LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowLead, room.avatarUrl) }
                 Spacer(Modifier.width(UiMetrics.GapMedium))
                 RowTitle(room.name)
             }
         }
         items(others, key = { "person ${it.id}" }) { person ->
             SearchRow({ onPerson(person) }) {
-                LiveAvatar(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), UiMetrics.CompactAvatar, person.avatarUrl)
+                Lead { LiveAvatar(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), UiMetrics.RowLead, person.avatarUrl) }
                 Spacer(Modifier.width(UiMetrics.GapMedium))
                 // The Matrix ID tells namesakes apart, and someone you have a conversation with from their profile.
                 Text(buildAnnotatedString {

@@ -165,11 +165,13 @@ internal fun InvitationsHeader() {
 @Composable
 internal fun InvitationRow(invitation: Invitation, onOpen: (String) -> Unit) {
     val colors = SlatrixTheme.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ConversationRow).clickable(role = Role.Button) { onOpen(invitation.id) }
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button) { onOpen(invitation.id) }
         .semantics { stateDescription = "Invitation" }.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        if (invitation.direct || invitation.space) LiveAvatar(invitation.initials, invitation.colorIndex, UiMetrics.RowAvatar)
-        else ChannelTile(private = false, UiMetrics.RowAvatar)
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+        Lead {
+            if (invitation.direct || invitation.space) LiveAvatar(invitation.initials, invitation.colorIndex, UiMetrics.RowLead)
+            else ChannelGlyph(private = false, colors.textPrimary)
+        }
         Column(Modifier.weight(1f)) {
             Text(invitation.name, style = MaterialTheme.typography.bodyLarge, color = colors.textPrimary,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)

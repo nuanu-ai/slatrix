@@ -384,8 +384,10 @@ private fun ChatHeader(room: RoomSummary, thread: Boolean, typing: List<String>,
         else Row(Modifier.weight(1f).heightIn(min = UiMetrics.Touch).clip(MaterialTheme.shapes.medium)
             .clickable(role = Role.Button, onClickLabel = "Conversation details", onClick = onOpenDetails),
             verticalAlignment = Alignment.CenterVertically) {
-            if (room.direct) LiveAvatar(room.initials, room.colorIndex, UiMetrics.ChannelTile, room.avatarUrl)
-            else ChannelTile(room.isPrivate, UiMetrics.ChannelTile)
+            Lead {
+                if (room.direct) LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowLead, room.avatarUrl)
+                else ChannelGlyph(room.isPrivate, colors.textPrimary)
+            }
             lines()
         }
         if (!thread) IconButton(onClick = onOpenDetails) {

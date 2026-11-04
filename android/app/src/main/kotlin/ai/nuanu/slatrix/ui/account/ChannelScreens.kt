@@ -106,20 +106,14 @@ private fun DirectoryRow(channel: DirectoryChannel, joined: Boolean, joining: Bo
     Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ConversationRow)
         .then(if (joined || channel.canJoin) Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick) else Modifier)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         // One that needs an invitation shows its lock.
-        ChannelTile(private = !joined && !channel.canJoin, UiMetrics.RowAvatar)
+        Lead { ChannelGlyph(private = !joined && !channel.canJoin, colors.textSecondary) }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                // The name gives way only to Joined and the count, which keeps to the right edge.
-                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                    Text(channel.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (joined) Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(SlackIcons.Check, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.accent)
-                        Text("Joined", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 1)
-                    }
-                }
+                // The name gives way only to the count, which keeps to the right edge.
+                Text(channel.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 // The progress takes the count's place, so the row never changes size.
                 if (joining) WaitingSpinner()
                 else Row(Modifier.semantics(mergeDescendants = true) { contentDescription = members },
@@ -129,8 +123,16 @@ private fun DirectoryRow(channel: DirectoryChannel, joined: Boolean, joining: Bo
                         color = colors.textSecondary, maxLines = 1)
                 }
             }
-            listOfNotNull(channel.rule.ifEmpty { null }, channel.topic).joinToString(" · ").ifEmpty { null }?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val about = listOfNotNull(channel.rule.ifEmpty { null }, channel.topic).joinToString(" · ").ifEmpty { null }
+            if (joined || about != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                if (joined) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(SlackIcons.Check, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.accent)
+                    Text("Joined", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 1)
+                }
+                about?.let {
+                    Text(it, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }
