@@ -31,7 +31,7 @@ import androidx.compose.ui.semantics.liveRegion
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
-import androidx.activity.compose.BackHandler
+import ai.nuanu.slatrix.ui.designsystem.rememberPredictiveBack
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import android.content.ClipData
@@ -60,6 +60,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -230,7 +231,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }.first { it }
         loadOlder()
     }
-    BackHandler(onBack = onBack)
+    val back = rememberPredictiveBack(onBack = onBack)
     var menu by remember { mutableStateOf<ConversationMessage?>(null) }
     // Inside a thread, Reply has nowhere further to go.
     menu?.let { MessageActionsHost(it, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent) { menu = null } }
@@ -255,7 +256,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     reacted?.let { ReactionsSheet(it.reactions, state.rows, state.ownUserId) { reacted = null } }
     val glass = rememberGlass()
     // The header floats over the messages, which start under it; the scaffold measures it first, so they never move.
-    Scaffold(topBar = { ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails) },
+    Scaffold(Modifier.graphicsLayer {
+        // A back swipe slides the conversation off under the finger, as a pushed page leaves.
+        alpha = 1 - back.value
+        translationX = back.value * Motion.PushDistance * size.width
+    }, topBar = { ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails) },
         containerColor = colors.canvas, contentWindowInsets = WindowInsets(0)) { bars ->
     val header = bars.calculateTopPadding()
     Column(Modifier.fillMaxSize().wallpaper().navigationBarsPadding().imePadding()) {

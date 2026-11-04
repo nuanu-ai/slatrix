@@ -16,7 +16,7 @@ extensions.configure<LibraryExtension> {
     compileSdk = 36
 
     defaultConfig {
-        minSdk = 33
+        minSdk = 35
     }
 
     sourceSets.named("main") {

@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
-import androidx.activity.compose.BackHandler
+import ai.nuanu.slatrix.ui.designsystem.rememberPredictiveBack
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -98,7 +98,7 @@ internal val LocalReturning = compositionLocalOf { false }
  */
 @Composable
 internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable () -> Unit = {}, content: LazyListScope.() -> Unit) {
-    BackHandler(onBack = onBack)
+    val back = rememberPredictiveBack(onBack = onBack)
     val returning = LocalReturning.current
     var entered by rememberSaveable { mutableStateOf(returning) }
     val shown = remember { Animatable(if (entered) 1f else 0f) }
@@ -107,8 +107,10 @@ internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable (
         entered = true
     }
     Column(Modifier.fillMaxSize().graphicsLayer {
-        alpha = shown.value
-        translationX = (1 - shown.value) * Motion.PushDistance * size.width
+        // A back swipe plays the way in backwards under the finger.
+        val now = shown.value * (1 - back.value)
+        alpha = now
+        translationX = (1 - now) * Motion.PushDistance * size.width
     }.background(SlatrixTheme.colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack, modifier = Modifier.size(UiMetrics.Touch)) {

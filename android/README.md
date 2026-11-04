@@ -1,6 +1,6 @@
 # Slatrix for Android
 
-The app runs on Android 13 and later. Building it requires JDK 17 and an Android SDK with platform 36 and build tools 36.0.0.
+The app runs on Android 15 and later. Building it requires JDK 17 and an Android SDK with platform 36 and build tools 36.0.0.
 Set `ANDROID_HOME` to the SDK directory, or put `sdk.dir` in `local.properties`.
 
 From the repository root:

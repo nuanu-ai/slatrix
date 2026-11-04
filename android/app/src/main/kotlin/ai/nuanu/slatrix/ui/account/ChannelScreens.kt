@@ -10,8 +10,9 @@ import ai.nuanu.slatrix.core.listed
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
-import androidx.activity.compose.BackHandler
+import ai.nuanu.slatrix.ui.designsystem.rememberPredictiveBack
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +52,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -123,8 +125,11 @@ fun CreateChannelScreen(workspace: String?, creating: Boolean, error: String?, o
     val colors = SlatrixTheme.colors
     var name by rememberSaveable { mutableStateOf("") }
     var topic by rememberSaveable { mutableStateOf("") }
-    BackHandler(onBack = onBack)
-    Box(Modifier.fillMaxSize().background(colors.canvas)) {
+    val back = rememberPredictiveBack(onBack = onBack)
+    Box(Modifier.fillMaxSize().graphicsLayer {
+        alpha = 1 - back.value
+        translationX = back.value * Motion.PushDistance * size.width
+    }.background(colors.canvas)) {
         Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight),
                 verticalAlignment = Alignment.CenterVertically) {
