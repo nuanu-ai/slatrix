@@ -29,23 +29,34 @@ struct DesignSystemHostedTests {
             window.close()
         }
 
-        /// Whether any pixel has the focus ring's cyan blue, whose green stands well above its red; the accent's blue
-        /// in link text doesn't.
-        func showsFocusRing() -> Bool {
-            hosting.layoutSubtreeIfNeeded()
-            guard let image = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { return false }
-            hosting.cacheDisplay(in: hosting.bounds, to: image)
+        /// Whether any pixel has the focus ring's blue, whose green stands well above its red, where `rest` shows
+        /// background. The ring is drawn outside a control, and the system accent can fill the control itself.
+        func showsFocusRing(outside rest: Host? = nil) -> Bool {
+            guard let image = snapshot() else { return false }
+            let background = rest?.snapshot()
             for x in 0..<image.pixelsWide {
                 for y in 0..<image.pixelsHigh {
                     guard let color = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
-                    if color.blueComponent - color.redComponent > 0.3
-                        && color.greenComponent - color.redComponent > 0.15
+                    if let background, let under = background.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                        min(under.redComponent, under.greenComponent, under.blueComponent) < 0.95
+                    {
+                        continue
+                    }
+                    if color.blueComponent - color.redComponent > 0.15
+                        && color.greenComponent - color.redComponent > 0.05
                     {
                         return true
                     }
                 }
             }
             return false
+        }
+
+        private func snapshot() -> NSBitmapImageRep? {
+            hosting.layoutSubtreeIfNeeded()
+            guard let image = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { return nil }
+            hosting.cacheDisplay(in: hosting.bounds, to: image)
+            return image
         }
 
         /// A click at `point`, in the window's top-left coordinates.
@@ -102,15 +113,24 @@ struct DesignSystemHostedTests {
         "Every button shows a focus ring when focused, and only then",
         arguments: [InteractionState.focused, .rest, .hover, .pressed])
     func focusRing(state: InteractionState) {
-        let host = Host(
-            VStack(spacing: 16) {
-                ForEach(ButtonKind.allCases, id: \.self) { kind in ButtonChrome(kind: kind, state: state) { Text("Go") }
-                }
-                IconChrome(state: state) { Image(systemName: "xmark").frame(width: 28, height: 28) }
-            }.padding(16).frame(width: 200, height: 260).background(Color.white),
-            size: CGSize(width: 200, height: 260))
-        defer { host.close() }
-        #expect(host.showsFocusRing() == (state == .focused))
+        func host(_ state: InteractionState) -> Host {
+            Host(
+                VStack(spacing: 16) {
+                    // A link's underline on hover is the accent's blue too.
+                    ForEach(ButtonKind.allCases.filter { $0 != .link }, id: \.self) { kind in
+                        ButtonChrome(kind: kind, state: state) { Text("Go") }
+                    }
+                    IconChrome(state: state) { Image(systemName: "xmark").frame(width: 28, height: 28) }
+                }.padding(16).frame(width: 200, height: 260).background(Color.white),
+                size: CGSize(width: 200, height: 260))
+        }
+        let rest = host(.rest)
+        let shown = host(state)
+        defer {
+            rest.close()
+            shown.close()
+        }
+        #expect(shown.showsFocusRing(outside: rest) == (state == .focused))
     }
 
     private struct FocusedCard: View {
@@ -402,12 +422,11 @@ struct DesignSystemHostedTests {
         #expect(visited == [1, 2, 1])
     }
 
-    @Test("A round rail button lights its whole circle when pressed, not a square inside it")
+    @Test("A round button lights its whole circle when pressed, not the square corners around it")
     func roundButtonPress() throws {
         func pixels(_ state: InteractionState) throws -> (edge: NSColor, corner: NSColor) {
             let host = Host(
-                IconChrome(state: state, round: true) { Image(systemName: "moon").frame(width: 28, height: 28) }
-                    .frame(width: 36, height: 36),
+                IconChrome(state: state, round: true) { Image(systemName: "moon").frame(width: 36, height: 36) },
                 size: CGSize(width: 36, height: 36))
             defer { host.close() }
             host.hosting.layoutSubtreeIfNeeded()
@@ -417,7 +436,7 @@ struct DesignSystemHostedTests {
             func color(_ x: CGFloat, _ y: CGFloat) throws -> NSColor {
                 try #require(image.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB))
             }
-            // Inside the circle near its top, outside the icon's square; and the frame's corner, outside the circle.
+            // Inside the circle near its top, clear of the icon; and the frame's corner, outside the circle.
             return (try color(18, 2), try color(1, 1))
         }
         let rest = try pixels(.rest)

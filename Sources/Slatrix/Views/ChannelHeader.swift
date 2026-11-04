@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Slack's conversation header: the name opens details, the member facepile opens Members, and ⋮ holds the rest. A
-/// direct message with one person shows them instead, and opens their profile. Reads the member list itself, so
-/// members arriving redraw only the header.
+/// The conversation's buttons in the toolbar, in one capsule: members, which opens Members; pins and files, which
+/// swap the timeline for that list and back; and ⋯ with the rest. Reads the member list itself, so members arriving
+/// redraw only the capsule.
 struct ChannelHeader: View {
     enum Action: Hashable {
         case details(RoomInfoView.Tab)
@@ -12,83 +12,93 @@ struct ChannelHeader: View {
     }
     let matrix: MatrixService
     let room: ChatRoom
+    @Binding var tab: ChannelTab
     let perform: (Action) -> Void
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
     var body: some View {
-        HStack(spacing: m.sp8) {
-            if ConversationHeader.isOneToOne(room) {
-                Button(action: openPerson) {
-                    HStack(spacing: m.sp8) {
-                        AvatarView(
-                            name: room.name, size: m.avatarMedium, cornerRadius: m.radiusSmall, matrix: matrix,
-                            source: room.avatarURL)
-                        Text(room.name).font(m.font(.title, .bold)).lineLimit(1)
-                    }
-                }.buttonStyle(.row).layoutPriority(1)
-            } else {
+        let colors = appearance.colors
+        ToolbarCapsule(padding: m.sp4) {
+            if !ConversationHeader.isOneToOne(room) {
                 Button {
-                    perform(.details(.about))
+                    perform(.details(.members))
                 } label: {
-                    HStack(spacing: m.sp8) {
-                        if !room.isDirect {
-                            Image(systemName: room.channelSymbol).font(m.font(.title, .bold))
-                        }
-                        Text(room.name).font(m.font(.title, .bold)).lineLimit(1)
-                        Image(systemName: "chevron.down").font(m.font(.caption, .semibold))
-                    }
-                }.buttonStyle(.row).layoutPriority(1)
+                    HStack(spacing: m(5)) {
+                        Image(systemName: "person.2").font(m.font(.body))
+                        Text("\(room.memberCount)").font(m.font(.body)).monospacedDigit()
+                    }.padding(.horizontal, m.sp8).frame(height: m.iconButton)
+                }.buttonStyle(.icon).help("View all members").accessibilityLabel("\(room.memberCount) members")
             }
-            Spacer()
-            if !ConversationHeader.isOneToOne(room) { facepile }
+            toggle(.pins, symbol: "pin", label: "Pinned", count: room.pinnedEventIDs.count)
+                .disabled(matrix.isPreview || room.membership != "join")
+            toggle(.files, symbol: "doc.on.doc", label: "Files and links")
             Menu {
                 NativeMessageMenuCommands(commands: Self.menu(for: room, isPreview: matrix.isPreview, perform: perform))
             } label: {
-                // A menu's label draws flat, so a rotated "ellipsis" would lie down; SF Symbols has no vertical one.
-                Text("⋮").font(m.font(.title, .bold)).frame(width: m.iconButton, height: m.iconButton)
-            }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m.iconButton).help("More actions")
+                Image(systemName: "ellipsis").font(m.font(.body)).frame(width: m.control, height: m.iconButton)
+            }.menuStyle(.button).buttonStyle(.icon).menuIndicator(.hidden).fixedSize().help("More actions")
                 .accessibilityLabel("More actions")
-        }.foregroundStyle(appearance.colors.textPrimary).padding(.horizontal, m.sp20).frame(height: m.paneHeader)
+        }.foregroundStyle(colors.textSecondary)
     }
 
-    /// Up to three faces over the header's surface, then the count. Slots for faces not yet loaded hold their place,
-    /// so photos arriving move nothing.
-    private var facepile: some View {
-        let colors = appearance.colors
-        let faces = ConversationHeader.faces(matrix.members, me: matrix.user?.id)
-        let slots = min(3, max(room.memberCount, faces.count))
+    /// Shows a list in the timeline's place, or the timeline again; the accent marks the one showing.
+    private func toggle(_ value: ChannelTab, symbol: String, label: String, count: Int = 0) -> some View {
+        let shown = tab == value
         return Button {
-            perform(.details(.members))
+            tab = shown ? .messages : value
         } label: {
-            HStack(spacing: m.sp4) {
-                HStack(spacing: -m.sp8) {
-                    ForEach(0..<slots, id: \.self) { index in
-                        Group {
-                            if index < faces.count {
-                                AvatarView(
-                                    name: faces[index].name, size: m.avatarMedium, cornerRadius: m.radiusSmall,
-                                    matrix: matrix, source: faces[index].avatarURL)
-                            } else {
-                                RoundedRectangle(cornerRadius: m.radiusSmall).fill(colors.sunken)
-                                    .frame(width: m.avatarMedium, height: m.avatarMedium)
-                            }
-                        }
-                        .padding(m.sp2).background(colors.canvas, in: RoundedRectangle(cornerRadius: m.radius))
-                        // The first face sits on top, as in Slack.
-                        .zIndex(Double(slots - index))
-                    }
-                }
-                Text("\(room.memberCount)").font(m.font(.secondary, .semibold))
-            }.padding(.horizontal, m.sp4).frame(height: m.iconButton)
-        }.buttonStyle(.icon).help("View all members").accessibilityLabel("\(room.memberCount) members")
+            Image(systemName: shown ? symbol + ".fill" : symbol).font(m.font(.body))
+                .foregroundStyle(shown ? appearance.colors.accent : appearance.colors.textSecondary)
+                .frame(width: m.control, height: m.iconButton)
+        }.buttonStyle(.icon).help(label)
+            .accessibilityLabel(count > 0 ? "\(label), \(count)" : label)
+            .accessibilityAddTraits(shown ? .isSelected : [])
     }
 
-    private func openPerson() {
-        if let person = matrix.members.first(where: { $0.id != matrix.user?.id }) {
-            perform(.profile(person))
-        } else {
-            perform(.details(.about))
+    /// The conversation's name over its topic. The name opens details, or the person's profile in a direct message
+    /// with one person.
+    struct Title: View {
+        let matrix: MatrixService
+        let room: ChatRoom
+        let perform: (Action) -> Void
+        @Environment(\.metrics) private var m
+        @EnvironmentObject private var appearance: AppearanceStore
+
+        var body: some View {
+            let colors = appearance.colors
+            Button(action: open) {
+                VStack(alignment: .leading, spacing: m(1)) {
+                    HStack(spacing: m(3)) {
+                        if ConversationHeader.isOneToOne(room) {
+                            AvatarView(
+                                name: room.name, size: m.avatarSmall, matrix: matrix, source: room.avatarURL
+                            ).padding(.trailing, m.sp4)
+                        } else if !room.isDirect {
+                            Image(systemName: room.channelSymbol).font(m.font(.body, .medium))
+                                .foregroundStyle(colors.textSecondary)
+                        }
+                        Text(room.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
+                    }
+                    if !room.topic.isEmpty {
+                        Text(room.topic).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                    }
+                }.lineLimit(1).truncationMode(.tail)
+            }.buttonStyle(.row).help(room.isDirect ? room.name : "Open channel details")
+                .contextMenu {
+                    NativeMessageMenuCommands(
+                        commands: ChannelHeader.menu(for: room, isPreview: matrix.isPreview, perform: perform))
+                }
+        }
+
+        private func open() {
+            if ConversationHeader.isOneToOne(room),
+                let person = matrix.members.first(where: { $0.id != matrix.user?.id })
+            {
+                perform(.profile(person))
+            } else {
+                perform(.details(.about))
+            }
         }
     }
 

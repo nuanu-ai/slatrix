@@ -47,7 +47,6 @@ struct RootView: View {
     @State private var workspaceInitialized = false
     @State private var pendingRoomID: String?
     @State private var preferredRoomID: String?
-    @State private var sidebarSearch = ""
     /// The sidebar column lists direct messages, as Slack's DMs view does, while the one open shows beside it.
     @State private var directMessagesColumn = false
     @State private var directMessageSearch = ""
@@ -139,9 +138,9 @@ struct RootView: View {
     private var colors: AppColors { appearance.colors }
     /// Threads and profiles share one pane width, as in Slack.
     private static let paneWidth: CGFloat = 380
-    private static let titleBarHeight: CGFloat = 40
+    /// Where the window buttons end, in window points; they do not zoom.
     private static let windowButtonsWidth: CGFloat = 72
-    private static let searchWidth: CGFloat = 648
+    static let searchWidth: CGFloat = 180
     private var paneOpen: Bool { profilePane != nil || (room != nil && threadRoot != nil) }
     /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
     private var inspectorWidth: CGFloat? {
@@ -155,6 +154,16 @@ struct RootView: View {
     /// open pane.
     private var sidebarCollapsed: Bool {
         sidebarHidden || SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom, paneOpen: paneOpen)
+    }
+    private var searchFits: Bool {
+        let available = availableContentWidth / m.zoom
+        // Beside the sidebar, or after the window buttons and the button that brings it back.
+        let leading =
+            sidebarCollapsed
+            ? (Self.windowButtonsWidth + m.control + m.sp12) / m.zoom
+            : (sidebarListWidth + m.sidebarInset) / m.zoom + SidebarLayout.handleWidth
+        return SidebarLayout.searchFits(
+            availableWidth: available, toolbarWidth: available - leading - occupiedInspectorWidth)
     }
     /// Pane width plus its divider, at 100% zoom.
     private var occupiedInspectorWidth: CGFloat { inspectorWidth.map { $0 + SidebarLayout.handleWidth } ?? 0 }
@@ -283,7 +292,6 @@ struct RootView: View {
 
     var body: some View {
         ModalHost(
-            top: m(Self.titleBarHeight),
             onCovered: { shown in
                 modalShown = shown
                 // A notification that arrived while a modal was open opens once it closes.
@@ -335,7 +343,7 @@ struct RootView: View {
                 }, onMatrixLink: enqueueMatrixLink, onClose: closeModal
             ).onAppear { Performance.finishOnScreen(.searchOpen) }
                 // Slack's switcher hangs below the title bar, not centered.
-                .modalSurface().frame(maxHeight: .infinity, alignment: .top).padding(.top, m.paneHeader + m.sp24)
+                .modalSurface().frame(maxHeight: .infinity, alignment: .top).padding(.top, m(112))
         case .shortcuts: KeyboardShortcutsView(onClose: closeModal)
         }
     }
@@ -368,7 +376,7 @@ struct RootView: View {
                 if logoutRecovery.isBusy {
                     VStack(spacing: m.sp12) {
                         DelayedProgress()
-                        Text("Signing out…").font(m.font(.secondary))
+                        Text("Signing out…").font(m.font(.body))
                     }
                     .padding(m.sp24).background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
                 }
@@ -666,11 +674,9 @@ struct RootView: View {
     }
 
     private var mainContent: some View {
-        VStack(spacing: 0) {
-            titleBar
+        Group {
             if bootstrapping {
                 DelayedProgress(interval: .appLoading).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(colors.canvas)
             } else if matrix.user == nil && !matrix.isPreview {
                 LoginView(matrix: matrix) {
                     matrix.enterPreview()
@@ -685,7 +691,7 @@ struct RootView: View {
                 ) {
                     HStack(spacing: 0) {
                         if !sidebarCollapsed {
-                            sidebar.transition(.move(edge: .leading))
+                            sidebar.padding([.leading, .vertical], m.sidebarInset).transition(.move(edge: .leading))
                             ResizeHandle(
                                 currentWidth: sidebarListWidth, onChange: resizeSidebar, onCommit: commitSidebarWidth,
                                 onReset: {
@@ -699,8 +705,10 @@ struct RootView: View {
                                     if let room {
                                         channelContent(room)
                                     } else if !matrix.roomsLoaded {
+                                        toolbar { EmptyView() }
                                         syncingView
                                     } else {
+                                        toolbar { EmptyView() }
                                         noRoomsView
                                     }
                                 } else {
@@ -710,16 +718,11 @@ struct RootView: View {
                             // A composer that grows or a message that arrives lays out this column, not the window.
                             .layoutIsolated()
                             // Banners float over the conversation instead of pushing it down.
-                            .overlay(alignment: .top) {
-                                banners.padding(
-                                    .top,
-                                    (screen.route == .home && room != nil ? m.paneHeader + m.sp40 : m.paneHeader) + 1)
-                            }
-                            // Too narrow to sit beside: the pane lies over the conversation's right side, as in Slack.
+                            .overlay(alignment: .top) { banners.padding(.top, m.paneHeader) }
+                            // Too narrow to sit beside: the pane lies over the conversation's right side.
                             .overlay(alignment: .trailing) {
                                 if paneOpen && inspectorWidth == nil {
                                     inspector(room).frame(maxWidth: m(Self.paneWidth))
-                                        .overlay(alignment: .leading) { colors.border.frame(width: 1) }
                                         .elevation(.e3, cornerRadius: 0)
                                 }
                             }
@@ -735,19 +738,10 @@ struct RootView: View {
                                     })
                                 inspector(room).layoutIsolated().frame(width: m(width))
                             }
-                        }.background(colors.canvas)
-                    }.clipped()
-                        // Rounds the panel by painting the frame over its corners: a rounded clip hosts AppKit views in an
-                        // offset container that AppKit's drag lookup never looks inside, so nothing in it took drops.
-                        .overlay {
-                            OutsideCorners(radius: m.radiusLarge).fill(colors.frame, style: FillStyle(eoFill: true))
-                                .allowsHitTesting(false)
                         }
-                        .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
-                        .padding(.leading, sidebarCollapsed ? m.sp4 : 0).padding(.trailing, m.sp4)
-                        .padding(.bottom, m.sp4)
-                        .overlay(alignment: .leading) { drawer }
-                        .animation(Motion.pane, value: sidebarCollapsed)
+                    }
+                    .overlay(alignment: .leading) { drawer }
+                    .animation(Motion.pane, value: sidebarCollapsed)
                 }
             }
         }
@@ -756,9 +750,13 @@ struct RootView: View {
         .overlay(alignment: .topLeading) {
             SearchMenu(
                 bar: searchBar, matrix: matrix, recents: recentSearches, visited: history,
-                top: m(Self.titleBarHeight), onPick: pickSearch)
+                top: m.paneHeader, onPick: pickSearch)
         }
-        .background(colors.frame).foregroundStyle(colors.textBody).ignoresSafeArea(.container, edges: .top)
+        // The window moves by its top edge wherever nothing there takes the click, and its buttons sit centered in it.
+        .background(alignment: .top) {
+            WindowDragArea().frame(height: m.paneHeader).background(WindowButtonsCentering())
+        }
+        .background(colors.canvas).foregroundStyle(colors.textBody).ignoresSafeArea(.container, edges: .top)
     }
 
     /// What needs attention until it resolves, across the top of the pane: the connection, waits that can be
@@ -926,7 +924,21 @@ struct RootView: View {
         }
     }
 
-    /// The workspace rail and conversation list, beside the conversation or in the drawer.
+    /// An update waiting, or the preview's one way out: everything else in it is the real interface.
+    private var sidebarAccessory: (title: String, action: () -> Void)? {
+        if matrix.isPreview {
+            return (
+                "Sign in",
+                {
+                    matrix.exitPreview()
+                    resetUI()
+                }
+            )
+        }
+        return updater.updateAvailable ? ("Update", { updater.checkForUpdates() }) : nil
+    }
+
+    /// The conversation list, beside the conversation or in the drawer.
     private var sidebar: some View {
         SidebarView(
             matrix: matrix,
@@ -944,7 +956,7 @@ struct RootView: View {
                     directMessagesColumn = false
                     workspaceID = $0
                     workspaceInitialized = true
-                }), search: $sidebarSearch, directMessageSearch: $directMessageSearch,
+                }), directMessageSearch: $directMessageSearch,
             unreadDirectMessagesOnly: $unreadDirectMessagesOnly, draftRoomIDs: draftRoomIDs,
             draftCount: draftAddresses.count,
             onSelect: selectRoom, onCreate: presentCreation,
@@ -960,8 +972,9 @@ struct RootView: View {
                 creation = .invite
             }, onEditWorkspace: { roomDetails = DetailsSelection(id: $0) },
             onNotifications: { roomNotifications = DetailsSelection(id: $0) },
+            onHide: { handleMenu("toggle-sidebar") }, accessory: sidebarAccessory,
             listWidth: sidebarListWidth, onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections
-        ).layoutIsolated().frame(width: m.rail + sidebarListWidth)
+        ).layoutIsolated().frame(width: sidebarListWidth)
     }
 
     /// The collapsed sidebar, slid over the conversation from the title bar's button, with a scrim that closes it.
@@ -975,63 +988,52 @@ struct RootView: View {
                     colors.scrim.contentShape(Rectangle())
                 }.buttonStyle(.row)
                     .focusable(false).accessibilityLabel("Close sidebar").transition(.opacity)
-                sidebar.background(colors.sidebar).elevation(.e3, cornerRadius: 0).transition(.move(edge: .leading))
+                sidebar.padding([.leading, .vertical], m.sidebarInset).transition(.move(edge: .leading))
             }
         }
         .animation(Motion.pane, value: shown)
     }
 
-    private var titleBar: some View {
+    /// The toolbar over the conversation or a page: the sidebar's button while it is folded, back and forward, the
+    /// title, the page's own buttons, and search.
+    private func toolbar<Title: View, Trailing: View>(
+        @ViewBuilder title: () -> Title, @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+    ) -> some View {
         HStack(spacing: m.sp12) {
-            // The window buttons are AppKit chrome and do not zoom.
-            Color.clear.frame(width: Self.windowButtonsWidth)
-            Spacer(minLength: 0)
-            HStack(spacing: m.sp2) {
-                if sidebarCollapsed { SidebarToggle(matrix: matrix) { sidebarDrawer.toggle() } }
-                IconButton(symbol: "arrow.left", label: "Back", role: .title) { navigateHistory(-1) }.disabled(
-                    historyIndex <= 0)
-                IconButton(symbol: "arrow.right", label: "Forward", role: .title) { navigateHistory(1) }.disabled(
-                    historyIndex >= history.count - 1)
-                HistoryMenu(matrix: matrix, history: history) { index in
-                    historyIndex = index
-                    selectRoom(history[index], record: false)
+            if sidebarCollapsed { SidebarToggle(matrix: matrix) { handleMenu("toggle-sidebar") } }
+            ToolbarCapsule(padding: m.sp2) {
+                IconButton(symbol: "chevron.left", label: "Back", role: .body, side: 30) { navigateHistory(-1) }
+                    .disabled(historyIndex <= 0)
+                IconButton(symbol: "chevron.right", label: "Forward", role: .body, side: 30) { navigateHistory(1) }
+                    .disabled(historyIndex >= history.count - 1)
+            }
+            .contextMenu {
+                ForEach(Array(history.enumerated()).reversed(), id: \.offset) { index, id in
+                    Button(matrix.rooms.first { $0.id == id }?.name ?? "Conversation") {
+                        historyIndex = index
+                        selectRoom(history[index], record: false)
+                    }
                 }
             }
-            TitleSearch(bar: searchBar, fits: SidebarLayout.searchFits(availableWidth: availableContentWidth / m.zoom))
-            {
+            title().frame(maxWidth: .infinity, alignment: .leading).padding(.leading, m.sp4)
+            trailing()
+            TitleSearch(bar: searchBar, fits: searchFits) {
                 SearchBarField(
                     bar: searchBar,
                     prompt: WorkspaceRail.searchPrompt(workspaceID: workspaceID, workspaces: matrix.workspaces),
                     matrix: matrix, recents: recentSearches, visited: history, onPick: pickSearch
-                ).frame(maxWidth: m(Self.searchWidth))
+                ).frame(width: m(Self.searchWidth))
             }.disabled(matrix.user == nil)
-            Spacer(minLength: 0)
-            if matrix.isPreview {
-                // The preview's one way out: everything else in it is the real interface.
-                Button("Sign in") {
-                    matrix.exitPreview()
-                    resetUI()
-                }.buttonStyle(.primary).controlSize(.small)
-            }
-            if updater.updateAvailable {
-                Button("Update") { updater.checkForUpdates() }.buttonStyle(.row).font(m.font(.caption, .semibold))
-                    .foregroundStyle(colors.canvas).padding(.horizontal, m.sp12).padding(.vertical, m.sp4)
-                    .background(colors.accent, in: Capsule())
-            }
-            IconButton(symbol: "questionmark.circle", label: "Keyboard shortcuts", role: .title) {
-                handleMenu("shortcuts")
-            }
-            .padding(.trailing, m.sp12)
-        }.frame(height: m(Self.titleBarHeight)).background(WindowDragArea()).background(WindowButtonsCentering())
-            .foregroundStyle(colors.textBody)
-            // A modal leaves the bar as it was, beside the window buttons, and takes its clicks in the modal host.
-            .environment(\.isEnabled, true)
+        }
+        // The window buttons are AppKit chrome and do not zoom.
+        .padding(.leading, sidebarCollapsed ? Self.windowButtonsWidth + m.sp16 : m.sp20).padding(.trailing, m.sp16)
+        .frame(height: m.paneHeader).background(WindowDragArea())
+        .foregroundStyle(colors.textSecondary)
     }
 
     private func channelContent(_ room: ChatRoom) -> some View {
         VStack(spacing: 0) {
             channelHeader(room)
-            Divider().overlay(colors.border)
             if room.membership == "invite" {
                 inviteView(room)
             } else if screen.tab == .pins {
@@ -1066,7 +1068,8 @@ struct RootView: View {
                 ).id("\(room.id):\(matrix.timelineSelectionID)")
                 VStack(spacing: 0) {
                     if room.canPostMessages == false {
-                        ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp20).padding(.vertical, m.sp4)
+                        ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp16).padding(.top, m.sp4)
+                            .padding(.bottom, m.sp16)
                     } else if let target = editTarget, target.surface == .conversation,
                         target.message.roomID == room.id
                     {
@@ -1114,7 +1117,7 @@ struct RootView: View {
                         .disabled(!localReady || !attachmentDrafts.ready).id(
                             "composer-\(composerGeneration)-\(room.id)"
                         )
-                        .padding(.horizontal, m.sp20).padding(.top, m.sp4).padding(.bottom, m.sp4)
+                        .padding(.horizontal, m.sp16).padding(.top, m.sp4).padding(.bottom, m.sp16)
                     }
                 }
                 // Floats above the composer, so a toast, reply or attachment notice never resizes it or moves the
@@ -1128,7 +1131,7 @@ struct RootView: View {
                                     && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
                             },
                             drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil)
-                    }.padding(.horizontal, m.sp20).alignmentGuide(.top) { $0[.bottom] }
+                    }.padding(.horizontal, m.sp16).alignmentGuide(.top) { $0[.bottom] }
                 }
                 TypingLine(matrix: matrix)
             }
@@ -1144,32 +1147,17 @@ struct RootView: View {
         channelTab = tab
     }
     private func channelHeader(_ room: ChatRoom) -> some View {
-        VStack(spacing: 0) {
-            ChannelHeader(matrix: matrix, room: room) { headerAction($0, room: room) }
-            HStack(spacing: m.sp24) {
-                TabBar(
-                    tabs: [
-                        .init(value: ChannelTab.messages, title: "Messages", symbol: "bubble.left"),
-                        .init(
-                            value: .pins, title: "Pins", symbol: "pin",
-                            count: room.pinnedEventIDs.isEmpty ? nil : room.pinnedEventIDs.count,
-                            disabled: matrix.isPreview || room.membership != "join"),
-                        .init(value: .files, title: "Files & links", symbol: "doc.on.doc"),
-                    ],
-                    selection: Binding(get: { screen.tab }, set: openChannelTab))
-                Spacer()
-                // In the tab row's reserved height, so it never covers or moves a message.
-                if matrix.hasLockedMessages {
-                    Button {
-                        showRecovery = true
-                    } label: {
-                        Label("Unlock messages", systemImage: "key").font(m.font(.meta, .medium))
-                    }.buttonStyle(.row).foregroundStyle(colors.accent).disabled(matrix.isPreview)
-                } else if room.isEncrypted {
-                    Image(systemName: "lock.shield").font(m.font(.meta)).foregroundStyle(colors.textSecondary).help(
-                        "End-to-end encrypted")
-                }
-            }.padding(.horizontal, m.sp24).frame(height: m.sp40)
+        toolbar {
+            ChannelHeader.Title(matrix: matrix, room: room) { headerAction($0, room: room) }
+        } trailing: {
+            // In the toolbar, so it never covers or moves a message.
+            if matrix.hasLockedMessages {
+                Button("Unlock messages") { showRecovery = true }.buttonStyle(.secondary).controlSize(.small)
+                    .disabled(matrix.isPreview)
+            }
+            ChannelHeader(
+                matrix: matrix, room: room, tab: Binding(get: { screen.tab }, set: openChannelTab)
+            ) { headerAction($0, room: room) }
         }
     }
     private func headerAction(_ action: ChannelHeader.Action, room: ChatRoom) {
@@ -1195,12 +1183,16 @@ struct RootView: View {
     private func threadPanel(root: ChatMessage, room: ChatRoom) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: m.sp8) {
-                Text("Thread").font(m.font(.title, .bold))
-                Text(room.name).font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
+                VStack(alignment: .leading, spacing: m(1)) {
+                    Text("Thread").font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
+                    Text(room.writtenName).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                }.lineLimit(1)
                 Spacer()
-                IconButton(symbol: "xmark", label: "Close thread", role: .body, action: closeThread)
-            }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
-            Divider().overlay(colors.border)
+                IconButton(
+                    symbol: "xmark", label: "Close thread", role: .subheadline, round: true, action: closeThread
+                ).fontWeight(.semibold).foregroundStyle(colors.textSecondary)
+            }.padding(.leading, m.sp20).padding(.trailing, m.sp12).frame(height: m.paneHeader)
+                .background(WindowDragArea())
             if let threadLoadError {
                 Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
                     Button("Retry") { [open = openThreadAction] in open(root) }
@@ -1222,7 +1214,8 @@ struct RootView: View {
             ).id(root.eventID)
             VStack(spacing: 0) {
                 if room.canPostMessages == false {
-                    ComposerNotice(text: Self.cannotPost).padding(m.sp12)
+                    ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp16).padding(.top, m.sp4)
+                        .padding(.bottom, m.sp16)
                 } else if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
                 {
@@ -1274,7 +1267,8 @@ struct RootView: View {
                             onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) }
                         )
                     }
-                    .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding([.horizontal, .top], m.sp12)
+                    .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(.horizontal, m.sp16)
+                    .padding(.top, m.sp4)
                     .disabled(
                         !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
                             || matrix.selectedRoomID != root.roomID)
@@ -1294,8 +1288,9 @@ struct RootView: View {
                                 "Also send to \(Image(systemName: room.channelSymbol))\(Text(room.name).fontWeight(.semibold))"
                             )
                         }
-                    }.toggleStyle(.checkbox).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(m.sp12)
+                    }.toggleStyle(.checkbox).font(m.font(.body)).foregroundStyle(colors.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, m(28))
+                        .padding(.top, m(10)).padding(.bottom, m(14))
                         .disabled(threadReadyID != root.eventID || withFiles)
                 }
             }
@@ -1310,20 +1305,19 @@ struct RootView: View {
     }
     private func collectionContent(_ route: AppRoute) -> some View {
         VStack(spacing: 0) {
-            // Search results title themselves with the query.
-            if route != .search {
-                HStack {
-                    Text(route.title).font(m.font(.title, .bold))
-                    Spacer()
-                    if route == .directory {
-                        Button {
-                            creation = .directMessage
-                        } label: {
-                            Label("New message", systemImage: "square.and.pencil")
-                        }.buttonStyle(.secondary)
-                    }
-                }.padding(.horizontal, m.sp24).frame(height: m.paneHeader)
-                Divider().overlay(colors.border)
+            toolbar {
+                // Search results title themselves with the query.
+                if route != .search {
+                    Text(route.title).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
+                }
+            } trailing: {
+                if route == .directory {
+                    Button {
+                        creation = .directMessage
+                    } label: {
+                        Label("New message", systemImage: "square.and.pencil")
+                    }.buttonStyle(.secondary)
+                }
             }
             switch route {
             case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
@@ -1403,7 +1397,7 @@ struct RootView: View {
                 DelayedProgress()
                 Text("Restoring attachments…")
                 Spacer()
-            }.font(m.font(.meta)).foregroundStyle(colors.textSecondary).padding(m.sp12).modifier(
+            }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).padding(m.sp12).modifier(
                 ComposerCard(colors: colors)
             )
             .loadingInterval(.attachmentsLoading)
@@ -1414,7 +1408,7 @@ struct RootView: View {
                 Text("Upload interrupted; it may have sent.")
                 Spacer()
                 Button("Send anyway") { attachmentDrafts.allowResend(address) }.buttonStyle(.textLink)
-            }.font(m.font(.meta)).padding(m.sp12).modifier(ComposerCard(colors: colors))
+            }.font(m.font(.subheadline)).padding(m.sp12).modifier(ComposerCard(colors: colors))
         }
         ForEach(localReady ? attachmentDrafts.files[address, default: []].filter { $0.url == nil } : []) { file in
             HStack(alignment: .top, spacing: m.sp8) {
@@ -1425,7 +1419,7 @@ struct RootView: View {
                 }
                 Spacer()
                 Button("Remove") { attachmentDrafts.removeUnavailable(file, at: address) }.buttonStyle(.textLink)
-            }.font(m.font(.meta)).padding(m.sp12).modifier(ComposerCard(colors: colors))
+            }.font(m.font(.subheadline)).padding(m.sp12).modifier(ComposerCard(colors: colors))
         }
     }
     private func retryAttachmentDrafts() {
@@ -1444,12 +1438,12 @@ struct RootView: View {
             HStack(spacing: m.sp8) {
                 Image(systemName: thread ? "bubble.left.and.bubble.right" : "square.and.pencil").foregroundStyle(
                     colors.textSecondary)
-                RoomName(matrix: matrix, roomID: roomID).font(m.font(.body, .semibold))
-                if thread { Text("Thread reply").font(m.font(.caption)).foregroundStyle(colors.textSecondary) }
+                RoomName(matrix: matrix, roomID: roomID).font(m.font(.reading, .semibold))
+                if thread { Text("Thread reply").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary) }
                 Spacer()
-                Image(systemName: "chevron.right").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                Image(systemName: "chevron.right").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             }
-            Text(body).font(m.font(.secondary)).foregroundStyle(colors.textSecondary).lineLimit(3)
+            Text(body).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(3)
         }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     }
     private func openThreadDraft(_ address: ThreadDraftAddress) {
@@ -1573,14 +1567,14 @@ struct RootView: View {
                 Rectangle().fill(colors.accent).frame(width: 3, height: m.control)
                 VStack(alignment: .leading, spacing: m.sp4) {
                     Text("Replying to \(target.message.senderName)\(target.threadID == nil ? "" : " in thread")").font(
-                        m.font(.caption, .semibold))
+                        m.font(.subheadline, .semibold))
                     NativeMessageBody(
                         body: target.message.body, formattedBody: target.message.formattedBody,
                         showsSpoilerControl: false
                     ).lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                IconButton(symbol: "xmark", label: "Cancel reply", role: .meta) {
+                IconButton(symbol: "xmark", label: "Cancel reply", role: .subheadline) {
                     guard target.isCurrent(replyTarget, owner: replyOwner) else { return }
                     cancelReply()
                 }
@@ -1593,7 +1587,7 @@ struct RootView: View {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                     Text(replyError).foregroundStyle(colors.textSecondary)
                     Button("Retry") { prepareReply(target) }.buttonStyle(.textLink)
-                }.font(m.font(.meta))
+                }.font(m.font(.subheadline))
             }
         }.padding(.horizontal, m.sp16).padding(.vertical, m.sp8).frame(maxWidth: .infinity, alignment: .leading)
             .modifier(ComposerCard(colors: colors))
@@ -2563,7 +2557,6 @@ struct RootView: View {
         route = .home
         history = []
         historyIndex = -1
-        sidebarSearch = ""
         directMessagesColumn = false
         directMessageSearch = ""
         unreadDirectMessagesOnly = false
@@ -2653,6 +2646,7 @@ struct RootView: View {
         case "activity": route = .activity
         case "later": route = .saved
         case "people": route = .directory
+        case "files": route = .files
         case "browse-channels": presentPublicDirectory()
         case _ where action.hasPrefix("workspace-"):
             let rail = WorkspaceRail.entries(workspaces: matrix.workspaces, rooms: matrix.rooms)
@@ -2709,11 +2703,8 @@ struct RootView: View {
                 target = ConversationNavigation.step(
                     shown, from: currentID, unreadOnly: unreadOnly, direction: direction)
             } else {
-                let shown = matrix.rooms.filter {
-                    sidebarSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(sidebarSearch)
-                }
                 target = ConversationNavigation.target(
-                    rooms: shown, currentID: currentID, workspaceID: workspaceID, unreadOnly: unreadOnly,
+                    rooms: matrix.rooms, currentID: currentID, workspaceID: workspaceID, unreadOnly: unreadOnly,
                     direction: direction)
             }
             if let target { selectRoom(target) }
@@ -2812,23 +2803,6 @@ private struct RoomListWatcher: View {
     }
 }
 
-private struct HistoryMenu: View {
-    let matrix: MatrixService
-    let history: [String]
-    let onSelect: (Int) -> Void
-    @Environment(\.metrics) private var m
-    var body: some View {
-        Menu {
-            ForEach(Array(history.enumerated()).reversed(), id: \.offset) { index, id in
-                Button(matrix.rooms.first { $0.id == id }?.name ?? "Conversation") { onSelect(index) }
-            }
-        } label: {
-            Image(systemName: "clock").font(m.font(.title)).frame(width: m.iconButton, height: m.iconButton)
-        }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m.iconButton + m.sp4)
-            .help("Recent conversations")
-    }
-}
-
 /// The title bar's button for the collapsed sidebar. Reads the room list itself, so unread changes redraw only it.
 private struct SidebarShownKey: FocusedValueKey { typealias Value = Bool }
 
@@ -2847,25 +2821,30 @@ private struct SidebarToggle: View {
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
         let badge = UnreadBadge.combined(matrix.rooms)
-        IconButton(symbol: "sidebar.left", label: "Show sidebar", role: .title, action: action)
-            // As the rail marks a workspace: a red count for mentions and direct messages, a dot for the rest.
-            .overlay(alignment: .topTrailing) {
-                switch badge {
-                case .count(let count): CountBadge(text: count).offset(x: m.sp8, y: -m.sp4)
-                case .bold:
-                    Circle().fill(appearance.colors.textPrimary).frame(width: m(9), height: m(9))
-                        .overlay(Circle().stroke(appearance.colors.frame, lineWidth: m.sp2))
-                case .none: EmptyView()
-                }
+        let colors = appearance.colors
+        ToolbarCapsule {
+            IconButton(symbol: "sidebar.left", label: "Show sidebar", role: .body, side: 32, action: action)
+        }
+        // A count for mentions and direct messages, a dot for the rest.
+        .overlay(alignment: .topTrailing) {
+            switch badge {
+            case .count(let count):
+                CountBadge(text: count, small: true).overlay(Capsule().stroke(colors.canvas, lineWidth: m.sp2))
+                    .offset(x: m(6), y: -m.sp4)
+            case .bold:
+                Circle().fill(colors.accentFill).frame(width: m(8), height: m(8))
+                    .overlay(Circle().stroke(colors.canvas, lineWidth: m.sp2)).offset(x: m.sp2, y: -m.sp2)
+            case .none: EmptyView()
             }
-            .accessibilityValue(
-                {
-                    switch badge {
-                    case .count(let count): "\(count) unread"
-                    case .bold: "Unread messages"
-                    case .none: ""
-                    }
-                }())
+        }
+        .accessibilityValue(
+            {
+                switch badge {
+                case .count(let count): "\(count) unread"
+                case .bold: "Unread messages"
+                case .none: ""
+                }
+            }())
     }
 }
 
@@ -2881,7 +2860,7 @@ private struct TitleSearch<Field: View>: View {
                 // Opened from the button, ⌘G or ⌘F: the field was not there to take the cursor, so it takes it now.
                 field().onAppear { if open { bar.focus() } }
             } else {
-                IconButton(symbol: "magnifyingglass", label: "Search", role: .title) { open = true }
+                IconButton(symbol: "magnifyingglass", label: "Search", role: .title3) { open = true }
             }
         }
         .onChange(of: bar.focusRequests) { _, _ in if !fits { open = true } }
@@ -2943,7 +2922,7 @@ private struct TypingLine: View {
         HStack {
             if !matrix.typingUsers.isEmpty { Text(label) }
             Spacer()
-        }.font(m.font(.caption)).foregroundStyle(appearance.colors.textSecondary).padding(.horizontal, m.sp24)
+        }.font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary).padding(.horizontal, m.sp24)
             .layoutIsolated().frame(height: m.sp24)
     }
 }

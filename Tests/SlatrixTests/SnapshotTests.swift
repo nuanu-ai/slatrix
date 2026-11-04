@@ -312,33 +312,28 @@ struct Snapshots {
         try write(await settledImage(hosting), "toast-\(theme.rawValue)")
     }
 
-    @Test("Sidebar", arguments: SidebarPalette.allCases, Theme.allCases)
-    func sidebar(palette: SidebarPalette, theme: Theme) async throws {
+    @Test("Sidebar", arguments: Theme.allCases)
+    func sidebar(theme: Theme) async throws {
         _ = NSApplication.shared
         let matrix = MatrixService()
         matrix.enterPreview()
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
-        let savedPalette = UserDefaults.standard.object(forKey: "appearance.palette")
-        defer {
-            UserDefaults.standard.set(savedMode, forKey: "appearance.mode")
-            UserDefaults.standard.set(savedPalette, forKey: "appearance.palette")
-        }
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
-        appearance.palette = palette
         let sidebar = WithState(Set<String>()) { collapsed in
             SidebarView(
                 matrix: matrix, route: .constant(.home), workspaceID: .constant("preview.workspace"),
-                search: .constant(""), directMessageSearch: .constant(""), unreadDirectMessagesOnly: .constant(false),
+                directMessageSearch: .constant(""), unreadDirectMessagesOnly: .constant(false),
                 draftRoomIDs: ["preview.room.3"], onSelect: { _ in }, onCreate: { _ in },
                 onPreferences: {}, onProfile: {}, onSignOut: {}, onMarkUnread: { _ in }, onMarkRead: { _ in },
-                onInviteWorkspace: { _ in }, onEditWorkspace: { _ in }, onNotifications: { _ in },
+                onInviteWorkspace: { _ in }, onEditWorkspace: { _ in }, onNotifications: { _ in }, onHide: {},
                 onBrowseChannels: {}, collapsed: collapsed)
         }
         let hosting = NSHostingView(
-            rootView: sidebar.frame(width: 68 + 280, height: 760).environmentObject(appearance))
-        let window = offscreenWindow(NSSize(width: 68 + 280, height: 760))
+            rootView: sidebar.padding(8).frame(width: 280, height: 760).environmentObject(appearance))
+        let window = offscreenWindow(NSSize(width: 280, height: 760))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
         window.orderFrontRegardless()
@@ -346,23 +341,7 @@ struct Snapshots {
             window.contentView = nil
             window.close()
         }
-        try write(await settledImage(hosting), "sidebar-\(palette.rawValue)-\(theme.rawValue)")
-
-        // Collapsed sections keep the open conversation and the unread ones. The headers' places from the top:
-        // Direct messages under all eight channels, then Channels under the shortcuts and Starred.
-        matrix.selectPreviewRoom("preview.room.3")
-        for header in [599.0, 307] {
-            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                window.sendEvent(
-                    try #require(
-                        NSEvent.mouseEvent(
-                            with: type, location: CGPoint(x: 68 + 80, y: 760 - header), modifierFlags: [],
-                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                            context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
-            }
-            _ = try await settledImage(hosting)
-        }
-        try write(await settledImage(hosting), "sidebar-collapsed-\(palette.rawValue)-\(theme.rawValue)")
+        try write(await settledImage(hosting), "sidebar-\(theme.rawValue)")
     }
 
     @Test("Component gallery", arguments: Theme.allCases)

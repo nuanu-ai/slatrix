@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A text field's frame: 32 pt, strong border, an accent border and halo while editing.
+/// A text field's frame: 32 pt with capsule ends, a hairline edge, and the accent's edge and halo while editing.
 struct FieldChrome<Content: View>: View {
     let focused: Bool
     var error = false
@@ -11,16 +11,16 @@ struct FieldChrome<Content: View>: View {
 
     var body: some View {
         let colors = appearance.colors
-        let shape = RoundedRectangle(cornerRadius: m.radius)
-        let edge = error ? colors.destructive : focused ? colors.accent : colors.borderStrong
-        content.textFieldStyle(.plain).font(m.font(.secondary)).foregroundStyle(colors.textPrimary)
-            .padding(.horizontal, m.sp8 + m.sp2).frame(minHeight: m.control)
-            .background(colors.canvas, in: shape)
-            .overlay(shape.strokeBorder(edge))
+        let shape = RoundedRectangle(cornerRadius: m.control / 2)
+        let edge = error ? colors.destructive : focused ? colors.accentFill : colors.borderStrong
+        content.textFieldStyle(.plain).font(m.font(.body)).foregroundStyle(colors.textPrimary)
+            .padding(.horizontal, m.sp12).frame(minHeight: m.control)
+            .background(colors.control, in: shape)
+            .overlay(shape.strokeBorder(edge, lineWidth: focused || error ? 1 : 0.5))
             // The halo sits outside the frame, so focusing never moves anything.
             .overlay {
                 if focused || error {
-                    RoundedRectangle(cornerRadius: m.radius + m.sp4)
+                    RoundedRectangle(cornerRadius: m.control / 2 + m(3))
                         .strokeBorder(edge.opacity(0.3), lineWidth: m(3)).padding(-m(3))
                 }
             }
@@ -63,11 +63,11 @@ struct SearchField: View {
                     if let onEscape { onEscape() } else { text = "" }
                 }
                 if !text.isEmpty {
-                    IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .secondary, side: 20) {
+                    IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body, side: 20) {
                         text = ""
                     }.foregroundStyle(colors.textTertiary)
                 } else if let hint {
-                    Text(hint).font(m.font(.caption)).foregroundStyle(colors.textTertiary).accessibilityHidden(true)
+                    Text(hint).font(m.font(.subheadline)).foregroundStyle(colors.textTertiary).accessibilityHidden(true)
                 }
             }
         }

@@ -30,7 +30,7 @@ struct DeviceVerificationSettings: View {
             Label(
                 status, systemImage: service.deviceStatus == .verified ? "checkmark.shield" : "shield.lefthalf.filled"
             )
-            .font(m.font(.secondary)).foregroundStyle(appearance.colors.textSecondary)
+            .font(m.font(.body)).foregroundStyle(appearance.colors.textSecondary)
             // The same two ways in as the sign-in step; the recovery key also unlocks older messages.
             HStack(spacing: m.sp12) {
                 if service.deviceStatus != .verified {
@@ -57,7 +57,7 @@ struct VerificationView: View {
             onClose: close, secondary: actions.secondary, primary: actions.primary
         ) {
             if !detail.isEmpty {
-                Text(detail).font(m.font(.body)).foregroundStyle(colors.textSecondary).fixedSize(
+                Text(detail).font(m.font(.reading)).foregroundStyle(colors.textSecondary).fixedSize(
                     horizontal: false, vertical: true)
             }
             if let request = service.request { requestDetails(request) }
@@ -68,7 +68,7 @@ struct VerificationView: View {
             if waiting {
                 HStack(spacing: m.sp12) {
                     DelayedProgress()
-                    Text(waitingText).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                    Text(waitingText).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                 }
                 .padding(.vertical, m.sp4).accessibilityElement(children: .combine)
             }
@@ -76,7 +76,7 @@ struct VerificationView: View {
                 HStack(spacing: m.sp8) {
                     Image(systemName: "desktopcomputer")
                     Text("This device: \(id)").textSelection(.enabled)
-                }.font(m.font(.caption, design: .monospaced)).foregroundStyle(colors.textSecondary)
+                }.font(m.font(.subheadline, design: .monospaced)).foregroundStyle(colors.textSecondary)
             }
         }
     }
@@ -124,12 +124,12 @@ struct VerificationView: View {
 
     private func requestDetails(_ request: VerificationService.Request) -> some View {
         VStack(alignment: .leading, spacing: m.sp8) {
-            Label(request.name, systemImage: "person.crop.circle").font(m.font(.body, .semibold))
-            Text(request.userID).font(m.font(.meta, design: .monospaced)).textSelection(.enabled)
-            Text("\(request.deviceName ?? "Matrix session") · \(request.deviceID)").font(m.font(.meta))
+            Label(request.name, systemImage: "person.crop.circle").font(m.font(.reading, .semibold))
+            Text(request.userID).font(m.font(.subheadline, design: .monospaced)).textSelection(.enabled)
+            Text("\(request.deviceName ?? "Matrix session") · \(request.deviceID)").font(m.font(.subheadline))
                 .textSelection(.enabled)
             Text("First seen \(request.firstSeen.formatted(date: .abbreviated, time: .shortened))").font(
-                m.font(.caption)
+                m.font(.subheadline)
             ).foregroundStyle(colors.textSecondary)
         }.padding(m.sp16).frame(maxWidth: .infinity, alignment: .leading).background(
             colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
@@ -142,7 +142,7 @@ struct VerificationView: View {
                     ForEach(service.emojis) { emoji in
                         VStack(spacing: m.sp8) {
                             Text(emoji.symbol).font(m.font(.hero)).frame(height: m(Self.emojiHeight))
-                            Text(emoji.name).font(m.font(.caption, .medium)).multilineTextAlignment(.center)
+                            Text(emoji.name).font(m.font(.subheadline, .medium)).multilineTextAlignment(.center)
                                 .lineLimit(3).frame(maxWidth: .infinity)
                         }.frame(maxWidth: .infinity).accessibilityElement(children: .ignore).accessibilityLabel(
                             "Item \(emoji.id + 1): \(emoji.name)")
@@ -151,13 +151,13 @@ struct VerificationView: View {
             } else {
                 HStack(spacing: m.sp20) {
                     ForEach(Array(service.decimals.enumerated()), id: \.offset) { index, number in
-                        Text(String(number)).font(m.font(.display, .semibold, design: .monospaced))
+                        Text(String(number)).font(m.font(.largeTitle, .semibold, design: .monospaced))
                             .accessibilityLabel("Group \(index + 1): \(String(number))")
                     }
                 }.padding(.vertical, m.sp12)
             }
             Label("A mismatch means you should stop and try again.", systemImage: "exclamationmark.shield").font(
-                m.font(.meta)
+                m.font(.subheadline)
             ).foregroundStyle(colors.textSecondary)
         }.padding(m.sp20).frame(maxWidth: .infinity).background(
             colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))

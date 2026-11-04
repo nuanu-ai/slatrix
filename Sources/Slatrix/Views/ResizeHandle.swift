@@ -18,9 +18,12 @@ struct ResizeHandle: View {
 
     var body: some View {
         ZStack {
-            pane == .leading ? appearance.colors.sidebar : appearance.colors.canvas
-            Rectangle().fill(dragging ? appearance.colors.accent : appearance.colors.border).frame(width: 1)
-            if hovering { appearance.colors.hover }
+            appearance.colors.canvas
+            // The sidebar floats on its own, so its divider shows only under the pointer; a pane keeps its hairline.
+            Rectangle().fill(
+                dragging || hovering
+                    ? appearance.colors.accentFill : pane == .trailing ? appearance.colors.border : .clear
+            ).frame(width: dragging || hovering ? m.sp2 : 1)
             ResizePointerSurface(
                 direction: direction, currentWidth: currentWidth,
                 onDragging: { dragging = $0 }, onArrow: { adjust(by: m.sp16 * direction * $0) },

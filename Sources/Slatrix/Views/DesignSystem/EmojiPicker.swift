@@ -52,7 +52,7 @@ struct EmojiPicker: View {
                         Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
                             .accessibilityHidden(true)
                         EmojiSearchField(
-                            text: $query, font: m.nsFont(.secondary), color: NSColor(colors.textPrimary),
+                            text: $query, font: m.nsFont(.body), color: NSColor(colors.textPrimary),
                             onMove: { direction in
                                 guard let selection else { return }
                                 selected = EmojiGrid.move(
@@ -66,7 +66,7 @@ struct EmojiPicker: View {
                 tabs(sections, proxy: proxy)
                 ScrollView {
                     if items.isEmpty {
-                        Text("No emoji found").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
+                        Text("No emoji found").font(m.font(.body)).foregroundStyle(colors.textSecondary)
                             .frame(maxWidth: .infinity).padding(.top, m.sp24)
                     }
                     LazyVGrid(
@@ -91,9 +91,11 @@ struct EmojiPicker: View {
                                     ).equatable().id(cellID(offset + position))
                                 }
                             } header: {
-                                Text(section.title).font(m.font(.meta, .semibold)).foregroundStyle(colors.textSecondary)
-                                    .frame(maxWidth: .infinity, minHeight: m.sp24, alignment: .leading)
-                                    .background(colors.overlay).id(section.id)
+                                Text(section.title).font(m.font(.subheadline, .semibold)).foregroundStyle(
+                                    colors.textSecondary
+                                )
+                                .frame(maxWidth: .infinity, minHeight: m.sp24, alignment: .leading)
+                                .background(colors.overlay).id(section.id)
                             }
                         }
                     }
@@ -112,7 +114,7 @@ struct EmojiPicker: View {
     private func tabs(_ sections: [Section], proxy: ScrollViewProxy) -> some View {
         HStack(spacing: 0) {
             ForEach(sections.filter { $0.id != "results" }) { section in
-                IconButton(symbol: section.symbol, label: section.title, role: .secondary, side: 28) {
+                IconButton(symbol: section.symbol, label: section.title, role: .body, side: 28) {
                     query = ""
                     proxy.scrollTo(section.id, anchor: .top)
                 }.foregroundStyle(appearance.colors.textSecondary).frame(maxWidth: .infinity)
@@ -254,7 +256,7 @@ private struct EmojiCell: View, Equatable {
 
     var body: some View {
         Button(action: onPick) {
-            Text(value).font(m.font(.title)).frame(width: m.sp32, height: m.sp32)
+            Text(value).font(m.font(.title3)).frame(width: m.sp32, height: m.sp32)
                 .background(
                     selected ? appearance.colors.selection : .clear, in: RoundedRectangle(cornerRadius: m.radius))
         }.buttonStyle(.icon).onHover(perform: onHover).accessibilityLabel(EmojiCatalog.emoji(for: value)?.name ?? value)
@@ -274,23 +276,23 @@ private struct EmojiFooter: View {
         let colors = appearance.colors
         HStack(spacing: m.sp8) {
             if choosingTone {
-                Text("Skin tone").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                Text("Skin tone").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                 Spacer(minLength: 0)
                 ForEach(SkinTone.allCases, id: \.self) { option in
                     Button {
                         tone = option
                         choosingTone = false
                     } label: {
-                        Text(hand(option)).font(m.font(.title)).frame(width: m.iconButton, height: m.iconButton)
+                        Text(hand(option)).font(m.font(.title3)).frame(width: m.iconButton, height: m.iconButton)
                     }.buttonStyle(.icon).accessibilityLabel(option.label)
                 }
             } else {
                 if let item = hover.item ?? fallback {
-                    Text(item.value).font(m.font(.header)).accessibilityHidden(true)
+                    Text(item.value).font(m.font(.title1)).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(item.emoji.name.prefix(1).uppercased() + item.emoji.name.dropFirst())
-                            .font(m.font(.secondary, .semibold)).foregroundStyle(colors.textPrimary)
-                        Text(EmojiCatalog.shortcode(for: item.value)).font(m.font(.meta))
+                            .font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
+                        Text(EmojiCatalog.shortcode(for: item.value)).font(m.font(.subheadline))
                             .foregroundStyle(colors.textSecondary)
                     }.lineLimit(1)
                 }
@@ -298,7 +300,7 @@ private struct EmojiFooter: View {
                 Button {
                     choosingTone = true
                 } label: {
-                    Text(hand(tone)).font(m.font(.title)).frame(width: m.iconButton, height: m.iconButton)
+                    Text(hand(tone)).font(m.font(.title3)).frame(width: m.iconButton, height: m.iconButton)
                 }.buttonStyle(.icon).help("Skin tone").accessibilityLabel("Skin tone: \(tone.label)")
             }
         }

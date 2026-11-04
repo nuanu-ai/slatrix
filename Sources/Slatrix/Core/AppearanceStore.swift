@@ -1,20 +1,10 @@
+import AppKit
 import SwiftUI
 
 enum AppTheme: String, CaseIterable, Identifiable {
     case system, light, dark
     var id: String { rawValue }
     var name: String { rawValue.capitalized }
-}
-/// Slack's single-color themes, in Slack's order. Three keep the raw value they were saved under before Slack's names.
-enum SidebarPalette: String, CaseIterable, Identifiable {
-    case aubergine, clementine, banana
-    case jade = "forest"
-    case lagoon = "ocean"
-    case barbra
-    case gray = "slate"
-    case moodIndigo
-    var id: String { rawValue }
-    var name: String { self == .moodIndigo ? "Mood Indigo" : String(describing: self).capitalized }
 }
 enum MessageDensity: String, CaseIterable, Identifiable {
     case comfortable, compact
@@ -24,9 +14,6 @@ enum MessageDensity: String, CaseIterable, Identifiable {
 @MainActor final class AppearanceStore: ObservableObject {
     @Published var mode = AppTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.mode") ?? "dark") ?? .dark
     { didSet { save(mode.rawValue, "mode") } }
-    @Published var palette =
-        SidebarPalette(rawValue: UserDefaults.standard.string(forKey: "appearance.palette") ?? "slate") ?? .gray
-    { didSet { save(palette.rawValue, "palette") } }
     @Published var density =
         MessageDensity(rawValue: UserDefaults.standard.string(forKey: "appearance.density") ?? "comfortable")
         ?? .comfortable
@@ -53,5 +40,27 @@ enum MessageDensity: String, CaseIterable, Identifiable {
     @Published var systemIsDark = true
     var preferredColorScheme: ColorScheme? { mode == .system ? nil : mode == .dark ? .dark : .light }
     var isDark: Bool { mode == .dark || (mode == .system && systemIsDark) }
+    /// The system accent in each theme, resolved once; picking another in System Settings redraws the window.
+    private var accents: [Bool: NSColor] = [:]
+    @Published private var accentChanges = 0
+    private var accentObserver: NSObjectProtocol?
+
+    init() {
+        accentObserver = NotificationCenter.default.addObserver(
+            forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.accents = [:]
+                self?.accentChanges += 1
+            }
+        }
+    }
+
+    func accent(dark: Bool) -> NSColor {
+        if let accent = accents[dark] { return accent }
+        let accent = AppColors.resolve(.controlAccentColor, dark: dark)
+        accents[dark] = accent
+        return accent
+    }
     private func save(_ value: String, _ key: String) { UserDefaults.standard.set(value, forKey: "appearance.\(key)") }
 }

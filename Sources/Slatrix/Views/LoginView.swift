@@ -27,7 +27,7 @@ struct LoginView: View {
                 )
                 .frame(width: m(Self.heroTile), height: m(Self.heroTile)).background(
                     colors.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: m(Self.heroRadius)))
-                Text("Sign in to Slatrix").font(m.font(.display, .bold)).foregroundStyle(colors.textPrimary)
+                Text("Sign in to Slatrix").font(m.font(.largeTitle, .bold)).foregroundStyle(colors.textPrimary)
                 VStack(alignment: .leading, spacing: m.sp16) {
                     field("Homeserver") {
                         TextField("https://matrix.example.org", text: $homeserver).textContentType(.URL)
@@ -68,7 +68,7 @@ struct LoginView: View {
                     guard matrix.canChangeAuthentication else { return }
                     onPreview()
                 }.disabled(busy || clearingSavedSession || !matrix.canChangeAuthentication).buttonStyle(.row).font(
-                    m.font(.secondary)
+                    m.font(.body)
                 ).foregroundStyle(colors.accent)
             }
             Spacer()
@@ -76,10 +76,10 @@ struct LoginView: View {
     }
     private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: m.sp8) {
-            Text(label).font(m.font(.secondary, .semibold))
+            Text(label).font(m.font(.body, .semibold))
             content().textFieldStyle(.plain).padding(.horizontal, m.sp12).frame(height: m(Self.fieldHeight)).background(
                 colors.canvas, in: RoundedRectangle(cornerRadius: m.radius)
-            ).overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border)).font(m.font(.body))
+            ).overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border)).font(m.font(.reading))
         }
     }
     private func clearSavedSession() {

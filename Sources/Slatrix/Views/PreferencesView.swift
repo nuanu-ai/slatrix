@@ -58,7 +58,7 @@ struct PreferencesView: View {
                             error = nil
                         } label: {
                             Label(item.title, systemImage: item.symbol)
-                                .font(m.font(.body, tab == item ? .semibold : .regular))
+                                .font(m.font(.reading, tab == item ? .semibold : .regular))
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, m.sp12).frame(
                                     height: m.control
                                 )
@@ -73,7 +73,7 @@ struct PreferencesView: View {
                 Divider().overlay(colors.border)
                 ScrollView {
                     VStack(alignment: .leading, spacing: m.sp24) {
-                        Text(tab.title).font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
+                        Text(tab.title).font(m.font(.title1, .bold)).foregroundStyle(colors.textPrimary)
                         if let error {
                             InlineErrorView(message: error, dismiss: { self.error = nil }).clipShape(
                                 RoundedRectangle(cornerRadius: m.radius))
@@ -125,22 +125,8 @@ struct PreferencesView: View {
                         } preview: {
                             AppMiniature(
                                 colors: AppColors(
-                                    dark: mode == .dark || (mode == .system && appearance.systemIsDark),
-                                    palette: appearance.palette), split: mode == .system)
-                        }
-                    }
-                }
-            }
-            VStack(alignment: .leading, spacing: m.sp12) {
-                sectionTitle("Sidebar theme")
-                // Slack's eight themes, in two rows of four.
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: m.sp12), count: 4), spacing: m.sp16)
-                {
-                    ForEach(SidebarPalette.allCases) { palette in
-                        choiceTile(label: palette.name, selected: appearance.palette == palette) {
-                            appearance.palette = palette
-                        } preview: {
-                            AppMiniature(colors: AppColors(dark: appearance.isDark, palette: palette))
+                                    dark: mode == .dark || (mode == .system && appearance.systemIsDark)),
+                                split: mode == .system)
                         }
                     }
                 }
@@ -151,10 +137,10 @@ struct PreferencesView: View {
                 Picker("Message density", selection: $appearance.density) {
                     Text("Comfortable").tag(MessageDensity.comfortable)
                     Text("Compact").tag(MessageDensity.compact)
-                }.pickerStyle(.radioGroup).horizontalRadioGroupLayout().labelsHidden().font(m.font(.secondary))
+                }.pickerStyle(.radioGroup).horizontalRadioGroupLayout().labelsHidden().font(m.font(.body))
             }
             Toggle("Show profile photos in conversations", isOn: $appearance.showAvatars).toggleStyle(.switch).font(
-                m.font(.secondary))
+                m.font(.body))
         }
     }
 
@@ -167,7 +153,7 @@ struct PreferencesView: View {
                 HStack(spacing: m.sp8) {
                     DelayedProgress()
                     Text("Waiting for macOS…")
-                }.font(m.font(.meta))
+                }.font(m.font(.subheadline))
             }
             macOSNotificationStatus
             Divider().overlay(colors.border)
@@ -183,7 +169,7 @@ struct PreferencesView: View {
         VStack(alignment: .leading, spacing: m.sp12) {
             HStack {
                 Label("macOS", systemImage: "desktopcomputer").font(
-                    m.font(.secondary, .semibold))
+                    m.font(.body, .semibold))
                 Spacer()
                 if readingNotificationStatus {
                     DelayedProgress().accessibilityLabel("Checking macOS notification settings")
@@ -192,11 +178,11 @@ struct PreferencesView: View {
                     .disabled(readingNotificationStatus || requestingNotifications)
             }
             if let notificationStatus {
-                Text(notificationStatusTitle(notificationStatus)).font(m.font(.secondary))
+                Text(notificationStatusTitle(notificationStatus)).font(m.font(.body))
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let notificationStatusError {
-                Text(notificationStatusError).font(m.font(.meta)).foregroundStyle(colors.warning).fixedSize(
+                Text(notificationStatusError).font(m.font(.subheadline)).foregroundStyle(colors.warning).fixedSize(
                     horizontal: false, vertical: true)
             }
         }.padding(m.sp16).frame(maxWidth: .infinity, alignment: .leading)
@@ -249,9 +235,9 @@ struct PreferencesView: View {
                     name: matrix.user?.name ?? "Slatrix", size: m.avatarLarge, matrix: matrix,
                     source: matrix.user?.avatarURL)
                 VStack(alignment: .leading, spacing: m.sp4) {
-                    Text(matrix.user?.name ?? "Not signed in").font(m.font(.title, .semibold))
+                    Text(matrix.user?.name ?? "Not signed in").font(m.font(.title3, .semibold))
                     Text(matrix.isPreview ? "Preview" : matrix.user?.id ?? "")
-                        .font(m.font(.meta)).foregroundStyle(colors.textSecondary).textSelection(.enabled)
+                        .font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).textSelection(.enabled)
                 }
                 Spacer(minLength: 0)
                 Button("Edit profile", action: onEditProfile).buttonStyle(.secondary)
@@ -299,7 +285,7 @@ struct PreferencesView: View {
     }
 
     private func sectionTitle(_ title: String) -> some View {
-        Text(title).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
+        Text(title).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
     }
 
     private func detailRow(_ title: String, value: String) -> some View {
@@ -307,7 +293,7 @@ struct PreferencesView: View {
             Text(title).foregroundStyle(colors.textSecondary)
             Spacer()
             Text(value).textSelection(.enabled)
-        }.font(m.font(.secondary))
+        }.font(m.font(.body))
     }
 
     private func choiceTile<Preview: View>(
@@ -323,7 +309,7 @@ struct PreferencesView: View {
                     Image(systemName: selected ? "checkmark.circle.fill" : "circle").foregroundStyle(
                         selected ? colors.accent : colors.textSecondary)
                     Text(label).foregroundStyle(colors.textBody)
-                }.font(m.font(.meta, selected ? .semibold : .regular))
+                }.font(m.font(.subheadline, selected ? .semibold : .regular))
             }.frame(maxWidth: .infinity)
         }.buttonStyle(.row).accessibilityLabel(label).accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -375,11 +361,11 @@ private struct AppMiniature: View {
                 Spacer()
                 Capsule().fill(colors.textSecondary.opacity(0.13)).frame(width: m(42), height: m(5))
                 Spacer()
-            }.padding(.horizontal, m.sp8).frame(height: m(15)).background(colors.frame)
+            }.padding(.horizontal, m.sp8).frame(height: m(15)).background(colors.canvas)
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: m.sp4) {
                     Capsule().fill(colors.textSecondary.opacity(0.55)).frame(width: m(29), height: m(4))
-                    RoundedRectangle(cornerRadius: m(2)).fill(colors.selectionStrong).frame(height: m(8))
+                    RoundedRectangle(cornerRadius: m(2)).fill(colors.accentFill).frame(height: m(8))
                     Capsule().fill(colors.textSecondary.opacity(0.25)).frame(width: m(25), height: m(3))
                     Capsule().fill(colors.textSecondary.opacity(0.25)).frame(width: m(31), height: m(3))
                     Spacer(minLength: 0)
@@ -399,7 +385,7 @@ private struct AppMiniature: View {
                     }
                     Spacer(minLength: 0)
                 }.padding(m.sp8).frame(maxWidth: .infinity).background(
-                    split ? AppColors(dark: false, palette: colors.palette).raised : colors.canvas)
+                    split ? AppColors(dark: false).canvas : colors.canvas)
             }
         }.accessibilityHidden(true)
     }

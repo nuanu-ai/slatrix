@@ -15,9 +15,9 @@ struct ComponentGallery: View {
         let colors = appearance.colors
         VStack(alignment: .leading, spacing: m.sp40) {
             VStack(alignment: .leading, spacing: m.sp4) {
-                Text("Slatrix design system").font(m.font(.display, .bold)).foregroundStyle(colors.textPrimary)
-                Text("\(appearance.isDark ? "Dark" : "Light") · \(appearance.palette.name) · 100%")
-                    .font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
+                Text("Slatrix design system").font(m.font(.largeTitle, .bold)).foregroundStyle(colors.textPrimary)
+                Text("\(appearance.isDark ? "Dark" : "Light") · system accent · 100%")
+                    .font(m.font(.body)).foregroundStyle(colors.textSecondary)
             }
             HStack(alignment: .top, spacing: m.sp40) {
                 VStack(alignment: .leading, spacing: m.sp40) {
@@ -50,13 +50,13 @@ struct ComponentGallery: View {
 
     private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: m.sp16) {
-            Text(title).font(m.font(.title, .bold)).foregroundStyle(appearance.colors.textPrimary)
+            Text(title).font(m.font(.title3, .bold)).foregroundStyle(appearance.colors.textPrimary)
             content()
         }
     }
 
     private func caption(_ text: String) -> some View {
-        Text(text).font(m.font(.caption)).foregroundStyle(appearance.colors.textSecondary)
+        Text(text).font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary)
     }
 
     // MARK: Tokens
@@ -75,7 +75,7 @@ struct ComponentGallery: View {
                 "Surface",
                 [
                     ("canvas", c.canvas), ("raised", c.raised), ("sunken", c.sunken), ("overlay", c.overlay),
-                    ("sidebar", c.sidebar), ("frame", c.frame), ("scrim", c.scrim),
+                    ("sidebar", c.sidebar), ("control", c.control), ("scrim", c.scrim),
                 ]
             ),
             (
@@ -83,14 +83,15 @@ struct ComponentGallery: View {
                 [
                     ("border", c.border), ("border strong", c.borderStrong), ("hover", c.hover),
                     ("pressed", c.pressed), ("selection", c.selection),
-                    ("selection strong", c.selectionStrong), ("focus ring", c.focusRing),
+                    ("focus ring", c.focusRing),
                 ]
             ),
             (
                 "Accent and status",
                 [
-                    ("accent", c.accent), ("primary", c.buttonPrimary), ("destructive", c.destructive),
-                    ("warning", c.warning), ("mention", c.mention), ("active", c.presenceActive),
+                    ("accent", c.accent), ("accent fill", c.accentFill), ("accent tint", c.accentTint),
+                    ("destructive", c.destructive), ("warning", c.warning), ("success", c.success),
+                    ("active", c.presenceActive),
                     ("away", c.presenceAway),
                 ]
             ),
@@ -119,15 +120,17 @@ struct ComponentGallery: View {
 
     private var typeScale: some View {
         let roles: [(String, TextRole)] = [
-            ("Hero 40", .hero), ("Display 28", .display), ("Header 22", .header), ("Title 18", .title),
-            ("Body 15", .body), ("Secondary 13", .secondary), ("Meta 12", .meta), ("Caption 11", .caption),
+            ("Hero 40", .hero), ("Large Title 26", .largeTitle), ("Title 1 22", .title1), ("Title 3 15", .title3),
+            ("Reading 14", .reading), ("Body 13", .body), ("Subheadline 11", .subheadline),
         ]
         return VStack(alignment: .leading, spacing: m.sp8) {
             ForEach(roles, id: \.0) { role in
                 HStack(alignment: .firstTextBaseline, spacing: m.sp12) {
-                    caption(role.0).frame(width: m(80), alignment: .leading)
-                    Text("Harbor").font(m.font(role.1, role.1.points >= 18 ? .bold : .regular))
-                        .foregroundStyle(appearance.colors.textPrimary)
+                    caption(role.0).frame(width: m(96), alignment: .leading)
+                    Text("Harbor").font(
+                        m.font(role.1, role.1.points >= 22 ? .bold : role.1 == .title3 ? .semibold : .regular)
+                    )
+                    .foregroundStyle(appearance.colors.textPrimary)
                 }
             }
         }
@@ -160,7 +163,7 @@ struct ComponentGallery: View {
                     ForEach(states, id: \.self) { state in
                         ButtonChrome(kind: kind, state: state) {
                             Text(kind == .destructive ? "Delete" : kind == .link ? "View all" : "Message")
-                        }.font(m.font(.secondary)).frame(width: m(104), alignment: .leading)
+                        }.font(m.font(.body)).frame(width: m(104), alignment: .leading)
                     }
                 }
             }
@@ -168,7 +171,7 @@ struct ComponentGallery: View {
                 caption("icon").frame(width: m(84), alignment: .leading)
                 ForEach(states, id: \.self) { state in
                     IconChrome(state: state) {
-                        Image(systemName: "bookmark").font(m.font(.title))
+                        Image(systemName: "bookmark").font(m.font(.title3))
                             .frame(width: m.iconButton, height: m.iconButton)
                     }.frame(width: m(104), alignment: .leading)
                 }
@@ -177,9 +180,20 @@ struct ComponentGallery: View {
                 caption("round").frame(width: m(84), alignment: .leading)
                 ForEach(states, id: \.self) { state in
                     IconChrome(state: state, round: true) {
-                        Image(systemName: "moon").font(m.font(.title))
+                        Image(systemName: "moon").font(m.font(.title3))
                             .frame(width: m.iconButton, height: m.iconButton)
                     }.frame(width: m(104), alignment: .leading)
+                }
+            }
+            HStack(spacing: m.sp12) {
+                caption("toolbar").frame(width: m(84), alignment: .leading)
+                ToolbarCapsule(padding: m.sp2) {
+                    IconButton(symbol: "chevron.left", label: "Back", role: .body, side: 30) {}
+                    IconButton(symbol: "chevron.right", label: "Forward", role: .body, side: 30) {}
+                }
+                ToolbarCapsule(padding: m.sp4) {
+                    IconButton(symbol: "pin", label: "Pinned", role: .body, side: 32) {}
+                    IconButton(symbol: "ellipsis", label: "More", role: .body, side: 32) {}
                 }
             }
             HStack(spacing: m.sp12) {
@@ -221,7 +235,8 @@ struct ComponentGallery: View {
             CountBadge(text: "99+")
             TagLabel(text: "You")
             TagLabel(text: "Invited")
-            Circle().fill(c.mention).frame(width: m(9), height: m(9))
+            AvatarView(name: "Harbor", size: m.avatar, cornerRadius: m.radiusSpace)
+            Circle().fill(c.accentFill).frame(width: m(6), height: m(6))
         }
     }
 
@@ -280,7 +295,7 @@ struct ComponentGallery: View {
     private var tooltips: some View {
         HStack(alignment: .bottom, spacing: m.sp24) {
             Tooltip("Copy link")
-            Tooltip(text: "Alice, Bob and you reacted with :+1:") { Text("👍").font(m.font(.display)) }
+            Tooltip(text: "Alice, Bob and you reacted with :+1:") { Text("👍").font(m.font(.largeTitle)) }
         }.padding(.vertical, m.sp8)
     }
 

@@ -38,7 +38,7 @@ private struct DropToUpload: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: m.radiusPanel)
         return VStack(spacing: m.sp12) {
             Image(systemName: "arrow.up.doc").font(m.font(.hero)).foregroundStyle(colors.accent)
-            Text(title).font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary).lineLimit(1)
+            Text(title).font(m.font(.title1, .bold)).foregroundStyle(colors.textPrimary).lineLimit(1)
                 .truncationMode(.middle)
         }
         .padding(m.sp24).frame(maxWidth: .infinity, maxHeight: .infinity)

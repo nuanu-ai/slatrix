@@ -21,9 +21,9 @@ struct ProfilePane: View {
         let colors = appearance.colors
         VStack(spacing: 0) {
             HStack {
-                Text("Profile").font(m.font(.title, .bold))
+                Text("Profile").font(m.font(.title3, .bold))
                 Spacer()
-                IconButton(symbol: "xmark", label: "Close profile", role: .body, action: onClose)
+                IconButton(symbol: "xmark", label: "Close profile", role: .reading, action: onClose)
             }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
             Divider().overlay(colors.border)
             ScrollView {
@@ -35,13 +35,13 @@ struct ProfilePane: View {
                         ).frame(maxWidth: .infinity)
                         VStack(alignment: .leading, spacing: m.sp4) {
                             HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
-                                Text(person.name).font(m.font(.header, .bold)).foregroundStyle(colors.textPrimary)
+                                Text(person.name).font(m.font(.title1, .bold)).foregroundStyle(colors.textPrimary)
                                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                                 if own { TagLabel(text: "You") }
                             }
                             // Where Slack shows a title; Matrix has a status instead.
                             if let status = person.status {
-                                Text(status).font(m.font(.title)).fixedSize(horizontal: false, vertical: true)
+                                Text(status).font(m.font(.title3)).fixedSize(horizontal: false, vertical: true)
                             }
                         }
                         if person.inCall {
@@ -49,7 +49,7 @@ struct ProfilePane: View {
                                 Text("In a call")
                             } icon: {
                                 Image(systemName: "video.fill").foregroundStyle(colors.presenceActive)
-                            }.font(m.font(.body))
+                            }.font(m.font(.reading))
                         }
                         ProfileActions(
                             matrix: matrix, userID: userID, own: own, onOpen: onOpenConversation, onEdit: onEditProfile
@@ -59,16 +59,16 @@ struct ProfilePane: View {
                     }.padding(m.sp20)
                     Divider().overlay(colors.border)
                     VStack(alignment: .leading, spacing: m.sp16) {
-                        Text("Contact information").font(m.font(.body, .bold)).foregroundStyle(colors.textPrimary)
+                        Text("Contact information").font(m.font(.reading, .bold)).foregroundStyle(colors.textPrimary)
                         HStack(spacing: m.sp12) {
-                            Image(systemName: "at").font(m.font(.body)).foregroundStyle(colors.textSecondary)
+                            Image(systemName: "at").font(m.font(.reading)).foregroundStyle(colors.textSecondary)
                                 .frame(width: m.iconTile, height: m.iconTile)
                                 .background(colors.sunken, in: RoundedRectangle(cornerRadius: m.radiusLarge))
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: m.sp2) {
-                                Text("Matrix ID").font(m.font(.secondary, .semibold))
+                                Text("Matrix ID").font(m.font(.body, .semibold))
                                     .foregroundStyle(colors.textSecondary)
-                                Text(userID).font(m.font(.body)).foregroundStyle(colors.accent).lineLimit(1)
+                                Text(userID).font(m.font(.reading)).foregroundStyle(colors.accent).lineLimit(1)
                                     .truncationMode(.middle).textSelection(.enabled)
                             }
                         }
@@ -144,7 +144,7 @@ private struct ProfileActions: View {
                 }.buttonStyle(.secondaryIcon).help("More actions")
             }.controlSize(.large)
             if let error {
-                Text(error).font(m.font(.meta)).foregroundStyle(appearance.colors.destructive)
+                Text(error).font(m.font(.subheadline)).foregroundStyle(appearance.colors.destructive)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

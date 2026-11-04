@@ -4,7 +4,8 @@ Slatrix is a Matrix client that should feel like Slack to someone who has used S
 
 ## Product bar
 
-- Slack parity first. When unsure how something should look, behave or be named, do what Slack does on that platform: Slack desktop on the Mac, Slack's mobile app on Android. That covers layout, shortcuts and gestures, wording and keyboard flow. Diverge only where Matrix forces it.
+- Slack parity first for layout, behavior, wording and keyboard flow. When unsure where something goes, how it behaves or what it's called, do what Slack does on that platform: Slack desktop on the Mac, Slack's mobile app on Android. Diverge only where Matrix forces it.
+- The look follows the platform: Apple's Human Interface Guidelines on the Mac, with the system accent color, and Material 3 on Android. Slack's colors and chrome are not the reference.
 - Fast and still. Nothing flickers, jumps or reflows after it appears. Reserve space for content that loads later, keep view identity stable, and put transient UI (errors, menus, suggestions) in overlays instead of pushing content around.
 - No visible kitchen. Show what's cached at once and reconcile quietly; late pieces (members, pins, reply previews, avatars) land without changing a row's height. A loading indicator waits ~400 ms, never covers content already on screen, and never comes with "Loading…" text.
 - Every string earns its place. No explanations of how things work under the hood, no "SDK", no apologies, no disclaimers. If a label needs a sentence of justification, the design is wrong.
@@ -13,7 +14,7 @@ Slatrix is a Matrix client that should feel like Slack to someone who has used S
 
 ## Shared by both apps
 
-- `design/tokens.json` holds the color roles for light and dark and every sidebar palette, the file and avatar colors, and the corner radii. Each app spells them out in its own code, and a test on each side checks them against the file, so a color changes in the file and in both apps in one pull request. Type sizes and spacing stay per platform.
+- `design/tokens.json` holds each app's color roles for light and dark and its corner radii, and the file and avatar colors both share. Each app spells them out in its own code, and a test on each side checks them against the file, so a color changes in the file and in both apps in one pull request. Type sizes and spacing stay per platform.
 - `spec/` holds product rules as cases, each an input and its expected result: unread badges, @ suggestions, search queries, what the composer sends, and avatar initials and colors. Each app's tests run every case, so the apps can't drift apart. Change a rule by changing its cases first, then each app until they pass. When a rule one app has comes to the other, its cases move into `spec/`.
 - `spec/capabilities.json` lists what a person can do in Slatrix, and each app's status for it: `done`, `missing`, or `n/a:` with the reason. A pull request that adds or changes a capability updates its line, flips the status to `done` when the capability lands, and tags the tests that prove it with `// capability: <id>`. CI runs `scripts/check-capabilities.py`, which fails a `done` that has no tagged test in that app or a tag the ledger doesn't list, and prints what each app is still missing.
 - Both apps use the same pinned `matrix-rust-sdk` with the patches in `Support/MatrixSDK/patches`: `scripts/build-sdk.sh` puts the Mac's in `.build/native-sdk-package`, and `scripts/build-sdk.sh --android` puts the Kotlin bindings with `arm64-v8a` and `x86_64` libraries in `.build/native-sdk-android`. Each downloads the package CI published for the current pin and patches. Send each patch upstream and drop it once a release includes it.

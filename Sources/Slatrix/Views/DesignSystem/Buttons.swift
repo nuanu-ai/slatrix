@@ -6,9 +6,9 @@ enum InteractionState: CaseIterable {
 }
 
 enum ButtonKind: CaseIterable {
-    /// Slack green, white text: the one main action on a screen.
+    /// The system accent, white text: the one main action on a screen.
     case primary
-    /// Canvas fill with a strong border.
+    /// A control's fill with a hairline edge.
     case secondary
     /// Red, white text: deleting, leaving, signing out.
     case destructive
@@ -16,7 +16,7 @@ enum ButtonKind: CaseIterable {
     case link
 }
 
-/// Push buttons. Size follows `.controlSize`: small 28, regular 32, large 36.
+/// Push buttons, as capsules. Size follows `.controlSize`: small 28, regular 32, large 40.
 struct HouseButtonStyle: ButtonStyle {
     let kind: ButtonKind
     var square = false
@@ -80,9 +80,9 @@ struct ButtonChrome<Label: View>: View {
             .opacity(state == .disabled ? 0.4 : state == .pressed ? 0.7 : 1)
             .focusRing(state == .focused, cornerRadius: m.radiusSmall)
         } else {
-            let shape = RoundedRectangle(cornerRadius: m.radius)
+            let shape = Capsule()
             let height = size == .small || size == .mini ? m.controlSmall : size == .large ? m.controlLarge : m.control
-            label.font(m.font(size == .large ? .body : .secondary, .semibold)).lineLimit(1)
+            label.font(m.font(.body, .medium)).lineLimit(1)
                 .padding(.horizontal, square ? 0 : size == .small ? m.sp12 : m.sp16)
                 .frame(width: square ? height : nil, height: height)
                 .foregroundStyle(kind == .secondary ? colors.textPrimary : colors.onAccent)
@@ -93,26 +93,26 @@ struct ButtonChrome<Label: View>: View {
                         shape.fill(kind == .secondary ? colors.hover : .black.opacity(state == .pressed ? 0.16 : 0.08))
                     }
                 }
-                .overlay { if kind == .secondary { shape.strokeBorder(colors.borderStrong) } }
+                .overlay { if kind == .secondary { shape.strokeBorder(colors.borderStrong, lineWidth: 0.5) } }
                 .contentShape(shape)
                 .opacity(state == .disabled ? 0.4 : 1)
-                .focusRing(state == .focused, cornerRadius: m.radius)
+                .focusRing(state == .focused, cornerRadius: height / 2)
         }
     }
 
     private func fill(_ colors: AppColors) -> Color {
         switch kind {
-        case .primary: colors.buttonPrimary
+        case .primary: colors.accentFill
         case .destructive: colors.destructive
-        case .secondary, .link: colors.canvas
+        case .secondary, .link: colors.control
         }
     }
 }
 
-/// An icon-only button's look: a square that fills on hover and press.
+/// An icon-only button's look: a capsule that fills on hover and press.
 struct IconChrome<Label: View>: View {
     let state: InteractionState
-    /// The rail's round buttons: a tinted circle that hover and press light whole.
+    /// A round button with a fill of its own, such as the composer's attach or a pane's close.
     var round = false
     @ViewBuilder let label: Label
     @Environment(\.metrics) private var m
@@ -123,15 +123,14 @@ struct IconChrome<Label: View>: View {
         let fill = state == .pressed ? colors.pressed : state == .hover ? colors.hover : .clear
         Group {
             if round {
-                label.padding(m.sp4).contentShape(Circle()).background(fill, in: Circle())
-                    .background(colors.textPrimary.opacity(0.1), in: Circle())
+                label.contentShape(Circle()).background(fill, in: Circle()).background(colors.sunken, in: Circle())
             } else {
-                label.contentShape(Rectangle()).background(fill, in: RoundedRectangle(cornerRadius: m.radius))
+                label.contentShape(Capsule()).background(fill, in: Capsule())
             }
         }
         .opacity(state == .disabled ? 0.4 : 1)
-        // A radius past half the side rounds the ring into a circle.
-        .focusRing(state == .focused, cornerRadius: round ? m.iconButton : m.radius)
+        // A radius past half the side rounds the ring into a capsule.
+        .focusRing(state == .focused, cornerRadius: m.iconButton)
     }
 }
 
@@ -165,7 +164,7 @@ struct IconButton: View {
     @Environment(\.metrics) private var m
     let symbol: String
     let label: String
-    var role: TextRole = .title
+    var role: TextRole = .title3
     /// Square side at 100% zoom; the standard icon button when nil.
     var side: CGFloat? = nil
     var round = false
@@ -226,5 +225,19 @@ private struct FocusRing: ViewModifier {
                     .allowsHitTesting(false)
             }
         }
+    }
+}
+
+/// The toolbar's grouped buttons: a capsule a hair above the canvas.
+struct ToolbarCapsule<Content: View>: View {
+    var padding: CGFloat = 0
+    @ViewBuilder let content: Content
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+
+    var body: some View {
+        HStack(spacing: 0) { content }.padding(.horizontal, padding).frame(height: m.control)
+            .background(appearance.colors.control, in: Capsule())
+            .elevation(.e1, cornerRadius: m.control / 2)
     }
 }

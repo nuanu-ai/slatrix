@@ -82,7 +82,7 @@ struct ActivityFeedView: View {
     }
 
     private func sectionLabel(_ label: String) -> some View {
-        Text(label).font(m.font(.secondary, .semibold)).foregroundStyle(colors.textSecondary).padding(
+        Text(label).font(m.font(.body, .semibold)).foregroundStyle(colors.textSecondary).padding(
             .horizontal, m.sp24
         ).padding(.top, m.sp20).padding(.bottom, m.sp12)
     }
@@ -91,11 +91,13 @@ struct ActivityFeedView: View {
         HStack(spacing: m.sp12) {
             ZStack(alignment: .bottomTrailing) {
                 AvatarView(name: room.name, size: m.avatar, matrix: matrix, source: room.avatarURL)
-                Image(systemName: room.membership == "invite" ? "envelope.fill" : "bell.fill").font(m.font(.caption))
-                    .padding(m.sp2).background(colors.canvas, in: Circle()).offset(x: m.sp4, y: m.sp4)
+                Image(systemName: room.membership == "invite" ? "envelope.fill" : "bell.fill").font(
+                    m.font(.subheadline)
+                )
+                .padding(m.sp2).background(colors.canvas, in: Circle()).offset(x: m.sp4, y: m.sp4)
             }
             VStack(alignment: .leading, spacing: m.sp4) {
-                Text(room.name).font(m.font(.secondary, .semibold)).foregroundStyle(colors.textPrimary)
+                Text(room.name).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
                     .lineLimit(1)
                 Text(
                     room.membership == "invite"
@@ -105,11 +107,11 @@ struct ActivityFeedView: View {
                             : room.unreadMessages > 0 || room.unread > 0
                                 ? "\(max(room.unreadMessages, room.unread)) unread messages" : "Marked unread"
                 )
-                .font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                .font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             }
             Spacer()
             if room.membership == "invite" {
-                Text("View invitation").font(m.font(.caption)).foregroundStyle(colors.accent)
+                Text("View invitation").font(m.font(.subheadline)).foregroundStyle(colors.accent)
             } else {
                 Circle().fill(colors.accent).frame(width: m.sp8, height: m.sp8).accessibilityLabel(
                     "Unread conversation")
@@ -125,18 +127,18 @@ struct ActivityFeedView: View {
             VStack(alignment: .leading, spacing: m.sp8) {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                     Text(item.senderName.isEmpty ? item.roomName : item.senderName).font(
-                        m.font(.secondary, .semibold)
+                        m.font(.body, .semibold)
                     ).foregroundStyle(colors.textPrimary).lineLimit(1)
                     Text(
                         item.kind == .invite ? "invited you" : item.hasMention ? "mentioned you" : "in \(item.roomName)"
-                    ).font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
+                    ).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).lineLimit(1)
                     Spacer()
                     Text(item.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
-                        m.font(.caption)
+                        m.font(.subheadline)
                     ).foregroundStyle(colors.textSecondary)
                 }
                 if item.hasMention || item.kind == .invite {
-                    Text(item.roomName).font(m.font(.caption, .medium)).foregroundStyle(colors.accent)
+                    Text(item.roomName).font(m.font(.subheadline, .medium)).foregroundStyle(colors.accent)
                         .lineLimit(1)
                 }
                 Text(
@@ -144,14 +146,14 @@ struct ActivityFeedView: View {
                         ? item.kind == .invite ? "Invitation" : "New message"
                         : item.body
                 )
-                .font(m.font(.secondary)).foregroundStyle(colors.textBody).lineLimit(3).multilineTextAlignment(.leading)
+                .font(m.font(.body)).foregroundStyle(colors.textBody).lineLimit(3).multilineTextAlignment(.leading)
                 if item.threadRootID != nil {
-                    Label("Thread reply", systemImage: "bubble.left.and.bubble.right").font(m.font(.caption))
+                    Label("Thread reply", systemImage: "bubble.left.and.bubble.right").font(m.font(.subheadline))
                         .foregroundStyle(colors.textSecondary)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
             if item.hasMention {
-                Image(systemName: "at").font(m.font(.secondary, .semibold)).foregroundStyle(colors.accent)
+                Image(systemName: "at").font(m.font(.body, .semibold)).foregroundStyle(colors.accent)
                     .padding(.top, m.sp2)
             }
         }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Slack's ⌘K: jump to a conversation. Recent ones while the field is empty; ↑ ↓ move, Return opens, Esc closes. A
+/// ⌘K: jump to a conversation. Recent ones while the field is empty; ↑ ↓ move, Return opens, Esc closes. A
 /// pasted Matrix link opens too.
 struct QuickSwitcherView: View {
     /// Ten rows and a half, so the list never resizes as results come and go, and a cut row says it scrolls.
@@ -13,6 +13,7 @@ struct QuickSwitcherView: View {
     var onClose: () -> Void
     @State private var query = ""
     @State private var selectedIndex = 0
+    @FocusState private var focused: Bool
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
@@ -28,11 +29,16 @@ struct QuickSwitcherView: View {
         let colors = appearance.colors
         let results = results
         VStack(spacing: 0) {
-            SearchField(prompt: "Jump to…", text: $query, onEscape: onClose)
-                .onSubmit(openSelected)
-                .onKeyPress(.upArrow) { move(-1) }
-                .onKeyPress(.downArrow) { move(1) }
-                .padding(m.sp12)
+            HStack(spacing: m(10)) {
+                Image(systemName: "magnifyingglass").font(m.font(.title3)).foregroundStyle(colors.textSecondary)
+                    .accessibilityHidden(true)
+                TextField("Jump to…", text: $query).textFieldStyle(.plain).font(m.font(.title3))
+                    .foregroundStyle(colors.textPrimary).focused($focused)
+                    .onSubmit(openSelected)
+                    .onKeyPress(.upArrow) { move(-1) }
+                    .onKeyPress(.downArrow) { move(1) }
+                    .onExitCommand(perform: onClose)
+            }.padding(.horizontal, m(18)).frame(height: m.paneHeader)
             Divider().overlay(colors.border)
             ScrollViewReader { proxy in
                 ScrollView {
@@ -42,22 +48,34 @@ struct QuickSwitcherView: View {
                                 onClose()
                                 onMatrixLink(matrixLink)
                             } icon: {
-                                Image(systemName: "link").font(m.font(.secondary))
+                                Image(systemName: "link").font(m.font(.body))
                             }
                         } else {
+                            if query.isEmpty && !results.isEmpty {
+                                Text("Recent").font(m.font(.subheadline, .semibold))
+                                    .foregroundStyle(colors.textSecondary).frame(
+                                        maxWidth: .infinity, alignment: .leading
+                                    )
+                                    .padding(.horizontal, m.sp12).padding(.top, m.sp8).padding(.bottom, m.sp4)
+                            }
                             ForEach(Array(results.enumerated()), id: \.element.id) { index, room in
-                                MenuRow(title: room.name, detail: detail(room), selected: index == selection) {
+                                let badge = UnreadBadge(room)
+                                MenuRow(
+                                    title: room.name, detail: detail(room), unread: badge != .none,
+                                    badge: { if case .count(let count) = badge { count } else { nil } }(),
+                                    selected: index == selection
+                                ) {
                                     onSelect(room.id)
                                 } icon: {
-                                    RoomIcon(room: room, matrix: matrix)
+                                    RoomIcon(room: room, matrix: matrix, size: m.avatarSmall)
                                 }.id(room.id)
                             }
                         }
-                    }.padding(m.sp8)
+                    }.padding(m(6))
                 }
                 .overlay {
                     if results.isEmpty && matrixLink == nil {
-                        Text("No conversations found").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
+                        Text("No conversations found").font(m.font(.body)).foregroundStyle(colors.textSecondary)
                     }
                 }
                 .onChange(of: selection) { _, index in
@@ -66,7 +84,8 @@ struct QuickSwitcherView: View {
             }
             .frame(height: m(Self.listHeight))
         }
-        .frame(width: m.modalMedium).background(colors.canvas).foregroundStyle(colors.textBody)
+        .frame(width: m(600)).background(colors.overlay).foregroundStyle(colors.textBody)
+        .onAppear { focused = true }
         .onChange(of: query) { _, _ in selectedIndex = 0 }
     }
 
@@ -183,22 +202,22 @@ struct CreationSheet: View {
                     if kind == .invite, let workspace = inviteWorkspace {
                         VStack(alignment: .leading, spacing: m.sp8) {
                             Label("To \(workspace.name)", systemImage: "square.stack.3d.up").font(
-                                m.font(.meta))
+                                m.font(.subheadline))
                         }.foregroundStyle(colors.textSecondary)
                     } else if kind == .invite, let room = inviteRoom {
                         HStack(spacing: m.sp8) {
                             Image(systemName: room.isDirect ? "bubble.left.and.bubble.right" : room.channelSymbol)
                             Text("To \(room.name)")
-                        }.font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                        }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     } else if kind == .invite, let roomID {
-                        Label("To \(roomID)", systemImage: "person.badge.plus").font(m.font(.meta))
+                        Label("To \(roomID)", systemImage: "person.badge.plus").font(m.font(.subheadline))
                             .foregroundStyle(colors.textSecondary)
                     } else if kind == .invite && roomID == nil {
-                        Text("Open a conversation first.").font(m.font(.meta)).foregroundStyle(
+                        Text("Open a conversation first.").font(m.font(.subheadline)).foregroundStyle(
                             colors.warning)
                     }
                     if kind == .invite && invitePermission == false {
-                        Text("You can’t invite people here.").font(m.font(.meta))
+                        Text("You can’t invite people here.").font(m.font(.subheadline))
                             .foregroundStyle(colors.warning)
                     }
                 case .channel, .workspace:
@@ -215,7 +234,7 @@ struct CreationSheet: View {
                     }
                     if kind == .channel && !matrix.workspaces.isEmpty {
                         VStack(alignment: .leading, spacing: m.sp8) {
-                            Text("Workspace").font(m.font(.secondary, .semibold))
+                            Text("Workspace").font(m.font(.body, .semibold))
                             Picker("Workspace", selection: $selectedWorkspaceID) {
                                 Text("No workspace").tag("")
                                 ForEach(matrix.workspaces) { workspace in
@@ -225,7 +244,7 @@ struct CreationSheet: View {
                             if matrix.workspaces.first(where: { $0.id == selectedWorkspaceID })?.canManageRooms == false
                             {
                                 Text("You can’t add channels to this workspace.").font(
-                                    m.font(.meta)
+                                    m.font(.subheadline)
                                 ).foregroundStyle(colors.warning)
                             }
                         }
@@ -259,8 +278,8 @@ struct CreationSheet: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: m.sp8) {
             HStack(spacing: m.sp4) {
-                Text(title).font(m.font(.secondary, .semibold))
-                if optional { Text("(optional)").font(m.font(.meta)).foregroundStyle(colors.textSecondary) }
+                Text(title).font(m.font(.body, .semibold))
+                if optional { Text("(optional)").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary) }
             }
             content().textFieldStyle(.field).accessibilityLabel(title)
         }

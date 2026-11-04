@@ -45,14 +45,14 @@ struct DirectMessagesHostedTests {
             NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
         }
 
-        #expect(await eventually { field("Find a conversation…") != nil })
+        #expect(await eventually { sidebarShown(in: hosting) && field("Find a DM") == nil })
         // A channel read first, for going back to later.
         let first = matrix.selectedRoomID
         menu("next-conversation")
         #expect(await eventually { matrix.selectedRoomID != first })
         let channel = matrix.selectedRoomID
         menu("dms")
-        let column = metrics.rail + SidebarLayout.defaultWidth
+        let column = metrics.sidebarInset + SidebarLayout.defaultWidth
         #expect(await eventually { field("Find a DM").map { $0.maxX <= column } == true })
         // Beside the list, the newest direct message opens.
         #expect(await eventually { matrix.selectedRoomID == id("Sam") })
@@ -64,7 +64,8 @@ struct DirectMessagesHostedTests {
             rootView: DirectMessageRow(room: ChatRoom(id: "!r:example.org", name: "Row", isDirect: true))
                 .frame(width: SidebarLayout.defaultWidth).environmentObject(appearance).environment(\.metrics, metrics)
         ).fittingSize.height
-        let point = NSPoint(x: metrics.rail + SidebarLayout.defaultWidth / 2, y: below.minY - metrics.sp8 - row * 1.5)
+        let point = NSPoint(
+            x: metrics.sidebarInset + SidebarLayout.defaultWidth / 2, y: below.minY - metrics.sp8 - row * 1.5)
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             await drainMainActor()
             window.sendEvent(
@@ -83,7 +84,7 @@ struct DirectMessagesHostedTests {
 
         // Switching workspace brings its conversations back.
         menu("workspace-1")
-        #expect(await eventually { field("Find a conversation…") != nil && field("Find a DM") == nil })
+        #expect(await eventually { sidebarShown(in: hosting) && field("Find a DM") == nil })
 
         // Back in DMs, the direct message read last stays open; going back to a channel leaves the list.
         menu("dms")
@@ -96,7 +97,7 @@ struct DirectMessagesHostedTests {
         menu("back")
         #expect(
             await eventually {
-                matrix.selectedRoomID == channel && field("Find a conversation…") != nil && field("Find a DM") == nil
+                matrix.selectedRoomID == channel && sidebarShown(in: hosting) && field("Find a DM") == nil
             })
     }
 
@@ -121,13 +122,13 @@ struct DirectMessagesHostedTests {
         func menu(_ action: String) {
             NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
         }
-        #expect(await eventually { matrix.selectedRoomID != nil && shows("Find a conversation…") })
+        #expect(await eventually { matrix.selectedRoomID != nil && sidebarShown(in: hosting) })
         window.setContentSize(NSSize(width: 480, height: 900))
-        #expect(await eventually { !shows("Find a conversation…") })
+        #expect(await eventually { !sidebarShown(in: hosting) })
         menu("activity")
         await drainMainActor()
         menu("toggle-sidebar")
-        #expect(await eventually { shows("Find a conversation…") })
+        #expect(await eventually { sidebarShown(in: hosting) })
         menu("dms")
         let direct = Set(matrix.rooms.filter(\.isDirect).map(\.id))
         #expect(await eventually { matrix.selectedRoomID.map(direct.contains) == true })

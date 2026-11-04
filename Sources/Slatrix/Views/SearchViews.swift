@@ -46,8 +46,9 @@ struct SearchBarField: View {
         @Bindable var bar = bar
         let colors = appearance.colors
         HStack(spacing: m.sp8) {
-            Image(systemName: "magnifyingglass").font(m.font(.body)).accessibilityHidden(true)
-            TextField(prompt, text: $bar.text).textFieldStyle(.plain).font(m.font(.secondary)).focused($focused)
+            Image(systemName: "magnifyingglass").font(m.font(.body)).foregroundStyle(colors.textSecondary)
+                .accessibilityHidden(true)
+            TextField(prompt, text: $bar.text).textFieldStyle(.plain).font(m.font(.body)).focused($focused)
                 .onKeyPress(.upArrow) { move(-1) }
                 .onKeyPress(.downArrow) { move(1) }
                 .onSubmit {
@@ -58,12 +59,11 @@ struct SearchBarField: View {
                     if bar.text.isEmpty { bar.close() } else { bar.text = "" }
                 }
         }
-        .padding(.horizontal, m.sp12).frame(height: m.row)
-        .foregroundStyle(focused ? colors.textPrimary : colors.textBody)
-        .background(
-            focused ? colors.canvas : colors.textPrimary.opacity(appearance.isDark ? 0.19 : 0.08),
-            in: RoundedRectangle(cornerRadius: m.radius)
-        )
+        .padding(.horizontal, m.sp12).frame(height: m.control)
+        .foregroundStyle(colors.textPrimary)
+        .background(colors.control, in: Capsule())
+        .overlay { if focused { Capsule().strokeBorder(colors.accentFill, lineWidth: 1) } }
+        .elevation(.e1, cornerRadius: m.control / 2)
         .onGeometryChange(for: CGRect.self) {
             $0.frame(in: .named(SearchBar.space))
         } action: {
@@ -88,7 +88,8 @@ struct SearchBarField: View {
     }
 }
 
-/// The menu that drops from the top bar's field while it has the cursor, as wide as the bar: recent searches,
+/// The menu that drops from the top bar's field while it has the cursor, at least 360 pt wide and flush with the
+/// field's trailing edge: recent searches,
 /// matching conversations, and the search itself. It floats over the window, so nothing under it moves, and a click
 /// below the title bar closes it.
 struct SearchMenu: View {
@@ -112,15 +113,16 @@ struct SearchMenu: View {
                 Button(action: bar.close) { Color.clear.contentShape(Rectangle()) }.buttonStyle(.row)
                     .focusable(false).accessibilityHidden(true).padding(.top, top)
                 if !items.isEmpty {
+                    let width = max(bar.frame.width, m(360))
                     VStack(spacing: 0) {
                         ForEach(Array(items.enumerated()), id: \.element) { index, item in
                             row(item, selected: index == bar.selection)
                         }
                     }
-                    .padding(m.sp8).frame(width: bar.frame.width)
+                    .padding(m(6)).frame(width: width)
                     .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
                     .elevation(.e2, cornerRadius: m.radiusLarge)
-                    .offset(x: bar.frame.minX, y: bar.frame.maxY + m.sp4)
+                    .offset(x: bar.frame.maxX - width, y: bar.frame.maxY + m.sp4)
                 }
             }
         }
@@ -133,19 +135,19 @@ struct SearchMenu: View {
             MenuRow(title: "Search for “\(text)”", selected: selected) {
                 onPick(item)
             } icon: {
-                Image(systemName: "magnifyingglass").font(m.font(.secondary))
+                Image(systemName: "magnifyingglass").font(m.font(.body))
             }
         case .recent(let text):
             MenuRow(title: text, selected: selected) {
                 onPick(item)
             } icon: {
-                Image(systemName: "clock.arrow.circlepath").font(m.font(.secondary))
+                Image(systemName: "clock.arrow.circlepath").font(m.font(.body))
             }
         case .conversation(let room):
             MenuRow(title: room.name, detail: conversationDetail(room, matrix), selected: selected) {
                 onPick(item)
             } icon: {
-                RoomIcon(room: room, matrix: matrix)
+                RoomIcon(room: room, matrix: matrix, size: m.avatarSmall)
             }
         }
     }
@@ -168,7 +170,7 @@ struct RoomIcon: View {
         if room.isDirect {
             AvatarView(name: room.name, size: side, matrix: matrix, source: room.avatarURL)
         } else {
-            Image(systemName: room.channelSymbol).font(m.font(side > m.avatarMedium ? .title : .body))
+            Image(systemName: room.channelSymbol).font(m.font(side > m.avatarMedium ? .title3 : .reading))
                 .frame(width: side, height: side)
         }
     }
@@ -220,8 +222,8 @@ struct SearchResultsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: m.sp8) {
-                Image(systemName: "magnifyingglass").font(m.font(.title)).foregroundStyle(colors.textSecondary)
-                Text(query.text.isEmpty ? "Search" : query.text).font(m.font(.title, .bold))
+                Image(systemName: "magnifyingglass").font(m.font(.title3)).foregroundStyle(colors.textSecondary)
+                Text(query.text.isEmpty ? "Search" : query.text).font(m.font(.title3, .bold))
                     .foregroundStyle(colors.textPrimary).lineLimit(1).accessibilityAddTraits(.isHeader)
             }.padding(.horizontal, m.sp24).frame(height: m.paneHeader)
             TabBar(
@@ -357,7 +359,7 @@ struct SearchResultsView: View {
     }
 
     private var loadMoreButton: some View {
-        Button("Load more", action: loadMore).buttonStyle(.textLink).font(m.font(.meta, .medium))
+        Button("Load more", action: loadMore).buttonStyle(.textLink).font(m.font(.subheadline, .medium))
             .disabled(paging || searchBusy)
             // Beside the button, so it never moves when the spinner shows.
             .overlay(alignment: .leading) {
@@ -377,17 +379,17 @@ struct SearchResultsView: View {
 
     private var indexingFooter: some View {
         HStack(alignment: .center, spacing: m.sp12) {
-            Text(indexingTitle).font(m.font(.caption, .medium))
+            Text(indexingTitle).font(m.font(.subheadline, .medium))
             Spacer(minLength: 0)
             if indexBusy { DelayedProgress().accessibilityLabel(indexingTitle) }
             if matrix.searchIndexingState.isBusy {
                 Button(matrix.searchIndexingState == .stopping ? "Stopping…" : "Stop") {
                     [session = matrix.notificationSessionID] in
                     matrix.cancelSearchBackfill(sessionID: session)
-                }.font(m.font(.caption, .medium)).disabled(matrix.searchIndexingState == .stopping)
+                }.font(m.font(.subheadline, .medium)).disabled(matrix.searchIndexingState == .stopping)
             } else {
                 Button(startingIndex ? "Starting…" : "Search older messages", action: indexRecentHistory)
-                    .font(m.font(.caption, .medium)).disabled(indexBusy || matrix.isPreview)
+                    .font(m.font(.subheadline, .medium)).disabled(indexBusy || matrix.isPreview)
             }
         }
         .buttonStyle(.textLink).padding(.horizontal, m.sp24).padding(.vertical, m.sp12).background(colors.raised)
@@ -544,16 +546,16 @@ private struct MessageResultRow: View {
                 HStack(spacing: m.sp4) {
                     Image(systemName: room?.isDirect == true ? "person" : room?.channelSymbol ?? "number")
                     Text(room?.name ?? message.roomID)
-                }.font(m.font(.meta, .semibold)).foregroundStyle(colors.textSecondary).lineLimit(1)
+                }.font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 HStack(alignment: .top, spacing: m.sp8) {
                     AvatarView(name: message.senderName, size: m.avatar, matrix: matrix, source: message.avatarURL)
                     VStack(alignment: .leading, spacing: m.sp2) {
                         HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
-                            Text(message.senderName).font(m.font(.body, .bold)).foregroundStyle(colors.textPrimary)
+                            Text(message.senderName).font(m.font(.reading, .bold)).foregroundStyle(colors.textPrimary)
                             Text(message.timestamp.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
-                                .font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                                .font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                         }.lineLimit(1)
-                        Text(snippet(colors)).font(m.font(.body)).foregroundStyle(colors.textBody).lineLimit(3)
+                        Text(snippet(colors)).font(m.font(.reading)).foregroundStyle(colors.textBody).lineLimit(3)
                             .multilineTextAlignment(.leading)
                     }
                 }
@@ -598,10 +600,10 @@ private struct ChannelResultRow: View {
                 RoomIcon(room: room, matrix: matrix, size: m.avatar).foregroundStyle(colors.textSecondary)
                 VStack(alignment: .leading, spacing: m.sp2) {
                     HStack(spacing: m.sp8) {
-                        Text(room.name).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
+                        Text(room.name).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
                         if room.membership == "invite" { TagLabel(text: "Invited") }
                     }
-                    Text(room.topic.isEmpty ? "\(room.memberCount) members" : room.topic).font(m.font(.meta))
+                    Text(room.topic.isEmpty ? "\(room.memberCount) members" : room.topic).font(m.font(.subheadline))
                         .foregroundStyle(colors.textSecondary)
                 }.lineLimit(1)
                 Spacer(minLength: 0)

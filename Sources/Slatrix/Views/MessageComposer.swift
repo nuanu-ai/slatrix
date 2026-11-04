@@ -44,7 +44,8 @@ struct MessageComposer: View {
     @State private var importTask: Task<Void, Never>?
     @State private var importGeneration = UUID()
     @State private var isActive = true
-    @State private var showFormatting = true
+    /// Text is selected in the editor, which brings up the formatting bar over it.
+    @State private var hasSelection = false
     @State private var mention: MentionSearch.Suggestions?
     @State private var mentionIndex = 0
     @State private var typingTask: Task<Void, Never>?
@@ -83,94 +84,74 @@ struct MessageComposer: View {
             if isEditing {
                 HStack(spacing: m.sp8) {
                     RoundedRectangle(cornerRadius: m.sp2).fill(colors.accent).frame(width: m(3), height: m.sp16)
-                    Text("Editing message").font(m.font(.meta, .medium))
+                    Text("Editing message").font(m.font(.subheadline, .medium))
                     Spacer()
                     Button {
                         onCancelEdit?()
                     } label: {
-                        Image(systemName: "xmark").font(m.font(.caption, .semibold))
+                        Image(systemName: "xmark").font(m.font(.subheadline, .semibold))
                     }
                     .buttonStyle(.row).help("Cancel editing (Escape)").accessibilityLabel("Cancel editing")
                 }.padding(.horizontal, m.sp12).padding(.top, m.sp12).padding(.bottom, m.sp4)
             }
-            // Hiding the toolbar keeps its row, so toggling it never resizes the composer or the conversation.
-            formattingToolbar.opacity(showFormatting ? 1 : 0).disabled(!showFormatting)
-                .accessibilityHidden(!showFormatting)
-            ZStack(alignment: .topLeading) {
-                if text.isEmpty && editor.formats.block == nil {
-                    Text(placeholder)
-                        .font(m.font(.body)).foregroundStyle(muted)
-                        .padding(.leading, m.sp12).padding(.top, m.sp8)
-                        .allowsHitTesting(false).accessibilityHidden(true)
-                }
-                ComposerNativeEditor(
-                    text: $text, state: editor, members: members, mentionText: NSColor(colors.mentionText),
-                    mentionFill: NSColor(colors.mentionFill), textColor: NSColor(colors.textBody),
-                    linkColor: NSColor(colors.accent), enabled: !sending,
-                    acceptsAttachments: !sending && !isEditing && !preparingAttachments, onTextChange: changed,
-                    onSelectionChange: updateMention, onSend: send, onSpecialKey: specialKey, onLink: editLink,
-                    onAttachments: queueInput, onAttachmentError: attachmentFailed
-                )
-                .accessibilityLabel(isEditing ? "Edit message" : placeholder)
-                .accessibilityHint("Drop or paste files to attach.")
-            }
-            if !attachments.isEmpty && !isEditing { attachmentStrip }
-            HStack(spacing: m.sp4) {
+            if !attachments.isEmpty && !isEditing { attachmentStrip.padding(.top, m.sp8) }
+            // One line at rest, 40 pt, growing upward; the buttons keep to its bottom edge, so Send never moves.
+            HStack(alignment: .bottom, spacing: m.sp4) {
                 iconButton("plus", label: "Attach files", circular: true) { chooseFiles() }.disabled(
-                    sending || isEditing || preparingAttachments)
-                Button {
-                    showFormatting.toggle()
-                    editor.focus()
-                } label: {
-                    Text("Aa").font(m.font(.body)).underline(showFormatting, color: muted)
-                        .frame(width: m.iconButton, height: m.iconButton).contentShape(Rectangle())
-                }.buttonStyle(.icon).foregroundStyle(muted).help(showFormatting ? "Hide formatting" : "Show formatting")
-                    .accessibilityLabel(showFormatting ? "Hide formatting" : "Show formatting")
-                iconButton("face.smiling", label: "Emoji") {
-                    popovers?.show(.emoji(EmojiPick { [editor] in editor.insert($0) }))
-                }
-                iconButton("at", label: "Mention someone") {
-                    editor.insert("@")
-                    editor.focus()
-                }.disabled(members.isEmpty)
-                Spacer(minLength: m.sp4)
-                if sending || preparingAttachments {
-                    DelayedProgress().accessibilityLabel(
-                        preparingAttachments ? "Preparing attachments" : "Sending message")
-                    if preparingAttachments {
-                        Text("Preparing attachments…").font(m.font(.caption)).foregroundStyle(muted)
+                    sending || isEditing || preparingAttachments
+                ).padding(.bottom, m(6))
+                ZStack(alignment: .topLeading) {
+                    if text.isEmpty && editor.formats.block == nil {
+                        Text(placeholder)
+                            .font(m.font(.reading)).foregroundStyle(muted).lineLimit(1)
+                            .padding(.leading, m.sp4).padding(.top, m(ComposerNativeEditor.inset))
+                            .allowsHitTesting(false).accessibilityHidden(true)
                     }
-                } else {
-                    // Shown whole or not at all, so a narrow pane or large zoom never shows "Shift…"; only while
-                    // typing, as in Slack.
-                    ViewThatFits(in: .horizontal) {
-                        Text("Shift + Return to add a new line").font(m.font(.caption)).foregroundStyle(muted)
-                            .fixedSize()
-                        Color.clear.frame(width: 0, height: 0)
-                    }.layoutPriority(-1).opacity(text.isEmpty || isEditing ? 0 : 1)
+                    ComposerNativeEditor(
+                        text: $text, state: editor, members: members, mentionText: NSColor(colors.mentionText),
+                        mentionFill: NSColor(colors.mentionFill), textColor: NSColor(colors.textBody),
+                        linkColor: NSColor(colors.accent), enabled: !sending,
+                        acceptsAttachments: !sending && !isEditing && !preparingAttachments, onTextChange: changed,
+                        onSelectionChange: { text, range in
+                            if hasSelection != (range.length > 0) { hasSelection = range.length > 0 }
+                            updateMention(text, range)
+                        }, onSend: send, onSpecialKey: specialKey, onLink: editLink,
+                        onAttachments: queueInput, onAttachmentError: attachmentFailed
+                    )
+                    .accessibilityLabel(isEditing ? "Edit message" : placeholder)
+                    .accessibilityHint("Drop or paste files to attach.")
                 }
-                Button(action: send) {
-                    HStack(spacing: m.sp8) {
-                        Image(systemName: "paperplane.fill").font(m.font(.secondary))
-                        Rectangle().fill(colors.onAccent.opacity(0.22)).frame(width: 1, height: m.sp16)
-                        Text(isEditing ? "Save" : "↵").font(m.font(.meta, .medium))
-                    }.foregroundStyle(canSend ? colors.onAccent : muted)
-                        .padding(.horizontal, m.sp12).frame(height: m.row)
-                        .background(
-                            canSend ? colors.buttonPrimary : muted.opacity(0.12),
-                            in: RoundedRectangle(cornerRadius: m.radiusSmall)
-                        )
-                        .contentShape(Rectangle())
-                }.buttonStyle(.row).disabled(!canSend)
-                    .help(isEditing ? "Save changes (Return)" : "Send message (Return)")
-                    .accessibilityLabel(isEditing ? "Save changes" : "Send message")
-            }.padding(.horizontal, m.sp12).padding(.bottom, m.sp8).disabled(sending)
+                HStack(spacing: 0) {
+                    iconButton("at", label: "Mention someone") {
+                        editor.insert("@")
+                        editor.focus()
+                    }.disabled(members.isEmpty)
+                    iconButton("face.smiling", label: "Emoji") {
+                        popovers?.show(.emoji(EmojiPick { [editor] in editor.insert($0) }))
+                    }
+                    if sending || preparingAttachments {
+                        DelayedProgress().frame(width: m.iconButton, height: m.iconButton).accessibilityLabel(
+                            preparingAttachments ? "Preparing attachments" : "Sending message")
+                    } else {
+                        Button(action: send) {
+                            Image(systemName: isEditing ? "checkmark" : "arrow.up").font(m.font(.body, .bold))
+                                .foregroundStyle(canSend ? colors.onAccent : colors.textTertiary)
+                                .frame(width: m.iconButton, height: m.iconButton)
+                                .background(canSend ? colors.accentFill : colors.sunken, in: Circle())
+                                .contentShape(Circle())
+                        }.buttonStyle(.row).disabled(!canSend).padding(.leading, m.sp4)
+                            .help(isEditing ? "Save changes (Return)" : "Send message (Return)")
+                            .accessibilityLabel(isEditing ? "Save changes" : "Send message")
+                    }
+                }.padding(.bottom, m(6)).disabled(sending)
+            }.padding(.horizontal, m(6))
         }
-        .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+        .background(colors.control, in: RoundedRectangle(cornerRadius: m.controlLarge / 2))
         .overlay(
-            RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(
-                editor.isFocused ? colors.textSecondary : colors.borderStrong, lineWidth: 1)
+            RoundedRectangle(cornerRadius: m.controlLarge / 2).strokeBorder(
+                editor.isFocused ? colors.accentLine : colors.border, lineWidth: 1)
         )
+        .elevation(.e1, cornerRadius: m.controlLarge / 2)
         // Suggestions, errors and hints float above the composer instead of growing it.
         .overlay(alignment: .topLeading) {
             floating.alignmentGuide(.top) { $0[.bottom] + m.sp8 }
@@ -215,6 +196,7 @@ struct MessageComposer: View {
 
     private var floating: some View {
         VStack(alignment: .leading, spacing: m.sp8) {
+            if hasSelection && editor.isFocused && linkDraft == nil { formattingToolbar }
             if let draft = Binding($linkDraft) { linkCard(draft) }
             if !mentionMatches.isEmpty { mentionSuggestions }
             Group {
@@ -224,7 +206,7 @@ struct MessageComposer: View {
                         Text(errorMessage).textSelection(.enabled)
                         Spacer(minLength: m.sp4)
                         Button("Try again", action: send).buttonStyle(.textLink).disabled(!canSend)
-                    }.font(m.font(.meta)).foregroundStyle(colors.destructive)
+                    }.font(m.font(.subheadline)).foregroundStyle(colors.destructive)
                         .accessibilityElement(children: .combine)
                 }
                 if let attachmentError {
@@ -237,11 +219,11 @@ struct MessageComposer: View {
                         } label: {
                             Image(systemName: "xmark")
                         }.buttonStyle(.row).accessibilityLabel("Dismiss attachment error")
-                    }.font(m.font(.meta)).foregroundStyle(colors.destructive).accessibilityElement(
+                    }.font(m.font(.subheadline)).foregroundStyle(colors.destructive).accessibilityElement(
                         children: .combine)
                 }
                 if requiresTextForSend && !attachments.isEmpty {
-                    Text("Add a message to reply").font(m.font(.caption)).foregroundStyle(muted)
+                    Text("Add a message to reply").font(m.font(.subheadline)).foregroundStyle(muted)
                 }
             }
             .padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
@@ -249,7 +231,7 @@ struct MessageComposer: View {
         }
     }
 
-    /// Slack's bar and order; each button shows whether its format is on where the caret is.
+    /// The formatting bar over a selection; each button shows whether its format is on there.
     private var formattingToolbar: some View {
         let formats = editor.formats
         return HStack(spacing: 0) {
@@ -282,8 +264,8 @@ struct MessageComposer: View {
             formatButton("curlybraces.square", label: "Code block", keys: "⌥⇧⌘C", on: formats.block == .code) {
                 editor.toggle(block: .code)
             }
-            Spacer(minLength: 0)
-        }.padding(.horizontal, m.sp8).padding(.top, m.sp8).disabled(sending)
+        }.padding(m.sp2).disabled(sending)
+            .background(colors.overlay, in: Capsule()).elevation(.e2, cornerRadius: m.control / 2)
             .accessibilityElement(children: .contain).accessibilityLabel("Message formatting")
     }
 
@@ -295,8 +277,8 @@ struct MessageComposer: View {
         _ icon: String, label: String, keys: String, on: Bool, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(m.font(.secondary)).frame(width: m.iconButton, height: m.iconButton)
-                .background(on ? muted.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: m.radiusSmall))
+            Image(systemName: icon).font(m.font(.body)).frame(width: m.iconButton, height: m.iconButton)
+                .background(on ? colors.selection : .clear, in: Circle())
                 .contentShape(Rectangle())
         }
         .buttonStyle(.icon).foregroundStyle(on ? colors.textPrimary : muted).help("\(label) (\(keys))")
@@ -329,7 +311,6 @@ struct MessageComposer: View {
         }
         .padding(m.sp12).frame(width: m.popoverWidth)
         .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
-        .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
         .elevation(.e2, cornerRadius: m.radiusLarge)
         .onAppear { linkFocused = true }
         .onExitCommand {
@@ -342,8 +323,9 @@ struct MessageComposer: View {
         -> some View
     {
         Button(action: action) {
-            Image(systemName: icon).font(m.font(.body)).frame(width: m.iconButton, height: m.iconButton)
-                .background(circular ? muted.opacity(0.12) : Color.clear, in: Circle()).contentShape(Rectangle())
+            Image(systemName: icon).font(m.font(circular ? .body : .reading, circular ? .semibold : .regular))
+                .frame(width: m.iconButton, height: m.iconButton)
+                .background(circular ? colors.sunken : Color.clear, in: Circle()).contentShape(Circle())
         }.buttonStyle(.icon).foregroundStyle(muted).help(label).accessibilityLabel(label)
     }
 
@@ -357,7 +339,7 @@ struct MessageComposer: View {
                     }.disabled(sending || preparingAttachments)
                 }
             }.padding(.horizontal, m.sp12)
-        }.scrollIndicators(.hidden).padding(.bottom, m.sp8)
+        }.scrollIndicators(.hidden)
     }
 
     /// Slack's @ list: eight rows at once, the rest by scrolling or the arrow keys, which keep the selection in view.
@@ -379,7 +361,6 @@ struct MessageComposer: View {
         .frame(height: CGFloat(min(mentionMatches.count, 8)) * m.menuRow + 2 * m.sp4)
         .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
         .clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
-        .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
         .elevation(.e2, cornerRadius: m.radiusLarge)
     }
 
@@ -395,13 +376,13 @@ struct MessageComposer: View {
             ) {
                 chooseMention(candidate)
             } icon: {
-                AvatarView(name: member.name, size: m.avatarMedium)
+                AvatarView(name: member.name, size: m.avatarSmall)
             }
         case .room:
             MenuRow(title: "@room", detail: "Notify everyone in this conversation", selected: selected) {
                 chooseMention(candidate)
             } icon: {
-                Image(systemName: "megaphone").font(m.font(.secondary))
+                Image(systemName: "megaphone").font(m.font(.body))
             }
         }
     }
@@ -681,16 +662,18 @@ struct ComposerNotice: View {
     @EnvironmentObject private var appearance: AppearanceStore
     @Environment(\.metrics) private var m
     var body: some View {
-        Text(text).font(m.font(.secondary)).foregroundStyle(appearance.colors.textSecondary)
+        Text(text).font(m.font(.body)).foregroundStyle(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity)
-            // The formatting row, the empty editor and the send row, as `MessageComposer` stacks them.
-            .frame(height: 2 * m.sp8 + m.iconButton + m.row + m(ComposerNativeEditor.minHeight))
+            // The empty composer's one line.
+            .frame(height: m.controlLarge)
     }
 }
 
 private struct ComposerNativeEditor: NSViewRepresentable {
-    static let minHeight: CGFloat = 60
-    static let maxHeight: CGFloat = 160
+    static let minHeight: CGFloat = 40
+    static let maxHeight: CGFloat = 200
+    /// Above and below the text, so one line sits centered in the composer's 40 pt.
+    static let inset: CGFloat = 10
     /// Matrix HTML, as `ComposerFormat` writes it.
     @Binding var text: String
     var state: ComposerEditorState
@@ -718,15 +701,15 @@ private struct ComposerNativeEditor: NSViewRepresentable {
         let m = context.environment.metrics
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? nsView.frame.width
         let minimum = m(Self.minHeight)
-        guard width > 2 * m.sp12, let view = nsView.documentView as? NSTextView, let manager = view.layoutManager,
+        guard width > 2 * m.sp4, let view = nsView.documentView as? NSTextView, let manager = view.layoutManager,
             let container = view.textContainer
         else { return CGSize(width: width, height: minimum) }
-        let textWidth = width - 2 * m.sp12
+        let textWidth = width - 2 * m.sp4
         if abs(container.size.width - textWidth) > 0.5 {
             container.size = NSSize(width: textWidth, height: .greatestFiniteMagnitude)
         }
         manager.ensureLayout(for: container)
-        let used = ceil(manager.usedRect(for: container).height) + 2 * m.sp8
+        let used = ceil(manager.usedRect(for: container).height) + 2 * m(Self.inset)
         return CGSize(width: width, height: min(m(Self.maxHeight), max(minimum, used)))
     }
 
@@ -783,7 +766,7 @@ private struct ComposerNativeEditor: NSViewRepresentable {
 
     private func configure(_ view: ComposerTextView, context: Context) {
         let m = context.environment.metrics
-        let inset = NSSize(width: m.sp12, height: m.sp8)
+        let inset = NSSize(width: m.sp4, height: m(Self.inset))
         if view.textContainerInset != inset { view.textContainerInset = inset }
         view.onSend = onSend
         view.onSpecialKey = onSpecialKey
@@ -795,7 +778,7 @@ private struct ComposerNativeEditor: NSViewRepresentable {
             if state?.formats != formats { state?.formats = formats }
         }
         view.style(
-            fontSize: m.size(.body), text: textColor, mentionText: mentionText, mentionFill: mentionFill,
+            fontSize: m.size(.reading), text: textColor, mentionText: mentionText, mentionFill: mentionFill,
             link: linkColor)
     }
 
@@ -1429,9 +1412,9 @@ private struct StagedAttachmentTile: View {
                 HStack(spacing: m.sp8) {
                     FileTypeIcon(kind: attachment.fileKind)
                     VStack(alignment: .leading, spacing: m.sp2) {
-                        Text(attachment.name).font(m.font(.secondary, .semibold)).foregroundStyle(colors.textPrimary)
+                        Text(attachment.name).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
                             .lineLimit(1).truncationMode(.middle)
-                        Text(attachment.typeLabel).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                        Text(attachment.typeLabel).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     }
                     Spacer(minLength: 0)
                 }
@@ -1443,7 +1426,7 @@ private struct StagedAttachmentTile: View {
         .help(attachment.name).accessibilityElement(children: .ignore).accessibilityLabel(attachment.name)
         .overlay(alignment: .topTrailing) {
             Button(action: onRemove) {
-                Image(systemName: "xmark").font(m.font(.caption, .bold)).foregroundStyle(colors.onMedia)
+                Image(systemName: "xmark").font(m.font(.subheadline, .bold)).foregroundStyle(colors.onMedia)
                     .frame(width: m.sp20, height: m.sp20).background(colors.mediaControl, in: Circle())
             }
             .buttonStyle(.row).focused($removeFocused).help("Remove \(attachment.name)")

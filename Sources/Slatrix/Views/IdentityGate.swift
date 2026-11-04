@@ -63,8 +63,8 @@ private struct ConfirmIdentityView: View {
         VStack(spacing: m.sp24) {
             Image(systemName: "lock.shield").font(m.font(.hero)).foregroundStyle(colors.accent)
             VStack(spacing: m.sp8) {
-                Text("Confirm it’s you").font(m.font(.display, .bold)).foregroundStyle(colors.textPrimary)
-                Text("Verify this Mac to read your encrypted messages.").font(m.font(.body)).foregroundStyle(
+                Text("Confirm it’s you").font(m.font(.largeTitle, .bold)).foregroundStyle(colors.textPrimary)
+                Text("Verify this Mac to read your encrypted messages.").font(m.font(.reading)).foregroundStyle(
                     colors.textSecondary
                 ).multilineTextAlignment(.center)
             }
@@ -77,7 +77,7 @@ private struct ConfirmIdentityView: View {
                 Button(action: onRecovery) { Label("Use recovery key", systemImage: "key") }.buttonStyle(.secondary)
             }.frame(width: m(Self.width))
             if verification.ownDeviceID != nil {
-                Button("Skip", action: onSkip).buttonStyle(.textLink).font(m.font(.secondary))
+                Button("Skip", action: onSkip).buttonStyle(.textLink).font(m.font(.body))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(colors.canvas)

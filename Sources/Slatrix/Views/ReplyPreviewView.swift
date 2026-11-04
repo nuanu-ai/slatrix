@@ -26,9 +26,9 @@ struct ReplyPreviewView: View {
                         if let thread { onOpenThread?(thread.root) }
                     } label: {
                         VStack(alignment: .leading, spacing: m.sp4) {
-                            Text("replied to a thread:").font(m.font(.caption))
+                            Text("replied to a thread:").font(m.font(.subheadline))
                                 .foregroundStyle(appearance.colors.textSecondary)
-                            Text(thread?.preview ?? " ").font(m.font(.meta, .medium))
+                            Text(thread?.preview ?? " ").font(m.font(.subheadline, .medium))
                                 .foregroundStyle(appearance.colors.accent)
                         }.lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }.buttonStyle(.row).disabled(thread == nil || onOpenThread == nil).help("View thread")
@@ -42,12 +42,12 @@ struct ReplyPreviewView: View {
                     }.buttonStyle(.row).disabled(onOpen == nil).help("Show original message")
                 } else if preview.state == .failed {
                     HStack(spacing: m.sp8) {
-                        Text("Original message unavailable").font(m.font(.meta))
+                        Text("Original message unavailable").font(m.font(.subheadline))
                             .foregroundStyle(appearance.colors.textSecondary)
                         Button("Retry") { [target = origin] in
                             guard let target else { return }
                             Task { await matrix.loadReplyPreview(for: target) }
-                        }.buttonStyle(.textLink).font(m.font(.caption)).disabled(origin == nil)
+                        }.buttonStyle(.textLink).font(m.font(.subheadline)).disabled(origin == nil)
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -71,8 +71,8 @@ struct ReplyPreviewView: View {
 
     private func lines(sender: String, body: String) -> some View {
         VStack(alignment: .leading, spacing: m.sp4) {
-            Text(sender).font(m.font(.caption, .semibold)).lineLimit(1)
-            Text(body).font(m.font(.meta)).foregroundStyle(appearance.colors.textSecondary).lineLimit(1)
+            Text(sender).font(m.font(.subheadline, .semibold)).lineLimit(1)
+            Text(body).font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary).lineLimit(1)
         }
     }
 }
