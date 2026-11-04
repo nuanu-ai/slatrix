@@ -28,7 +28,6 @@ import kotlinx.coroutines.sync.withLock
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.JoinRule
 import org.matrix.rustcomponents.sdk.LatestEventValue
-import org.matrix.rustcomponents.sdk.ProfileDetails
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.NotificationProcessSetup
 import org.matrix.rustcomponents.sdk.NotificationStatus
@@ -83,7 +82,7 @@ data class RoomSummary(
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
-data class LatestMessage(val body: String?, val timestamp: Long, val own: Boolean, val sender: String? = null)
+data class LatestMessage(val body: String?, val timestamp: Long, val own: Boolean)
 
 data class SpaceSummary(
     val id: String,
@@ -350,8 +349,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         val value = room.latestEvent()
         try {
             when (value) {
-                is LatestEventValue.Remote -> LatestMessage(previewText(value.content), value.timestamp.clampedLong(), value.isOwn, name(value.profile, value.sender))
-                is LatestEventValue.Local -> LatestMessage(previewText(value.content), value.timestamp.clampedLong(), own = true, name(value.profile, value.sender))
+                is LatestEventValue.Remote -> LatestMessage(previewText(value.content), value.timestamp.clampedLong(), value.isOwn)
+                is LatestEventValue.Local -> LatestMessage(previewText(value.content), value.timestamp.clampedLong(), own = true)
                 else -> null
             }
         } finally {
@@ -362,9 +361,6 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     } catch (_: Exception) {
         null
     }
-
-    private fun name(profile: ProfileDetails, userId: String) =
-        (profile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: userId.removePrefix("@").substringBefore(':')
 
     private fun publish() {
         mutableState.value = RoomListState(

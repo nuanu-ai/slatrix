@@ -49,6 +49,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
@@ -90,6 +91,8 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     /** Marks these conversations read, and returns the ones that failed. */
     onMarkAllRead: suspend (List<String>) -> List<String> = { emptyList() },
     onNewMessage: (() -> Unit)? = null,
+    /** Home's closed sections, kept with the account, and where a change to them goes. */
+    collapsedSections: Set<String> = emptySet(), onCollapsedSections: (Set<String>) -> Unit = {},
     /** Search, opened from Home's search bar over the whole screen; it calls back to close. */
     search: @Composable (onClose: () -> Unit) -> Unit = {}, userAvatarUrl: String? = null, activity: @Composable () -> Unit = {},
     later: @Composable () -> Unit = {}) {
@@ -152,8 +155,8 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                 when (tab) {
                     HomeTab.Home -> Column {
                         HomeSearchBar(state.spaces.firstOrNull { it.id == selectedSpaceId }?.name) { searching = true }
-                        HomeList(homeList, shown, selectedSpaceId, onRoom, onBrowseChannels,
-                            (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } }, onInvitation, clearance) { actions = it.id }
+                        HomeList(homeList, shown, selectedSpaceId, onRoom, (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } },
+                            onInvitation, clearance, collapsedSections, onCollapsedSections) { actions = it.id }
                     }
                     HomeTab.Dms -> DirectList(directList, shown, onRoom, clearance) { actions = it.id }
                     HomeTab.Activity -> Box(Modifier.padding(bottom = clearance)) { activity() }
@@ -347,7 +350,7 @@ private enum class HomeSection(val label: String) {
 
 @Composable
 private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId: String?, onRoom: (String) -> Unit,
-    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, onInvitation: (String) -> Unit, bottom: Dp,
+    onAddChannel: (() -> Unit)?, onInvitation: (String) -> Unit, bottom: Dp, saved: Set<String>, onSaved: (Set<String>) -> Unit,
     onActions: (RoomSummary) -> Unit) {
     // A saved workspace's channels are known only with its spaces, so its list waits for them rather than filling in.
     val waiting = state.loading || (selectedSpaceId != null && !state.spacesKnown)
@@ -360,7 +363,7 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
             HomeSection.Direct to visible.filter { !it.starred && it.direct },
         )
     }
-    var collapsed by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var collapsed by remember(saved) { mutableStateOf(saved) }
     LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = bottom)) {
         if (waiting) {
             item { ConnectionIndicator(true, null) }
@@ -373,13 +376,14 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
             sections.forEach { (section, rooms) ->
                 val open = section.name !in collapsed
                 item(key = section.name) {
-                    SectionHeader(section, open, onBrowseChannels.takeIf { section == HomeSection.Channels }) {
+                    SectionHeader(section, open) {
                         collapsed = if (open) collapsed + section.name else collapsed - section.name
+                        onSaved(collapsed)
                     }
                 }
                 // A collapsed section keeps its unread conversations in view, as Slack's does.
                 items(if (open) rooms else rooms.filter { it.unread != UnreadBadge.None }, key = { it.id }) {
-                    ConversationRow(it, onRoom, onActions)
+                    CompactRow(it, onRoom, onActions)
                 }
                 if (open && section == HomeSection.Channels && onAddChannel != null) item(key = "add-channel") { AddChannelRow(onAddChannel) }
             }
@@ -387,43 +391,71 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
     }
 }
 
+/** A section's title after its arrow, in the column the rows' marks take, so titles line up with names; it opens and closes. */
 @Composable
-private fun SectionHeader(section: HomeSection, open: Boolean, onOpen: (() -> Unit)?, onToggle: () -> Unit) {
+private fun SectionHeader(section: HomeSection, open: Boolean, onToggle: () -> Unit) {
     val colors = SlatrixTheme.colors
-    val toggle = Modifier.clickable(role = Role.Button, onClickLabel = if (open) "Collapse" else "Expand", onClick = onToggle)
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.SectionHeader)
+        .clickable(role = Role.Button, onClickLabel = if (open) "Collapse" else "Expand", onClick = onToggle)
         .semantics(mergeDescendants = true) { stateDescription = if (open) "Expanded" else "Collapsed" }
-    // A section that opens something, as Slack's Channels › does, leaves collapsing to the arrow at its end.
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.SectionHeader).then(if (onOpen == null) toggle else Modifier)
-        .padding(start = UiMetrics.GapLarge, end = if (onOpen == null) UiMetrics.GapLarge else UiMetrics.GapTiny),
-        verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.weight(1f).then(if (onOpen != null) Modifier.heightIn(min = UiMetrics.Touch)
-            .clickable(role = Role.Button, onClick = onOpen) else Modifier), verticalAlignment = Alignment.CenterVertically) {
-            Text(section.label, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelLarge,
-                color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (onOpen != null) Icon(SlackIcons.ChevronRight, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.textSecondary)
-        }
-        val arrow = @Composable {
-            Icon(if (open) SlackIcons.ChevronUp else SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
-        }
-        if (onOpen == null) arrow()
-        else Box(Modifier.size(UiMetrics.Touch).then(toggle).semantics { contentDescription = section.label },
-            contentAlignment = Alignment.Center) { arrow() }
+        .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+        Lead { Icon(if (open) SlackIcons.ChevronDown else SlackIcons.ChevronRight, null, Modifier.size(glyph()), tint = colors.textSecondary) }
+        Text(section.label, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = colors.textSecondary,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
-/** Slack's Add channel row, closing the Channels section, its plus where a channel's tile sits. */
+/** Slack's Add channel row, closing the Channels section, its plus where a channel's # sits. */
 @Composable
 private fun AddChannelRow(onClick: () -> Unit) {
     val colors = SlatrixTheme.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ConversationRow).clickable(role = Role.Button, onClick = onClick)
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button, onClick = onClick)
         .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        Box(Modifier.size(UiMetrics.RowAvatar).clip(MaterialTheme.shapes.large).background(colors.raised), contentAlignment = Alignment.Center) {
-            Icon(SlackIcons.Plus, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.textSecondary)
-        }
-        Text("Add channel", style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+        Lead { Icon(SlackIcons.Plus, null, Modifier.size(glyph()), tint = colors.textSecondary) }
+        Text("Add channel", style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary, maxLines = 1,
+            overflow = TextOverflow.Ellipsis)
     }
 }
+
+/** The narrow column ahead of a row's name: a channel's #, a person's picture or a section's arrow. */
+@Composable
+private fun Lead(content: @Composable () -> Unit) {
+    Box(Modifier.widthIn(min = UiMetrics.RowLead), contentAlignment = Alignment.Center) { content() }
+}
+
+/** A row's # or arrow, at the size of its text, so it grows with the phone's font. */
+@Composable
+internal fun glyph(): Dp = with(LocalDensity.current) { MaterialTheme.typography.bodyLarge.fontSize.toDp() * GlyphScale }
+
+/** Slack's Home row: one line, a channel's # or a person's picture, the name in bold while unread, and a mention count. */
+@Composable
+private fun CompactRow(room: RoomSummary, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) {
+    val colors = SlatrixTheme.colors
+    val unread = room.unread != UnreadBadge.None
+    val color = if (unread) colors.textPrimary else colors.textSecondary
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).conversation(room, onRoom, onActions).unreadState(room)
+        .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+        Lead {
+            if (room.direct) LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowLead, room.avatarUrl)
+            else ChannelGlyph(room.isPrivate, color)
+        }
+        Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = color,
+            fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        UnreadCount(room.unread)
+    }
+}
+
+/** A channel's plain # or, for a private one, its lock, in [color]. */
+@Composable
+internal fun ChannelGlyph(private: Boolean, color: Color) {
+    Icon(if (private) SlackIcons.Lock else SlackIcons.Hash, if (private) "Private channel" else null, Modifier.size(glyph()), tint = color)
+}
+
+/** A 20 sp mark beside 16 sp text, as the boards draw it. */
+private const val GlyphScale = 1.25f
 
 @Composable
 private fun DirectList(list: LazyListState, state: RoomListState, onRoom: (String) -> Unit, bottom: Dp, onActions: (RoomSummary) -> Unit) {
@@ -446,8 +478,8 @@ private fun Modifier.conversation(room: RoomSummary, onRoom: (String) -> Unit, o
     combinedClickable(role = Role.Button, onLongClickLabel = "More actions", onLongClick = { onActions(room) }) { onRoom(room.id) }
 
 /**
- * Design B's two-line row: a person's picture or a channel's tile, the name in bold while unread, and under it the
- * newest message, who sent it, and the mention count; when it came sits at the end of the name's line.
+ * The DMs tab's two-line row: the person's picture, the name in bold while unread, and under it the newest message and
+ * the unread count; when it came sits at the end of the name's line.
  */
 @Composable
 private fun ConversationRow(room: RoomSummary, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) {
@@ -456,8 +488,7 @@ private fun ConversationRow(room: RoomSummary, onRoom: (String) -> Unit, onActio
     Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ConversationRow).conversation(room, onRoom, onActions).unreadState(room)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        if (room.direct) LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowAvatar, room.avatarUrl)
-        else ChannelTile(room.isPrivate, UiMetrics.RowAvatar)
+        LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowAvatar, room.avatarUrl)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
@@ -477,20 +508,15 @@ private fun ConversationRow(room: RoomSummary, onRoom: (String) -> Unit, onActio
     }
 }
 
-/** The newest message under a row's name: in a channel after its sender's first name, and yours after You. */
+/** The newest message under a row's name, yours after You. */
 @Composable
 private fun preview(room: RoomSummary): AnnotatedString {
     val latest = room.latest ?: return AnnotatedString("")
     val body = latest.body ?: return AnnotatedString("")
-    val sender = when {
-        latest.own -> "You: "
-        room.direct -> null
-        else -> latest.sender?.substringBefore(' ')?.let { "$it: " }
-    }
     val color = SlatrixTheme.colors.textPrimary
-    return remember(sender, body, color) {
+    return remember(latest.own, body, color) {
         buildAnnotatedString {
-            if (sender != null) withStyle(SpanStyle(color = color)) { append(sender) }
+            if (latest.own) withStyle(SpanStyle(color = color)) { append("You: ") }
             append(body)
         }
     }

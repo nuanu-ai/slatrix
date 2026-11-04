@@ -431,8 +431,11 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
     val open: (String) -> Unit = remember(rooms, workspace) {
         { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
     }
+    val preferences = remember(userId, context) { WorkspacePreferences(context, userId) }
+    var collapsed by remember(preferences) { mutableStateOf(preferences.collapsedSections) }
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
+        collapsedSections = collapsed, onCollapsedSections = { collapsed = it; preferences.collapsedSections = it },
         onInvitation = onInvitation,
         onNewMessage = onNewMessage,
         onBrowseChannels = { onChannels(ChannelPage.Browse) }, onCreateChannel = { onChannels(ChannelPage.Create) },

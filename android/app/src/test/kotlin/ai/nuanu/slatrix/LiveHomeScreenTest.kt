@@ -1,5 +1,7 @@
 package ai.nuanu.slatrix
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.platform.LocalDensity
@@ -142,6 +144,32 @@ class LiveHomeScreenTest {
         compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(listOf(channel("!general:example.org", "general")), loading = false, spacesKnown = true), {}, {}, {}) } }
         compose.onNodeWithText("Channels").assertIsDisplayed()
         compose.onNodeWithText("Starred").assertDoesNotExist()
+    }
+
+    // capability: home.channels
+    @Test fun homeListsEachConversationOnOneLineWhileDmsKeepTheirPreviews() {
+        val rooms = listOf(channel("!general:example.org", "general").copy(latest = LatestMessage("Lunch is on the roof", 1_000L, own = false)),
+            direct("!sam:example.org", "Sam", latest = LatestMessage("See you there", 2_000L, own = false)))
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {}) } }
+        compose.onNodeWithText("general").assertIsDisplayed()
+        compose.onNodeWithText("Lunch is on the roof", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("See you there", substring = true).assertDoesNotExist()
+        tab("DMs").performClick()
+        compose.onNodeWithText("See you there", substring = true).assertIsDisplayed()
+    }
+
+    @Test fun collapsedSectionsComeFromAndGoBackToTheAccount() {
+        val rooms = listOf(channel("!general:example.org", "general"), direct("!sam:example.org", "Sam"))
+        var collapsed by mutableStateOf(setOf("Channels"))
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
+                    collapsedSections = collapsed, onCollapsedSections = { collapsed = it })
+            }
+        }
+        compose.onNodeWithText("general").assertDoesNotExist()
+        compose.onNodeWithText("Direct messages").performClick()
+        compose.runOnIdle { assertEquals(setOf("Channels", "Direct"), collapsed) }
     }
 
     // capability: home.sections-collapse

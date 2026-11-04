@@ -85,7 +85,7 @@ class PhoneSizeScreenshots(private val screen: String, private val phone: String
                 RoomSummary("!wm:example.org", "Wanda Moss", true, "", UnreadBadge.Count("2"), "WM", 1,
                     latest = LatestMessage("Can you look at the release notes before lunch?", now - hour, own = false)),
                 RoomSummary("!design:example.org", "design", false, "", UnreadBadge.Count("1"), "D", 0, spaceIds = setOf(Harbor),
-                    latest = LatestMessage("The new onboarding flow is up on staging", now - 2 * hour, own = false, sender = "Mira Lane")),
+                    latest = LatestMessage("The new onboarding flow is up on staging", now - 2 * hour, own = false)),
                 RoomSummary("!general:example.org", "general", false, "", UnreadBadge.None, "G", 2, spaceIds = setOf(Harbor),
                     latest = LatestMessage("Lunch is on the roof today", now - 26 * hour, own = true)),
                 RoomSummary("!plans:example.org", "launch-plans", false, "", UnreadBadge.None, "L", 5, isPrivate = true, spaceIds = setOf(Harbor)),

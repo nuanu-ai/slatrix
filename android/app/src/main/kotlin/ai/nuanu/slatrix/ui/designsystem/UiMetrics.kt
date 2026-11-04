@@ -39,6 +39,9 @@ object UiMetrics {
     /** A chat header's row, over the glass. */
     val HeaderRow = 64.dp
     val SectionHeader = 40.dp
+    /** Home's one-line row, and the column ahead of its name that holds a #, a picture or a section's arrow. */
+    val CompactRow = 48.dp
+    val RowLead = 24.dp
     val Badge = 20.dp
     val ChannelTile = 40.dp
     /** The faces on a thread's replies bar. */

@@ -10,9 +10,6 @@ import ai.nuanu.slatrix.ui.account.CreateChannelScreen
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -45,16 +42,6 @@ class ChannelScreensTest {
             LiveHomeScreen("@alex:example.org", RoomListState(listOf(general), loading = false, spacesKnown = true), {}, {}, {},
                 onBrowseChannels = { opened += "browse" }, onCreateChannel = { opened += "create" })
         }
-    }
-
-    // capability: home.browse-channels
-    @Test fun channelsHeaderOpensBrowseChannelsAndItsArrowStillCollapses() {
-        home()
-        compose.onNodeWithText("Channels").performClick()
-        compose.runOnIdle { assertEquals(listOf("browse"), opened) }
-        compose.onNodeWithContentDescription("Channels").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
-            .performClick()
-        compose.onNodeWithText("general").assertDoesNotExist()
     }
 
     // capability: home.browse-channels
