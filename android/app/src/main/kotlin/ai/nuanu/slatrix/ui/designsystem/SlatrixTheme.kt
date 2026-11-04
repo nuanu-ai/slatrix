@@ -22,7 +22,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
-class AppColors internal constructor(private val roles: Map<String, Color>, private val dark: Boolean) {
+class AppColors internal constructor(private val roles: Map<String, Color>, private val dark: Boolean,
+    /** Inside your own bubble links are underlined, since they share the text's color. */
+    val underlineLinks: Boolean = false) {
     val textPrimary = roles.getValue("textPrimary")
     val textBody = roles.getValue("textBody")
     val textSecondary = roles.getValue("textSecondary")
@@ -40,14 +42,14 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     val scrim = roles.getValue("scrim")
     val border = roles.getValue("border")
     val borderStrong = roles.getValue("borderStrong")
-    val hover = roles.getValue("hover")
-    val pressed = roles.getValue("pressed")
     val highlight = roles.getValue("highlight")
     /** The accent as text and icons; [accentFill] is the same hue for filled shapes under [onAccent]. */
     val accent = roles.getValue("accent")
     val accentTint = roles.getValue("accentTint")
     val accentFill = roles.getValue("accentFill")
     val onAccent = roles.getValue("onAccent")
+    /** Initials and icons on the shared avatar and file colors, whatever the accent. */
+    val onAvatar = roles.getValue("onAvatar")
     val destructive = roles.getValue("destructive")
     val warning = roles.getValue("warning")
     /** A mention count's badge. */
@@ -56,8 +58,6 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     val mentionFill = roles.getValue("mentionFill")
     val mentionYouText = roles.getValue("mentionYouText")
     val mentionYouFill = roles.getValue("mentionYouFill")
-    val presenceActive = roles.getValue("presenceActive")
-    val presenceAway = roles.getValue("presenceAway")
     /** The chat wallpaper: a diagonal wash through three colors under a grid of faint dots. */
     val wallpaperTop = roles.getValue("wallpaperTop")
     val wallpaperMiddle = roles.getValue("wallpaperMiddle")
@@ -77,10 +77,8 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     val glassEdge = roles.getValue("glassEdge")
     val glassShadow = roles.getValue("glassShadow")
     val mediaBackdrop = roles.getValue("mediaBackdrop")
-    val mediaControl = roles.getValue("mediaControl")
     val mediaShade = roles.getValue("mediaShade")
     val onMedia = roles.getValue("onMedia")
-    val onMediaEdge = roles.getValue("onMediaEdge")
     // Text tints for message blocks, as the Mac draws them.
     val inlineCode = textBody.copy(alpha = 0.06f)
     val codeBlock = textBody.copy(alpha = 0.04f)
@@ -91,15 +89,15 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     fun person(colorIndex: Int): Color = DesignTokens.avatarColors[colorIndex].let { if (dark) lerp(it, Color.White, PersonLift) else it }
 
     /** The roles inside your own bubble, on [accentFill]: text, links and marks in [onAccent] and its quieter tints. */
-    internal fun onFill(): AppColors {
+    internal val onFill: AppColors by lazy {
         val on = roles.getValue("onAccent")
         val meta = roles.getValue("bubbleOutMeta")
         val rule = roles.getValue("bubbleOutRule")
-        return AppColors(roles + mapOf(
+        AppColors(roles + mapOf(
             "textPrimary" to on, "textBody" to on, "textSecondary" to meta, "textTertiary" to meta, "border" to rule,
             "accent" to on, "accentTint" to rule, "accentFill" to rule, "mentionText" to on, "mentionFill" to rule,
             "mentionYouText" to on, "reaction" to rule, "bubbleIn" to roles.getValue("accentFill"),
-        ), dark)
+        ), dark, underlineLinks = true)
     }
 
     private companion object { const val PersonLift = 0.45f }
@@ -108,9 +106,12 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
 /** Draws [content] on the accent's fill, as your own bubbles are, with every role it reads turned to suit. */
 @Composable
 fun OnAccentFill(content: @Composable () -> Unit) {
-    val colors = LocalColors.current
-    val fill = remember(colors) { colors.onFill() }
-    CompositionLocalProvider(LocalColors provides fill, LocalContentColor provides fill.textPrimary, content = content)
+    val fill = LocalColors.current.onFill
+    // Material's own components, such as progress indicators, draw in the scheme's primary, which is the bubble's fill.
+    val scheme = MaterialTheme.colorScheme.copy(primary = fill.textPrimary, secondaryContainer = fill.border, surfaceVariant = fill.border)
+    CompositionLocalProvider(LocalColors provides fill, LocalContentColor provides fill.textPrimary) {
+        MaterialTheme(colorScheme = scheme, content = content)
+    }
 }
 
 private val LocalColors = staticCompositionLocalOf { AppColors(DesignTokens.colors(false), false) }
@@ -127,6 +128,7 @@ private fun wallpaperRoles(dark: Boolean, scheme: ColorScheme): Map<String, Colo
         "mentionFill" to scheme.primary.copy(alpha = 0.12f), "wallpaperTop" to wash(scheme.primaryContainer),
         "wallpaperMiddle" to wash(scheme.secondaryContainer), "wallpaperBottom" to wash(scheme.tertiaryContainer),
         "wallpaperDot" to scheme.primary.copy(alpha = 0.08f),
+        "bubbleOutMeta" to scheme.onPrimary.copy(alpha = 0.8f), "bubbleOutRule" to scheme.onPrimary.copy(alpha = 0.22f),
         "bubbleIn" to if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLowest,
         "reaction" to scheme.surfaceContainerHighest,
     )

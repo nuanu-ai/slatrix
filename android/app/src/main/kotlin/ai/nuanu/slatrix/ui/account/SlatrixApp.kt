@@ -1,5 +1,8 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.SavedPreview
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.mutableStateMapOf
 import android.content.ActivityNotFoundException
 import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountState
@@ -135,6 +138,9 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 val media = remember(client) { MatrixMedia(client, File(context.cacheDir, "media")) }
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
                 val laterScope = rememberCoroutineScope()
+                // Later's cards and place outlive its tab, so coming back to it neither reads nor scrolls again.
+                val laterPreviews = remember(userId) { mutableStateMapOf<Pair<String, String>, SavedPreview?>() }
+                val laterList = rememberLazyListState()
                 // Later is the account's list, shared with the Mac through account data; Home's card, the message sheet
                 // and the Later page read it here. Once sync is back it reads the account again and writes what waited.
                 val laterSync = remember(client, userId, rooms) {
@@ -252,7 +258,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                         { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
                                             // A saved reply opens in its thread, so it is looked up first.
                                             laterScope.launch { jump(room, item.eventId, workspace?.threadRootOf(room.id, item.eventId)) }
-                                        } }) { item -> setSaved(item.roomId, item.eventId, false) }
+                                        } }, { item -> setSaved(item.roomId, item.eventId, false) }, laterPreviews, laterList)
                                 }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list

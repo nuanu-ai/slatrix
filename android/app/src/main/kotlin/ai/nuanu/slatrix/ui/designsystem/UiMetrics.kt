@@ -59,18 +59,14 @@ object UiMetrics {
     val CompactAvatar = 24.dp
     val ListAvatar = 36.dp
     val HeaderAvatar = 32.dp
-    val RootHeaderHeight = 60.dp
     val ComposerMinHeight = 64.dp
     val FormWidth = 480.dp
-    /** Slack's cards at the top of Home, such as Later. */
-    val HomeCard = 100.dp
     const val ProgressDelayMillis = 400L
     const val NoticeMillis = 4_000L
     /** How long the connection must be down before the offline banner shows, as on the Mac. */
     const val ConnectionNoticeMillis = 2_000L
     /** How long a message jumped to stays highlighted, as on the Mac. */
     const val HighlightMillis = 1_500L
-    val ExpandedWidth = 600.dp
     /** Slack's message sheet: its icons and its Reply tile. */
     val SheetIcon = 24.dp
     val ActionTile = 86.dp

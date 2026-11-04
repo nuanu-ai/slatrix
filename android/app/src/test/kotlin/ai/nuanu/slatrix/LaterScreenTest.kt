@@ -76,7 +76,6 @@ class LaterScreenTest {
         compose.onNodeWithText("Nothing saved for later").assertIsDisplayed()
     }
 
-    // capability: message.save
     @Test fun homesLaterTabShowsWhatIsSaved() {
         compose.setContent {
             SlatrixTheme {

@@ -173,8 +173,9 @@ internal fun InvitationRow(invitation: Invitation, onOpen: (String) -> Unit) {
         Column(Modifier.weight(1f)) {
             Text(invitation.name, style = MaterialTheme.typography.bodyLarge, color = colors.textPrimary,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            invitation.inviter?.let {
-                Text("$it invited you", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary,
+            // A direct invitation's name is already who sent it.
+            (if (invitation.direct) "Invited you" else invitation.inviter?.let { "$it invited you" })?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }

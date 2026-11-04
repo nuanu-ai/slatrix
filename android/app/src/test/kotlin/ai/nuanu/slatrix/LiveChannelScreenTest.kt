@@ -403,8 +403,12 @@ class LiveChannelScreenTest {
             }
         }
         compose.onNodeWithText("New").assertIsDisplayed()
+        val header = compose.onNodeWithContentDescription("Conversation details").fetchSemanticsNode().boundsInRoot
+        val newLine = compose.onNodeWithText("New").fetchSemanticsNode().boundsInRoot
+        assertTrue("The line clears the header over the list", newLine.top >= header.bottom)
         compose.onNodeWithText("Message 185").assertIsDisplayed()
-        compose.onNodeWithText("Message 184").assertIsNotDisplayed()
+        // Older messages scroll on under the glass header, above the line.
+        compose.onAllNodesWithText("Message 184").fetchSemanticsNodes().forEach { assertTrue(it.boundsInRoot.bottom <= newLine.top) }
         compose.onNodeWithText("Message 200").assertIsNotDisplayed()
 
         // Reading moves the SDK's marker after the newest message; the line stays until the reader leaves.

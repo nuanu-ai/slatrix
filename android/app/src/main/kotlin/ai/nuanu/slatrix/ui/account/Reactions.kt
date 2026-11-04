@@ -15,7 +15,6 @@ import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.text.format.DateUtils
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -51,6 +50,8 @@ internal fun Reactions(reactions: List<MessageReaction>, onToggle: ((String) -> 
         for (reaction in reactions) {
             Row(Modifier.height(UiMetrics.ChipHeight)
                 .background(if (reaction.mine) colors.accentFill else colors.reaction, CircleShape)
+                // Your own bubble tints every chip alike, so yours also wears an edge in the accent, white there.
+                .then(if (reaction.mine) Modifier.border(UiMetrics.Divider, colors.accent, CircleShape) else Modifier)
                 .semantics { selected = reaction.mine }
                 .combinedClickable(onLongClickLabel = "See who reacted", onLongClick = onShowWho) { onToggle?.invoke(reaction.key) }
                 .padding(horizontal = UiMetrics.GapMedium),

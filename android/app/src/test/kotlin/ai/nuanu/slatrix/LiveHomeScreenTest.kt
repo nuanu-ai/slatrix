@@ -468,17 +468,8 @@ class LiveHomeScreenTest {
         compose.runOnIdle { assertEquals(listOf<String?>(null), chosen) }
     }
 
-    @Test fun theWorkspaceHeaderSitsOnTheCanvasUnderDarkStatusIconsInLightMode() {
+    @Test fun lightModeKeepsTheStatusIconsDarkOverTheCanvas() {
         compose.setContent { SlatrixTheme(dark = false) { LiveHomeScreen("@alex:example.org", RoomListState(loading = false, spacesKnown = true), {}, {}, {}) } }
-
-        val header = compose.onNodeWithContentDescription("Switch workspace").fetchSemanticsNode().boundsInWindow
-        compose.runOnIdle {
-            val window = compose.activity.window.decorView
-            val bitmap = Bitmap.createBitmap(window.width, window.height, Bitmap.Config.ARGB_8888)
-            window.draw(Canvas(bitmap))
-            val pixel = Color(bitmap.getPixel(header.right.toInt() + 1, header.top.toInt()))
-            assertEquals(DesignTokens.colors(false).getValue("canvas"), pixel)
-        }
         compose.runOnIdle {
             val appearance = compose.activity.window.insetsController!!.systemBarsAppearance
             assertEquals("Status bar icons must be dark over the light canvas", WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,

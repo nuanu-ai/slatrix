@@ -308,7 +308,7 @@ private fun WorkspaceIcon(space: SpaceSummary?, size: Dp, loading: Boolean = fal
         .background(if (space != null) DesignTokens.avatarColors[space.colorIndex] else colors.accentTint), contentAlignment = Alignment.Center) {
         if (space == null && !loading) Icon(SlackIcons.Tray, null, Modifier.size(UiMetrics.Icon), tint = colors.accent)
         else if (space != null) Text(space.initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label,
-            color = colors.onAccent, maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
+            color = colors.onAvatar, maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
         Picture(space?.avatarUrl, size)
     }
 }
@@ -562,7 +562,7 @@ internal fun LiveAvatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.
     // People are round, as in every messenger; workspaces and channels are rounded squares.
     Box(Modifier.size(size).clip(CircleShape).background(DesignTokens.avatarColors[colorIndex]), contentAlignment = Alignment.Center) {
         // Two letters shrink to fit, so every avatar in a list has the same width.
-        Text(initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label, color = SlatrixTheme.colors.onAccent,
+        Text(initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label, color = SlatrixTheme.colors.onAvatar,
             maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
         Picture(url, size)
     }

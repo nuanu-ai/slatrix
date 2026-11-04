@@ -32,7 +32,6 @@ import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import android.content.ClipData
@@ -191,7 +190,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             if (target == newLine.start) {
                 // The line tops the screen with the unread messages under it; fewer than a screenful sit at the bottom.
                 val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == rows.size - 1 - index }
-                list.scrollBy(-(list.layoutInfo.viewportSize.height - (item?.size ?: 0)).coerceAtLeast(0).toFloat())
+                val info = list.layoutInfo
+                val visible = info.viewportSize.height - info.beforeContentPadding - info.afterContentPadding
+                list.scrollBy(-(visible - (item?.size ?: 0)).coerceAtLeast(0).toFloat())
                 return@LaunchedEffect
             }
             // The list is reversed, so the message sits at the bottom; newer ones below lift it a third of the way up.
@@ -253,11 +254,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     reacted?.let { ReactionsSheet(it.reactions, state.rows, state.ownUserId) { reacted = null } }
     val glass = rememberGlass()
-    // The header floats over the messages, so they start under it; its height is known before it draws, so they never move.
-    val density = LocalDensity.current
-    val statusBar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    var header by remember { mutableStateOf(statusBar + UiMetrics.HeaderRow) }
-    Box(Modifier.fillMaxSize().background(colors.canvas)) {
+    // The header floats over the messages, which start under it; the scaffold measures it first, so they never move.
+    Scaffold(topBar = { ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails) },
+        containerColor = colors.canvas, contentWindowInsets = WindowInsets(0)) { bars ->
+    val header = bars.calculateTopPadding()
     Column(Modifier.fillMaxSize().wallpaper().navigationBarsPadding().imePadding()) {
         // Only the messages pass under the header, so typing never redraws what it blurs.
         Box(Modifier.weight(1f).fillMaxWidth().glassSource(glass)) {
@@ -338,17 +338,15 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 { AlsoSendTo(room, composer.alsoToChannel, composerActions.onAlsoToChannel) }
             } else null) else CannotPost()
     }
-    ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails,
-        Modifier.align(Alignment.TopCenter).onSizeChanged { header = with(density) { it.height.toDp() } })
     }
 }
 
 /** The glass header over a conversation: back, who or what it is, and who's typing or how many are in it. */
 @Composable
 private fun ChatHeader(room: RoomSummary, thread: Boolean, typing: List<String>, glass: HazeState, onBack: () -> Unit,
-    onOpenDetails: () -> Unit, modifier: Modifier) {
+    onOpenDetails: () -> Unit) {
     val colors = SlatrixTheme.colors
-    Row(modifier.fillMaxWidth().glassBar(glass).statusBarsPadding().heightIn(min = UiMetrics.HeaderRow)
+    Row(Modifier.fillMaxWidth().glassBar(glass).statusBarsPadding().heightIn(min = UiMetrics.HeaderRow)
         .padding(horizontal = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
         val subtitle = when {
@@ -563,7 +561,8 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
                 val body: (@Composable () -> Unit)? = if (attachment == null || message.caption != null) {
                     { MessageBody(message, if (message.sendState == MessageSendState.Sending) fill.textSecondary else fill.textBody, me, onPerson) }
                 } else null
-                TimedBody(body) {
+                // Without a caption the time closes the attachment, at its end.
+                TimedBody(body, if (body == null) Modifier.align(Alignment.End) else Modifier) {
                     Text(when (message.sendState) {
                         MessageSendState.Sent -> remember(message.timestamp) { timeLabel(message.timestamp) }
                         MessageSendState.Sending -> "Sending…"
@@ -592,12 +591,12 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
 }
 
 /**
- * A bubble's text with its time: after the last line when there's room, as a messenger sets it, or else on a line of
+ * A bubble's text with its time: beside a single line when there's room, as a messenger sets it, or else on a line of
  * its own at the end.
  */
 @Composable
-private fun TimedBody(body: (@Composable () -> Unit)?, time: @Composable () -> Unit) {
-    Layout({ Box { body?.invoke() }; Box { time() } }) { (text, stamp), constraints ->
+private fun TimedBody(body: (@Composable () -> Unit)?, modifier: Modifier = Modifier, time: @Composable () -> Unit) {
+    Layout({ Box { body?.invoke() }; Box { time() } }, modifier) { (text, stamp), constraints ->
         val gap = UiMetrics.GapSmall.roundToPx()
         val loose = constraints.copy(minWidth = 0, minHeight = 0)
         val t = text.measure(loose)
@@ -606,8 +605,8 @@ private fun TimedBody(body: (@Composable () -> Unit)?, time: @Composable () -> U
         val width = (if (beside) t.width + gap + m.width else maxOf(t.width, m.width)).coerceIn(constraints.minWidth, constraints.maxWidth)
         val height = if (beside) t.height else t.height + m.height
         layout(width, height) {
-            t.place(0, 0)
-            m.place(width - m.width, height - m.height)
+            t.placeRelative(0, 0)
+            m.placeRelative(width - m.width, height - m.height)
         }
     }
 }

@@ -189,6 +189,16 @@ class MessageContentTest {
         compose.onNodeWithText("office.jpg", useUnmergedTree = true).assertDoesNotExist()
     }
 
+    // capability: message.image
+    @Test fun anImageWithoutACaptionEndsWithItsTimeInTheCorner() {
+        show(message("office.jpg").copy(kind = MessageKind.Attachment,
+            attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, source)))
+        val image = compose.onNodeWithContentDescription("office.jpg").fetchSemanticsNode().boundsInRoot
+        val time = compose.onNode(hasText("AM", substring = true) or hasText("PM", substring = true), useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertEquals("The time sits under the image's end", image.right, time.right, 1f)
+    }
+
     // capability: message.media-viewer
     @Test fun tappingAnImageOpensItFullScreenUntilClosed() {
         show(message("office.jpg").copy(kind = MessageKind.Attachment,

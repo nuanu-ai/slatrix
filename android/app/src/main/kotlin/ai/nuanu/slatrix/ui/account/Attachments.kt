@@ -224,7 +224,7 @@ private fun FileRow(attachment: MessageAttachment, opening: Boolean, onLongPress
 internal fun FileTile(kind: FileKind) {
     Box(Modifier.size(UiMetrics.FileTile).background(DesignTokens.fileColors.getValue(kind.token), MaterialTheme.shapes.medium),
         contentAlignment = Alignment.Center) {
-        Icon(Icons.Outlined.Description, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.onAccent)
+        Icon(Icons.Outlined.Description, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.onAvatar)
     }
 }
 
