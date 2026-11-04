@@ -104,7 +104,7 @@ jobs:
           built=.build/slatrix-spm/.commit
           if [[ -f $built ]]; then
             if changed=$(git diff --name-only --diff-filter=d "$(<"$built")" HEAD); then
-              echo "Building on $(<"$built"), $(wc -l <<< "$changed" | tr -d ' ') files changed since"
+              echo "Building on $(<"$built"), $(grep -c . <<< "$changed") files changed since"
               if [[ -n $changed ]]; then tr '\n' '\0' <<< "$changed" | xargs -0 touch; fi
             else
               rm -rf .build/slatrix-spm
