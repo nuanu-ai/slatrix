@@ -144,12 +144,12 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
         with(density) { HomeTab.entries.maxOf { measurer.measure(it.label, label).size.width }.toDp() }
     }
     BoxWithConstraints(Modifier.fillMaxSize().background(colors.canvas)) {
-    val beside = onNewMessage == null ||
-        (maxWidth - UiMetrics.GapLarge * 2 - UiMetrics.Fab - UiMetrics.GapMedium - UiMetrics.TabInset * 2) / HomeTab.entries.size >=
-        widest + UiMetrics.GapMedium * 2
-    // The lists scroll on under the tab capsule, and end clear of it and of New message above it.
-    val clearance = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + UiMetrics.TabBar + UiMetrics.GapSmall * 2 +
-        (UiMetrics.Fab + UiMetrics.GapLarge) * (if (beside) 0 else 1)
+        val beside = onNewMessage == null ||
+            (maxWidth - UiMetrics.GapLarge * 2 - UiMetrics.Fab - UiMetrics.GapMedium - UiMetrics.TabInset * 2) / HomeTab.entries.size >=
+            widest + UiMetrics.GapMedium * 2
+        // The lists scroll on under the tab capsule, and end clear of it and of New message above it.
+        val clearance = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + UiMetrics.TabBar + UiMetrics.GapSmall * 2 +
+            (UiMetrics.Fab + UiMetrics.GapLarge) * (if (beside) 0 else 1)
         Column(Modifier.fillMaxSize().glassSource(glass)) {
             HomeHeader(tab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
             Box(Modifier.weight(1f).fillMaxWidth()) {
