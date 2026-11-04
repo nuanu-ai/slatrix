@@ -23,6 +23,9 @@ import ai.nuanu.slatrix.ui.designsystem.wallpaper
 import dev.chrisbanes.haze.HazeState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.outlined.MoreVert
@@ -232,9 +235,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         loadOlder()
     }
     val back = rememberPredictiveBack(onBack = onBack)
-    var menu by remember { mutableStateOf<ConversationMessage?>(null) }
+    var menu by remember { mutableStateOf<Pair<ConversationMessage, LiftedMessage?>?>(null) }
     // Inside a thread, Reply has nowhere further to go.
-    menu?.let { MessageActionsHost(it, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent) { menu = null } }
+    menu?.let { (message, lifted) ->
+        MessageActionsHost(message, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent, lifted) { menu = null }
+    }
     var reacted by remember { mutableStateOf<ConversationMessage?>(null) }
     // The row and its tile's pixels, saved, so the viewer stays open on the same image when the phone turns.
     var viewing by rememberSaveable { mutableStateOf<Pair<String, Pair<Int, Int>>?>(null) }
@@ -291,13 +296,17 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             // The newer row, below; a run of one sender's bubbles shows their picture by its last.
                             val next = rows.getOrNull(rows.size - index) as? ConversationMessage
                             val last = next == null || !next.grouped || restarts(next)
-                            if (threadRoot != null && row.eventId == threadRoot) Column {
-                                LiveMessageRow(row.copy(grouped = false), true, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson, loadThreadOrigin) { menu = it }
-                                // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
-                                RepliesBar(replies)
-                            } else LiveMessageRow(if (restarts(row)) row.copy(grouped = false) else row, last, state.ownUserId,
-                                actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
-                                loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson, loadThreadOrigin) { menu = it }
+                            val root = threadRoot != null && row.eventId == threadRoot
+                            // The menu lifts the row as drawn here, so it draws the same row again.
+                            val draw: @Composable ((ConversationMessage, Float?) -> Unit) -> Unit = { onMenu ->
+                                LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId,
+                                    actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
+                                    loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
+                                    loadThreadOrigin, onMenu)
+                            }
+                            draw { message, top -> menu = message to top?.let { LiftedMessage(it) { draw { _, _ -> } } } }
+                            // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
+                            if (root) RepliesBar(replies)
                         }
                     }
                 }
@@ -516,16 +525,19 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?,
-    onMenu: (ConversationMessage) -> Unit) {
+    onMenu: (ConversationMessage, top: Float?) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
     val own = message.own
-    Row(Modifier.fillMaxWidth()
-        // Only a failed message answers a tap, as in Slack; any message opens its sheet on a long press.
+    // Kept without state, so scrolling never recomposes for it; read only when the menu opens over the row.
+    val placed = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    fun menu() = onMenu(message, placed[0]?.takeIf { it.isAttached }?.positionInWindow()?.y)
+    Row(Modifier.fillMaxWidth().onPlaced { placed[0] = it }
+        // Only a failed message answers a tap, as in Slack; any message opens its menu on a long press.
         .then(if (failed) Modifier.combinedClickable(onClickLabel = "Message actions", onLongClickLabel = "Message actions",
-            onLongClick = { onMenu(message) }) { onMenu(message) }
-        else Modifier.pointerInput(message) { detectTapGestures(onLongPress = { onMenu(message) }) }
-            .semantics(mergeDescendants = true) { onLongClick("Message actions") { onMenu(message); true } })
+            onLongClick = ::menu, onClick = ::menu)
+        else Modifier.pointerInput(message) { detectTapGestures(onLongPress = { menu() }) }
+            .semantics(mergeDescendants = true) { onLongClick("Message actions") { menu(); true } })
         .padding(top = if (message.grouped) UiMetrics.Hairline * 4 else UiMetrics.GapSmall)
         .padding(start = if (own) UiMetrics.BubbleGutter + UiMetrics.GapSmall else UiMetrics.GapMedium,
             end = if (own) UiMetrics.GapMedium else UiMetrics.BubbleGutter),
@@ -560,7 +572,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
                 }
                 val attachment = message.attachment
                 attachment?.let { Box(Modifier.padding(vertical = UiMetrics.GapTiny)) {
-                    Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, { onMenu(message) }, onView)
+                    Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, ::menu, onView)
                 } }
                 // An attachment's text is its caption; without one it is the file's name, which the attachment shows.
                 val body: (@Composable () -> Unit)? = if (attachment == null || message.caption != null) {

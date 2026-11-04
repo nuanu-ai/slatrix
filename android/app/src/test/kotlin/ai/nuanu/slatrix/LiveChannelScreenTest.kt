@@ -193,7 +193,7 @@ class LiveChannelScreenTest {
     }
 
     // capability: conversation.grouping
-    @Test fun aGroupedMessageDropsAvatarAndNameAndKeepsItsTimeInItsMenu() {
+    @Test fun aGroupedMessageDropsAvatarAndNameAndKeepsItsTime() {
         val at = LocalDate.now().atTime(9, 41).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val rows = listOf(message("First", minutes = 0).copy(timestamp = at), message("Second", minutes = 0).copy(timestamp = at, grouped = true))
         compose.setContent {
@@ -205,8 +205,7 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Second").assertIsDisplayed()
         compose.onAllNodesWithText("Mira", useUnmergedTree = true).assertCountEquals(1)
         compose.onAllNodesWithText("M", useUnmergedTree = true).assertCountEquals(1)
-        compose.onNodeWithText("Second").performTouchInput { longClick() }
-        compose.onNodeWithText("Today at 9:41", substring = true).assertIsDisplayed()
+        compose.onNode(hasText("Second", substring = true) and hasText("9:41", substring = true)).assertIsDisplayed()
     }
 
     // capability: people.avatars
@@ -260,9 +259,9 @@ class LiveChannelScreenTest {
             .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnClick).and(SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick)))
             .performTouchInput { longClick() }
         compose.onNodeWithText("Retry").assertDoesNotExist()
-        compose.onNodeWithText("Copy message").performClick()
+        compose.onNodeWithText("Copy text").performClick()
         compose.waitUntil { clipboard.primaryClip?.getItemAt(0)?.text?.toString() == "Ship it" }
-        compose.onNodeWithText("Copy message").assertDoesNotExist()
+        compose.onNodeWithText("Copy text").assertDoesNotExist()
 
         compose.onNodeWithText("Lost on the way").performClick()
         compose.onNodeWithText("Retry").performClick()

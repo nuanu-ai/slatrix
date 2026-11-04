@@ -48,6 +48,13 @@ object UiMetrics {
     /** A bubble's room on the side away from its author, so a long one never spans the screen. */
     val BubbleGutter = 56.dp
     val GlassBlur = 24.dp
+    /** The message menu: its card's width and rows, the reaction bar and its buttons, and the blur of the screen behind. */
+    val MenuWidth = 252.dp
+    val MenuItem = 44.dp
+    val MenuInset = 6.dp
+    val ReactionBar = 52.dp
+    val ReactionButton = 40.dp
+    val MenuBlur = 14.dp
     val GlassLift = 12.dp
     val WallpaperGrid = 20.dp
     val WallpaperDot = 1.dp

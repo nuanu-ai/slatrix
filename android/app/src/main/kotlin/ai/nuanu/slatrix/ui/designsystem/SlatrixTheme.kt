@@ -76,6 +76,9 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     val glassHeader = roles.getValue("glassHeader")
     val glassEdge = roles.getValue("glassEdge")
     val glassShadow = roles.getValue("glassShadow")
+    /** The message menu: its cards' [glassMenu] over a screen blurred and washed with [dim]. */
+    val glassMenu = roles.getValue("glassMenu")
+    val dim = roles.getValue("dim")
     val mediaBackdrop = roles.getValue("mediaBackdrop")
     val mediaShade = roles.getValue("mediaShade")
     val onMedia = roles.getValue("onMedia")
