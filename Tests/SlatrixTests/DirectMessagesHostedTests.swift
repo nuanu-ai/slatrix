@@ -64,7 +64,8 @@ struct DirectMessagesHostedTests {
             rootView: DirectMessageRow(room: ChatRoom(id: "!r:example.org", name: "Row", isDirect: true))
                 .frame(width: SidebarLayout.defaultWidth).environmentObject(appearance).environment(\.metrics, metrics)
         ).fittingSize.height
-        let point = NSPoint(x: metrics.sidebarInset + SidebarLayout.defaultWidth / 2, y: below.minY - metrics.sp8 - row * 1.5)
+        let point = NSPoint(
+            x: metrics.sidebarInset + SidebarLayout.defaultWidth / 2, y: below.minY - metrics.sp8 - row * 1.5)
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             await drainMainActor()
             window.sendEvent(
