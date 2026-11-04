@@ -46,8 +46,8 @@ object UiMetrics {
     /** The faces on a thread's replies bar. */
     val Facepile = 20.dp
     val ThreadBar = 40.dp
-    /** A bubble's room on the side away from its author, so a long one never spans the screen. */
-    val BubbleGutter = 56.dp
+    /** The share of the width a bubble leaves on the side away from its author, so a long one reaches about 85%, as in Telegram. */
+    const val BubbleGutter = 0.12f
     val GlassBlur = 24.dp
     /** The message menu: its card's width and rows, the reaction bar and its buttons, and the blur of the screen behind. */
     val MenuWidth = 252.dp
