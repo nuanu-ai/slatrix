@@ -258,8 +258,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val statusBar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     var header by remember { mutableStateOf(statusBar + UiMetrics.HeaderRow) }
     Box(Modifier.fillMaxSize().background(colors.canvas)) {
-    Column(Modifier.fillMaxSize().glassSource(glass).wallpaper().navigationBarsPadding().imePadding()) {
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+    Column(Modifier.fillMaxSize().wallpaper().navigationBarsPadding().imePadding()) {
+        // Only the messages pass under the header, so typing never redraws what it blurs.
+        Box(Modifier.weight(1f).fillMaxWidth().glassSource(glass)) {
             val rows = state.rows
             // A reset re-pages the thread; the last count stays until the new one is known, so the bar doesn't blank.
             var replies by remember { mutableStateOf<Int?>(null) }

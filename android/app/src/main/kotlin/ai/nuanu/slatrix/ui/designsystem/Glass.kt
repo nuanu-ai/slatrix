@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.ui.designsystem
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
@@ -10,6 +11,12 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Canvas
@@ -61,12 +68,33 @@ fun Modifier.glassBar(state: HazeState): Modifier {
 }
 
 /** A bubble's fill in [shape], over a hairline of [edge] a little below it, which lifts it off the wallpaper. */
-fun Modifier.bubble(shape: Shape, fill: Color, edge: Color): Modifier = drawWithCache {
-    val outline = shape.createOutline(size, layoutDirection, this)
-    val lift = UiMetrics.Hairline.toPx() * 2
-    onDrawBehind {
-        translate(top = lift) { drawOutline(outline, edge) }
+fun Modifier.bubble(shape: Shape, fill: Color, edge: Color): Modifier = this then BubbleElement(shape, fill, edge)
+
+// An element compared by value, so recomposing a bubble's row, or the composer on every keystroke, leaves it alone.
+private data class BubbleElement(val shape: Shape, val fill: Color, val edge: Color) : ModifierNodeElement<BubbleNode>() {
+    override fun create() = BubbleNode(shape, fill, edge)
+    override fun update(node: BubbleNode) {
+        node.shape = shape
+        node.fill = fill
+        node.edge = edge
+        node.outline = null
+        node.invalidateDraw()
+    }
+}
+
+private class BubbleNode(var shape: Shape, var fill: Color, var edge: Color) : Modifier.Node(), DrawModifierNode {
+    var outline: Outline? = null
+    private var outlineSize = Size.Unspecified
+
+    override fun ContentDrawScope.draw() {
+        if (outline == null || outlineSize != size) {
+            outline = shape.createOutline(size, layoutDirection, this)
+            outlineSize = size
+        }
+        val outline = outline!!
+        translate(top = UiMetrics.Hairline.toPx() * 2) { drawOutline(outline, edge) }
         drawOutline(outline, fill)
+        drawContent()
     }
 }
 
@@ -74,7 +102,8 @@ fun Modifier.bubble(shape: Shape, fill: Color, edge: Color): Modifier = drawWith
 @Composable
 fun Modifier.wallpaper(): Modifier {
     val colors = SlatrixTheme.colors
-    return drawWithCache {
+    // Remembered, so recomposing the conversation keeps the drawing cache instead of building the wash and dots again.
+    return this then remember(colors) { Modifier.drawWithCache {
         val slant = size.height * tan(Math.toRadians(WashTurn)).toFloat() / 2
         val wash = Brush.linearGradient(0f to colors.wallpaperTop, WashMiddle to colors.wallpaperMiddle, 1f to colors.wallpaperBottom,
             start = Offset(size.width / 2 - slant, 0f), end = Offset(size.width / 2 + slant, size.height))
@@ -87,7 +116,7 @@ fun Modifier.wallpaper(): Modifier {
             drawRect(wash)
             drawRect(dots)
         }
-    }
+    } }
 }
 
 private const val WashTurn = 15.0
