@@ -37,6 +37,34 @@ struct DesktopMessageNotification {
     var body: String
     var playSound: Bool
 
+    /// The title and one-line text of a message, as the cases in `spec/notification-text.json` say.
+    static func message(room: String, sender: String, direct: Bool, body: String) -> (title: String, text: String) {
+        let text = plain(body)
+        return direct ? (sender, text) : (room, "\(sender): \(text)")
+    }
+
+    private static let markers = [
+        #"\*\*(.+?)\*\*"#, "__(.+?)__", "~~(.+?)~~", "`([^`]+)`",
+        #"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])"#, #"(?<![\w_])_(?!\s)(.+?)(?<!\s)_(?![\w_])"#,
+    ].map { try! NSRegularExpression(pattern: $0) }
+
+    private static func plain(_ body: String) -> String {
+        var lines = body.components(separatedBy: "\n")
+        // A reply's body opens with the quoted message, "> <@sender> …", and a blank line.
+        if lines.first?.hasPrefix("> <") == true, let blank = lines.firstIndex(where: { !$0.hasPrefix(">") }),
+            lines[blank].isEmpty
+        {
+            lines.removeFirst(blank + 1)
+        }
+        let joined = lines.filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("```") }
+            .map { $0.hasPrefix(">") ? String($0.dropFirst()) : $0 }.joined(separator: " ")
+        let text = markers.reduce(joined) { text, marker in
+            marker.stringByReplacingMatches(
+                in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "$1")
+        }
+        return text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
     func applyingPreviewPreference(_ enabled: Bool) -> Self {
         guard !enabled else { return self }
         var hidden = self

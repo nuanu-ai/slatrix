@@ -412,6 +412,8 @@ struct TimelineView: View {
 struct MessageRowActions {
     var openProfile: (() -> Void)?
     var thread: () -> Void = {}
+    /// Opens the thread's timeline ahead of a click on its replies.
+    var prepareThread: () -> Void = {}
     var reply: () -> Void = {}
     var save: () -> Void = {}
     /// Nil while the message cannot take a reaction.
@@ -540,7 +542,7 @@ struct MessageRow: View {
                     if !isThread && message.replyCount > 0 {
                         ThreadRepliesBar(
                             count: message.replyCount, lastReply: message.lastReply, avatar: replierAvatar,
-                            action: actions.thread)
+                            prepare: actions.prepareThread, action: actions.thread)
                     }
                     if pendingSend, let failure = sendFailure {
                         VStack(alignment: .leading, spacing: m.sp4) {
@@ -658,6 +660,7 @@ private struct ThreadRepliesBar: View {
     let count: Int
     let lastReply: ThreadReply?
     let avatar: AvatarView?
+    let prepare: () -> Void
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.metrics) private var m
@@ -682,7 +685,12 @@ private struct ThreadRepliesBar: View {
             }.lineLimit(1).padding(m.sp4).frame(maxWidth: m(Self.maxWidth), minHeight: m.sp32, alignment: .leading)
                 .background(hovering ? colors.canvas : .clear, in: shape)
                 .overlay(shape.strokeBorder(hovering ? colors.border : .clear))
-        }.buttonStyle(.row).onHover { hovering = $0 }.accessibilityLabel("\(count) replies, view thread")
+        }.buttonStyle(.row)
+            .onHover {
+                hovering = $0
+                if $0 { prepare() }
+            }
+            .accessibilityLabel("\(count) replies, view thread")
             // The face lines up with the text above; the hover box reaches past it.
             .padding(.leading, -m.sp4)
     }
@@ -777,7 +785,8 @@ extension TimelineRowContext {
                         ChatUser(id: message.senderID, name: message.senderName, avatarURL: message.avatarURL))
                 }
             },
-            thread: { self.onThread(message) }, reply: { self.onReply(message) }, save: { self.onSave(message) },
+            thread: { self.onThread(message) }, prepareThread: { self.matrix?.prepareThread(message) },
+            reply: { self.onReply(message) }, save: { self.onSave(message) },
             react: target.map { target in { self.onReact(target, $0) } },
             openReactions: target.map { target in
                 {

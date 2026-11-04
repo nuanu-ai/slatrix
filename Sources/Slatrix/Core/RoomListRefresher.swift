@@ -13,6 +13,8 @@ private final class RoomObserver: RoomInfoListener, @unchecked Sendable {
 final class RoomListRefresher {
     private(set) var rooms: [ChatRoom] = []
     private(set) var workspaces: [Workspace] = []
+    /// Whether the room list has been read once: until then, no rooms means not yet, not none.
+    private(set) var loaded = false
     var onChange: (() -> Void)?
     var onError: ((Error) -> Void)?
     private var client: Client?
@@ -32,6 +34,7 @@ final class RoomListRefresher {
         state = State()
         rooms = []
         workspaces = []
+        loaded = false
         self.client = client
     }
 
@@ -88,11 +91,13 @@ final class RoomListRefresher {
                     return
                 }
                 self.state = outcome.state
+                let first = only == nil && !self.loaded
+                if first { self.loaded = true }
                 if let (rooms, workspaces) = outcome.sidebar {
                     self.rooms = rooms
                     self.workspaces = workspaces
-                    self.onChange?()
                 }
+                if first || outcome.sidebar != nil { self.onChange?() }
                 if let failure = outcome.failure { self.onError?(failure) }
             }
             if let self, self.generation == generation { self.task = nil }

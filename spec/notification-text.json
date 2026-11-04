@@ -1,0 +1,13 @@
+{
+  "about": "What a message notification says. A channel's is titled with the channel and its text starts with the sender's name; a direct message's is titled with the sender. The text is the message's plain body on one line: a reply's quoted fallback is dropped, Markdown markers and quote marks go, and line breaks become spaces.",
+  "cases": [
+    { "name": "A channel message names its sender", "room": "Design", "sender": "Alice", "direct": false, "body": "Ship it", "title": "Design", "text": "Alice: Ship it" },
+    { "name": "A direct message is titled with its sender", "room": "Alice", "sender": "Alice", "direct": true, "body": "Ship it", "title": "Alice", "text": "Ship it" },
+    { "name": "Markdown markers go", "room": "Design", "sender": "Alice", "direct": true, "body": "**Bold** and _italic_ and *also* and `code` and ~~gone~~", "title": "Alice", "text": "Bold and italic and also and code and gone" },
+    { "name": "Underscores inside a word stay", "room": "Design", "sender": "Alice", "direct": true, "body": "rename my_var_name to snake_case", "title": "Alice", "text": "rename my_var_name to snake_case" },
+    { "name": "A reply's quoted fallback is dropped", "room": "Design", "sender": "Alice", "direct": true, "body": "> <@bob:example.org> Earlier\n> and more\n\nMy reply", "title": "Alice", "text": "My reply" },
+    { "name": "A quote keeps its words", "room": "Design", "sender": "Alice", "direct": true, "body": "> worth reading", "title": "Alice", "text": "worth reading" },
+    { "name": "Lines join into one", "room": "Design", "sender": "Alice", "direct": true, "body": "First line\n\nSecond line\n- item", "title": "Alice", "text": "First line Second line - item" },
+    { "name": "A code block keeps its code", "room": "Design", "sender": "Alice", "direct": true, "body": "```swift\nlet x = 1\n```", "title": "Alice", "text": "let x = 1" }
+  ]
+}

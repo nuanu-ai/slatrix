@@ -27,7 +27,7 @@ State and Matrix logic never import a view. Rows and leaf views take plain value
 
 ## Testing
 
-- Every behavior change starts red. Work with the `tdd` skill: one failing test, the minimal change, repeat; a bug fix starts with a test that fails for the reported reason. Commit the failing test first, with a message that says how it fails, then the change that makes it pass, so the pull request shows red before green.
+- Every behavior change starts red. Work with the `tdd` skill: one failing test, the minimal change, repeat; a bug fix starts with a test that fails for the reported reason. Watch it fail locally; the test and its fix may share a commit, since CI's red check runs new tests on the base branch's sources and requires them to fail.
 - Every new or changed test passes the `test-audit` authoring gate. No tests of code written inside the test, no exact internal call counts, no restated constants, no assertion counting.
 - Wait on conditions, never on sleeps or a fixed number of yields.
 - Check that a test can fail: mutate the production line it protects and watch it go red.
@@ -39,8 +39,9 @@ The README and anything else a visitor reads should sound like a person wrote it
 
 ## Workflow
 
-- Branch per change, small commits with imperative subjects, a pull request, green CI before merge. Pull requests merge as one squashed commit, so `main` stays green and bisectable while the pull request keeps the red-then-green record.
-- Open pull requests with auto-merge on (`gh pr merge --auto --squash`), so green CI merges them.
+- A branch and pull request per series of related fixes, not per fix, with small commits with imperative subjects and green CI before merge. Pull requests merge as one squashed commit, so `main` stays green and bisectable.
+- Keep working while CI runs instead of waiting on it, and push the next fix to the same branch. Locally run only the suites a change touches; CI runs everything.
+- Open the pull request as a draft with the first fix, and when the series is done mark it ready with auto-merge on (`gh pr ready` then `gh pr merge --auto --squash`), so green CI merges it.
 - Match the process to the change. Small fixes (a visual tweak, a wrong condition, a few lines) go together in one pull request: one red test and the fix for each, the protected line mutated once by hand, and no mutation runs, hosted runs, snapshots or review skills unless the fix is in their area. New features, hard bugs and anything touching sync, storage or encryption get the full process.
 - Review a larger diff with `code-review` and `ponytail-review` before it merges. Hard bugs go through `diagnosing-bugs`.
 - Subagents run on Opus. Give open-ended work high effort: architecture, cross-cutting refactors, hard bugs, UI that needs judgment. Narrow tasks with a known shape get medium: a bug with a known cause, a mechanical sweep, a port.

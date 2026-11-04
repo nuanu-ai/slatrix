@@ -48,6 +48,19 @@ struct TimelineScrollPolicyTests {
         #expect(top == expected)
     }
 
+    @Test(
+        "A change the reader didn't make counts as a jump when it moves their row or takes them off the newest message",
+        arguments: [
+            (Policy.Position.bottom, Viewport(top: 400, height: 600, contentHeight: 1_000), CGFloat?.none),
+            (.bottom, Viewport(top: 400, height: 600, contentHeight: 1_195), 195),
+            (.anchored(rowID: "row", offset: -20), Viewport(top: 120, height: 600, contentHeight: 1_000), nil),
+            (.anchored(rowID: "row", offset: -20), Viewport(top: 7, height: 600, contentHeight: 1_000), 113),
+        ])
+    func jumps(before: Policy.Position, after: Viewport, moved: CGFloat?) {
+        let row = Policy.RowFrame(id: "row", top: 100, height: 50)
+        #expect(Policy.jump(from: before, to: after) { $0 == row.id ? row : nil } == moved)
+    }
+
     @Test("A position whose row is gone restores nothing")
     func missingRow() {
         #expect(

@@ -162,6 +162,21 @@ struct TimelineHostedTests {
         var showsImage: Bool { Self.views(in: hosting).contains { ($0 as? NSImageView)?.image != nil } }
     }
 
+    /// A message taller than the screen: a heading, a code block of long unbroken lines, a list and a reaction.
+    private static func longMessage(_ index: Int) -> ChatMessage {
+        let tunnel = String(repeating: "-L 27190:127.0.0.1:27190 ", count: 12)
+        let steps = (0..<8).map { "<li>Step \($0) with <code>inline code</code> and <strong>bold words</strong></li>" }
+        let html =
+            "<p><strong>Setting up the tunnel</strong></p><pre><code>ssh \(tunnel)\n\(tunnel)\n\(tunnel)</code></pre>"
+            + "<ul>\(steps.joined())</ul><p>" + String(repeating: "More prose that keeps going. ", count: 30) + "</p>"
+        var message = ChatMessage(
+            id: "Long-\(index)", roomID: room.id, senderID: "@other:example.org", senderName: "Other",
+            body: "Setting up the tunnel", formattedBody: html,
+            timestamp: Date(timeIntervalSince1970: 1_761_192_000 + Double(index) * 400))
+        message.reactions = [MessageReaction(key: "👍", count: 1, mine: false, senders: ["@other:example.org"])]
+        return message
+    }
+
     private static func messages(_ range: Range<Int>, prefix: String = "Message") -> [ChatMessage] {
         range.map { index in
             ChatMessage(
@@ -214,6 +229,82 @@ struct TimelineHostedTests {
         harness.window.setContentSize(NSSize(width: 380, height: 400))
         harness.layout()
         #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        await settle(harness)
+        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+    }
+
+    @Test("A conversation at its newest message stays there when the space above or below it changes")
+    func staysPinnedThroughHeightChange() async throws {
+        let harness = Harness(messages: Self.messages(0..<20) + [Self.longMessage(20)], height: 700)
+        defer { harness.close() }
+        await settle(harness)
+        // The composer grows with a draft or queued files, or the header with a banner.
+        harness.window.setContentSize(NSSize(width: 620, height: 505))
+        harness.layout()
+        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        harness.window.setContentSize(NSSize(width: 620, height: 700))
+        harness.layout()
+        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+    }
+
+    @Test("Narrowing the window keeps the message you are reading where it was, even one scrolled mostly past")
+    func readingStaysStillThroughResize() async throws {
+        let harness = Harness(
+            messages: Self.messages(0..<30) + [Self.longMessage(30)] + Self.messages(31..<70), height: 800)
+        defer { harness.close() }
+        harness.window.setContentSize(NSSize(width: 1_381, height: 800))
+        await settle(harness)
+        _ = await eventually {
+            harness.scroll(toTop: harness.clip.bounds.minY - 200)
+            return harness.cell(showing: "Long-30") != nil
+        }
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        let row = table.row(for: try #require(harness.cell(showing: "Long-30")))
+        // Only its last 100 points on screen.
+        harness.scroll(toTop: table.rect(ofRow: row).maxY - 100)
+        /// The message's edges from the top of the screen.
+        func edges() -> (top: CGFloat, bottom: CGFloat) {
+            let rect = table.rect(ofRow: row)
+            return (rect.minY - harness.clip.bounds.minY, rect.maxY - harness.clip.bounds.minY)
+        }
+        let before = edges().top
+        #expect(before < 0)
+        // Its lines wrap more and it grows, from the top edge it keeps.
+        harness.window.setContentSize(NSSize(width: 736, height: 800))
+        harness.layout()
+        #expect(edges().top == before && edges().bottom >= 100)
+        await drainMainActor()
+        await settle(harness)
+        #expect(edges().top == before && edges().bottom >= 100)
+    }
+
+    @Test("Sending files brings the conversation to them, from wherever you were reading")
+    func sendingBringsToBottom() async throws {
+        let earlier = Self.messages(0..<60)
+        let harness = Harness(messages: earlier, height: 700)
+        defer { harness.close() }
+        await settle(harness)
+        harness.scroll(toTop: harness.clip.bounds.minY - 1_500)
+        let files = [
+            ("wide.jpg", "image/jpeg", 4_032, 3_024, 3_400_000), ("tall.png", "image/png", 1_080, 1_920, 900_000),
+            ("pano.jpg", "image/jpeg", 3_000, 800, 1_200_000), ("square.png", "image/png", 800, 800, 300_000),
+            ("report.pdf", "application/pdf", 0, 0, 80_000), ("notes.txt", "text/plain", 0, 0, 2_000),
+        ]
+        let sent = files.enumerated().map { index, file in
+            var message = ChatMessage(
+                id: "sent-\(index)", roomID: Self.room.id, senderID: Self.user, senderName: "Reader", body: file.0,
+                timestamp: earlier[59].timestamp.addingTimeInterval(60), kind: file.2 > 0 ? "m.image" : "m.file")
+            message.timelineEventID = "transaction-\(index)"
+            message.sendState = "sending"
+            message.attachment = MessageAttachment(
+                name: file.0, url: "", mimeType: file.1, size: UInt64(file.4),
+                width: file.2 > 0 ? UInt64(file.2) : nil, height: file.3 > 0 ? UInt64(file.3) : nil)
+            return message
+        }
+        harness.service.messages = earlier + sent
+        await settle(harness) { harness.cell(showing: "transaction-5") != nil }
+        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        await drainMainActor()
         await settle(harness)
         #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
     }

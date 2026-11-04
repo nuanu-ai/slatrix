@@ -7,7 +7,7 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     private let cached: [TimelineItem]
     private var listeners: [TimelineListener] = []
     private var handles: [FakeCancellableHandle] = []
-    let pageGate = Gate()
+    let pageGate: Gate
     /// Whether the next older page reaches the start of the room.
     var startReached: Bool {
         get { lock.withLock { reachedStart } }
@@ -18,8 +18,9 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     let receipts = Recorder<String>()
     /// False until a listener is added: a timeline still being set up is not closed.
     var allListenersCancelled: Bool { lock.withLock { !handles.isEmpty && handles.allSatisfy(\.isCancelled) } }
-    init(_ cached: [TimelineItem]) {
+    init(_ cached: [TimelineItem], pageGate: Gate = Gate()) {
         self.cached = cached
+        self.pageGate = pageGate
         super.init(noHandle: .init())
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
@@ -61,6 +62,8 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     let focuses = Recorder<TimelineFocus>()
     /// Holds reading the event cache, as a slow disk would.
     let buildGate = Gate()
+    /// Holds reading an older page in every timeline the room builds.
+    let pageGate = Gate()
     /// Holds a timeline opened at an older message, as the server's context request would.
     let eventGate = Gate()
     /// What a timeline opened at an older message loads; the cache when nil.
@@ -85,7 +88,7 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
         if case .event = configuration.focus { await eventGate.wait() }
         var items = cached
         if case .event = configuration.focus, let focusedItems { items = focusedItems }
-        let timeline = FakeLiveTimeline(items)
+        let timeline = FakeLiveTimeline(items, pageGate: pageGate)
         timelines.append(timeline)
         return timeline
     }
