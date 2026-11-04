@@ -45,7 +45,7 @@ struct DirectMessagesHostedTests {
             NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
         }
 
-        #expect(await eventually { field("Find a conversation…") != nil })
+        #expect(await eventually { sidebarShown(in: hosting) && field("Find a DM") == nil })
         // A channel read first, for going back to later.
         let first = matrix.selectedRoomID
         menu("next-conversation")
@@ -84,7 +84,7 @@ struct DirectMessagesHostedTests {
 
         // Switching workspace brings its conversations back.
         menu("workspace-1")
-        #expect(await eventually { field("Find a conversation…") != nil && field("Find a DM") == nil })
+        #expect(await eventually { sidebarShown(in: hosting) && field("Find a DM") == nil })
 
         // Back in DMs, the direct message read last stays open; going back to a channel leaves the list.
         menu("dms")
@@ -97,7 +97,7 @@ struct DirectMessagesHostedTests {
         menu("back")
         #expect(
             await eventually {
-                matrix.selectedRoomID == channel && field("Find a conversation…") != nil && field("Find a DM") == nil
+                matrix.selectedRoomID == channel && sidebarShown(in: hosting) && field("Find a DM") == nil
             })
     }
 
@@ -122,13 +122,13 @@ struct DirectMessagesHostedTests {
         func menu(_ action: String) {
             NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
         }
-        #expect(await eventually { matrix.selectedRoomID != nil && shows("Find a conversation…") })
+        #expect(await eventually { matrix.selectedRoomID != nil && sidebarShown(in: hosting) })
         window.setContentSize(NSSize(width: 480, height: 900))
-        #expect(await eventually { !shows("Find a conversation…") })
+        #expect(await eventually { !sidebarShown(in: hosting) })
         menu("activity")
         await drainMainActor()
         menu("toggle-sidebar")
-        #expect(await eventually { shows("Find a conversation…") })
+        #expect(await eventually { sidebarShown(in: hosting) })
         menu("dms")
         let direct = Set(matrix.rooms.filter(\.isDirect).map(\.id))
         #expect(await eventually { matrix.selectedRoomID.map(direct.contains) == true })
