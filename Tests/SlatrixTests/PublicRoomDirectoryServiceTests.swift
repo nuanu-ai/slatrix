@@ -342,4 +342,18 @@ extension PublicRoomDirectoryServiceTests {
         await service.search(query: " rese ")
         #expect(ids() == ["!research:example.org"])
     }
+
+    @Test("A workspace's channels include those in its nested spaces, as its sidebar does")
+    func listsNestedSpaceChannels() async {
+        let client = FakeClient()
+        client.spaces.roomLists["!lab:example.org"] = SpaceListFake(pages: [
+            [child("welcome", name: "Welcome", state: .joined), child("team", name: "Team", type: .space)]
+        ])
+        client.spaces.roomLists["!team:example.org"] = SpaceListFake(pages: [
+            [child("design", name: "Design", state: .joined), child("lab", name: "Lab", type: .space)]
+        ])
+        service.open(client: client, spaceID: "!lab:example.org", validate: {})
+        await service.search(query: "")
+        #expect(ids() == ["!welcome:example.org", "!design:example.org"])
+    }
 }
