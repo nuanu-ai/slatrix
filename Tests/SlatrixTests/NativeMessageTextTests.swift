@@ -128,6 +128,21 @@ struct NativeMessageTextTests {
         }
     }
 
+    @Test("A blank line between paragraphs is a small gap, not a whole line; in a code block it stays a line")
+    func paragraphGap() {
+        func gap(_ block: MessageBlock = MessageBlock()) -> CGFloat {
+            func secondLine(_ body: String) -> CGFloat {
+                let text = NativeSelectableMessageText.attributed(
+                    [MessageBodyRun(text: body, block: block)], fontSize: 14, textColor: .labelColor,
+                    linkColor: .systemBlue)
+                return positions(text, width: 400)(body.count - 1).y
+            }
+            return secondLine("One\n\nTwo") - secondLine("One\nTwo")
+        }
+        #expect((4...10).contains(gap()))
+        #expect(gap(MessageBlock(code: true)) > 14)
+    }
+
     @Test("A quote indents past its bar, and the text after it does not")
     func quoteLayout() {
         let text = NativeSelectableMessageText.attributed(

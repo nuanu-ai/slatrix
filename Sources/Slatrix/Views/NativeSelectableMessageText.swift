@@ -285,6 +285,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             lineStart = run.text.hasSuffix("\n")
         }
         MessageBlocks.padCodeBlocks(result, in: NSRange(location: 0, length: result.length), fontSize: fontSize)
+        MessageBlocks.shrinkBlankLines(result, fontSize: fontSize)
         result.padMentionPills()
         return result
     }
