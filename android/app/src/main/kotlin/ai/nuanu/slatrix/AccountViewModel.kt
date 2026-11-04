@@ -1,3 +1,4 @@
+// CI timing probe, never merged.
 package ai.nuanu.slatrix
 
 import android.app.Application
