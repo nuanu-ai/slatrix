@@ -1,5 +1,8 @@
 package ai.nuanu.slatrix
 
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.platform.LocalDensity
 import android.app.Application
 import android.view.WindowInsetsController
 import ai.nuanu.slatrix.core.LatestMessage
@@ -78,6 +81,33 @@ class LiveHomeScreenTest {
         compose.runOnIdle { open.value = false }
         tab("DMs").assertIsSelected()
         compose.onNodeWithText("Person 39").assertIsDisplayed()
+    }
+
+    private fun showTabBar(fontScale: Float) {
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
+                SlatrixTheme {
+                    LiveHomeScreen("@alex:example.org", RoomListState(emptyList(), loading = false, spacesKnown = true), {}, {}, {}, onNewMessage = {})
+                }
+            }
+        }
+    }
+
+    private fun SemanticsNodeInteraction.bounds() = fetchSemanticsNode().boundsInRoot
+
+    @Test fun newMessageSitsBesideTheTabBarWhereEveryTabFitsItsLabel() {
+        showTabBar(1f)
+        val button = compose.onNodeWithContentDescription("New message").bounds()
+        assertTrue(button.left >= tab("Later").bounds().right)
+        assertTrue(button.top < tab("Later").bounds().bottom)
+    }
+
+    @Config(qualifiers = "w320dp-h704dp-xxxhdpi")
+    @Test fun onANarrowPhoneAtALargeFontNewMessageRisesAboveATabBarAcrossTheWidth() {
+        showTabBar(1.15f)
+        val button = compose.onNodeWithContentDescription("New message").bounds()
+        assertTrue(button.bottom <= tab("Later").bounds().top)
+        assertTrue(tab("Later").bounds().right > button.left)
     }
 
     @Test fun homeAndDmsListConversationsWithoutAPermanentSearchField() {

@@ -1,5 +1,8 @@
 package ai.nuanu.slatrix.ui.account
 
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.foundation.layout.BoxWithConstraints
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
@@ -128,9 +131,21 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
         return
     }
     val glass = rememberGlass()
-    // The lists scroll on under the tab capsule, and end clear of it.
-    val clearance = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + UiMetrics.TabBar + UiMetrics.TabBarGap
-    Box(Modifier.fillMaxSize().background(colors.canvas)) {
+    // New message sits beside the capsule while every tab still fits its widest label with room a side; on a narrow
+    // phone or at a large font the capsule takes the width and New message rises above it.
+    val measurer = rememberTextMeasurer()
+    val label = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold)
+    val density = LocalDensity.current
+    val widest = remember(measurer, label, density) {
+        with(density) { HomeTab.entries.maxOf { measurer.measure(it.label, label).size.width }.toDp() }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().background(colors.canvas)) {
+    val beside = onNewMessage == null ||
+        (maxWidth - UiMetrics.GapLarge * 2 - UiMetrics.Fab - UiMetrics.GapMedium - UiMetrics.TabInset * 2) / HomeTab.entries.size >=
+        widest + UiMetrics.GapMedium * 2
+    // The lists scroll on under the tab capsule, and end clear of it and of New message above it.
+    val clearance = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + UiMetrics.TabBar + UiMetrics.GapSmall * 2 +
+        (UiMetrics.Fab + UiMetrics.GapLarge) * (if (beside) 0 else 1)
         Column(Modifier.fillMaxSize().glassSource(glass)) {
             HomeHeader(tab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -147,16 +162,22 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                 OfflineBanner()
             }
         }
-        Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()
-            .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, bottom = UiMetrics.TabBarGap - UiMetrics.GapSmall),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-            TabCapsule(glass, tab, Modifier.weight(1f)) { tab = it }
-            // Slack's new message button, round beside the capsule.
+        val newMessage = @Composable {
+            // Slack's new message button, round beside the capsule or above it.
             if (onNewMessage != null) Box(Modifier.size(UiMetrics.Fab)
                 .shadow(UiMetrics.GapSmall, CircleShape, ambientColor = colors.accentFill, spotColor = colors.accentFill)
                 .clip(CircleShape).background(colors.accentFill).clickable(role = Role.Button, onClick = onNewMessage)
                 .semantics { contentDescription = "New message" }, contentAlignment = Alignment.Center) {
                 Icon(SlackIcons.Compose, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.onAccent)
+            }
+        }
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()
+            .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, bottom = UiMetrics.GapSmall),
+            horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+            if (!beside) newMessage()
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+                TabCapsule(glass, tab, Modifier.weight(1f)) { tab = it }
+                if (beside) newMessage()
             }
         }
         val failure = notice

@@ -36,7 +36,6 @@ object UiMetrics {
     /** The floating tab capsule, its inset around the selected tab, and its gap above the screen's bottom. */
     val TabBar = 64.dp
     val TabInset = 4.dp
-    val TabBarGap = 24.dp
     /** A chat header's row, over the glass. */
     val HeaderRow = 64.dp
     val SectionHeader = 40.dp
