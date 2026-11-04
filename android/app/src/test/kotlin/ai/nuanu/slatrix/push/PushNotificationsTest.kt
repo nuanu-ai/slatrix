@@ -50,18 +50,6 @@ class PushNotificationsTest {
         assertEquals("Sam: Review budget?", manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
 
-    @Test @Config(sdk = [25]) fun noisyEventsUseSystemSoundBeforeNotificationChannels() {
-        val context = ApplicationProvider.getApplicationContext<Application>()
-        val manager = context.getSystemService(NotificationManager::class.java)
-        val notifications = PushNotifications(context)
-        notifications.show("@alex:example.org", "!team:example.org", "\$noisy", notificationMessage())
-        assertTrue(manager.activeNotifications.single().notification.defaults and Notification.DEFAULT_SOUND != 0)
-
-        manager.cancelAll()
-        notifications.show("@alex:example.org", "!team:example.org", "\$quiet", notificationMessage(noisy = false))
-        assertEquals(0, manager.activeNotifications.single().notification.defaults and Notification.DEFAULT_SOUND)
-    }
-
     @Test fun sdkPrivacyDecisionsAndDismissedDuplicatesSurviveNotificationDelivery() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)

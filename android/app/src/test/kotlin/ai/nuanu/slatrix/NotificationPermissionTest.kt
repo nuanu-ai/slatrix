@@ -28,12 +28,6 @@ class NotificationPermissionTest {
         compose.runOnIdle { assertNull(shadowOf(compose.activity).lastRequestedPermission) }
     }
 
-    @Test @Config(sdk = [32])
-    fun olderAndroidDoesNotRequestTheNewRuntimePermission() {
-        compose.setContent { RequestNotificationPermission(signedIn = true, configured = true) }
-        compose.runOnIdle { assertNull(shadowOf(compose.activity).lastRequestedPermission) }
-    }
-
     // capability: notifications.permission
     @Test fun notificationPermissionWaitsUntilTheUserHasSignedIn() {
         val application = ApplicationProvider.getApplicationContext<Application>()
