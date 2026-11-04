@@ -49,6 +49,8 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -80,13 +82,28 @@ class LiveHomeScreenTest {
             }
         }
         tab("DMs").performClick()
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(39)
+        compose.onNode(hasScrollToIndexAction() and SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange)).performScrollToIndex(39)
         compose.onNodeWithText("Person 39").performClick()
         compose.onNodeWithText("Conversation").assertExists()
 
         compose.runOnIdle { open.value = false }
         tab("DMs").assertIsSelected()
         compose.onNodeWithText("Person 39").assertIsDisplayed()
+    }
+
+    // capability: home.swipe-tabs
+    @Test fun swipingAcrossHomeMovesBetweenTabsAsTappingDoes() {
+        val people = listOf(direct("!p:example.org", "Person 1", latest = LatestMessage("Hello", 1_000L, false)))
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(people, loading = false, spacesKnown = true), {}, {}, {})
+            }
+        }
+        compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.HorizontalScrollAxisRange)).performTouchInput { swipeLeft() }
+        compose.waitUntil { tab("DMs").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false } }
+        compose.onNodeWithText("Hello").assertIsDisplayed()
+        compose.onNodeWithText("Hello").performTouchInput { swipeRight() }
+        compose.waitUntil { tab("Home").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false } }
     }
 
     private fun showTabBar(fontScale: Float) {

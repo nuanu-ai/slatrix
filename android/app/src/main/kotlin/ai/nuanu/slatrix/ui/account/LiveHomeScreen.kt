@@ -40,7 +40,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.selection.selectableGroup
@@ -97,7 +103,9 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     /** Search, opened from Home's search bar over the whole screen; it calls back to close. */
     search: @Composable (onClose: () -> Unit) -> Unit = {}, userAvatarUrl: String? = null, activity: @Composable () -> Unit = {},
     later: @Composable () -> Unit = {}) {
-    var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
+    // The tabs sit side by side, so a swipe moves between them as Telegram's folders do, and a tap slides there.
+    val pager = rememberPagerState { HomeTab.entries.size }
+    val tab = HomeTab.entries[pager.currentPage]
     var searching by rememberSaveable { mutableStateOf(false) }
     var actions by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -129,7 +137,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     val directList = rememberLazyListState()
     val colors = SlatrixTheme.colors
     BackHandler(enabled = searching) { searching = false }
-    BackHandler(enabled = tab != HomeTab.Home && !searching) { tab = HomeTab.Home }
+    BackHandler(enabled = tab != HomeTab.Home && !searching) { scope.launch { pager.animateScrollToPage(HomeTab.Home.ordinal) } }
     if (searching) {
         Box(Modifier.fillMaxSize().background(colors.canvas)) { search { searching = false } }
         return
@@ -153,7 +161,8 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
         Column(Modifier.fillMaxSize().glassSource(glass)) {
             HomeHeader(tab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                when (tab) {
+                HorizontalPager(pager, Modifier.fillMaxSize(), key = { HomeTab.entries[it] }) { page ->
+                when (HomeTab.entries[page]) {
                     HomeTab.Home -> Column {
                         HomeSearchBar(state.spaces.firstOrNull { it.id == selectedSpaceId }?.name) { searching = true }
                         HomeList(homeList, shown, selectedSpaceId, onRoom, (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } },
@@ -162,6 +171,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                     HomeTab.Dms -> DirectList(directList, shown, onRoom, clearance) { actions = it.id }
                     HomeTab.Activity -> Box(Modifier.padding(bottom = clearance)) { activity() }
                     HomeTab.Later -> Box(Modifier.padding(bottom = clearance)) { later() }
+                }
                 }
                 OfflineBanner()
             }
@@ -180,7 +190,9 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
             horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
             if (!beside) newMessage()
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-                TabCapsule(glass, tab, Modifier.weight(1f)) { tab = it }
+                TabCapsule(glass, tab, { pager.currentPage + pager.currentPageOffsetFraction }, Modifier.weight(1f)) {
+                    scope.launch { pager.animateScrollToPage(it.ordinal) }
+                }
                 if (beside) newMessage()
             }
         }
@@ -231,15 +243,19 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
 
 /** Design B's tab bar: a capsule of frosted glass floating over the list, the open tab on an accent tint. */
 @Composable
-private fun TabCapsule(glass: HazeState, tab: HomeTab, modifier: Modifier, onTab: (HomeTab) -> Unit) {
+private fun TabCapsule(glass: HazeState, tab: HomeTab, position: () -> Float, modifier: Modifier, onTab: (HomeTab) -> Unit) {
     val colors = SlatrixTheme.colors
     Row(modifier.heightIn(min = UiMetrics.TabBar).glass(glass, colors.glass, CircleShape, lifted = true)
-        .padding(UiMetrics.TabInset).selectableGroup()) {
+        .padding(UiMetrics.TabInset).selectableGroup()
+        // The open tab's tint follows the pager under the finger, read while drawing, so a swipe never recomposes the bar.
+        .drawBehind {
+            val width = size.width / HomeTab.entries.size
+            drawRoundRect(colors.accentTint, Offset(width * position(), 0f), Size(width, size.height), CornerRadius(size.height / 2))
+        }) {
         HomeTab.entries.forEach { destination ->
             val selected = tab == destination
             val tint = if (selected) colors.accent else colors.textSecondary
             Column(Modifier.weight(1f).heightIn(min = UiMetrics.TabBar - UiMetrics.TabInset * 2).clip(CircleShape)
-                .background(if (selected) colors.accentTint else colors.accentTint.copy(alpha = 0f))
                 .selectable(selected, role = Role.Tab) { onTab(destination) },
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Icon(if (selected) destination.selectedIcon else destination.icon, null, Modifier.size(UiMetrics.LargeIcon), tint = tint)
