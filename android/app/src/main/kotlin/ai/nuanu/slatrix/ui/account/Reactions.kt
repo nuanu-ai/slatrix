@@ -1,5 +1,10 @@
 package ai.nuanu.slatrix.ui.account
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.text.style.TextOverflow
+import ai.nuanu.slatrix.ui.designsystem.SlackIcons
+import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.ComposerFormat
 import ai.nuanu.slatrix.core.ConversationMessage
@@ -10,7 +15,6 @@ import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.text.format.DateUtils
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -45,35 +49,41 @@ internal fun Reactions(reactions: List<MessageReaction>, onToggle: ((String) -> 
         verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
         for (reaction in reactions) {
             Row(Modifier.height(UiMetrics.ChipHeight)
-                .background(if (reaction.mine) colors.accentTint else colors.sunken, CircleShape)
-                .border(BorderStroke(UiMetrics.Divider, if (reaction.mine) colors.accent else colors.sunken), CircleShape)
+                .background(if (reaction.mine) colors.accentFill else colors.reaction, CircleShape)
+                // Your own bubble tints every chip alike, so yours also wears an edge in the accent, white there.
+                .then(if (reaction.mine) Modifier.border(UiMetrics.Divider, colors.accent, CircleShape) else Modifier)
                 .semantics { selected = reaction.mine }
                 .combinedClickable(onLongClickLabel = "See who reacted", onLongClick = onShowWho) { onToggle?.invoke(reaction.key) }
                 .padding(horizontal = UiMetrics.GapMedium),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
                 Text(reaction.key, style = MaterialTheme.typography.bodyLarge)
                 Text("${reaction.count}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium,
-                    color = if (reaction.mine) colors.accent else colors.textPrimary)
+                    color = if (reaction.mine) colors.onAccent else colors.textPrimary)
             }
         }
     }
 }
 
-/** Slack's line under a thread's root: who replied last, how many replies and when; a tap opens the thread. */
+/** The bar at the foot of a thread's root bubble: who replied last, how many replies and when; a tap opens the thread. */
 @Composable
 internal fun ThreadReplies(thread: MessageThread, onOpen: (() -> Unit)?) {
     val colors = SlatrixTheme.colors
-    Row(Modifier.padding(top = UiMetrics.GapTiny).heightIn(min = UiMetrics.ChipHeight)
-        .then(if (onOpen != null) Modifier.clickable(onClickLabel = "View thread", onClick = onOpen) else Modifier),
-        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
-        thread.lastReplier?.let {
-            LiveAvatar(AvatarPlaceholder.initials(it), AvatarPlaceholder.colorIndex(it), UiMetrics.CompactAvatar, thread.lastReplierAvatarUrl)
-        }
-        Text("${thread.replies} ${if (thread.replies == 1) "reply" else "replies"}", style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold, color = colors.accent, maxLines = 1)
-        thread.lastReplyAt?.let { at ->
-            val now = System.currentTimeMillis()
-            Text(remember(at) { lastReply(at, now) }, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1)
+    Column(Modifier.padding(top = UiMetrics.GapSmall)) {
+        HorizontalDivider(color = colors.border)
+        Row(Modifier.heightIn(min = UiMetrics.ThreadBar)
+            .then(if (onOpen != null) Modifier.clickable(onClickLabel = "View thread", onClick = onOpen) else Modifier),
+            horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
+            thread.lastReplier?.let {
+                LiveAvatar(AvatarPlaceholder.initials(it), AvatarPlaceholder.colorIndex(it), UiMetrics.Facepile, thread.lastReplierAvatarUrl)
+            }
+            Text("${thread.replies} ${if (thread.replies == 1) "reply" else "replies"}", style = MaterialTheme.typography.labelLarge,
+                color = colors.accent, maxLines = 1)
+            thread.lastReplyAt?.let { at ->
+                val now = System.currentTimeMillis()
+                Text(remember(at) { lastReply(at, now) }, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelSmall,
+                    color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (onOpen != null) Icon(SlackIcons.ChevronRight, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
         }
     }
 }

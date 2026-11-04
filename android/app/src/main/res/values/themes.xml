@@ -3,5 +3,8 @@
     <style name="Base.Theme.Slatrix" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/canvas</item>
     </style>
-    <style name="Theme.Slatrix" parent="Base.Theme.Slatrix" />
+    <!-- The splash shows the launcher icon on the canvas the app opens on. -->
+    <style name="Theme.Slatrix" parent="Base.Theme.Slatrix">
+        <item name="android:windowSplashScreenBackground">@color/canvas</item>
+    </style>
 </resources>

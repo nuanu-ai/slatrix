@@ -35,7 +35,7 @@ class LaterScreenshots(private val dark: Boolean) {
             "\$b" to SavedPreview("Wanda Moss", "Can you look at the release notes before lunch?", 1_761_048_000_000L),
             "\$c" to SavedPreview("Jordan Lee", "Launch review moved to Thursday at 3.", 1_760_961_600_000L),
         )
-        compose.setContent { SlatrixTheme(dark = dark) { LaterScreen(saved, rooms, { previews[it.eventId] }, {}, {}) {} } }
+        compose.setContent { SlatrixTheme(dark = dark) { LaterScreen(saved, rooms, { previews[it.eventId] }, {}, {}) } }
         compose.waitForIdle()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/Later-${if (dark) "dark" else "light"}.png")
     }

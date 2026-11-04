@@ -10,8 +10,15 @@ import ai.nuanu.slatrix.core.listed
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
-import androidx.activity.compose.BackHandler
+import ai.nuanu.slatrix.ui.designsystem.rememberPredictiveBack
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +58,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -80,10 +88,12 @@ fun BrowseChannelsScreen(title: String, state: ChannelDirectoryState, joined: Se
             }
             when {
                 state.error != null -> item { Note(state.error) }
-                state.loading && !answered[0] -> item { ConnectionIndicator(true, null) }
+                state.loading && !answered[0] -> item { DirectorySkeleton() }
                 // Asks for the next page as the end comes into view.
                 state.more -> item { LaunchedEffect(state.channels.size) { onMore() } }
-                state.channels.isEmpty() -> item { Note(if (query.isBlank()) "No channels yet" else "No channels found") }
+                state.channels.isEmpty() -> item {
+                    if (query.isBlank()) Note("No channels yet") else NothingFound(query.trim())
+                }
             }
         }
         error?.let { Notice(it) }
@@ -94,24 +104,72 @@ fun BrowseChannelsScreen(title: String, state: ChannelDirectoryState, joined: Se
 private fun DirectoryRow(channel: DirectoryChannel, joined: Boolean, joining: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val colors = SlatrixTheme.colors
     val members = membersLabel(channel.members)
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow)
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ConversationRow)
         .then(if (joined || channel.canJoin) Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick) else Modifier)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        Icon(if (joined || channel.canJoin) SlackIcons.Hash else SlackIcons.Lock, null, Modifier.size(UiMetrics.Icon))
+        // One that needs an invitation shows its lock.
+        ChannelTile(private = !joined && !channel.canJoin, UiMetrics.RowAvatar)
         Column(Modifier.weight(1f)) {
-            Text(channel.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull(members, channel.rule.ifEmpty { null }, channel.topic).joinToString(" · "),
-                style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-        // The progress takes the label's place, so the row never changes size.
-        Box(Modifier.widthIn(min = UiMetrics.Icon), contentAlignment = Alignment.CenterEnd) {
-            if (joining) WaitingSpinner()
-            else if (joined) Text("Joined", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                Text(channel.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (joined) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(SlackIcons.Check, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.accent)
+                    Text("Joined", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 1)
+                }
+                Spacer(Modifier.weight(1f))
+                // The progress takes the count's place, so the row never changes size.
+                if (joining) WaitingSpinner()
+                else Row(Modifier.semantics(mergeDescendants = true) { contentDescription = members },
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
+                    Icon(SlackIcons.Person, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.textSecondary)
+                    Text("${channel.members}", Modifier.clearAndSetSemantics {}, style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary, maxLines = 1)
+                }
+            }
+            listOfNotNull(channel.rule.ifEmpty { null }, channel.topic).joinToString(" · ").ifEmpty { null }?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
+
+/** A search that found nothing, said in the middle of the page with what it looked for. */
+@Composable
+private fun LazyItemScope.NothingFound(query: String) {
+    val colors = SlatrixTheme.colors
+    Column(Modifier.fillParentMaxHeight(EmptyHeight).fillMaxWidth().padding(UiMetrics.GapLarge),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge, Alignment.CenterVertically)) {
+        Icon(SlackIcons.Search, null, Modifier.size(UiMetrics.RowAvatar), tint = colors.textSecondary)
+        Text("No channels match “$query”", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+    }
+}
+
+/** Rows of grey where channels will be, shown only if they take a moment, at the height the rows will have. */
+@Composable
+private fun DirectorySkeleton() {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(UiMetrics.ProgressDelayMillis); visible = true }
+    if (!visible) return
+    val fill = SlatrixTheme.colors.raised
+    Column(Modifier.clearAndSetSemantics {}) {
+        SkeletonLines.forEach { (name, topic) ->
+            Row(Modifier.fillMaxWidth().height(UiMetrics.ConversationRow).padding(horizontal = UiMetrics.GapLarge),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+                Box(Modifier.size(UiMetrics.RowAvatar).background(fill, MaterialTheme.shapes.large))
+                Column(verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                    Box(Modifier.fillMaxWidth(name).height(UiMetrics.SkeletonLine).background(fill, CircleShape))
+                    Box(Modifier.fillMaxWidth(topic).height(UiMetrics.SkeletonLine).background(fill, CircleShape))
+                }
+            }
+        }
+    }
+}
+
+/** Each placeholder row's name and topic, as shares of the row, so the grey reads as varied text. */
+private val SkeletonLines = listOf(0.35f to 0.7f, 0.25f to 0.6f, 0.4f to 0.8f, 0.3f to 0.65f, 0.45f to 0.75f)
+private const val EmptyHeight = 0.6f
 
 /**
  * Slack's Create a channel: a name, and a topic if you like, in the open workspace when there is one. Channels are
@@ -123,8 +181,11 @@ fun CreateChannelScreen(workspace: String?, creating: Boolean, error: String?, o
     val colors = SlatrixTheme.colors
     var name by rememberSaveable { mutableStateOf("") }
     var topic by rememberSaveable { mutableStateOf("") }
-    BackHandler(onBack = onBack)
-    Box(Modifier.fillMaxSize().background(colors.canvas)) {
+    val back = rememberPredictiveBack(onBack = onBack)
+    Box(Modifier.fillMaxSize().graphicsLayer {
+        alpha = 1 - back.value
+        translationX = back.value * Motion.PushDistance * size.width
+    }.background(colors.canvas)) {
         Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight),
                 verticalAlignment = Alignment.CenterVertically) {

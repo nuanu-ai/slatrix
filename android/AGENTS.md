@@ -4,7 +4,7 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 
 - Kotlin and Jetpack Compose, in one Gradle project in this folder.
 - The reference is Slack's Android app, not a smaller Slatrix for Mac: its tabs, navigation, gestures and wording. When unsure, do what Slack's Android app does.
-- Matrix work goes through the SDK from `scripts/build-sdk.sh --android`, never Element's published `matrix-rust-components-kotlin`, which lacks our patches. Gradle takes its `kotlin` folder as a source set and its `jniLibs` as native libraries; minSdk is 24 or higher. The bindings need:
+- Matrix work goes through the SDK from `scripts/build-sdk.sh --android`, never Element's published `matrix-rust-components-kotlin`, which lacks our patches. Gradle takes its `kotlin` folder as a source set and its `jniLibs` as native libraries; minSdk is 35 (Android 15), so every phone gets backdrop blur, Material You, predictive back and edge-to-edge, with no branches for older versions. The bindings need:
   - JNA as `net.java.dev.jna:jna:5.18.1@aar`, plus `kotlinx-coroutines-core` and `androidx.annotation`;
   - `org.matrix.rustsdk.Android.init(applicationContext)` before `initPlatform`, or TLS verification fails;
   - rustls's `rustls-platform-verifier` at the version the package's `Cargo.lock` pins, with its ProGuard keep rule;
@@ -23,9 +23,9 @@ The root `AGENTS.md` applies here in full: the product bar, the shared tokens an
 - **Compose screens**: drive real screens with fictional data through Compose semantics and render them with Roborazzi. Catches navigation, draft and appearance regressions; captures support visual review but miss physical input, real server behavior and device timing.
 
 - **Opening attachments**: download through an SDK fake into the real cache, then read the intent and content link Android would hand another app. Catches files saved outside the shared folder, a provider path that doesn't match and a missing read grant; misses the app that opens the file.
-- **Shared design tokens**: resolve every light/dark palette and compare all colors, file/avatar colors and radii with `design/tokens.json`. Catches cross-platform drift; misses rendering.
+- **Shared design tokens**: compare the Android colors in light and dark, the shared file and avatar colors, and the radii with `design/tokens.json`. Catches cross-platform drift; misses rendering.
 - **Session storage**: reopen encrypted sessions through the real Android Keystore and app files. Catches lost session fields, plaintext credentials, tampering and missing keys; misses hardware-specific key behavior and abrupt power loss.
-- **Appearance and notification storage**: reopen Android preferences after changing theme, palette, previews or what notifies. Catches lost choices and one account's choice reaching another; misses rendered application and abrupt process death.
+- **Appearance and notification storage**: reopen Android preferences after changing color mode, wallpaper colors, previews or what notifies. Catches lost choices and one account's choice reaching another; misses rendered application and abrupt process death.
 - **Recent searches storage**: reopen an account's recent searches through Android preferences, and plant stored lists that break the rules. Catches lost or mixed-up searches and unchecked stored values; misses abrupt process death.
 - **Saved messages storage**: reopen an account's Later, removals included, through Android preferences, kept as its account data content, and open a list kept earlier in the Mac's vault format or planted to break its rules. Catches lost or mixed-up items, a lost removal, an earlier list that no longer opens and unchecked stored values; misses abrupt process death.
 - **Window configuration**: inspect the real Activity's keyboard adjustment mode and launch background, and the system bar icons the app sets. Catches a missing resize request, a launch that flashes the wrong color, or icons that ignore the chosen color mode; actual IME geometry and icon contrast still need emulator inspection.

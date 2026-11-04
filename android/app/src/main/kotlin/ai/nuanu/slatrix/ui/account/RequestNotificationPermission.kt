@@ -3,7 +3,6 @@ package ai.nuanu.slatrix.ui.account
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -15,7 +14,7 @@ import androidx.core.content.edit
 
 @Composable
 fun RequestNotificationPermission(signedIn: Boolean, configured: Boolean) {
-    if (!configured || Build.VERSION.SDK_INT < 33) return
+    if (!configured) return
     val context = LocalContext.current
     val preferences = remember(context) { context.getSharedPreferences("notification-permission", Context.MODE_PRIVATE) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}

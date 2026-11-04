@@ -12,7 +12,6 @@ import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
@@ -283,7 +282,7 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("design", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action ->
             val layouts = mutableListOf<TextLayoutResult>()
             action(layouts)
-            assertEquals(DesignTokens.colors(false, SidebarPalette.Aubergine).getValue("textPrimary"), layouts.single().layoutInput.style.color)
+            assertEquals(DesignTokens.colors(false).getValue("textPrimary"), layouts.single().layoutInput.style.color)
         }
         compose.onNodeWithContentDescription("Message #design").performClick()
         val field = compose.onNodeWithContentDescription("Message #design").fetchSemanticsNode().boundsInRoot
@@ -404,8 +403,12 @@ class LiveChannelScreenTest {
             }
         }
         compose.onNodeWithText("New").assertIsDisplayed()
+        val header = compose.onNodeWithContentDescription("Conversation details").fetchSemanticsNode().boundsInRoot
+        val newLine = compose.onNodeWithText("New").fetchSemanticsNode().boundsInRoot
+        assertTrue("The line clears the header over the list", newLine.top >= header.bottom)
         compose.onNodeWithText("Message 185").assertIsDisplayed()
-        compose.onNodeWithText("Message 184").assertIsNotDisplayed()
+        // Older messages scroll on under the glass header, above the line.
+        compose.onAllNodesWithText("Message 184").fetchSemanticsNodes().forEach { assertTrue(it.boundsInRoot.bottom <= newLine.top) }
         compose.onNodeWithText("Message 200").assertIsNotDisplayed()
 
         // Reading moves the SDK's marker after the newest message; the line stays until the reader leaves.

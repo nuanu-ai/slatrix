@@ -14,7 +14,6 @@ import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import android.graphics.Bitmap
@@ -117,7 +116,7 @@ class MessageContentTest {
             "<a href=\"https://matrix.to/#/@sam:example.org\">Sam</a>"))
         val text = compose.onNodeWithText("@Me @Sam", useUnmergedTree = true).text()
         fun fill(name: String) = text.spanStyles.single { text.substring(it.start, it.end) == name }.item.background
-        val tokens = DesignTokens.colors(false, SidebarPalette.Aubergine)
+        val tokens = DesignTokens.colors(false)
         assertEquals(tokens.getValue("mentionYouFill"), fill("@Me"))
         assertEquals(tokens.getValue("mentionFill"), fill("@Sam"))
     }
@@ -188,6 +187,16 @@ class MessageContentTest {
         compose.waitForIdle()
         assertEquals(before, compose.onNodeWithContentDescription("office.jpg").fetchSemanticsNode().boundsInRoot)
         compose.onNodeWithText("office.jpg", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    // capability: message.image
+    @Test fun anImageWithoutACaptionEndsWithItsTimeInTheCorner() {
+        show(message("office.jpg").copy(kind = MessageKind.Attachment,
+            attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, source)))
+        val image = compose.onNodeWithContentDescription("office.jpg").fetchSemanticsNode().boundsInRoot
+        val time = compose.onNode(hasText("AM", substring = true) or hasText("PM", substring = true), useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertEquals("The time sits under the image's end", image.right, time.right, 1f)
     }
 
     // capability: message.media-viewer

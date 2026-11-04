@@ -54,7 +54,7 @@ extensions.configure<ApplicationExtension> {
         applicationId = "ai.nuanu.slatrix"
         buildConfigField("String", "PUSH_GATEWAY", "\"$pushGateway\"")
         manifestPlaceholders["authRedirectScheme"] = "com.github.nuanu-ai.slatrix"
-        minSdk = 24
+        minSdk = 35
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
@@ -118,6 +118,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.11.0")
+    // Backdrop blur for the glass tab capsule and chat headers; Apache 2.0.
+    implementation("dev.chrisbanes.haze:haze:1.6.10")
     lintChecks(project(":lint-rules"))
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:core:1.7.0")

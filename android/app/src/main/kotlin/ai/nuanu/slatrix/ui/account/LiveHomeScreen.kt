@@ -12,7 +12,10 @@ import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
-import ai.nuanu.slatrix.ui.designsystem.StatusBarOverWorkspaceBar
+import ai.nuanu.slatrix.ui.designsystem.glass
+import ai.nuanu.slatrix.ui.designsystem.glassSource
+import ai.nuanu.slatrix.ui.designsystem.rememberGlass
+import dev.chrisbanes.haze.HazeState
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.text.format.DateFormat
 import android.text.format.DateUtils
@@ -34,6 +37,13 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -57,7 +67,7 @@ private enum class HomeTab(val label: String, val icon: ImageVector, val selecte
     Home("Home", SlackIcons.Home, SlackIcons.HomeFilled),
     Dms("DMs", SlackIcons.Messages, SlackIcons.MessagesFilled),
     Activity("Activity", SlackIcons.Bell, SlackIcons.BellFilled),
-    Search("Search", SlackIcons.Search, SlackIcons.SearchSelected),
+    Later("Later", SlackIcons.Bookmark, SlackIcons.BookmarkFilled),
 }
 
 /** Shows [cover], such as a conversation, in Home's place, and gives Home back its tab, search and scroll position after. */
@@ -76,11 +86,12 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     onMarkUnread: suspend (String, Boolean) -> Boolean = { _, _ -> true },
     /** Marks these conversations read, and returns the ones that failed. */
     onMarkAllRead: suspend (List<String>) -> List<String> = { emptyList() },
-    /** How many messages wait in Later, for its card at the top of Home; null leaves the card out. */
-    laterCount: Int? = null, onLater: () -> Unit = {},
     onNewMessage: (() -> Unit)? = null,
-    search: @Composable () -> Unit = {}, userAvatarUrl: String? = null, activity: @Composable () -> Unit = {}) {
+    /** Search, opened from Home's search bar over the whole screen; it calls back to close. */
+    search: @Composable (onClose: () -> Unit) -> Unit = {}, userAvatarUrl: String? = null, activity: @Composable () -> Unit = {},
+    later: @Composable () -> Unit = {}) {
     var tab by rememberSaveable { mutableStateOf(HomeTab.Home) }
+    var searching by rememberSaveable { mutableStateOf(false) }
     var actions by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var adding by remember { mutableStateOf(false) }
@@ -110,75 +121,50 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     val homeList = rememberLazyListState()
     val directList = rememberLazyListState()
     val colors = SlatrixTheme.colors
-    BackHandler(enabled = tab != HomeTab.Home) { tab = HomeTab.Home }
-    StatusBarOverWorkspaceBar()
-    BoxWithConstraints(Modifier.fillMaxSize().background(colors.workspaceBar)) {
-        val expanded = maxWidth >= UiMetrics.ExpandedWidth
-        Row(Modifier.fillMaxSize()) {
-            if (expanded) {
-                NavigationRail(containerColor = colors.raised) {
-                    val navigationColors = NavigationRailItemDefaults.colors(
-                        selectedIconColor = colors.textPrimary, selectedTextColor = colors.textPrimary,
-                        indicatorColor = colors.selection, unselectedIconColor = colors.textSecondary,
-                        unselectedTextColor = colors.textSecondary,
-                    )
-                    HomeTab.entries.forEach { destination ->
-                        NavigationRailItem(selected = tab == destination, onClick = { tab = destination },
-                            icon = { Icon(if (tab == destination) destination.selectedIcon else destination.icon, null) },
-                            label = { Text(destination.label) }, colors = navigationColors)
+    BackHandler(enabled = searching) { searching = false }
+    BackHandler(enabled = tab != HomeTab.Home && !searching) { tab = HomeTab.Home }
+    if (searching) {
+        Box(Modifier.fillMaxSize().background(colors.canvas)) { search { searching = false } }
+        return
+    }
+    val glass = rememberGlass()
+    // The lists scroll on under the tab capsule, and end clear of it.
+    val clearance = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + UiMetrics.TabBar + UiMetrics.TabBarGap
+    Box(Modifier.fillMaxSize().background(colors.canvas)) {
+        Column(Modifier.fillMaxSize().glassSource(glass)) {
+            HomeHeader(tab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                when (tab) {
+                    HomeTab.Home -> Column {
+                        HomeSearchBar(state.spaces.firstOrNull { it.id == selectedSpaceId }?.name) { searching = true }
+                        HomeList(homeList, shown, selectedSpaceId, onRoom, onBrowseChannels,
+                            (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } }, onInvitation, clearance) { actions = it.id }
                     }
+                    HomeTab.Dms -> DirectList(directList, shown, onRoom, clearance) { actions = it.id }
+                    HomeTab.Activity -> Box(Modifier.padding(bottom = clearance)) { activity() }
+                    HomeTab.Later -> Box(Modifier.padding(bottom = clearance)) { later() }
                 }
+                OfflineBanner()
             }
-            Column(Modifier.weight(1f)) {
-                HomeHeader(tab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
-                Surface(Modifier.weight(1f).fillMaxWidth(), shape = SlatrixTheme.topPanelShape, color = colors.canvas) {
-                    Box(Modifier.fillMaxSize()) {
-                        // The lists end clear of the +, so it never covers their last row.
-                        val bottom = if (onNewMessage == null) UiMetrics.GapSmall else UiMetrics.Fab + UiMetrics.GapLarge
-                        when (tab) {
-                            HomeTab.Home -> HomeList(homeList, shown, selectedSpaceId, onRoom, onBrowseChannels,
-                                (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } },
-                                laterCount?.let { count -> { LaterCard(count, onLater) } }, onInvitation, bottom) { actions = it.id }
-                            HomeTab.Dms -> DirectList(directList, shown, onRoom, bottom) { actions = it.id }
-                            HomeTab.Activity -> activity()
-                            HomeTab.Search -> search()
-                        }
-                        OfflineBanner()
-                        // Slack's + on Home and DMs, which starts a new message.
-                        if (onNewMessage != null && (tab == HomeTab.Home || tab == HomeTab.Dms)) {
-                            FloatingActionButton(onNewMessage, Modifier.align(Alignment.BottomEnd)
-                                .padding(end = UiMetrics.GapLarge, bottom = UiMetrics.GapSmall).semantics { contentDescription = "New message" },
-                                shape = MaterialTheme.shapes.large, containerColor = colors.textPrimary, contentColor = colors.canvas) {
-                                Icon(SlackIcons.Plus, null, Modifier.size(UiMetrics.LargeIcon))
-                            }
-                        }
-                        val failure = notice
-                        if (failure != null) {
-                            Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)
-                                .semantics { liveRegion = LiveRegionMode.Polite }) { Text(failure) }
-                        } else state.error?.let { message ->
-                            Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
-                                action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
-                        }
-                    }
-                }
-                if (!expanded) {
-                    HorizontalDivider(color = colors.border)
-                    NavigationBar(containerColor = colors.raised) {
-                        val navigationColors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = colors.textPrimary, selectedTextColor = colors.textPrimary, indicatorColor = colors.pressed,
-                            unselectedIconColor = colors.textSecondary, unselectedTextColor = colors.textSecondary,
-                        )
-                        HomeTab.entries.forEach { destination ->
-                            val selected = tab == destination
-                            NavigationBarItem(selected = selected, onClick = { tab = destination },
-                                icon = { Icon(if (selected) destination.selectedIcon else destination.icon, null) },
-                                label = { Text(destination.label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
-                                colors = navigationColors)
-                        }
-                    }
-                }
+        }
+        Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()
+            .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, bottom = UiMetrics.TabBarGap - UiMetrics.GapSmall),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+            TabCapsule(glass, tab, Modifier.weight(1f)) { tab = it }
+            // Slack's new message button, round beside the capsule.
+            if (onNewMessage != null) Box(Modifier.size(UiMetrics.Fab)
+                .shadow(UiMetrics.GapSmall, CircleShape, ambientColor = colors.accentFill, spotColor = colors.accentFill)
+                .clip(CircleShape).background(colors.accentFill).clickable(role = Role.Button, onClick = onNewMessage)
+                .semantics { contentDescription = "New message" }, contentAlignment = Alignment.Center) {
+                Icon(SlackIcons.Compose, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.onAccent)
             }
+        }
+        val failure = notice
+        val snackbar = Modifier.align(Alignment.BottomCenter).padding(bottom = clearance).padding(UiMetrics.GapLarge)
+        if (failure != null) {
+            Snackbar(snackbar.semantics { liveRegion = LiveRegionMode.Polite }) { Text(failure) }
+        } else state.error?.let { message ->
+            Snackbar(snackbar, action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
         }
     }
     // Looked up on each change, so the sheet follows the room's live name and star, and closes if the room goes.
@@ -218,38 +204,71 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
 }
 
+/** Design B's tab bar: a capsule of frosted glass floating over the list, the open tab on an accent tint. */
+@Composable
+private fun TabCapsule(glass: HazeState, tab: HomeTab, modifier: Modifier, onTab: (HomeTab) -> Unit) {
+    val colors = SlatrixTheme.colors
+    Row(modifier.heightIn(min = UiMetrics.TabBar).glass(glass, colors.glass, CircleShape, lifted = true)
+        .padding(UiMetrics.TabInset).selectableGroup()) {
+        HomeTab.entries.forEach { destination ->
+            val selected = tab == destination
+            val tint = if (selected) colors.accent else colors.textSecondary
+            Column(Modifier.weight(1f).heightIn(min = UiMetrics.TabBar - UiMetrics.TabInset * 2).clip(CircleShape)
+                .background(if (selected) colors.accentTint else colors.accentTint.copy(alpha = 0f))
+                .selectable(selected, role = Role.Tab) { onTab(destination) },
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Icon(if (selected) destination.selectedIcon else destination.icon, null, Modifier.size(UiMetrics.LargeIcon), tint = tint)
+                Text(destination.label, style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, color = tint, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** Material's search bar, which opens search over Home. */
+@Composable
+private fun HomeSearchBar(space: String?, onClick: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    Row(Modifier.padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, bottom = UiMetrics.GapSmall).fillMaxWidth()
+        .heightIn(min = UiMetrics.SearchBar).clip(CircleShape).background(colors.raised).clickable(role = Role.Button, onClick = onClick)
+        .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+        Icon(SlackIcons.Search, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.textSecondary)
+        Text(space?.let { "Search $it" } ?: "Search", style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
 @Composable
 private fun HomeHeader(tab: HomeTab, userId: String, userAvatarUrl: String?, state: RoomListState, selectedSpaceId: String?, onSpace: (String?) -> Unit, onYou: () -> Unit) {
     var switching by remember { mutableStateOf(false) }
-    CompositionLocalProvider(LocalContentColor provides SlatrixTheme.colors.onAccent) {
-        // The avatar's touch target overhangs its tile, so the end gutter is smaller and the tile lines up with Slack's.
-        Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.RootHeaderHeight)
-            .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) {
-                when (tab) {
-                    HomeTab.Home -> {
-                        val space = state.spaces.firstOrNull { it.id == selectedSpaceId }
-                        Row(Modifier.heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) { switching = true }
-                            .semantics { contentDescription = "Switch workspace" }, verticalAlignment = Alignment.CenterVertically) {
-                            // A saved workspace whose space hasn't loaded yet keeps its place blank rather than say All.
-                            val loading = space == null && selectedSpaceId != null
-                            WorkspaceIcon(space, UiMetrics.HeaderAvatar, loading)
-                            Spacer(Modifier.width(UiMetrics.GapMedium))
-                            HeaderTitle(space?.name ?: if (loading) "" else "All conversations", Modifier.weight(1f, fill = false))
-                            Spacer(Modifier.width(UiMetrics.GapSmall))
-                            Icon(SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.Icon))
-                        }
+    // The avatar's touch target overhangs its picture, so the end gutter is smaller and the picture lines up with the list.
+    Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.HeaderRow)
+        .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) {
+            when (tab) {
+                HomeTab.Home -> {
+                    val space = state.spaces.firstOrNull { it.id == selectedSpaceId }
+                    Row(Modifier.heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) { switching = true }
+                        .semantics { contentDescription = "Switch workspace" }, verticalAlignment = Alignment.CenterVertically) {
+                        // A saved workspace whose space hasn't loaded yet keeps its place blank rather than say All.
+                        val loading = space == null && selectedSpaceId != null
+                        WorkspaceIcon(space, UiMetrics.HeaderAvatar, loading)
+                        Spacer(Modifier.width(UiMetrics.GapMedium))
+                        HeaderTitle(space?.name ?: if (loading) "" else "All conversations", Modifier.weight(1f, fill = false))
+                        Spacer(Modifier.width(UiMetrics.GapSmall))
+                        Icon(SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.textSecondary)
                     }
-                    HomeTab.Dms -> HeaderTitle("Direct messages")
-                    HomeTab.Activity -> HeaderTitle("Activity")
-                    HomeTab.Search -> HeaderTitle("Search")
                 }
+                HomeTab.Dms -> HeaderTitle("Direct messages")
+                HomeTab.Activity -> HeaderTitle("Activity")
+                HomeTab.Later -> HeaderTitle("Later")
             }
-            Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
-                .clickable(role = Role.Button, onClick = onYou).semantics { contentDescription = "You" }, contentAlignment = Alignment.Center) {
-                LiveAvatar(AvatarPlaceholder.initials(userId.removePrefix("@").substringBefore(':')), AvatarPlaceholder.colorIndex(userId),
-                    UiMetrics.HeaderAvatar, userAvatarUrl)
-            }
+        }
+        Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
+            .clickable(role = Role.Button, onClick = onYou).semantics { contentDescription = "You" }, contentAlignment = Alignment.Center) {
+            LiveAvatar(AvatarPlaceholder.initials(userId.removePrefix("@").substringBefore(':')), AvatarPlaceholder.colorIndex(userId),
+                UiMetrics.HeaderAvatar, userAvatarUrl)
         }
     }
     if (switching) WorkspaceSwitcher(state, selectedSpaceId, onSpace) { switching = false }
@@ -262,7 +281,7 @@ private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, on
     BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             Text("Workspaces", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                style = MaterialTheme.typography.titleMedium)
             for (space in entries) {
                 val selected = space?.id == selectedSpaceId
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow)
@@ -270,44 +289,44 @@ private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, on
                         onSpace(space?.id)
                         onDismiss()
                     }.padding(horizontal = UiMetrics.GapLarge),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-                    WorkspaceIcon(space, UiMetrics.ListAvatar)
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+                    WorkspaceIcon(space, UiMetrics.ChannelTile)
                     Text(space?.name ?: "All conversations", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (selected) Icon(SlackIcons.Check, null, Modifier.size(UiMetrics.LargeIcon))
+                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (selected) Icon(SlackIcons.Check, null, Modifier.size(UiMetrics.LargeIcon), tint = SlatrixTheme.colors.accent)
                 }
             }
         }
     }
 }
 
-/** A workspace's rounded-square icon: its initials on the palette's color, or a tray for All conversations. */
+/** A workspace's rounded-square icon: its initials on its own color, or a tray for All conversations. */
 @Composable
 private fun WorkspaceIcon(space: SpaceSummary?, size: Dp, loading: Boolean = false) {
-    Box(Modifier.size(size).clip(MaterialTheme.shapes.large).background(SlatrixTheme.colors.selectionStrong),
-        contentAlignment = Alignment.Center) {
-        if (space == null && !loading) Icon(SlackIcons.Tray, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.onAccent)
+    val colors = SlatrixTheme.colors
+    Box(Modifier.size(size).clip(MaterialTheme.shapes.medium)
+        .background(if (space != null) DesignTokens.avatarColors[space.colorIndex] else colors.accentTint), contentAlignment = Alignment.Center) {
+        if (space == null && !loading) Icon(SlackIcons.Tray, null, Modifier.size(UiMetrics.Icon), tint = colors.accent)
         else if (space != null) Text(space.initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label,
-            color = SlatrixTheme.colors.onAccent, maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
+            color = colors.onAvatar, maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
         Picture(space?.avatarUrl, size)
     }
 }
 
 @Composable
 private fun HeaderTitle(text: String, modifier: Modifier = Modifier) {
-    Text(text, modifier, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black,
-        maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Text(text, modifier, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
-private enum class HomeSection(val label: String, val icon: ImageVector) {
-    Starred("Starred", SlackIcons.Star),
-    Channels("Channels", SlackIcons.Hash),
-    Direct("Direct messages", SlackIcons.Messages),
+private enum class HomeSection(val label: String) {
+    Starred("Starred"),
+    Channels("Channels"),
+    Direct("Direct messages"),
 }
 
 @Composable
 private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId: String?, onRoom: (String) -> Unit,
-    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, cards: (@Composable () -> Unit)?, onInvitation: (String) -> Unit, bottom: Dp,
+    onBrowseChannels: (() -> Unit)?, onAddChannel: (() -> Unit)?, onInvitation: (String) -> Unit, bottom: Dp,
     onActions: (RoomSummary) -> Unit) {
     // A saved workspace's channels are known only with its spaces, so its list waits for them rather than filling in.
     val waiting = state.loading || (selectedSpaceId != null && !state.spacesKnown)
@@ -321,14 +340,7 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
         )
     }
     var collapsed by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(top = UiMetrics.GapSmall, bottom = bottom)) {
-        // Slack's cards above the sections; they're kept on this device, so they show while the list loads.
-        if (cards != null) item(key = "cards") {
-            Column {
-                Row(Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall)) { cards() }
-                SectionDivider()
-            }
-        }
+    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = bottom)) {
         if (waiting) {
             item { ConnectionIndicator(true, null) }
         } else {
@@ -337,8 +349,7 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
                 item(key = "invitations") { InvitationsHeader() }
                 items(state.invitations, key = { "invitation ${it.id}" }) { InvitationRow(it, onInvitation) }
             }
-            sections.forEachIndexed { index, (section, rooms) ->
-                if (index > 0 || state.invitations.isNotEmpty()) item(key = "divider-${section.name}") { SectionDivider() }
+            sections.forEach { (section, rooms) ->
                 val open = section.name !in collapsed
                 item(key = section.name) {
                     SectionHeader(section, open, onBrowseChannels.takeIf { section == HomeSection.Channels }) {
@@ -347,7 +358,7 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
                 }
                 // A collapsed section keeps its unread conversations in view, as Slack's does.
                 items(if (open) rooms else rooms.filter { it.unread != UnreadBadge.None }, key = { it.id }) {
-                    LiveRoomRow(it, onRoom, onActions)
+                    ConversationRow(it, onRoom, onActions)
                 }
                 if (open && section == HomeSection.Channels && onAddChannel != null) item(key = "add-channel") { AddChannelRow(onAddChannel) }
             }
@@ -357,49 +368,48 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
 
 @Composable
 private fun SectionHeader(section: HomeSection, open: Boolean, onOpen: (() -> Unit)?, onToggle: () -> Unit) {
+    val colors = SlatrixTheme.colors
     val toggle = Modifier.clickable(role = Role.Button, onClickLabel = if (open) "Collapse" else "Expand", onClick = onToggle)
         .semantics(mergeDescendants = true) { stateDescription = if (open) "Expanded" else "Collapsed" }
     // A section that opens something, as Slack's Channels › does, leaves collapsing to the arrow at its end.
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).then(if (onOpen == null) toggle else Modifier)
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.SectionHeader).then(if (onOpen == null) toggle else Modifier)
         .padding(start = UiMetrics.GapLarge, end = if (onOpen == null) UiMetrics.GapLarge else UiMetrics.GapTiny),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        Icon(section.icon, null, Modifier.size(UiMetrics.Icon))
+        verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.weight(1f).then(if (onOpen != null) Modifier.heightIn(min = UiMetrics.Touch)
             .clickable(role = Role.Button, onClick = onOpen) else Modifier), verticalAlignment = Alignment.CenterVertically) {
-            // Slack's section titles are 14 sp, a step under the rows.
             Text(section.label, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Icon(SlackIcons.ChevronRight, null, Modifier.size(UiMetrics.SmallIcon))
+                color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (onOpen != null) Icon(SlackIcons.ChevronRight, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.textSecondary)
         }
-        val arrow = @Composable { Icon(if (open) SlackIcons.ChevronUp else SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.LargeIcon)) }
+        val arrow = @Composable {
+            Icon(if (open) SlackIcons.ChevronUp else SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
+        }
         if (onOpen == null) arrow()
         else Box(Modifier.size(UiMetrics.Touch).then(toggle).semantics { contentDescription = section.label },
             contentAlignment = Alignment.Center) { arrow() }
     }
 }
 
-/** Slack's Add channel row, closing the Channels section. */
+/** Slack's Add channel row, closing the Channels section, its plus where a channel's tile sits. */
 @Composable
 private fun AddChannelRow(onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button, onClick = onClick)
-        .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically,
+    val colors = SlatrixTheme.colors
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ConversationRow).clickable(role = Role.Button, onClick = onClick)
+        .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        Icon(SlackIcons.Plus, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.textBody)
-        Text("Add channel", style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textBody)
+        Box(Modifier.size(UiMetrics.RowAvatar).clip(MaterialTheme.shapes.large).background(colors.raised), contentAlignment = Alignment.Center) {
+            Icon(SlackIcons.Plus, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.textSecondary)
+        }
+        Text("Add channel", style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
     }
-}
-
-@Composable
-private fun SectionDivider() {
-    HorizontalDivider(Modifier.padding(vertical = UiMetrics.GapSmall), color = SlatrixTheme.colors.border)
 }
 
 @Composable
 private fun DirectList(list: LazyListState, state: RoomListState, onRoom: (String) -> Unit, bottom: Dp, onActions: (RoomSummary) -> Unit) {
     val direct = remember(state.rooms) { state.rooms.filter { it.direct } }
-    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(top = UiMetrics.GapSmall, bottom = bottom)) {
+    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = bottom)) {
         if (state.loading) item { ConnectionIndicator(true, null) }
-        items(direct, key = { it.id }) { LiveDirectRow(it, onRoom, onActions) }
+        items(direct, key = { it.id }) { ConversationRow(it, onRoom, onActions) }
         if (!state.loading && direct.isEmpty()) item { EmptyList("No direct messages") }
     }
 }
@@ -414,52 +424,65 @@ private fun EmptyList(text: String) {
 private fun Modifier.conversation(room: RoomSummary, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) =
     combinedClickable(role = Role.Button, onLongClickLabel = "More actions", onLongClick = { onActions(room) }) { onRoom(room.id) }
 
+/**
+ * Design B's two-line row: a person's picture or a channel's tile, the name in bold while unread, and under it the
+ * newest message, who sent it, and the mention count; when it came sits at the end of the name's line.
+ */
 @Composable
-private fun LiveRoomRow(room: RoomSummary, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) {
+private fun ConversationRow(room: RoomSummary, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) {
     val colors = SlatrixTheme.colors
     val unread = room.unread != UnreadBadge.None
-    val color = if (unread) colors.textPrimary else colors.textBody
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).conversation(room, onRoom, onActions)
-        .unreadState(room).padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapTiny),
-        verticalAlignment = Alignment.CenterVertically) {
-        if (room.direct) {
-            LiveAvatar(room.initials, room.colorIndex, UiMetrics.CompactAvatar, room.avatarUrl)
-            Spacer(Modifier.width(UiMetrics.GapMedium))
-        } else {
-            Icon(if (room.isPrivate) SlackIcons.Lock else SlackIcons.Hash, if (room.isPrivate) "Private channel" else null,
-                Modifier.size(UiMetrics.Icon), tint = color)
-            Spacer(Modifier.width(UiMetrics.GapLarge))
-        }
-        Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = color,
-            fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        UnreadCount(room.unread)
-    }
-}
-
-/** A row of the DMs tab: the newest message under the name, and when it came, as Slack lists them. */
-@Composable
-private fun LiveDirectRow(room: RoomSummary, onRoom: (String) -> Unit, onActions: (RoomSummary) -> Unit) {
-    val colors = SlatrixTheme.colors
-    val unread = room.unread != UnreadBadge.None
-    Row(Modifier.fillMaxWidth().conversation(room, onRoom, onActions).unreadState(room)
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ConversationRow).conversation(room, onRoom, onActions).unreadState(room)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-        LiveAvatar(room.initials, room.colorIndex, UiMetrics.ListAvatar, room.avatarUrl)
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+        if (room.direct) LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowAvatar, room.avatarUrl)
+        else ChannelTile(room.isPrivate, UiMetrics.RowAvatar)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                room.latest?.let { Text(latestTime(it.timestamp), style = MaterialTheme.typography.bodySmall, color = colors.textBody) }
+                    fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                room.latest?.let {
+                    Text(latestTime(it.timestamp), style = MaterialTheme.typography.labelMedium,
+                        color = if (room.unread is UnreadBadge.Count) colors.accent else colors.textSecondary, maxLines = 1)
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                // Held at a line's height while there's nothing to show, so every row is the same height.
+                Text(preview(room), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary,
+                    minLines = 1, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 UnreadCount(room.unread)
             }
-            val latest = room.latest
-            Text(when {
-                latest?.body == null -> ""
-                latest.own -> "You: ${latest.body}"
-                else -> latest.body
-            }, style = MaterialTheme.typography.bodyLarge, color = if (unread) colors.textPrimary else colors.textBody,
-                minLines = 1, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
+    }
+}
+
+/** The newest message under a row's name: in a channel after its sender's first name, and yours after You. */
+@Composable
+private fun preview(room: RoomSummary): AnnotatedString {
+    val latest = room.latest ?: return AnnotatedString("")
+    val body = latest.body ?: return AnnotatedString("")
+    val sender = when {
+        latest.own -> "You: "
+        room.direct -> null
+        else -> latest.sender?.substringBefore(' ')?.let { "$it: " }
+    }
+    val color = SlatrixTheme.colors.textPrimary
+    return remember(sender, body, color) {
+        buildAnnotatedString {
+            if (sender != null) withStyle(SpanStyle(color = color)) { append(sender) }
+            append(body)
+        }
+    }
+}
+
+/** A channel's rounded tile: its # or, for a private one, its lock, on the accent's tint. */
+@Composable
+internal fun ChannelTile(private: Boolean, size: Dp) {
+    val colors = SlatrixTheme.colors
+    Box(Modifier.size(size).clip(if (size >= UiMetrics.RowAvatar) MaterialTheme.shapes.large else MaterialTheme.shapes.medium)
+        .background(colors.accentTint), contentAlignment = Alignment.Center) {
+        Icon(if (private) SlackIcons.Lock else SlackIcons.Hash, if (private) "Private channel" else null, Modifier.size(UiMetrics.LargeIcon),
+            tint = colors.accent)
     }
 }
 
@@ -500,10 +523,10 @@ private fun SheetRow(icon: ImageVector, label: String, onClick: () -> Unit) {
 @Composable
 private fun UnreadCount(unread: UnreadBadge) {
     if (unread !is UnreadBadge.Count) return
-    Surface(color = SlatrixTheme.colors.mention, contentColor = SlatrixTheme.colors.onAccent,
-        shape = MaterialTheme.shapes.large) {
-        Text(unread.label, Modifier.padding(horizontal = UiMetrics.GapSmall, vertical = UiMetrics.GapTiny),
-            style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+    val colors = SlatrixTheme.colors
+    Box(Modifier.heightIn(min = UiMetrics.Badge).widthIn(min = UiMetrics.Badge).clip(CircleShape).background(colors.mention)
+        .padding(horizontal = UiMetrics.GapTiny * 1.5f), contentAlignment = Alignment.Center) {
+        Text(unread.label, style = MaterialTheme.typography.labelSmall, color = colors.onAccent, maxLines = 1)
     }
 }
 
@@ -536,10 +559,10 @@ internal fun latestTime(timestamp: Long): String {
 
 @Composable
 internal fun LiveAvatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.Avatar, url: String? = null) {
-    Box(Modifier.size(size).clip(if (size > UiMetrics.Avatar) MaterialTheme.shapes.large else MaterialTheme.shapes.small)
-        .background(DesignTokens.avatarColors[colorIndex]), contentAlignment = Alignment.Center) {
+    // People are round, as in every messenger; workspaces and channels are rounded squares.
+    Box(Modifier.size(size).clip(CircleShape).background(DesignTokens.avatarColors[colorIndex]), contentAlignment = Alignment.Center) {
         // Two letters shrink to fit, so every avatar in a list has the same width.
-        Text(initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label, color = SlatrixTheme.colors.onAccent,
+        Text(initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label, color = SlatrixTheme.colors.onAvatar,
             maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
         Picture(url, size)
     }
