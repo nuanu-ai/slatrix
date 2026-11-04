@@ -209,18 +209,18 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {
                         LiveWorkspace(when {
-                            preferences -> { val client = (state as AccountState.Connected).client; { LivePreferencesScreen(dark, darkOverride, wallpaperColors,
+                            preferences -> { val client = (state as AccountState.Connected).client; WorkspaceCover("preferences", 0) { LivePreferencesScreen(dark, darkOverride, wallpaperColors,
                                 { darkOverride = it; appearance.darkMode = it },
                                 { wallpaperColors = it; appearance.wallpaperColors = it }, { preferences = false; returning = true }) {
                                     LiveNotificationSettings(userId) { client.getNotificationSettings() }
                                 } } }
-                            invitation != null -> { { invitation?.let { id ->
+                            invitation != null -> WorkspaceCover("invitation", 0) { invitation?.let { id ->
                                 LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
                                     { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
-                            } } }
-                            editingProfile -> { { LiveEditProfile((state as? AccountState.Connected)?.client, userId) { editingProfile = false } } }
-                            newMessage -> { { LiveNewMessage(userId, people, rooms, { room -> newMessage = false; workspace?.open(room) }) { newMessage = false } } }
-                            person != null -> { { person?.let { (id, name) ->
+                            } }
+                            editingProfile -> WorkspaceCover("edit profile", 0) { LiveEditProfile((state as? AccountState.Connected)?.client, userId) { editingProfile = false } }
+                            newMessage -> WorkspaceCover("new message", 0) { LiveNewMessage(userId, people, rooms, { room -> newMessage = false; workspace?.open(room) }) { newMessage = false } }
+                            person != null -> WorkspaceCover("person", 0) { person?.let { (id, name) ->
                                 LivePersonProfile(id, name, userId, people, rooms?.state, { room ->
                                     person = null
                                     you = false
@@ -228,28 +228,30 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     // Message from the conversation already open just goes back to it, where you were.
                                     if (selected?.room?.id != room.id) workspace?.open(room)
                                 }, onEdit = { editingProfile = true }) { person = null }
-                            } } }
-                            channels != null -> { {
+                            } }
+                            channels != null -> WorkspaceCover("channels", 0) {
                                 val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
                                 if (channels == ChannelPage.Browse) LiveBrowseChannels(rooms, selectedSpaceId, openChannel) { channels = null }
                                 else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
                                     openChannel, { notice = it }) { channels = null }
-                            } }
+                            }
                             // Back from Preferences shows You at once.
-                            you -> { { CompositionLocalProvider(LocalReturning provides returning) {
+                            you -> WorkspaceCover("you", 0) { CompositionLocalProvider(LocalReturning provides returning) {
                                 LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() },
                                     { preferences = true; returning = false }, account::signOut, onViewProfile = { person = userId to null },
                                     onBack = { you = false }, avatarUrl = userAvatarUrl)
-                            } } }
-                            thread != null -> { { covered.SaveableStateProvider("${thread.room.id} ${thread.threadRoot}") { key(thread.room.id, thread.threadRoot) {
+                            } }
+                            // A conversation slides in over Home, and a thread over its conversation.
+                            thread != null -> WorkspaceCover("${thread.room.id} ${thread.threadRoot}", 2) {
+                                covered.SaveableStateProvider("${thread.room.id} ${thread.threadRoot}") { key(thread.room.id, thread.threadRoot) {
                                 LiveConversation(thread, threads, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name })
-                            } } } }
+                            } } }
                             // Kept while a thread or a profile covers it, so Back returns to the same place.
-                            selected != null -> { { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
+                            selected != null -> WorkspaceCover(selected.room.id, 1) { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
                                 LiveConversation(selected, workspace, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name }) { root, row ->
                                     threads?.open(selected.room, root, root = row)
                                 }
-                            } } } }
+                            } } }
                             else -> null
                         }) {
                             LiveHome(userId, userAvatarUrl, rooms, workspace, search, people, jump, { you = true }, selectedSpaceId, chooseSpace,

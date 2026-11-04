@@ -14,6 +14,7 @@ import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.account.LiveWorkspace
+import ai.nuanu.slatrix.ui.account.WorkspaceCover
 import ai.nuanu.slatrix.ui.account.LiveYouScreen
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -76,7 +77,7 @@ class LiveHomeScreenTest {
         val open = mutableStateOf(false)
         compose.setContent {
             SlatrixTheme {
-                LiveWorkspace(if (open.value) { { Text("Conversation") } } else null) {
+                LiveWorkspace(if (open.value) WorkspaceCover("design", 1) { Text("Conversation") } else null) {
                     LiveHomeScreen("@alex:example.org", RoomListState(people, loading = false, spacesKnown = true), { open.value = true }, {}, {})
                 }
             }

@@ -35,11 +35,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.*
+import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import ai.nuanu.slatrix.ui.designsystem.Motion
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.draw.clip
@@ -57,6 +59,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
@@ -81,11 +84,40 @@ private enum class HomeTab(val label: String, val icon: ImageVector, val selecte
     Later("Later", SlackIcons.Bookmark, SlackIcons.BookmarkFilled),
 }
 
-/** Shows [cover], such as a conversation, in Home's place, and gives Home back its tab, search and scroll position after. */
+/**
+ * What covers Home, such as a conversation. A cover deeper than the one before slides in over it; one at depth 0 eases
+ * itself in, as a pushed page does.
+ */
+class WorkspaceCover(val key: Any, val depth: Int, val content: @Composable () -> Unit)
+
+/**
+ * Shows [cover] in Home's place, and gives Home back its tab, search and scroll position after. Going deeper slides the
+ * new page in over 140 ms with the page it covers still drawn under it, so nothing blank shows; going back is instant,
+ * since predictive back has already played the way out under the finger.
+ */
 @Composable
-fun LiveWorkspace(cover: (@Composable () -> Unit)?, home: @Composable () -> Unit) {
+fun LiveWorkspace(cover: WorkspaceCover?, home: @Composable () -> Unit) {
     val saved = rememberSaveableStateHolder()
-    if (cover != null) cover() else saved.SaveableStateProvider("home", home)
+    val page = cover ?: WorkspaceCover(Unit, 0) { saved.SaveableStateProvider("home", home) }
+    val shown = remember { object { var page = page; var under: WorkspaceCover? = null } }
+    if (shown.page.key != page.key) shown.under = shown.page.takeIf { page.depth > it.depth }
+    shown.page = page
+    val slide = remember(page.key) { Animatable(if (shown.under == null) 1f else 0f) }
+    var settled by remember(page.key) { mutableStateOf(shown.under == null) }
+    LaunchedEffect(slide) {
+        slide.animateTo(1f, Motion.pane())
+        shown.under = null
+        settled = true
+    }
+    Box(Modifier.fillMaxSize()) {
+        // One keyed loop, so the page under keeps its composition as it moves from on top to underneath.
+        for (each in listOfNotNull(shown.under.takeUnless { settled }, page)) key(each.key) {
+            Box(if (each === page) Modifier.fillMaxSize().graphicsLayer {
+                alpha = slide.value
+                translationX = (1 - slide.value) * Motion.PushDistance * size.width
+            } else Modifier.fillMaxSize()) { each.content() }
+        }
+    }
 }
 
 @Composable
