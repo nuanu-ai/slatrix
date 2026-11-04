@@ -30,7 +30,7 @@ struct ProfilePane: View {
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: m.sp16) {
                         AvatarView(
-                            name: person.name, size: m.profilePhoto, cornerRadius: m.radiusLarge, matrix: matrix,
+                            name: person.name, size: m.profilePhoto, matrix: matrix,
                             source: person.avatarURL
                         ).frame(maxWidth: .infinity)
                         VStack(alignment: .leading, spacing: m.sp4) {

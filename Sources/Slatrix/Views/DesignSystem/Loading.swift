@@ -28,7 +28,7 @@ struct SkeletonRows: View {
             VStack(alignment: .leading, spacing: m.sp20) {
                 ForEach(0..<count, id: \.self) { index in
                     HStack(alignment: .top, spacing: m.sp12) {
-                        RoundedRectangle(cornerRadius: m.avatar * 0.19).fill(fill).frame(
+                        Circle().fill(fill).frame(
                             width: m.avatar, height: m.avatar)
                         VStack(alignment: .leading, spacing: m.sp8) {
                             RoundedRectangle(cornerRadius: m.radiusSmall).fill(fill).frame(
