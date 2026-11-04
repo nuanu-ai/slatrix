@@ -6,7 +6,6 @@ import ai.nuanu.slatrix.core.NotifyAbout
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.LiveNotificationSettings
 import ai.nuanu.slatrix.ui.account.NotificationRows
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
@@ -42,7 +41,7 @@ class NotificationSettingsScreenTest {
         val previews = mutableStateOf(true)
         compose.setContent {
             SlatrixTheme {
-                LivePreferencesScreen(false, null, SidebarPalette.Aubergine, {}, {}, {}) {
+                LivePreferencesScreen(false, null, false, {}, {}, {}) {
                     NotificationRows(notifyAbout.value, previews.value, null, { notifyAbout.value = it }, { previews.value = it })
                 }
             }

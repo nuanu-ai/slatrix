@@ -11,6 +11,7 @@ import ai.nuanu.slatrix.core.MentionSearch
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import ai.nuanu.slatrix.ui.designsystem.bubble
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -155,10 +156,8 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         }) { linking = null }
     }
     var height by remember { mutableIntStateOf(0) }
-    // Slack's composer is a panel with rounded top corners over the conversation.
-    Column(Modifier.fillMaxWidth().onSizeChanged { height = it.height }
-        .border(UiMetrics.Divider, colors.border, SlatrixTheme.topPanelShape).background(colors.canvas, SlatrixTheme.topPanelShape)
-        .padding(top = UiMetrics.GapTiny)) {
+    // The field floats over the wallpaper as a capsule, as a messenger's does.
+    Column(Modifier.fillMaxWidth().onSizeChanged { height = it.height }.padding(horizontal = UiMetrics.GapTiny, vertical = UiMetrics.GapSmall)) {
         if (suggestions != null && !editing) Popup(Alignment.BottomStart, IntOffset(0, -height),
             properties = PopupProperties(focusable = false)) {
             MentionList(suggestions.candidates) { candidate ->
@@ -190,7 +189,8 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         if (expanded) aboveField?.invoke()
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (!expanded) attach?.let { Box(Modifier.padding(start = UiMetrics.GapTiny)) { AttachButton { attaching = true } } }
-            Box(Modifier.weight(1f)) { ReceiveKeyboardMedia(attach) {
+            Box(Modifier.weight(1f).padding(horizontal = UiMetrics.GapTiny)
+                .bubble(MaterialTheme.shapes.extraLarge, colors.field, colors.bubbleEdge)) { ReceiveKeyboardMedia(attach) {
                 BasicTextField(shown, { next ->
                     val left = ComposerStyles.blockLeft(composer.styles, composer.typing, shown.text, next.text, shown.selection.min)
                         .takeIf { shown.selection.collapsed && onFormat != null }
@@ -204,7 +204,7 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                     lastText = next.text
                     if (changed) onDraft(next.text)
                 }, enabled = !composer.loading,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge)
                         .onFocusChanged { focused = it.isFocused }.semantics { contentDescription = placeholder },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
                     visualTransformation = remember(composer.styles, composer.mentions, composer.typing, colors) {

@@ -67,6 +67,22 @@ class MatrixChannelsTest {
         assertEquals(listOf("example.org"), found.via)
     }
 
+    @Test fun aWorkspaceListsTheChannelsOfItsNestedSpacesAsItsSidebarDoes() = runTest {
+        val client = ChannelsClient()
+        client.hierarchy = listOf(
+            spaceRoom("!welcome:example.org", "welcome", JoinRule.Public),
+            spaceRoom("!team:example.org", "Team", JoinRule.Public, type = RoomType.Space),
+        )
+        client.nested = mapOf("!team:example.org" to listOf(
+            spaceRoom("!design:example.org", "design", JoinRule.Public),
+            spaceRoom(Harbor, "Harbor", JoinRule.Public, type = RoomType.Space),
+        ))
+        val directory = ChannelDirectory(backgroundScope, client, Harbor)
+
+        directory.search("")
+        assertEquals(listOf("welcome", "design"), directory.state.first { !it.loading }.channels.map { it.name })
+    }
+
     @Test fun aDirectoryThatFailsSaysSo() = runTest {
         val client = ChannelsClient().apply { directoryFails = true }
         val directory = ChannelDirectory(backgroundScope, client, null)
@@ -134,6 +150,7 @@ private class ChannelsClient : Client(NoHandle) {
     var directory = emptyList<RoomDescription>()
     var directoryFails = false
     var hierarchy = emptyList<SpaceRoom>()
+    var nested = emptyMap<String, List<SpaceRoom>>()
     var canManage = true
     var joinFails = false
     var linkFails = false
@@ -166,7 +183,7 @@ private class ChannelsClient : Client(NoHandle) {
     override suspend fun spaceService(): SpaceService = object : SpaceService(NoHandle) {
         override suspend fun spaceRoomList(spaceId: String): SpaceRoomList = object : SpaceRoomList(NoHandle) {
             override fun paginationState(): SpaceRoomListPaginationState = SpaceRoomListPaginationState.Idle(endReached = true)
-            override suspend fun rooms(): List<SpaceRoom> = hierarchy.takeIf { spaceId == Harbor }.orEmpty()
+            override suspend fun rooms(): List<SpaceRoom> = if (spaceId == Harbor) hierarchy else nested[spaceId].orEmpty()
         }
         override suspend fun addChildToSpace(childId: String, spaceId: String) {
             if (linkFails) throw IllegalStateException("Not ready")

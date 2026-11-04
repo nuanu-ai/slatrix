@@ -1,18 +1,16 @@
 package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.AvatarPlaceholder
-import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.Motion
 import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.graphicsLayer
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
-import androidx.activity.compose.BackHandler
+import ai.nuanu.slatrix.ui.designsystem.rememberPredictiveBack
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -32,7 +30,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -101,7 +98,7 @@ internal val LocalReturning = compositionLocalOf { false }
  */
 @Composable
 internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable () -> Unit = {}, content: LazyListScope.() -> Unit) {
-    BackHandler(onBack = onBack)
+    val back = rememberPredictiveBack(onBack = onBack)
     val returning = LocalReturning.current
     var entered by rememberSaveable { mutableStateOf(returning) }
     val shown = remember { Animatable(if (entered) 1f else 0f) }
@@ -110,18 +107,20 @@ internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable (
         entered = true
     }
     Column(Modifier.fillMaxSize().graphicsLayer {
-        alpha = shown.value
-        translationX = (1 - shown.value) * Motion.PushDistance * size.width
+        // A back swipe plays the way in backwards under the finger.
+        val now = shown.value * (1 - back.value)
+        alpha = now
+        translationX = (1 - now) * Motion.PushDistance * size.width
     }.background(SlatrixTheme.colors.canvas).navigationBarsPadding().imePadding()) {
-        Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.HeaderRow).padding(horizontal = UiMetrics.GapTiny),
+            verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack, modifier = Modifier.size(UiMetrics.Touch)) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
             }
             Text(title, Modifier.weight(1f).padding(start = UiMetrics.GapSmall),
-                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             action()
         }
-        HorizontalDivider(color = SlatrixTheme.colors.border)
         LazyColumn(Modifier.fillMaxSize(), content = content)
     }
 }
@@ -130,9 +129,9 @@ internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable (
 fun LivePreferencesScreen(
     dark: Boolean,
     darkOverride: Boolean?,
-    palette: SidebarPalette,
+    wallpaperColors: Boolean,
     onColorMode: (Boolean?) -> Unit,
-    onPalette: (SidebarPalette) -> Unit,
+    onWallpaperColors: (Boolean) -> Unit,
     onBack: () -> Unit,
     notifications: @Composable () -> Unit = {},
 ) {
@@ -173,16 +172,14 @@ fun LivePreferencesScreen(
                         Text(colorMode, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
                     }
                 }
-                Text("Color theme", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text("Colors", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Column(Modifier.selectableGroup()) {
-                    SidebarPalette.entries.forEach { choice ->
+                    listOf("Slatrix" to false, "From your wallpaper" to true).forEach { (label, choice) ->
                         Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
-                            .selectable(selected = palette == choice, role = Role.RadioButton, onClick = { onPalette(choice) })
+                            .selectable(selected = wallpaperColors == choice, role = Role.RadioButton, onClick = { onWallpaperColors(choice) })
                             .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(UiMetrics.GapSection).clip(MaterialTheme.shapes.small)
-                                .background(DesignTokens.colors(dark, choice).getValue("selectionStrong")))
-                            Text(choice.label, Modifier.weight(1f).padding(horizontal = UiMetrics.GapMedium), style = MaterialTheme.typography.bodyLarge)
-                            RadioButton(selected = palette == choice, onClick = null)
+                            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                            RadioButton(selected = wallpaperColors == choice, onClick = null)
                         }
                     }
                 }

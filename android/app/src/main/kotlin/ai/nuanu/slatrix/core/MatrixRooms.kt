@@ -28,6 +28,7 @@ import kotlinx.coroutines.sync.withLock
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.JoinRule
 import org.matrix.rustcomponents.sdk.LatestEventValue
+import org.matrix.rustcomponents.sdk.ProfileDetails
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.NotificationProcessSetup
 import org.matrix.rustcomponents.sdk.NotificationStatus
@@ -82,7 +83,7 @@ data class RoomSummary(
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
-data class LatestMessage(val body: String?, val timestamp: Long, val own: Boolean)
+data class LatestMessage(val body: String?, val timestamp: Long, val own: Boolean, val sender: String? = null)
 
 data class SpaceSummary(
     val id: String,
@@ -326,7 +327,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             initials = AvatarPlaceholder.initials(name), colorIndex = AvatarPlaceholder.colorIndex(name),
             spaceIds = ancestors(info.id),
             parentIds = parentIds(info.id),
-            latest = if (info.isDirect) followed[info.id]?.let { latest(it.room) } else null,
+            latest = followed[info.id]?.let { latest(it.room) },
             starred = info.isFavourite,
             // A direct message without a picture of its own shows the other person's.
             avatarUrl = info.avatarUrl ?: info.heroes.singleOrNull()?.avatarUrl?.takeIf { info.isDirect },
@@ -349,8 +350,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         val value = room.latestEvent()
         try {
             when (value) {
-                is LatestEventValue.Remote -> LatestMessage(previewText(value.content), value.timestamp.clampedLong(), value.isOwn)
-                is LatestEventValue.Local -> LatestMessage(previewText(value.content), value.timestamp.clampedLong(), own = true)
+                is LatestEventValue.Remote -> LatestMessage(previewText(value.content), value.timestamp.clampedLong(), value.isOwn, name(value.profile, value.sender))
+                is LatestEventValue.Local -> LatestMessage(previewText(value.content), value.timestamp.clampedLong(), own = true, name(value.profile, value.sender))
                 else -> null
             }
         } finally {
@@ -362,10 +363,13 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         null
     }
 
+    private fun name(profile: ProfileDetails, userId: String) =
+        (profile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: userId.removePrefix("@").substringBefore(':')
+
     private fun publish() {
         mutableState.value = RoomListState(
-            // Newest first, the key the SDK's recency order uses; channels carry no latest message and fall back to their names.
-            rooms = summaries.values.sortedWith(compareByDescending<RoomSummary> { it.latest?.timestamp }
+            // Direct messages newest first, the key the SDK's recency order uses; channels keep Slack's order by name.
+            rooms = summaries.values.sortedWith(compareByDescending<RoomSummary> { room -> room.latest?.timestamp?.takeIf { room.direct } }
                 .thenComparator { a, b -> String.CASE_INSENSITIVE_ORDER.compare(a.name, b.name) }.thenBy { it.id }),
             spaces = spaces.values.sortedWith(compareBy<SpaceSummary, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.id }),
             loading = false,

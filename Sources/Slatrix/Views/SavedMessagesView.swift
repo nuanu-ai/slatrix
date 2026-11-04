@@ -6,142 +6,118 @@ struct SavedMessagesView: View {
     let saved: [SavedMessageReference]
     var onOpen: (SavedMessageReference) -> Void
     var onRemove: (SavedMessageReference) -> Void
-    var onOpenProfile: (String, ChatUser?) -> Void
     @EnvironmentObject private var appearance: AppearanceStore
-    @State private var refresh = UUID()
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: m.sp8) {
+            HStack {
                 Spacer()
                 Text("\(saved.count) \(saved.count == 1 ? "message" : "messages")").font(m.font(.subheadline))
                     .foregroundStyle(appearance.colors.textSecondary)
-                IconButton(symbol: "arrow.clockwise", label: "Refresh", role: .reading) { refresh = UUID() }
             }.padding(.horizontal, m.sp24).frame(height: m.control + m.sp16)
             Divider().overlay(appearance.colors.border)
             if saved.isEmpty {
                 EmptyStateView(symbol: "bookmark", title: "Nothing saved for later")
             } else {
                 ScrollView {
-                    LazyVStack(spacing: m.sp16) {
+                    LazyVStack(spacing: 0) {
                         ForEach(saved.sorted { $0.savedAt > $1.savedAt }) { reference in
-                            SavedMessageCard(
-                                matrix: matrix, reference: reference, refresh: refresh, onOpen: { onOpen(reference) },
-                                onRemove: { onRemove(reference) }, onOpenProfile: onOpenProfile)
+                            SavedMessageRow(
+                                matrix: matrix, reference: reference, onOpen: { onOpen(reference) },
+                                onRemove: { onRemove(reference) })
+                            Divider().overlay(appearance.colors.border)
                         }
-                    }.padding(m.sp24)
+                    }
                 }
             }
         }.background(appearance.colors.canvas)
     }
 }
 
-private struct SavedMessageCard: View {
+/// One saved message, laid out like Slack's Later: the conversation, then the message; a click anywhere opens it.
+private struct SavedMessageRow: View {
     @Environment(\.metrics) private var m
     let matrix: MatrixService
     let reference: SavedMessageReference
-    let refresh: UUID
     var onOpen: () -> Void
     var onRemove: () -> Void
-    var onOpenProfile: (String, ChatUser?) -> Void
     @EnvironmentObject private var appearance: AppearanceStore
     @State private var message: ChatMessage?
-    @State private var loading = true
     @State private var error: String?
     @State private var retry = UUID()
+    @State private var hovered = false
     private var colors: AppColors { appearance.colors }
     private var room: ChatRoom? { matrix.rooms.first { $0.id == reference.roomID } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: m.sp16) {
-            HStack(spacing: m.sp8) {
-                Image(
-                    systemName: room?.isDirect == true
-                        ? "bubble.left.and.bubble.right" : room?.channelSymbol ?? "number"
-                ).font(
-                    m.font(.subheadline))
-                Text(room?.name ?? "Conversation unavailable").font(m.font(.subheadline, .semibold)).lineLimit(1)
-                Spacer()
-                IconButton(symbol: "bookmark.fill", label: "Remove from Later", role: .reading, action: onRemove)
-            }.foregroundStyle(colors.textSecondary)
-            if let message {
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: m.sp8) {
+                HStack(spacing: m.sp4) {
+                    Image(
+                        systemName: room?.isDirect == true
+                            ? "bubble.left.and.bubble.right" : room?.channelSymbol ?? "number")
+                    Text(room?.name ?? "Conversation unavailable").lineLimit(1)
+                }.font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
                 HStack(alignment: .top, spacing: m.sp12) {
-                    Button {
-                        profile(message)
-                    } label: {
-                        AvatarView(name: message.senderName, size: m.avatar, matrix: matrix, source: message.avatarURL)
-                    }.buttonStyle(.row).help("View profile")
-                    VStack(alignment: .leading, spacing: m.sp8) {
+                    AvatarView(
+                        name: message?.senderName ?? "", size: m.avatar, matrix: matrix, source: message?.avatarURL)
+                    VStack(alignment: .leading, spacing: m.sp4) {
                         HStack(spacing: m.sp8) {
-                            Button {
-                                profile(message)
-                            } label: {
-                                Text(message.senderName).font(m.font(.body, .semibold))
-                            }.buttonStyle(.row)
-                            Text(message.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
-                                m.font(.subheadline)
-                            ).foregroundStyle(colors.textSecondary)
-                            if message.isEdited {
-                                Text("edited").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                            }
+                            Text(message?.senderName ?? "Placeholder name").font(m.font(.reading, .semibold))
+                                .foregroundStyle(colors.textPrimary)
+                            Text(
+                                message?.timestamp ?? reference.savedAt,
+                                format: .dateTime.month(.abbreviated).day().hour().minute()
+                            ).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                         }
-                        if message.isRedacted {
-                            Text("This message was deleted.").italic().foregroundStyle(colors.textSecondary)
-                        } else {
-                            NativeMessageBody(
-                                body: message.body, formattedBody: message.formattedBody, showsSpoilerControl: false
-                            ).lineLimit(6)
-                            if let attachment = message.attachment {
-                                Label(attachment.name, systemImage: "paperclip").font(m.font(.subheadline))
-                                    .foregroundStyle(colors.textSecondary).lineLimit(1)
-                            }
-                        }
+                        content
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
-            } else if loading {
-                HStack(spacing: m.sp8) {
-                    DelayedProgress()
-                    Text("Loading…").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                }.padding(.vertical, m.sp12)
-            } else {
-                HStack(alignment: .top, spacing: m.sp8) {
-                    Image(systemName: "exclamationmark.bubble").foregroundStyle(colors.textSecondary)
-                    VStack(alignment: .leading, spacing: m.sp4) {
-                        Text(error ?? "Preview unavailable").font(m.font(.body, .medium))
-                        Button("Retry") { retry = UUID() }.buttonStyle(.textLink).font(m.font(.subheadline))
-                    }
-                }.padding(.vertical, m.sp8)
+                // Until the message arrives, its outline holds the row's place.
+                .redacted(reason: message == nil && error == nil ? .placeholder : [])
+            }.padding(.horizontal, m.sp24).padding(.vertical, m.sp12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(hovered ? colors.hover : .clear)
+        }.buttonStyle(.row).disabled(room?.membership != "join")
+            .onHover { hovered = $0 }
+            .overlay(alignment: .topTrailing) {
+                if hovered {
+                    IconButton(symbol: "bookmark.fill", label: "Remove from Later", role: .body, action: onRemove)
+                        .padding(.trailing, m.sp16).padding(.top, m.sp8)
+                }
             }
-            HStack {
-                Text("Saved \(reference.savedAt.formatted(.dateTime.month(.abbreviated).day()))").font(
-                    m.font(.subheadline)
-                ).foregroundStyle(colors.textSecondary)
-                Spacer()
-                Button(action: onOpen) {
-                    HStack(spacing: m.sp8) {
-                        Text("Open")
-                        Image(systemName: "arrow.up.right").font(m.font(.subheadline, .semibold))
-                    }.font(m.font(.subheadline, .semibold)).foregroundStyle(colors.accent)
-                }.buttonStyle(.row).disabled(room?.membership != "join")
-            }
-        }.padding(m.sp20).frame(maxWidth: .infinity, alignment: .leading)
-            .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge)).overlay(
-                RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border)
-            )
-            .task(id: refresh.uuidString + retry.uuidString) { await load() }
+            .accessibilityAction(named: "Remove from Later", onRemove)
+            .task(id: retry) { await load() }
             .onDisappear {
                 message = nil
                 error = nil
-                loading = true
             }
     }
 
-    private func profile(_ message: ChatMessage) {
-        onOpenProfile(
-            message.senderID, ChatUser(id: message.senderID, name: message.senderName, avatarURL: message.avatarURL))
+    @ViewBuilder private var content: some View {
+        if let message {
+            if message.isRedacted {
+                Text("This message was deleted.").italic().foregroundStyle(colors.textSecondary)
+            } else {
+                // A text view keeps clicks for selecting; here a click anywhere opens the message, as in Slack.
+                NativeMessageBody(body: message.body, formattedBody: message.formattedBody, showsSpoilerControl: false)
+                    .lineLimit(3).allowsHitTesting(false)
+                if let attachment = message.attachment {
+                    Label(attachment.name, systemImage: "paperclip").font(m.font(.subheadline))
+                        .foregroundStyle(colors.textSecondary).lineLimit(1)
+                }
+            }
+        } else if let error {
+            HStack(spacing: m.sp8) {
+                Text(error).foregroundStyle(colors.textSecondary)
+                Button("Retry") { retry = UUID() }.buttonStyle(.textLink)
+            }.font(m.font(.subheadline))
+        } else {
+            Text("Placeholder for the message while it loads").font(m.font(.reading))
+        }
     }
+
     private func load() async {
-        loading = true
         error = nil
         message = nil
         do {
@@ -158,11 +134,9 @@ private struct SavedMessageCard: View {
             }
             guard !Task.isCancelled else { return }
             message = current
-            loading = false
         } catch {
             guard !Task.isCancelled else { return }
             self.error = MatrixService.safeError(error)
-            loading = false
         }
     }
 }

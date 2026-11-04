@@ -49,6 +49,8 @@ object SlackIcons {
     val Offline = outline("offline", "M2.5 8.75 A13.5 13.5 0 0 1 21.5 8.75 M5.5 12.25 A9 9 0 0 1 18.5 12.25 " +
         "M8.75 15.75 A4.5 4.5 0 0 1 15.25 15.75 M12 19.5 L12 19.5 M4 4 L20 20")
     val Plus = outline("plus", "M12 5 V19 M5 12 H19")
+    /** A pencil, for a new message. */
+    val Compose = outline("compose", "M4 20 H8 L19 9 L15 5 L4 16 Z M13.5 6.5 L17.5 10.5", width = 2f)
     /** Slack's forward: an arrow that turns off to the right. */
     val Forward = outline("forward", "M14 5.5 L19.5 10.75 L14 16 M19.5 10.75 H11.5 A6.5 6.5 0 0 0 5 17.25 V18.5")
     val Bookmark = outline("bookmark", BookmarkShape)

@@ -1352,7 +1352,7 @@ struct RootView: View {
             onRemove: { item in
                 matrix.savedMessages.set(roomID: item.roomID, eventID: item.eventID, saved: false)
                 toasts.show("Removed from Later")
-            }, onOpenProfile: openProfile
+            }
         ).id(composerGeneration)
     }
     private var draftsCollection: some View {

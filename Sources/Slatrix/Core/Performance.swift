@@ -20,6 +20,10 @@ import os
         case sheetLoading, attachmentsLoading
         /// A visible timeline row moved while the reader was not at the newest message.
         case timelineJump
+        /// A second after a conversation opens: visible rows whose height is not their content's, the largest
+        /// difference (positive cuts content off, negative leaves space), the distance from the newest message, and
+        /// whether it opened where the reader left it.
+        case timelineFit
 
         var label: String { String(describing: self).replacing(#/[A-Z]/#) { "." + $0.output.lowercased() } }
     }

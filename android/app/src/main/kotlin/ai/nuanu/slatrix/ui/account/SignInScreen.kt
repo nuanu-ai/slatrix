@@ -146,7 +146,7 @@ internal fun AccountLayout(
 internal fun AccountAction(label: String, enabled: Boolean = true, onClick: () -> Unit) {
     val colors = SlatrixTheme.colors
     Button(onClick, enabled = enabled, shape = MaterialTheme.shapes.small,
-        colors = ButtonDefaults.buttonColors(containerColor = colors.buttonPrimary, contentColor = colors.onAccent),
+        colors = ButtonDefaults.buttonColors(containerColor = colors.accentFill, contentColor = colors.onAccent),
         modifier = Modifier.fillMaxWidth()) { Text(label) }
 }
 

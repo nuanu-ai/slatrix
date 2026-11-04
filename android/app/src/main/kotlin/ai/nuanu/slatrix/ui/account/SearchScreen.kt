@@ -1,5 +1,10 @@
 package ai.nuanu.slatrix.ui.account
 
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.shape.CircleShape
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.ConversationSearch
 import ai.nuanu.slatrix.core.MessageSearchQuery
@@ -70,7 +75,7 @@ import androidx.compose.ui.text.withStyle
 fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchState, onSearch: (MessageSearchQuery?) -> Unit,
     onMore: () -> Unit, onMessage: (SearchHit) -> Unit, recents: List<String> = emptyList(), onSearched: (String) -> Unit = {},
     people: PeopleSearchState = PeopleSearchState(), onPeopleQuery: (String) -> Unit = {}, onPerson: (Person) -> Unit = {},
-    onRoom: (String) -> Unit) {
+    onClose: (() -> Unit)? = null, onRoom: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     var submitted by rememberSaveable { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
@@ -94,12 +99,12 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
         }
     }
     val searchRecent = { recent: String -> text = recent; submit() }
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().statusBarsPadding()) {
         SearchField(text, { value ->
             text = value
             if (submitted) { submitted = false; onSearch(null) }
             onPeopleQuery(value)
-        }, submit, Modifier.focusRequester(focus))
+        }, submit, Modifier.focusRequester(focus), onClose = onClose)
         when {
             submitted -> MessageResults(text.trim(), rooms, messages, onMore, onMessage)
             text.isNotBlank() -> Suggestions(text, rooms, RecentSearches.offered(text, recents), people.people, submit, searchRecent, onPerson, onRoom)
@@ -113,25 +118,27 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
 }
 
 @Composable
-internal fun SearchField(text: String, onText: (String) -> Unit, onSubmit: () -> Unit, modifier: Modifier, placeholder: String = "Search") {
+internal fun SearchField(text: String, onText: (String) -> Unit, onSubmit: () -> Unit, modifier: Modifier, placeholder: String = "Search",
+    onClose: (() -> Unit)? = null) {
     val colors = SlatrixTheme.colors
     BasicTextField(text, onText, modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
         singleLine = true, textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textPrimary),
         cursorBrush = SolidColor(colors.accent),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
         decorationBox = { field ->
-            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.SearchField).clip(MaterialTheme.shapes.large)
-                .border(UiMetrics.Divider, colors.borderStrong, MaterialTheme.shapes.large).background(colors.canvas)
-                .padding(start = UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                Icon(SlackIcons.Search, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
+            // Material's search bar; opened over Home, it leads with the way back.
+            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.SearchBar).clip(CircleShape).background(colors.raised)
+                .padding(start = if (onClose == null) UiMetrics.GapLarge else UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+                if (onClose == null) Icon(SlackIcons.Search, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.textSecondary)
+                else IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back", tint = colors.textSecondary) }
                 Box(Modifier.weight(1f)) {
                     if (text.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
                     field()
                 }
                 if (text.isNotEmpty()) {
                     // As tall as the field, so the target is bigger than the glyph without growing the field.
-                    Box(Modifier.size(UiMetrics.SearchField).clickable(role = Role.Button) { onText("") }
+                    Box(Modifier.size(UiMetrics.Touch).clickable(role = Role.Button) { onText("") }
                         .semantics { contentDescription = "Clear" }, contentAlignment = Alignment.Center) {
                         Icon(SlackIcons.Close, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
                     }

@@ -4,7 +4,6 @@ import android.app.Application
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
@@ -33,7 +32,7 @@ class LiveProfileScreenTest {
         val mode = mutableStateOf<Boolean?>(null)
         compose.setContent {
             SlatrixTheme(dark = mode.value ?: false) {
-                LivePreferencesScreen(mode.value ?: false, mode.value, SidebarPalette.Aubergine, { mode.value = it }, {}, {})
+                LivePreferencesScreen(mode.value ?: false, mode.value, false, { mode.value = it }, {}, {})
             }
         }
         compose.onNodeWithText("System default").assertExists()
@@ -44,49 +43,18 @@ class LiveProfileScreenTest {
     }
 
     // capability: app.appearance
-    @Test fun anAccountCanChooseItsPaletteAndGoBack() {
-        val palette = mutableStateOf(SidebarPalette.Aubergine)
+    @Test fun anAccountCanTakeItsColorsFromTheWallpaperAndGoBack() {
+        val wallpaper = mutableStateOf(false)
         var returned = false
         compose.setContent {
-            SlatrixTheme(palette = palette.value) {
-                LivePreferencesScreen(false, null, palette.value, {}, { palette.value = it }, { returned = true })
+            SlatrixTheme(wallpaperColors = wallpaper.value) {
+                LivePreferencesScreen(false, null, wallpaper.value, {}, { wallpaper.value = it }, { returned = true })
             }
         }
-        compose.onNodeWithText("Aubergine").assertIsSelected()
-        compose.onNodeWithText("Lagoon").performScrollTo().performClick().assertIsSelected()
-        compose.runOnIdle { assertEquals(SidebarPalette.Lagoon, palette.value) }
+        compose.onNodeWithText("Slatrix").assertIsSelected()
+        compose.onNodeWithText("From your wallpaper").performScrollTo().performClick().assertIsSelected()
+        compose.runOnIdle { assertEquals(true, wallpaper.value) }
         compose.onNodeWithContentDescription("Back").performClick()
         compose.runOnIdle { assertEquals(true, returned) }
-    }
-
-    // capability: app.appearance
-    @Test fun everyThemeTheMacOffersCanBeChosen() {
-        val palette = mutableStateOf(SidebarPalette.Aubergine)
-        compose.setContent {
-            SlatrixTheme(palette = palette.value) {
-                LivePreferencesScreen(false, null, palette.value, {}, { palette.value = it }, {})
-            }
-        }
-        listOf("Aubergine" to SidebarPalette.Aubergine, "Clementine" to SidebarPalette.Clementine,
-            "Banana" to SidebarPalette.Banana, "Jade" to SidebarPalette.Jade, "Lagoon" to SidebarPalette.Lagoon,
-            "Barbra" to SidebarPalette.Barbra, "Gray" to SidebarPalette.Gray, "Mood Indigo" to SidebarPalette.MoodIndigo,
-        ).forEach { (name, choice) ->
-            compose.onNodeWithText(name).performScrollTo().performClick().assertIsSelected()
-            compose.runOnIdle { assertEquals(choice, palette.value) }
-        }
-    }
-
-    @Test @Config(qualifiers = "w840dp-h900dp-420dpi")
-    fun expandedHomePlacesItsDestinationsInAWorkingRail() {
-        compose.setContent {
-            SlatrixTheme {
-                LiveHomeScreen("@alex:example.org", RoomListState(loading = false), {}, {}, {})
-            }
-        }
-        val home = compose.onNodeWithText("Home").fetchSemanticsNode().boundsInRoot
-        val dms = compose.onNodeWithText("DMs").fetchSemanticsNode().boundsInRoot
-        assertEquals(home.center.x, dms.center.x, 1f)
-        compose.onNodeWithText("DMs").performClick()
-        compose.onNodeWithText("Direct messages").assertExists()
     }
 }

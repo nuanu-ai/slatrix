@@ -3,7 +3,6 @@ package ai.nuanu.slatrix.ui.account
 import android.content.ActivityNotFoundException
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -75,7 +74,7 @@ fun ReceiveKeyboardMedia(onMedia: ((List<Uri>) -> Unit)?, content: @Composable (
             val receive = media ?: return@PlatformTextInputMethodRequest connection
             EditorInfoCompat.setContentMimeTypes(editor, arrayOf("image/*", "video/*"))
             InputConnectionCompat.createWrapper(connection, editor) { info, flags, _ ->
-                val readable = Build.VERSION.SDK_INT < 25 || flags and InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION == 0 ||
+                val readable = flags and InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION == 0 ||
                     runCatching { info.requestPermission() }.isSuccess.also { if (it) granted += info }
                 if (readable) receive(listOf(info.contentUri))
                 readable

@@ -116,7 +116,8 @@ private fun AnnotatedString.Builder.append(lines: List<Line>, colors: AppColors,
             val yours = run.mention == me || run.mention == "@room"
             val decorations = listOfNotNull(
                 TextDecoration.LineThrough.takeIf { MessageTextStyle.Strike in run.styles },
-                TextDecoration.Underline.takeIf { MessageTextStyle.Underline in run.styles },
+                TextDecoration.Underline.takeIf { MessageTextStyle.Underline in run.styles ||
+                    run.link != null && run.mention == null && colors.underlineLinks },
             )
             val style = SpanStyle(
                 color = when {

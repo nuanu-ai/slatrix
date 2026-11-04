@@ -2,10 +2,11 @@
   "about": "What a person can do in Slatrix, and whether each app does it. AGENTS.md says how to keep it current.",
   "capabilities": [
     {"id": "app.icon", "what": "The app has its own icon in the Dock or launcher.", "mac": "done", "android": "done"},
-    {"id": "app.appearance", "what": "Choose light, dark or the system's appearance, and a sidebar theme.", "mac": "done", "android": "done"},
+    {"id": "app.appearance", "what": "Choose light, dark or the system's appearance, and a color theme.", "mac": "done", "android": "done"},
     {"id": "app.zoom", "what": "Zoom the whole interface from 80% to 200% with ⌘= and ⌘-.", "mac": "done", "android": "n/a: Android scales with the system font size instead"},
     {"id": "app.updates", "what": "The app updates itself to new releases.", "mac": "done", "android": "n/a: an Android app updates through the store or installer it came from"},
     {"id": "app.offline-banner", "what": "A banner says when you're offline and leaves when the connection returns.", "mac": "done", "android": "done"},
+    {"id": "app.predictive-back", "what": "A back swipe slides the page away under your finger, and goes back only when you let go.", "mac": "n/a: Android's system back swipe", "android": "done"},
     {"id": "app.narrow-window", "what": "In a narrow window the sidebar becomes a drawer and side panes cover the conversation.", "mac": "done", "android": "n/a: a phone shows one screen at a time"},
     {"id": "app.resize-panes", "what": "Drag the edges of the sidebar and the thread pane to resize them.", "mac": "done", "android": "n/a: Android screens fill the window"},
 
@@ -16,6 +17,7 @@
     {"id": "home.workspace-switcher", "what": "Switch between workspaces, which are Matrix spaces.", "mac": "done", "android": "done"},
     {"id": "home.conversations", "what": "See a workspace's channels and direct messages together.", "mac": "done", "android": "done"},
     {"id": "home.dms", "what": "See every direct message, newest first, with its latest message.", "mac": "done", "android": "done"},
+    {"id": "home.channels", "what": "Channel rows show the newest message and who sent it, and keep their order by name.", "mac": "n/a: the sidebar lists channels by name alone, as Slack's does", "android": "done"},
     {"id": "home.unread-badges", "what": "Unread conversations show in bold, and mentions show a count.", "mac": "done", "android": "done"},
     {"id": "home.starred", "what": "Starred conversations sit in their own section at the top.", "mac": "done", "android": "done"},
     {"id": "home.star-toggle", "what": "Star or unstar a conversation.", "mac": "done", "android": "done"},

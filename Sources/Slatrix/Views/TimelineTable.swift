@@ -665,10 +665,32 @@ struct TimelineTable: NSViewRepresentable {
         scroll(to: opening)
         settle(keeping: opening)
         stopLoading()
+        // Opening a channel sometimes leaves space under its newest message or cuts it off, and no test reproduces it.
+        let reopened = opening == remembered && opening != .bottom
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.logFit(reopened: reopened) }
         if !configuration.context.isThread {
             Performance.finishOnScreen(.roomOpen, ["rows": rows.count])
             Performance.finishOnScreen(.launchConversation, ["rows": rows.count])
         }
+    }
+
+    private func logFit(reopened: Bool) {
+        guard scrollView.window != nil else { return }
+        let shown = Range(table.rows(in: scrollView.contentView.bounds)) ?? 0..<0
+        let differences = shown.compactMap { row -> CGFloat? in
+            guard case .message = rows[row].kind,
+                let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell
+            else { return nil }
+            let difference = ceil(cell.height(width: width)) - cell.frame.height
+            return abs(difference) >= 1 ? difference : nil
+        }
+        let largest = differences.max { abs($0) < abs($1) } ?? 0
+        Performance.event(
+            .timelineFit,
+            [
+                "misfit": differences.count, "px": Int(largest), "bottom": Int(viewport.distanceFromBottom.rounded()),
+                "remembered": reopened ? 1 : 0,
+            ])
     }
 
     func stopLoading() {

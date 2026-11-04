@@ -10,9 +10,11 @@ import ai.nuanu.slatrix.ui.account.ChannelDetailsScreen
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.account.MessageActionsHost
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.activity.BackEventCompat
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -25,6 +27,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotEquals
 import org.junit.Rule
 import org.junit.Test
@@ -43,7 +47,7 @@ class MotionTest {
     @Test fun aPushedPageEasesInAndSettlesWithin150Milliseconds() {
         var shown by mutableStateOf(false)
         compose.setContent {
-            SlatrixTheme { if (shown) LivePreferencesScreen(false, null, SidebarPalette.Aubergine, {}, {}, {}) }
+            SlatrixTheme { if (shown) LivePreferencesScreen(false, null, false, {}, {}, {}) }
         }
         settles("Color mode") { shown = true }
     }
@@ -71,6 +75,35 @@ class MotionTest {
         compose.runOnUiThread { Snapshot.sendApplyNotifications() }
         compose.mainClock.advanceTimeByFrame()
         assertEquals("The details are back in place at once", title, bounds("Channel details").left)
+    }
+
+    // capability: app.predictive-back
+    @Test fun aPageFollowsBackAsItsSwipedAndGoesOnlyOnRelease() {
+        var went = false
+        lateinit var dispatcher: OnBackPressedDispatcher
+        compose.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            SlatrixTheme { LivePreferencesScreen(false, null, false, {}, {}, { went = true }) }
+        }
+        compose.waitForIdle()
+        val rest = bounds("Color mode")
+        compose.runOnUiThread {
+            dispatcher.dispatchOnBackStarted(BackEventCompat(0f, 800f, 0f, BackEventCompat.EDGE_LEFT))
+            dispatcher.dispatchOnBackProgressed(BackEventCompat(300f, 800f, 0.5f, BackEventCompat.EDGE_LEFT))
+        }
+        compose.waitForIdle()
+        assertTrue("The page moves with the swipe", bounds("Color mode").left > rest.left)
+        assertFalse("It stays until the swipe is let go", went)
+
+        compose.runOnUiThread { dispatcher.dispatchOnBackCancelled() }
+        compose.waitForIdle()
+        assertEquals("A swipe taken back returns the page", rest, bounds("Color mode"))
+
+        compose.runOnUiThread {
+            dispatcher.dispatchOnBackStarted(BackEventCompat(0f, 800f, 0f, BackEventCompat.EDGE_LEFT))
+            dispatcher.onBackPressed()
+        }
+        compose.runOnIdle { assertTrue(went) }
     }
 
     /** After [show], [text] is still on its way in two frames later, and in place, as it stays, 150 ms after that. */
