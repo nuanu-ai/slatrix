@@ -999,10 +999,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                         return
                     }
                     if let target = MatrixNotificationTarget(accountID: id, roomID: roomID, eventID: item.eventID) {
+                        var (title, body) = (item.roomName, item.body)
+                        if case .message = item.kind {
+                            (title, body) = DesktopMessageNotification.message(
+                                room: item.roomName, sender: item.senderName,
+                                direct: notification.roomInfo.isDirect, body: item.body)
+                        }
                         self.notificationHandler?(
                             DesktopMessageNotification(
-                                target: target, title: item.roomName, body: item.body,
-                                playSound: notification.isNoisy == true))
+                                target: target, title: title, body: body, playSound: notification.isNoisy == true))
                     }
                 }
             })

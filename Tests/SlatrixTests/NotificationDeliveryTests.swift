@@ -308,3 +308,28 @@ struct NotificationDeliveryTests {
         #expect(transport.delivered.isEmpty)
     }
 }
+
+/// What a message notification says, from the shared cases in `spec/notification-text.json`.
+struct NotificationTextTests {
+    struct Case: Decodable, CustomTestStringConvertible {
+        var name: String
+        var room: String
+        var sender: String
+        var direct: Bool
+        var body: String
+        var title: String
+        var text: String
+        var testDescription: String { name }
+    }
+
+    struct Spec: Decodable { var cases: [Case] }
+
+    private static let spec = Result { try SharedSpec.decode("spec/notification-text.json", as: Spec.self) }
+
+    @Test("A notification reads as in every shared case", arguments: try spec.get().cases)
+    func text(spec: Case) {
+        let shown = DesktopMessageNotification.message(
+            room: spec.room, sender: spec.sender, direct: spec.direct, body: spec.body)
+        #expect(shown.title == spec.title && shown.text == spec.text)
+    }
+}

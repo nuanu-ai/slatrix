@@ -67,9 +67,13 @@ class PushNotifications(private val context: Context) {
             is MessageType.Emote -> message.content.body
             else -> null
         }?.takeIf { settings.previews && it.isNotBlank() }?.take(512)
-        val title = if (body != null) item?.roomInfo?.displayName?.takeIf { it.isNotBlank() } ?: "Slatrix" else "Slatrix"
-        val sender = if (body != null) item?.senderInfo?.displayName?.takeIf { it.isNotBlank() } ?: event?.senderId() else null
-        val text = if (body == null) "New message" else if (item?.roomInfo?.isDirect == true || sender == null) body else "$sender: $body"
+        val room = item?.roomInfo?.displayName?.takeIf { it.isNotBlank() } ?: "Slatrix"
+        val sender = item?.senderInfo?.displayName?.takeIf { it.isNotBlank() } ?: event?.senderId()
+        val (title, text) = when {
+            body == null -> "Slatrix" to "New message"
+            sender == null -> room to NotificationText.plain(body)
+            else -> NotificationText.message(room, sender, item?.roomInfo?.isDirect == true, body)
+        }
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel(CHANNEL, "Messages", NotificationManager.IMPORTANCE_DEFAULT))
         val intent = Intent(context, MainActivity::class.java)
             .setAction("${context.packageName}.OPEN_NOTIFICATION")
@@ -105,6 +109,27 @@ class PushNotifications(private val context: Context) {
         }
         private const val CHANNEL = "messages"
         private val deliveryLock = Any()
+    }
+}
+
+/** What a message notification says, as the cases in `spec/notification-text.json` say. */
+internal object NotificationText {
+    fun message(room: String, sender: String, direct: Boolean, body: String): Pair<String, String> =
+        plain(body).let { if (direct) sender to it else room to "$sender: $it" }
+
+    private val markers = listOf(
+        "\\*\\*(.+?)\\*\\*", "__(.+?)__", "~~(.+?)~~", "`([^`]+)`",
+        "(?<![\\w*])\\*(?!\\s)(.+?)(?<!\\s)\\*(?![\\w*])", "(?<![\\w_])_(?!\\s)(.+?)(?<!\\s)_(?![\\w_])",
+    ).map(::Regex)
+
+    fun plain(body: String): String {
+        var lines = body.split("\n")
+        // A reply's body opens with the quoted message, "> <@sender> …", and a blank line.
+        val blank = lines.indexOfFirst { !it.startsWith(">") }
+        if (lines.first().startsWith("> <") && blank >= 0 && lines[blank].isEmpty()) lines = lines.drop(blank + 1)
+        val joined = lines.filterNot { it.trim().startsWith("```") }
+            .joinToString(" ") { if (it.startsWith(">")) it.drop(1) else it }
+        return markers.fold(joined) { text, marker -> marker.replace(text, "$1") }.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
     }
 }
 
