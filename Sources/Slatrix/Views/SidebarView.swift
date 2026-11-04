@@ -101,7 +101,7 @@ struct SidebarView: View {
                 }.padding(.bottom, m.sp24)
             }.scrollIndicators(.hidden)
                 .loadingInterval(
-                    .sidebarLoading, while: matrix.rooms.isEmpty && matrix.status != .ready && !matrix.isPreview
+                    .sidebarLoading, while: !matrix.roomsLoaded
                 )
                 .onChange(of: matrix.rooms.isEmpty, initial: true) { _, empty in
                     if !empty { Performance.finishOnScreen(.launchRooms, ["rooms": matrix.rooms.count]) }

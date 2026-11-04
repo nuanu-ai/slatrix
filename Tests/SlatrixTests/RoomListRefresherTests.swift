@@ -261,3 +261,18 @@ extension RoomListRefresherTests {
         #expect(await eventually { refresher.rooms.first?.avatarURL == "mxc://example.org/avery" })
     }
 }
+
+extension RoomListRefresherTests {
+    @Test("An account with no rooms counts as loaded only once the first read of the room list ends")
+    func loadedAfterFirstPass() async {
+        let refresher = RoomListRefresher()
+        var reported = false
+        refresher.onChange = { reported = refresher.loaded }
+        refresher.attach(FakeClient(rooms: []))
+        #expect(!refresher.loaded)
+        refresher.request()
+        #expect(await eventually { reported })
+        refresher.attach(FakeClient(rooms: []))
+        #expect(!refresher.loaded)
+    }
+}

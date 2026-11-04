@@ -698,7 +698,7 @@ struct RootView: View {
                                 if screen.route == .home {
                                     if let room {
                                         channelContent(room)
-                                    } else if matrix.status == .connecting || matrix.status == .syncing {
+                                    } else if !matrix.roomsLoaded {
                                         syncingView
                                     } else {
                                         noRoomsView
@@ -2382,7 +2382,7 @@ struct RootView: View {
     /// Opens the remembered workspace, or the busiest one on first launch, once rooms are known, and moves off
     /// a workspace that is gone.
     private func settleWorkspace() {
-        guard !matrix.workspaces.isEmpty || matrix.status == .ready else { return }
+        guard matrix.roomsLoaded else { return }
         let remembered =
             workspaceInitialized
             ? workspaceID ?? WorkspaceRail.allToken : UserDefaults.standard.string(forKey: "workspace.\(storageKey)")

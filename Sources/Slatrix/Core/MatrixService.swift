@@ -546,6 +546,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var errorMessage: String?
     var rooms: [ChatRoom] = [] { didSet { updateSelectedRoom() } }
     var workspaces: [Workspace] = []
+    /// False until the first read of the room list after signing in, so an empty list is not shown as no rooms.
+    var roomsLoaded = false
     var messages: [ChatMessage] = [] {
         didSet {
             let locked = messages.contains { $0.kind == "m.room.encrypted" }
@@ -778,6 +780,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             guard let self, let refresher else { return }
             if self.rooms != refresher.rooms { self.rooms = refresher.rooms }
             if self.workspaces != refresher.workspaces { self.workspaces = refresher.workspaces }
+            if self.roomsLoaded != refresher.loaded { self.roomsLoaded = refresher.loaded }
             self.threadFeed.updateRooms(refresher.rooms)
         }
         refresher.onError = { [weak self] error in self?.errorMessage = Self.safeError(error) }
@@ -1213,6 +1216,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         // LoginView earlier would allow overlapping new-session persistence.
         rooms = []
         workspaces = []
+        roomsLoaded = false
         messages = []
         threadMessages = []
         members = []

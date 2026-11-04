@@ -6,6 +6,7 @@ import Foundation
         guard canChangeAuthentication else { return }
         isPreview = true
         status = .ready
+        roomsLoaded = true
         user = ChatUser(id: "preview.you", name: "You")
         savedMessages.attach(nil, accountID: "preview.you")
         workspaces = [
