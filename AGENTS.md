@@ -4,7 +4,8 @@ Slatrix is a Matrix client that should feel like Slack to someone who has used S
 
 ## Product bar
 
-- Slack parity first. When unsure how something should look, behave or be named, do what Slack does on that platform: Slack desktop on the Mac, Slack's mobile app on Android. That covers layout, shortcuts and gestures, wording and keyboard flow. Diverge only where Matrix forces it.
+- Slack parity first for layout, behavior, wording and keyboard flow. When unsure where something goes, how it behaves or what it's called, do what Slack does on that platform: Slack desktop on the Mac, Slack's mobile app on Android. Diverge only where Matrix forces it.
+- The look follows the platform: Apple's Human Interface Guidelines on the Mac, with the system accent color, and Material 3 on Android. Slack's colors and chrome are not the reference.
 - Fast and still. Nothing flickers, jumps or reflows after it appears. Reserve space for content that loads later, keep view identity stable, and put transient UI (errors, menus, suggestions) in overlays instead of pushing content around.
 - No visible kitchen. Show what's cached at once and reconcile quietly; late pieces (members, pins, reply previews, avatars) land without changing a row's height. A loading indicator waits ~400 ms, never covers content already on screen, and never comes with "Loading…" text.
 - Every string earns its place. No explanations of how things work under the hood, no "SDK", no apologies, no disclaimers. If a label needs a sentence of justification, the design is wrong.
