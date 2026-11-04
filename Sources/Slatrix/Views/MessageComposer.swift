@@ -894,7 +894,6 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
             attributes[.composerMention] = mention
         } else if let link {
             attributes[.foregroundColor] = linkColor
-            attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
             attributes[.composerLink] = link
         }
         return attributes

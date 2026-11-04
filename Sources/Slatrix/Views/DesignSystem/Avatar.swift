@@ -5,7 +5,7 @@ enum Presence {
     case active, away
 }
 
-/// A person's or conversation's photo over its initials, as a rounded square.
+/// A person's photo over their initials, as a circle; a space or channel passes a corner radius for a rounded square.
 struct AvatarView: View {
     /// Above this side a 128 px thumbnail looks soft, so a larger one replaces it once loaded.
     private static let largeSide: CGFloat = 64
@@ -15,7 +15,7 @@ struct AvatarView: View {
     var presence: Presence? = nil
     /// The surface the avatar sits on, for the ring that separates the presence dot from the photo.
     var surface: Color? = nil
-    /// The tile's rounding; large photos use a panel radius rather than a fifth of their side.
+    /// A rounded square's corners, for spaces and channels; nil draws a person's circle.
     var cornerRadius: CGFloat? = nil
     var matrix: MatrixService? = nil
     var source: String? = nil
@@ -30,7 +30,7 @@ struct AvatarView: View {
         let request: RequestID
         let image: CGImage
     }
-    private var radius: CGFloat { cornerRadius ?? size * 0.19 }
+    private var radius: CGFloat { cornerRadius ?? size / 2 }
     private var large: Bool { size > Self.largeSide }
     private var requestID: RequestID { RequestID(userID: matrix?.user?.id, source: source, large: large) }
     private var largeKey: String? { source.map { "\($0)#large" } }

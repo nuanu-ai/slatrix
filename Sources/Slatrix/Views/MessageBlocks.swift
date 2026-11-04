@@ -31,6 +31,26 @@ enum MessageBlocks {
         return style
     }
 
+    /// Shrinks each blank line between paragraphs to a small gap, as Slack spaces them, keeping the text as written so
+    /// a copy still has its blank lines. Code blocks keep theirs.
+    static func shrinkBlankLines(_ text: NSMutableAttributedString, fontSize: CGFloat) {
+        let string = text.string as NSString
+        string.enumerateSubstrings(
+            in: NSRange(location: 0, length: string.length), options: [.byParagraphs, .substringNotRequired]
+        ) { _, line, enclosing, _ in
+            guard line.length == 0, enclosing.length > 0,
+                text.attribute(.codeBlock, at: enclosing.location, effectiveRange: nil) == nil,
+                let style =
+                    (text.attribute(.paragraphStyle, at: enclosing.location, effectiveRange: nil)
+                    as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle
+            else { return }
+            style.lineSpacing = 0
+            style.minimumLineHeight = fontSize * 0.35
+            style.maximumLineHeight = fontSize * 0.35
+            text.addAttribute(.paragraphStyle, value: style, range: enclosing)
+        }
+    }
+
     /// Pads the first and last lines of each code block in `range`, inside its fill.
     static func padCodeBlocks(_ text: NSMutableAttributedString, in range: NSRange, fontSize: CGFloat) {
         let string = text.string as NSString

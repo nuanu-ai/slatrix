@@ -37,6 +37,8 @@ struct TimelineView: View {
     @State private var sendActions = Set<String>()
     @State private var linkCopy: LinkCopy?
     @State private var jumpVisible = false
+    /// Messages scrolled up under the header, which then gets its line.
+    @State private var contentAbove = false
     @State private var atBottom = false
     /// The message jumped to, while its highlight lasts.
     @State private var highlighted: String?
@@ -70,12 +72,16 @@ struct TimelineView: View {
             canLoadOlder: hasOlder && !loadingHistory,
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
-            onScroll: { atBottom, showsJump in
+            onScroll: { atBottom, showsJump, scrolled in
                 self.atBottom = atBottom
                 jumpVisible = showsJump
+                contentAbove = scrolled
                 onBottomVisibilityChange?(atBottom)
             }
         )
+        .overlay(alignment: .top) {
+            if contentAbove { Divider().overlay(colors.border) }
+        }
         .overlay(alignment: .bottomTrailing) {
             if jumpVisible && !messages.isEmpty {
                 Button {

@@ -90,7 +90,9 @@ struct ActivityFeedView: View {
     private func summaryRow(_ room: ChatRoom) -> some View {
         HStack(spacing: m.sp12) {
             ZStack(alignment: .bottomTrailing) {
-                AvatarView(name: room.name, size: m.avatar, matrix: matrix, source: room.avatarURL)
+                AvatarView(
+                    name: room.name, size: m.avatar, cornerRadius: room.isDirect ? nil : m.radius, matrix: matrix,
+                    source: room.avatarURL)
                 Image(systemName: room.membership == "invite" ? "envelope.fill" : "bell.fill").font(
                     m.font(.subheadline)
                 )

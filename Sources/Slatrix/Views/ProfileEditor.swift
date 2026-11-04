@@ -100,11 +100,11 @@ struct ProfileEditor: View {
         switch photo {
         case .upload(let image, let crop):
             Image(decorative: image.cropping(to: crop) ?? image, scale: 1).resizable().frame(width: side, height: side)
-                .clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
-        case .remove: AvatarView(name: shownName, size: side, cornerRadius: m.radiusLarge)
+                .clipShape(Circle())
+        case .remove: AvatarView(name: shownName, size: side)
         case nil:
             AvatarView(
-                name: shownName, size: side, cornerRadius: m.radiusLarge, matrix: matrix,
+                name: shownName, size: side, matrix: matrix,
                 source: matrix.user?.avatarURL)
         }
     }
