@@ -7,23 +7,61 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mac: ${{ steps.paths.outputs.mac }}
+      android: ${{ steps.paths.outputs.android }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Pick the apps this change touches
+        id: paths
+        run: |
+          if [[ $GITHUB_EVENT_NAME != pull_request ]]; then
+            echo "mac=true" >> "$GITHUB_OUTPUT"
+            echo "android=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A pull request runs on a merge commit whose first parent is the base branch.
+          files=$(git diff --name-only HEAD^1 HEAD)
+          # The capability ledger has a job of its own, so a ledger line alone doesn't build either app.
+          if grep -vE '^(android/|spec/capabilities\.json$)' <<< "$files" | grep -q .; then mac=true; else mac=false; fi
+          android_paths='^(android/|design/|spec/|Sources/Slatrix/Core/EmojiData\.swift$|scripts/(build-sdk|settle-android-emulator)\.sh$|Support/MatrixSDK/|\.github/workflows/ci\.yml$)'
+          if grep -E "$android_paths" <<< "$files" | grep -qv '^spec/capabilities\.json$'; then android=true; else android=false; fi
+          echo "mac=$mac" >> "$GITHUB_OUTPUT"
+          echo "android=$android" >> "$GITHUB_OUTPUT"
+          echo "Mac: $mac, Android: $android"
+
+  capabilities:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capabilities
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          scripts/check-capabilities.py
+
+  mac:
+    needs: changes
+    if: needs.changes.outputs.mac == 'true'
     runs-on: macos-26
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Capabilities
-        run: |
-          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-          scripts/check-capabilities.py
 
       - name: Restore Matrix SDK package
         id: sdk-cache
@@ -43,6 +81,38 @@ jobs:
           path: .build/native-sdk-package
           key: ${{ steps.sdk-cache.outputs.cache-primary-key }}
 
+      - name: Name the build cache
+        id: build-cache
+        run: echo "prefix=mac-build-$(xcodebuild -version | shasum | cut -c1-8)-$(scripts/build-sdk.sh --key)-" >> "$GITHUB_OUTPUT"
+
+      # Main builds from scratch and saves the result; a pull request starts from main's last build.
+      - name: Restore the last build of main
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: .build/slatrix-spm
+          key: ${{ steps.build-cache.outputs.prefix }}${{ github.sha }}
+          restore-keys: ${{ steps.build-cache.outputs.prefix }}
+
+      # A fresh checkout stamps every file with the current time, which would recompile everything. Every file gets
+      # one fixed time instead, and only the files that changed since the restored build get the current one.
+      - name: Line up file times with the restored build
+        run: |
+          fixed=200001010000
+          git ls-files -z | xargs -0 touch -h -t $fixed
+          find .build/native-sdk-package -exec touch -h -t $fixed {} +
+          built=.build/slatrix-spm/.commit
+          if [[ -f $built ]]; then
+            if changed=$(git diff --name-only --diff-filter=d "$(<"$built")" HEAD); then
+              echo "Building on $(<"$built"), $(grep -c . <<< "$changed") files changed since"
+              if [[ -n $changed ]]; then tr '\n' '\0' <<< "$changed" | xargs -0 touch; fi
+            else
+              rm -rf .build/slatrix-spm
+            fi
+          fi
+          # Refreshes the index's file times, so red-check's checkout rewrites only the files that differ.
+          git update-index -q --refresh || true
+
       - name: Lint
         run: scripts/lint.sh
 
@@ -52,6 +122,18 @@ jobs:
       # Alone and one at a time, so other tests do not skew the clock.
       - name: Speed budgets
         run: SLATRIX_BUDGETS=1 scripts/test.sh --quiet --filter Budget --no-parallel
+
+      - name: Record the built commit
+        if: github.event_name == 'push'
+        run: git rev-parse HEAD > .build/slatrix-spm/.commit
+
+      # Before the release build, which would add its own products to the directory.
+      - name: Save the build
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: .build/slatrix-spm
+          key: ${{ steps.build-cache.outputs.prefix }}${{ github.sha }}
 
       - name: Upload crash reports
         if: failure()
@@ -69,3 +151,115 @@ jobs:
       - name: Red-green
         if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'refactor')
         run: scripts/red-check.sh origin/${{ github.base_ref }}
+
+  push-gateway:
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: android/push-gateway/package-lock.json
+      - name: Test push gateway
+        working-directory: android/push-gateway
+        run: |
+          npm ci
+          npm test
+
+  android:
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    name: android (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Three runners at once: each pays for setup and a compile, and none waits for another's slowest part.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: checks
+            tasks: :lint-rules:test :app:recordRoborazziDebug :app:lintDebug
+            python: test_push_configuration.py
+          - name: release
+            tasks: :app:assembleRelease
+            python: test_release_apk.py
+          - name: device
+            tasks: :app:assembleDebug :app:assembleDebugAndroidTest
+            device: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+      # The runner has four cores; tasks main already built come from the build cache it saved.
+      - name: Configure Gradle
+        run: |
+          mkdir -p ~/.gradle
+          printf '%s\n' org.gradle.caching=true org.gradle.parallel=true org.gradle.workers.max=4 >> ~/.gradle/gradle.properties
+      - name: Restore Matrix SDK
+        uses: actions/cache@v4
+        with:
+          path: .build/native-sdk-android
+          key: matrix-sdk-android-${{ hashFiles('scripts/build-sdk.sh', 'Support/MatrixSDK/patches/**') }}
+      - name: Prepare SDKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+          scripts/build-sdk.sh --android
+      - name: Build
+        working-directory: android
+        run: ./gradlew ${{ matrix.tasks }} --console=plain
+      - name: Check build configuration and the release APK
+        if: matrix.python
+        run: python3 -m unittest discover -s android/tests -p '${{ matrix.python }}'
+      - name: Enable hardware acceleration
+        if: matrix.device
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Check native startup
+        if: matrix.device
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            scripts/settle-android-emulator.sh
+            ./android/gradlew -p android :app:connectedDebugAndroidTest --console=plain
+      - name: Upload Android results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-results-${{ matrix.name }}
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            android/app/build/outputs/apk/
+            android/app/build/reports/
+            android/app/build/outputs/roborazzi/
+            android/lint-rules/build/reports/
+
+  # The one required check: it passes when every job above passed or had nothing to check.
+  build:
+    needs: [changes, capabilities, mac, push-gateway, android]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
