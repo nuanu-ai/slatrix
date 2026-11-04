@@ -8,21 +8,15 @@ import Testing
 @Suite("Themes")
 struct ThemeTests {
     // capability: app.appearance
-    @Test(
-        "A theme picked before Slack's names came in stays picked",
-        arguments: zip(["slate", "aubergine", "ocean", "forest"], [SidebarPalette.gray, .aubergine, .lagoon, .jade]))
-    func savedThemeStays(saved: String, theme: SidebarPalette) {
-        #expect(SidebarPalette(rawValue: saved) == theme)
-    }
-
-    @Test("Every theme keeps the sidebar and rail readable", arguments: SidebarPalette.allCases, [false, true])
-    func readable(palette: SidebarPalette, dark: Bool) {
-        let colors = AppColors(dark: dark, palette: palette)
+    @Test("Text stays readable on the window and the sidebar in both themes", arguments: [false, true])
+    func readable(dark: Bool) {
+        let colors = AppColors(dark: dark, accent: AppColors.resolve(.systemBlue, dark: dark))
         // WCAG AA for text.
-        #expect(contrast(colors.selectionText, colors.selectionStrong) >= 4.5)
-        #expect(contrast(colors.textPrimary, colors.selection) >= 4.5)
-        #expect(contrast(colors.textSecondary, colors.frame) >= 4.5)
-        #expect(contrast(colors.textSecondary, colors.sidebar) >= 4.5)
+        for surface in [colors.canvas, colors.sidebar] {
+            #expect(contrast(colors.textPrimary, surface) >= 4.5)
+            #expect(contrast(colors.textSecondary, surface) >= 4.5)
+        }
+        #expect(contrast(colors.accent, colors.canvas) >= 4.5)
     }
 
     private func contrast(_ first: Color, _ second: Color) -> Double {

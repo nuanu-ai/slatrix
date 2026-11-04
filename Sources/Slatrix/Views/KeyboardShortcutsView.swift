@@ -71,7 +71,7 @@ struct KeyboardShortcutsView: View {
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: m.sp8) {
-            Text(title.uppercased()).font(m.font(.caption, .semibold)).tracking(m(0.6)).foregroundStyle(
+            Text(title.uppercased()).font(m.font(.subheadline, .semibold)).tracking(m(0.6)).foregroundStyle(
                 colors.textSecondary
             ).padding(.bottom, m.sp4)
             content()
@@ -80,9 +80,9 @@ struct KeyboardShortcutsView: View {
 
     private func shortcut(_ title: String, keys: String, spoken: String) -> some View {
         HStack(spacing: m.sp12) {
-            Text(title).font(m.font(.meta)).lineLimit(1)
+            Text(title).font(m.font(.subheadline)).lineLimit(1)
             Spacer(minLength: m.sp4)
-            Text(keys).font(m.font(.meta, .medium, design: .monospaced)).foregroundStyle(colors.textPrimary)
+            Text(keys).font(m.font(.subheadline, .medium, design: .monospaced)).foregroundStyle(colors.textPrimary)
                 .padding(.horizontal, m.sp8).frame(minWidth: m(Self.keyCapWidth), minHeight: m.sp24)
                 .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusSmall))
                 .overlay(RoundedRectangle(cornerRadius: m.radiusSmall).stroke(colors.border))

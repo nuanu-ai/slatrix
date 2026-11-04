@@ -54,11 +54,11 @@ struct RoomNotificationSettingsView: View {
                 retryingFailedUpdate ? "Retry update" : "Save changes", disabled: !canSave, action: save)
         ) {
             VStack(alignment: .leading, spacing: m.sp20) {
-                Text(name).font(m.font(.secondary)).foregroundStyle(colors.textSecondary).lineLimit(2)
+                Text(name).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(2)
                 if loading {
                     HStack(spacing: m.sp8) {
                         DelayedProgress(interval: .sheetLoading)
-                        Text("Loading…").font(m.font(.secondary)).foregroundStyle(
+                        Text("Loading…").font(m.font(.body)).foregroundStyle(
                             colors.textSecondary)
                     }.padding(.vertical, m.sp20)
                 } else if let snapshot, current {
@@ -69,18 +69,18 @@ struct RoomNotificationSettingsView: View {
                                     ? "Default (\(snapshot.defaultChoice.title))" : option.title
                             ).tag(option)
                         }
-                    }.pickerStyle(.radioGroup).font(m.font(.secondary)).disabled(
+                    }.pickerStyle(.radioGroup).font(m.font(.body)).disabled(
                         saving || retries.isWriting || needsReload)
 
                 }
                 if let notice {
-                    Label(notice, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(
+                    Label(notice, systemImage: "info.circle").font(m.font(.subheadline)).foregroundStyle(
                         colors.textSecondary
                     )
                     .fixedSize(horizontal: false, vertical: true)
                 }
                 if let error {
-                    Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive).fixedSize(
+                    Text(error).font(m.font(.subheadline)).foregroundStyle(colors.destructive).fixedSize(
                         horizontal: false, vertical: true
                     ).textSelection(.enabled)
                 }
@@ -88,11 +88,11 @@ struct RoomNotificationSettingsView: View {
                     HStack(spacing: m.sp8) {
                         DelayedProgress()
                         Text("Saving…")
-                    }.font(m.font(.meta))
+                    }.font(m.font(.subheadline))
                 }
                 if current && !loading && !saving && !retries.isWriting {
                     Button(snapshot == nil ? "Try again" : "Reload") { Task { await load() } }
-                        .buttonStyle(.textLink).font(m.font(.meta))
+                        .buttonStyle(.textLink).font(m.font(.subheadline))
                 }
             }
         }

@@ -24,9 +24,9 @@ struct FileRow<Menu: View>: View {
             HStack(spacing: m.sp12) {
                 tileView
                 VStack(alignment: .leading, spacing: m.sp2) {
-                    Text(name).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
+                    Text(name).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
                         .lineLimit(1).truncationMode(.middle)
-                    Text(caption).font(m.font(.secondary)).foregroundStyle(colors.textSecondary).lineLimit(1)
+                    Text(caption).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
@@ -56,7 +56,7 @@ struct FileRow<Menu: View>: View {
         case .link:
             shape.fill(colors.sunken)
                 .overlay {
-                    Image(systemName: "link").font(m.font(.title, .semibold)).foregroundStyle(colors.textSecondary)
+                    Image(systemName: "link").font(m.font(.title3, .semibold)).foregroundStyle(colors.textSecondary)
                 }
                 .frame(width: m(Self.tileSide), height: m(Self.tileSide))
         }
@@ -69,11 +69,13 @@ struct FileRow<Menu: View>: View {
             if downloading {
                 DelayedProgress().frame(width: m(side), height: m(side))
             } else if let onDownload {
-                IconButton(symbol: "arrow.down.to.line", label: "Download", role: .body, side: side, action: onDownload)
-                    .focused($focus, equals: .download)
+                IconButton(
+                    symbol: "arrow.down.to.line", label: "Download", role: .reading, side: side, action: onDownload
+                )
+                .focused($focus, equals: .download)
             }
             SwiftUI.Menu(content: menu) {
-                Image(systemName: "ellipsis").font(m.font(.body)).frame(width: m(side), height: m(side))
+                Image(systemName: "ellipsis").font(m.font(.reading)).frame(width: m(side), height: m(side))
             }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m(side)).help("More actions")
                 .focused($focus, equals: .menu)
         }.padding(.horizontal, m.sp2).frame(height: m(side))

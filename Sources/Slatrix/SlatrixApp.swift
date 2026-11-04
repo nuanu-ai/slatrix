@@ -25,7 +25,7 @@ struct SlatrixApp: App {
         Window("Slatrix", id: "main") {
             RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, metrics)
                 .preferredColorScheme(appearance.preferredColorScheme)
-                .background(WindowConfiguration(background: NSColor(appearance.colors.frame))).frame(
+                .background(WindowConfiguration(background: NSColor(appearance.colors.canvas))).frame(
                     minWidth: minimumSize.width, minHeight: minimumSize.height)
         }
         .windowStyle(.hiddenTitleBar).defaultSize(width: 1440, height: 940)
@@ -77,6 +77,7 @@ struct SlatrixApp: App {
                 Button("Activity") { menuAction("activity") }.keyboardShortcut("m", modifiers: [.command, .shift])
                 Button("Later") { menuAction("later") }.keyboardShortcut("s", modifiers: [.command, .shift])
                 Button("People") { menuAction("people") }.keyboardShortcut("e", modifiers: [.command, .shift])
+                Button("Files") { menuAction("files") }
                 Button("Browse channels") { menuAction("browse-channels") }.keyboardShortcut(
                     "l", modifiers: [.command, .shift])
                 Divider()

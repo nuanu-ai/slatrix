@@ -18,9 +18,9 @@ struct PinnedMessagesView: View {
         VStack(spacing: 0) {
             HStack(spacing: m.sp8) {
                 Spacer()
-                Text("\(service.totalPinned) \(service.totalPinned == 1 ? "pin" : "pins")").font(m.font(.caption))
+                Text("\(service.totalPinned) \(service.totalPinned == 1 ? "pin" : "pins")").font(m.font(.subheadline))
                     .foregroundStyle(colors.textSecondary)
-                IconButton(symbol: "arrow.clockwise", label: "Refresh", role: .body) {
+                IconButton(symbol: "arrow.clockwise", label: "Refresh", role: .reading) {
                     Task { await service.retry() }
                 }.disabled(service.state == "loading")
             }.padding(.horizontal, m.sp24).frame(height: m.control + m.sp16)
@@ -46,7 +46,7 @@ struct PinnedMessagesView: View {
                         ForEach(service.messages) { message in card(message) }
                         if service.hasMore {
                             Button("Show more") { service.loadMore() }.buttonStyle(.textLink).font(
-                                m.font(.meta)
+                                m.font(.subheadline)
                             ).padding(m.sp16)
                         }
                     }.padding(m.sp24)
@@ -57,7 +57,7 @@ struct PinnedMessagesView: View {
                     Image(systemName: "info.circle")
                     Text(coverage)
                     Spacer()
-                }.font(m.font(.caption)).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24).padding(
+                }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24).padding(
                     .vertical, m.sp12
                 )
                 .background(colors.raised)
@@ -80,16 +80,16 @@ struct PinnedMessagesView: View {
                         Button {
                             profile(message)
                         } label: {
-                            Text(message.senderName).font(m.font(.secondary, .semibold))
+                            Text(message.senderName).font(m.font(.body, .semibold))
                         }.buttonStyle(.row)
                         Text(message.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
-                            m.font(.caption)
+                            m.font(.subheadline)
                         ).foregroundStyle(colors.textSecondary)
                         if message.isEdited {
-                            Text("edited").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                            Text("edited").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                         }
                         Spacer(minLength: 0)
-                        Image(systemName: "pin.fill").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                        Image(systemName: "pin.fill").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     }
                     if message.isRedacted {
                         Text("This message was deleted.").italic().foregroundStyle(colors.textSecondary)
@@ -98,7 +98,7 @@ struct PinnedMessagesView: View {
                             body: message.body, formattedBody: message.formattedBody, showsSpoilerControl: false
                         ).lineLimit(8)
                         if let attachment = message.attachment {
-                            Label(attachment.name, systemImage: "paperclip").font(m.font(.meta)).foregroundStyle(
+                            Label(attachment.name, systemImage: "paperclip").font(m.font(.subheadline)).foregroundStyle(
                                 colors.textSecondary
                             ).lineLimit(1)
                         }
@@ -107,7 +107,7 @@ struct PinnedMessagesView: View {
             }
             HStack {
                 if service.canPinUnpin {
-                    Button("Unpin") { unpin(message) }.buttonStyle(.row).font(m.font(.caption)).foregroundStyle(
+                    Button("Unpin") { unpin(message) }.buttonStyle(.row).font(m.font(.subheadline)).foregroundStyle(
                         colors.textSecondary
                     ).disabled(service.isUpdating)
                 }
@@ -117,8 +117,8 @@ struct PinnedMessagesView: View {
                 } label: {
                     HStack(spacing: m.sp8) {
                         Text("Open")
-                        Image(systemName: "arrow.up.right").font(m.font(.caption, .semibold))
-                    }.font(m.font(.meta, .semibold)).foregroundStyle(colors.accent)
+                        Image(systemName: "arrow.up.right").font(m.font(.subheadline, .semibold))
+                    }.font(m.font(.subheadline, .semibold)).foregroundStyle(colors.accent)
                 }.buttonStyle(.row)
             }
         }.padding(m.sp20).frame(maxWidth: .infinity, alignment: .leading).background(

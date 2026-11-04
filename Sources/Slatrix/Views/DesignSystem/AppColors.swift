@@ -1,158 +1,119 @@
+import AppKit
 import SwiftUI
 
 extension AppearanceStore {
-    var colors: AppColors { AppColors(dark: isDark, palette: palette) }
+    var colors: AppColors { AppColors(dark: isDark, accent: accent(dark: isDark)) }
 }
 
-/// Every color in the UI, by role. Views pick a role, never a value.
+/// Every color in the UI, by role. Views pick a role, never a value. A neutral base and one accent, the one picked in
+/// System Settings.
 struct AppColors {
     let dark: Bool
-    let palette: SidebarPalette
+    /// The system accent in this theme, in sRGB.
+    let accentBase: NSColor
+
+    init(dark: Bool, accent: NSColor? = nil) {
+        self.dark = dark
+        accentBase = accent ?? Self.resolve(.controlAccentColor, dark: dark)
+    }
+
+    /// A dynamic system color as it draws in one theme.
+    static func resolve(_ color: NSColor, dark: Bool) -> NSColor {
+        var resolved = color
+        NSAppearance(named: dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
+            resolved = color.usingColorSpace(.sRGB) ?? color
+        }
+        return resolved
+    }
 
     // MARK: Text
 
     /// Names, titles and headings.
-    var textPrimary: Color { Color(hex: dark ? 0xf5f5f5 : 0x1d1c1d) }
+    var textPrimary: Color { Color(hex: dark ? 0xf5f5f7 : 0x1d1d1f) }
     /// Message bodies and running text.
-    var textBody: Color { Color(hex: dark ? 0xd1d2d3 : 0x1d1c1d) }
-    /// Timestamps, descriptions, secondary lines.
-    var textSecondary: Color { Color(hex: dark ? 0xabadb1 : 0x616061) }
-    /// Placeholders, disabled text and hints.
-    var textTertiary: Color { Color(hex: dark ? 0x7c7f84 : 0x8d8c8d) }
+    var textBody: Color { textPrimary }
+    /// Times, descriptions, section titles, secondary lines.
+    var textSecondary: Color { Color(hex: dark ? 0x98989f : 0x6a6a6f) }
+    /// Icons at rest, placeholders, disabled text and hints.
+    var textTertiary: Color { Color(hex: dark ? 0x8a8a90 : 0x86868b) }
 
     // MARK: Surfaces
 
-    /// The conversation and modal background.
-    var canvas: Color { Color(hex: dark ? 0x1c1d21 : 0xffffff) }
-    /// Cards and tiles that sit on the canvas.
-    var raised: Color { Color(hex: dark ? 0x24262a : 0xf8f8f8) }
-    /// Wells: reserved media boxes, chips, skeletons.
-    var sunken: Color { Color(hex: dark ? 0x27282c : 0xf4f4f4) }
-    /// Popovers, menus, toolbars and toasts that float over content.
-    var overlay: Color { Color(hex: dark ? 0x222529 : 0xffffff) }
-    /// Tooltips: a dark bubble in both themes, as Slack's are. In dark mode it sits below the canvas, and the
-    /// elevation's hairline sets it apart from the conversation.
-    var tooltip: Color { Color(hex: dark ? 0x111214 : 0x1d1c1d) }
+    /// The window: the conversation, panes and modals.
+    var canvas: Color { Color(hex: dark ? 0x1e1e20 : 0xffffff) }
+    /// Cards and tiles that sit on the canvas, in the sidebar's gray.
+    var raised: Color { sidebar }
+    /// Wells: reserved media boxes, chips, skeletons, filled round buttons.
+    var sunken: Color { dark ? Color.white.opacity(0.07) : Color.black.opacity(0.05) }
+    /// Menus, popovers, the switcher and toasts that float over content.
+    var overlay: Color { Color(hex: dark ? 0x2c2c2f : 0xfbfbfd) }
+    /// The toolbar's capsules and the composer, which sit a hair above the canvas.
+    var control: Color { Color(hex: dark ? 0x2c2c2f : 0xffffff) }
+    /// Tooltips: a dark bubble in both themes, lighter than every surface in dark mode.
+    var tooltip: Color { Color(hex: dark ? 0x111113 : 0x1d1d1f) }
     var onTooltip: Color { Color(hex: 0xffffff) }
     /// Dims the window under a modal.
     var scrim: Color { Color.black.opacity(dark ? 0.48 : 0.32) }
-    var sidebar: Color {
-        guard dark else { return Color(hex: 0xf8f8f8) }
-        return switch palette {
-        case .aubergine: Color(hex: 0x211323)
-        case .clementine: Color(hex: 0x24170e)
-        case .banana: Color(hex: 0x211e0f)
-        case .jade: Color(hex: 0x15231d)
-        case .lagoon: Color(hex: 0x13212b)
-        case .barbra: Color(hex: 0x25121b)
-        case .gray: Color(hex: 0x17181a)
-        case .moodIndigo: Color(hex: 0x161833)
-        }
-    }
-    /// The window around the panels: title bar and rail.
-    var frame: Color {
-        guard dark else {
-            return switch palette {
-            case .aubergine: Color(hex: 0xede4ef)
-            case .clementine: Color(hex: 0xf8e9dd)
-            case .banana: Color(hex: 0xf7f1d9)
-            case .jade: Color(hex: 0xe4eee7)
-            case .lagoon: Color(hex: 0xe2edf4)
-            case .barbra: Color(hex: 0xf6e4ec)
-            case .gray: Color(hex: 0xf0f0f0)
-            case .moodIndigo: Color(hex: 0xe6e7f6)
-            }
-        }
-        return switch palette {
-        case .aubergine: Color(hex: 0x350d36)
-        case .clementine: Color(hex: 0x4a2410)
-        case .banana: Color(hex: 0x3a3210)
-        case .jade: Color(hex: 0x142b23)
-        case .lagoon: Color(hex: 0x0e293b)
-        case .barbra: Color(hex: 0x3f1328)
-        case .gray: Color(hex: 0x202124)
-        case .moodIndigo: Color(hex: 0x1e2154)
-        }
-    }
+    /// The sidebar, a panel inset in the window.
+    var sidebar: Color { Color(hex: dark ? 0x2a2a2d : 0xf3f3f5) }
 
     // MARK: Lines
 
     /// Dividers and the hairlines of cards.
-    var border: Color { Color(hex: dark ? 0x383a3e : 0xe3e3e3) }
-    /// Fields and secondary buttons.
-    var borderStrong: Color { Color(hex: dark ? 0x5a5c61 : 0xbbbabb) }
+    var border: Color { dark ? Color.white.opacity(0.1) : Color.black.opacity(0.09) }
+    /// Fields, checkboxes and secondary buttons.
+    var borderStrong: Color { dark ? Color.white.opacity(0.16) : Color.black.opacity(0.15) }
 
     // MARK: Interaction
 
-    var hover: Color { Color(hex: dark ? 0xffffff : 0x1d1c1d).opacity(dark ? 0.08 : 0.06) }
-    var pressed: Color { Color(hex: dark ? 0xffffff : 0x1d1c1d).opacity(dark ? 0.14 : 0.11) }
-    /// A quiet tint for what is picked on the canvas: my reactions, search results, the open Preferences tab.
-    var selection: Color {
-        switch palette {
-        case .aubergine: Color(hex: dark ? 0x713783 : 0xf0e6f4)
-        case .clementine: Color(hex: dark ? 0x8a4a1f : 0xfbe9dc)
-        case .banana: Color(hex: dark ? 0x6b5a12 : 0xfaf2cf)
-        case .jade: Color(hex: dark ? 0x2d6654 : 0xdeeee5)
-        case .lagoon: Color(hex: dark ? 0x195b7c : 0xdceef8)
-        case .barbra: Color(hex: dark ? 0x7a2a52 : 0xf9e4ee)
-        case .gray: Color(hex: dark ? 0x293b94 : 0xe7ebff)
-        case .moodIndigo: Color(hex: dark ? 0x3a3f99 : 0xe6e8fb)
-        }
-    }
-    /// The open conversation in the sidebar: Slack's strong fill, under `selectionText`.
-    var selectionStrong: Color {
-        switch palette {
-        case .aubergine: Color(hex: dark ? 0x7c3085 : 0x611f69)
-        case .clementine: Color(hex: dark ? 0xb35418 : 0xa84c12)
-        case .banana: Color(hex: dark ? 0x8f6c00 : 0x8a6a00)
-        case .jade: Color(hex: dark ? 0x2a7d5f : 0x1d6b50)
-        case .lagoon: Color(hex: dark ? 0x0f7aa8 : 0x0b5c8a)
-        case .barbra: Color(hex: dark ? 0xb0306a : 0x9e2a5e)
-        case .gray: Color(hex: 0x1164a3)
-        case .moodIndigo: Color(hex: dark ? 0x4b52c9 : 0x3a40b0)
-        }
-    }
-    var selectionText: Color { .white }
-    /// Words a search matched, in a result: Slack's yellow.
-    var highlight: Color { Color(hex: 0xf2c744).opacity(dark ? 0.3 : 0.5) }
-    /// The keyboard focus ring around buttons, rows and fields; the same in every theme, so views without the
-    /// appearance store, like an AppKit popover's, can draw it.
-    static let focusRing = Color(hex: 0x1d9bd1)
+    var hover: Color { dark ? Color.white.opacity(0.07) : Color.black.opacity(0.05) }
+    var pressed: Color { dark ? Color.white.opacity(0.12) : Color.black.opacity(0.09) }
+    /// What is picked in a list: the open conversation in the sidebar, a search result, a Preferences tab.
+    var selection: Color { dark ? Color.white.opacity(0.1) : Color.black.opacity(0.07) }
+    /// Words a search matched, in a result.
+    var highlight: Color { Color(hex: 0xffcc00).opacity(dark ? 0.3 : 0.4) }
+    /// The keyboard focus ring around buttons, rows and fields: the system's, in the accent.
+    static var focusRing: Color { Color(nsColor: .keyboardFocusIndicatorColor) }
     var focusRing: Color { Self.focusRing }
 
     // MARK: Accent and status
 
-    /// Links, selected tabs, mine.
-    var accent: Color { Color(hex: dark ? 0x8195ff : 0x334ec9) }
-    /// The fill behind something of yours, such as your reaction.
-    var accentTint: Color { accent.opacity(dark ? 0.2 : 0.1) }
-    /// Text and icons on a filled button.
+    /// The system accent as a fill: the one main button, the send button, badges, the highlighted menu row.
+    var accentFill: Color { Color(nsColor: accentBase) }
+    /// The accent as text and icons: links, the open conversation's icon, a mention. Deepened in light mode and lifted
+    /// in dark mode, so it reads as text on the canvas.
+    var accent: Color {
+        Color(nsColor: accentBase.blended(withFraction: 0.2, of: dark ? .white : .black) ?? accentBase)
+    }
+    /// The fill behind something of yours, such as your reaction or a mention of you.
+    var accentTint: Color { accentFill.opacity(dark ? 0.18 : 0.1) }
+    /// The edge of something of yours.
+    var accentLine: Color { accentFill.opacity(dark ? 0.5 : 0.32) }
+    /// Text and icons on an accent fill.
     var onAccent: Color { .white }
-    /// Slack's green: the one primary action on a screen.
-    var buttonPrimary: Color { Color(hex: 0x007a5a) }
-    /// Done and verified marks, in the same green.
-    var success: Color { buttonPrimary }
-    var destructive: Color { Color(hex: 0xe01e5a) }
+    /// Done and verified marks.
+    var success: Color { Color(hex: dark ? 0x30d158 : 0x248a3d) }
+    var destructive: Color { Color(hex: dark ? 0xff453a : 0xd70015) }
     /// Connection trouble and recoverable failures.
-    var warning: Color { Color(hex: dark ? 0xf0a030 : 0xc46800) }
-    /// Mention badges: the same red as destructive, as in Slack.
-    var mention: Color { destructive }
-    /// An @Name pill in a message or the composer: Slack's link blue on a pale blue fill.
-    var mentionText: Color { Color(hex: dark ? 0x1d9bd1 : 0x1264a3) }
-    var mentionFill: Color { Color(hex: 0x1d9bd1).opacity(dark ? 0.18 : 0.1) }
-    /// The pill of a mention that notifies you, or everyone: Slack's yellow.
-    var mentionYouText: Color { dark ? Color(hex: 0xf2c744) : mentionText }
-    var mentionYouFill: Color { Color(hex: 0xf2c744).opacity(dark ? 0.2 : 0.4) }
-    var presenceActive: Color { Color(hex: 0x2bac76) }
-    var presenceAway: Color { Color(hex: dark ? 0xabadb1 : 0x616061) }
+    var warning: Color { Color(hex: dark ? 0xff9f0a : 0xc46800) }
+    /// An @Name pill in a message or the composer.
+    var mentionText: Color { accent }
+    var mentionFill: Color { .clear }
+    /// The pill of a mention that notifies you, or everyone.
+    var mentionYouText: Color { accent }
+    var mentionYouFill: Color { accentTint }
+    /// Inline code in a message.
+    var code: Color { sunken }
+    var presenceActive: Color { Color(hex: dark ? 0x30d158 : 0x34c759) }
+    var presenceAway: Color { textTertiary }
 
     // MARK: Media
 
-    /// Behind the media viewer: near black in either theme, as in Slack, and opaque so nothing ghosts through.
+    /// Behind the media viewer: near black in either theme, and opaque so nothing ghosts through.
     var mediaBackdrop: Color { Color(hex: 0x1a1b1e) }
     /// Chips over a photo or video: play, duration and the GIF tag.
     var mediaControl: Color { Color.black.opacity(0.6) }
-    /// Over the part of a photo left out, such as outside the crop frame; half black, as in Slack, in either theme.
+    /// Over the part of a photo left out, such as outside the crop frame; half black in either theme.
     var mediaShade: Color { Color.black.opacity(0.5) }
     /// Text and icons over media and in the media viewer.
     var onMedia: Color { .white }

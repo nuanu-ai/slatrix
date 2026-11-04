@@ -12,7 +12,7 @@ struct SavedMessagesView: View {
         VStack(spacing: 0) {
             HStack {
                 Spacer()
-                Text("\(saved.count) \(saved.count == 1 ? "message" : "messages")").font(m.font(.caption))
+                Text("\(saved.count) \(saved.count == 1 ? "message" : "messages")").font(m.font(.subheadline))
                     .foregroundStyle(appearance.colors.textSecondary)
             }.padding(.horizontal, m.sp24).frame(height: m.control + m.sp16)
             Divider().overlay(appearance.colors.border)
@@ -57,18 +57,18 @@ private struct SavedMessageRow: View {
                         systemName: room?.isDirect == true
                             ? "bubble.left.and.bubble.right" : room?.channelSymbol ?? "number")
                     Text(room?.name ?? "Conversation unavailable").lineLimit(1)
-                }.font(m.font(.caption, .semibold)).foregroundStyle(colors.textSecondary)
+                }.font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
                 HStack(alignment: .top, spacing: m.sp12) {
                     AvatarView(
                         name: message?.senderName ?? "", size: m.avatar, matrix: matrix, source: message?.avatarURL)
                     VStack(alignment: .leading, spacing: m.sp4) {
                         HStack(spacing: m.sp8) {
-                            Text(message?.senderName ?? "Placeholder name").font(m.font(.secondary, .semibold))
+                            Text(message?.senderName ?? "Placeholder name").font(m.font(.reading, .semibold))
                                 .foregroundStyle(colors.textPrimary)
                             Text(
                                 message?.timestamp ?? reference.savedAt,
                                 format: .dateTime.month(.abbreviated).day().hour().minute()
-                            ).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                            ).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                         }
                         content
                     }.frame(maxWidth: .infinity, alignment: .leading)
@@ -103,7 +103,7 @@ private struct SavedMessageRow: View {
                 NativeMessageBody(body: message.body, formattedBody: message.formattedBody, showsSpoilerControl: false)
                     .lineLimit(3).allowsHitTesting(false)
                 if let attachment = message.attachment {
-                    Label(attachment.name, systemImage: "paperclip").font(m.font(.meta))
+                    Label(attachment.name, systemImage: "paperclip").font(m.font(.subheadline))
                         .foregroundStyle(colors.textSecondary).lineLimit(1)
                 }
             }
@@ -111,9 +111,9 @@ private struct SavedMessageRow: View {
             HStack(spacing: m.sp8) {
                 Text(error).foregroundStyle(colors.textSecondary)
                 Button("Retry") { retry = UUID() }.buttonStyle(.textLink)
-            }.font(m.font(.meta))
+            }.font(m.font(.subheadline))
         } else {
-            Text("Placeholder for the message while it loads").font(m.font(.body))
+            Text("Placeholder for the message while it loads").font(m.font(.reading))
         }
     }
 

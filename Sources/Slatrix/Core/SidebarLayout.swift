@@ -5,7 +5,7 @@ import Foundation
 /// threshold crosses it once and nothing flickers.
 enum SidebarLayout {
     static let minimumWidth: CGFloat = 220
-    static let defaultWidth: CGFloat = 280
+    static let defaultWidth: CGFloat = 264
     static let maximumWidth: CGFloat = 420
 
     static func validatedPreferred(_ value: Double) -> CGFloat {
@@ -26,21 +26,24 @@ enum SidebarLayout {
     static let handleWidth: CGFloat = 6
     static let minimumPaneWidth: CGFloat = 280
     static let maximumPaneWidth: CGFloat = 720
-    /// The frame around the conversation panel.
-    private static let inset: CGFloat = 4
-    // The workspace rail, the sidebar's divider, a readable conversation and the frame on its right.
-    private static let reserved: CGFloat = 68 + handleWidth + readableWidth + inset
+    /// The margin the sidebar floats in, left of it.
+    private static let inset: CGFloat = 8
+    // The sidebar's margin, its divider and a readable conversation.
+    private static let reserved: CGFloat = inset + handleWidth + readableWidth
 
-    /// Whether the rail and sidebar leave for a drawer: the narrowest sidebar no longer fits beside a readable
+    /// Whether the sidebar leaves for a drawer: the narrowest sidebar no longer fits beside a readable
     /// conversation and, while one is open, the narrowest pane. The sidebar gives way before the pane covers the
     /// conversation.
     static func collapses(availableWidth: CGFloat, paneOpen: Bool = false) -> Bool {
         !(availableWidth >= reserved + minimumWidth + (paneOpen ? handleWidth + minimumPaneWidth : 0))
     }
 
-    /// Whether the title bar keeps its search field, which otherwise becomes a button; below this the field would
-    /// be too short for its prompt.
-    static func searchFits(availableWidth: CGFloat) -> Bool { availableWidth >= 640 }
+    /// Whether the toolbar keeps its search field, which otherwise becomes a button: below these the field would be
+    /// too short for its prompt, or push the conversation's buttons past the toolbar's edge. `toolbarWidth` is what
+    /// the conversation's toolbar has after the window buttons, when they sit in it.
+    static func searchFits(availableWidth: CGFloat, toolbarWidth: CGFloat = .infinity) -> Bool {
+        availableWidth >= 640 && toolbarWidth >= 520
+    }
 
     /// The thread or details pane width: the dragged width, or the pane's ideal one, narrowed to what fits beside
     /// a readable conversation and the narrowest sidebar while it shows. Nil when even the minimum does not fit, so
@@ -48,7 +51,7 @@ enum SidebarLayout {
     static func paneWidth(
         preferred: CGFloat, ideal: CGFloat, availableWidth: CGFloat, sidebarShown: Bool = true
     ) -> CGFloat? {
-        let beside = sidebarShown ? reserved + minimumWidth : inset + readableWidth + inset
+        let beside = sidebarShown ? reserved + minimumWidth : readableWidth
         let space = availableWidth - beside - handleWidth
         guard space >= minimumPaneWidth else { return nil }
         let wanted =

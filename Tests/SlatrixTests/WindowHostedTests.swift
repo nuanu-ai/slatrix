@@ -133,9 +133,9 @@ struct WindowHostedTests {
         /// The sidebar's and an open pane's dividers.
         var dividers: Int { shown().filter { String(describing: type(of: $0)) == "ResizePointerView" }.count }
         var sidebarShown: Bool {
-            shown().contains { ($0 as? NSTextField)?.placeholderString == "Find a conversation…" }
+            SlatrixTests.sidebarShown(in: hosting)
         }
-        /// The conversation's left edge: past the rail while it shows, at the window's inset once it folds away.
+        /// The conversation's left edge: past the sidebar while it shows, at the window's edge once it folds away.
         var conversationLeft: CGFloat? {
             shown().compactMap { $0 as? UploadDropView }.map { $0.convert($0.bounds, to: nil).minX }.min()
         }
@@ -156,37 +156,12 @@ struct WindowHostedTests {
             _ = item.target?.perform(item.action, with: item)
         }
 
-        /// The channel header's tabs, left to right: the runs of ink in the row above the timeline, where the gap
-        /// between two tabs is wider than any inside one.
-        func tabs() throws -> [CGRect] {
-            let timeline = try timeline()
-            // Past the divider, and short of the underline and the row's edges.
-            let row = CGRect(x: timeline.minX, y: timeline.maxY + 6, width: timeline.width / 2, height: 30)
-            hosting.layoutSubtreeIfNeeded()
-            let image = try #require(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
-            hosting.cacheDisplay(in: hosting.bounds, to: image)
-            let scale = CGFloat(image.pixelsWide) / hosting.bounds.width
-            let rows = Int((hosting.bounds.height - row.maxY) * scale)..<Int((hosting.bounds.height - row.minY) * scale)
-            let paper = try #require(image.colorAt(x: Int(row.minX * scale) + 1, y: rows.lowerBound))
-            var runs: [ClosedRange<CGFloat>] = []
-            for x in Int(row.minX * scale)..<Int(row.maxX * scale) {
-                let inked = rows.contains { y in
-                    image.colorAt(x: x, y: y).map {
-                        abs($0.redComponent - paper.redComponent) + abs($0.greenComponent - paper.greenComponent)
-                            + abs($0.blueComponent - paper.blueComponent) > 0.3
-                    } ?? false
-                }
-                guard inked else { continue }
-                let point = CGFloat(x) / scale
-                if let last = runs.last, point - last.upperBound < 12 {
-                    runs[runs.count - 1] = last.lowerBound...point
-                } else {
-                    runs.append(point...point)
-                }
-            }
-            return runs.map {
-                CGRect(x: $0.lowerBound, y: row.minY, width: $0.upperBound - $0.lowerBound, height: row.height)
-            }
+        /// A point in the toolbar's capsule of conversation buttons, which SwiftUI draws without views: `inset` from
+        /// its trailing end, which sits a gap short of the search field at the toolbar's end.
+        func toolbarCapsule(inset: CGFloat) -> CGRect {
+            let m = Metrics()
+            let end = window.frame.width - m.sp16 - m(RootView.searchWidth) - m.sp12 - m.sp4
+            return CGRect(x: end - inset, y: window.frame.height - m.paneHeader / 2, width: 0, height: 0)
         }
 
         func click(_ frame: CGRect) async throws {
@@ -260,21 +235,8 @@ struct WindowHostedTests {
         let harness = Harness()
         defer { harness.close() }
         #expect(await harness.settle())
-        // The facepile sits just left of the header's ⋮, the rightmost menu in the window.
-        let menu = try #require(
-            Harness.views(in: harness.hosting).compactMap { $0 as? NSPopUpButton }.map {
-                $0.convert($0.bounds, to: nil)
-            }
-            .max { $0.minX < $1.minX })
-        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            await drainMainActor()
-            harness.window.sendEvent(
-                try #require(
-                    NSEvent.mouseEvent(
-                        with: type, location: NSPoint(x: menu.minX - 20, y: menu.midY), modifierFlags: [],
-                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: harness.window.windowNumber,
-                        context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
-        }
+        // Members leads the toolbar's capsule, before pins, files and ⋯.
+        try await harness.click(harness.toolbarCapsule(inset: 3 * Metrics().control + 10))
         #expect(
             await eventually {
                 harness.hosting.layoutSubtreeIfNeeded()
@@ -285,7 +247,7 @@ struct WindowHostedTests {
     }
 
     // capability: conversation.files
-    @Test("Files & links shows the channel's files under its header, and Messages brings its messages back")
+    @Test("Files and links in the toolbar shows the channel's files in place of its messages, and brings them back")
     func filesTab() async throws {
         let harness = Harness()
         defer { harness.close() }
@@ -294,12 +256,11 @@ struct WindowHostedTests {
             harness.shown().contains { ($0 as? NSTextField)?.placeholderString == "Search files and links" }
         }
 
-        // Messages, Pins, then Files & links.
-        let tabs = try harness.tabs()
-        try #require(tabs.count == 3, "\(tabs)")
-        try await harness.click(tabs[2])
+        // Files sits just left of the capsule's ⋯.
+        let files = harness.toolbarCapsule(inset: 1.5 * Metrics().control)
+        try await harness.click(files)
         #expect(await eventually { filesShown() })
-        try await harness.click(tabs[0])
+        try await harness.click(files)
         #expect(await eventually { !filesShown() && (try? harness.newest().window) != nil })
     }
 
@@ -367,7 +328,7 @@ struct WindowHostedTests {
         let harness = Harness()
         defer { harness.close() }
         #expect(await harness.settle())
-        let messages = (1...9).map {
+        let messages = (1...21).map {
             ChatMessage(
                 id: "$later\($0)", roomID: "!later:example.org", senderID: "@ana:example.org", senderName: "Ana",
                 body: "Saved message \($0)", timestamp: Date(timeIntervalSince1970: 1_761_955_000))
@@ -377,22 +338,23 @@ struct WindowHostedTests {
         let entry = { (index: Int) in
             #"{"room_id":"!later:example.org","event_id":"$later\#(index)","ts":\#(1_761_955_200_000 + index)}"#
         }
-        let client = LaterClient(server: #"{"saved":[\#((1...8).map(entry).joined(separator: ","))],"removed":[]}"#)
+        let client = LaterClient(server: #"{"saved":[\#((1...20).map(entry).joined(separator: ","))],"removed":[]}"#)
         harness.matrix.savedMessages.attach(client, accountID: "preview.you")
         harness.menu("later")
         func card(_ index: Int) -> NSView? {
             harness.shown().first { ($0 as? MessageTextView)?.string == "Saved message \(index)" }
         }
-        #expect(await eventually { card(8) != nil })
-        let scroll = try #require(card(8)?.enclosingScrollView)
+        #expect(await eventually { card(20) != nil })
+        let scroll = try #require(card(20)?.enclosingScrollView)
         scroll.contentView.setBoundsOrigin(NSPoint(x: 0, y: 500))
         scroll.reflectScrolledClipView(scroll.contentView)
-        #expect(await eventually { card(4) != nil })
-        let shown = try #require(card(4))
+        #expect(scroll.contentView.bounds.minY > 0)
+        #expect(await eventually { card(12) != nil })
+        let shown = try #require(card(12))
         let before = shown.convert(shown.bounds, to: nil)
 
-        client.sync(#"{"saved":[\#((1...9).map(entry).joined(separator: ","))],"removed":[]}"#)
-        #expect(await eventually { harness.matrix.savedMessages.list.saved.count == 9 })
+        client.sync(#"{"saved":[\#((1...21).map(entry).joined(separator: ","))],"removed":[]}"#)
+        #expect(await eventually { harness.matrix.savedMessages.list.saved.count == 21 })
         await drainMainActor()
         harness.hosting.layoutSubtreeIfNeeded()
         #expect(abs(shown.convert(shown.bounds, to: nil).minY - before.minY) < 1)
@@ -477,8 +439,8 @@ struct WindowHostedTests {
         defer { harness.close() }
         #expect(await harness.settle())
         try harness.openThread()
-        // The rightmost drop target is the thread's, as wide as the pane; the panel ends 4 pt from the window's edge.
-        let panelEdge = harness.window.frame.width - Metrics(zoom: 1.5).sp4
+        // The rightmost drop target is the thread's, as wide as the pane, which ends at the window's edge.
+        let panelEdge = harness.window.frame.width
         #expect(
             await eventually {
                 let targets = harness.shown().compactMap { $0 as? UploadDropView }
@@ -495,19 +457,16 @@ struct WindowHostedTests {
         #expect(await eventually { harness.dividers == 2 })
 
         // Only the thread's divider: conversation and thread side by side, the sidebar folded away.
-        harness.resize(1_000)
+        harness.resize(980)
         #expect(
-            await eventually {
-                harness.dividers == 1 && !harness.sidebarShown
-                    && harness.conversationLeft ?? .infinity < Metrics().rail
-            })
+            await eventually { harness.dividers == 1 && !harness.sidebarShown && harness.conversationLeft == 0 })
         harness.resize(700)
         #expect(await eventually { harness.dividers == 0 && harness.searchFieldShown })
         harness.resize(560)
         #expect(await eventually { !harness.searchFieldShown })
 
         // Closing the thread brings the sidebar back on its own.
-        harness.resize(1_000)
+        harness.resize(980)
         #expect(await eventually { harness.dividers == 1 && !harness.sidebarShown })
         harness.menu("toggle-pane")
         #expect(await eventually { harness.dividers == 1 && harness.sidebarShown })
@@ -538,7 +497,7 @@ struct WindowHostedTests {
         #expect(await eventually { !harness.sidebarShown })
     }
 
-    @Test("Hiding the sidebar by hand at full width hides the rail too, and it comes back")
+    @Test("Hiding the sidebar by hand at full width gives the conversation the whole window, and it comes back")
     func hiddenByHand() async {
         let key = "layout.sidebarHidden"
         let saved = UserDefaults.standard.object(forKey: key)
@@ -548,7 +507,7 @@ struct WindowHostedTests {
         defer { harness.close() }
         #expect(await harness.settle())
         harness.menu("toggle-sidebar")
-        #expect(await eventually { !harness.sidebarShown && harness.conversationLeft ?? .infinity < Metrics().rail })
+        #expect(await eventually { !harness.sidebarShown && harness.conversationLeft == 0 })
         harness.menu("toggle-sidebar")
         #expect(await eventually { harness.sidebarShown && harness.dividers == 1 })
     }
@@ -598,43 +557,28 @@ struct WindowHostedTests {
         #expect(await eventually { abs(offset(harness.searchField)) <= 1 }, "\(offset(harness.searchField))")
     }
 
-    @Test("A modal dims the window below the title bar, which looks the same and takes no clicks", arguments: [1, 1.5])
-    func modalLeavesTitleBar(zoom: Double) async throws {
+    @Test("A modal dims the whole window, toolbar included, which then takes no clicks", arguments: [1, 1.5])
+    func modalCoversToolbar(zoom: Double) async throws {
         let harness = Harness(zoom: zoom)
         defer { harness.close() }
         #expect(await harness.settle())
         let search = try #require(harness.searchField)
         let field = search.convert(search.bounds, to: nil)
-        // The title bar, centered on its search field: under the window buttons, and from the field to the window's
-        // right edge, past Sign in and help. The AppKit controls between draw as the offscreen window's key state
-        // has them, which a modal changes. A point short of the bar's bottom edge, which can fall inside a pixel.
-        let height = 2 * (harness.hosting.bounds.height - field.midY) - 1
-        let top = harness.hosting.bounds.height - height
-        let zoomButton = try #require(harness.window.standardWindowButton(.zoomButton))
-        let buttons = zoomButton.convert(zoomButton.bounds, to: nil).maxX
-        let stretches = [
-            CGRect(x: 0, y: top, width: buttons, height: height),
-            CGRect(x: field.maxX, y: top, width: harness.hosting.bounds.width - field.maxX, height: height),
-        ]
-        let before = stretches.map(harness.pixels)
         harness.menu("preferences")
         // Preferences opens on Appearance, with its profile photos switch.
         #expect(await eventually { harness.shown().contains { $0 is NSSwitch } })
 
-        // The scrim is in once the window's frame color along its bottom edge, under the panel, is dimmed.
-        let frame = try #require(NSColor(harness.appearance.colors.frame).usingColorSpace(.sRGB))
+        // The scrim is in once the canvas no longer shows along the window's bottom edge, under the panel.
+        let canvas = try #require(NSColor(harness.appearance.colors.canvas).usingColorSpace(.sRGB))
         let edge = CGRect(x: 0, y: 0, width: harness.hosting.bounds.width, height: 2)
         #expect(
             await eventually {
                 harness.longestRun(in: edge) {
-                    abs($0.redComponent - frame.redComponent) + abs($0.greenComponent - frame.greenComponent)
-                        + abs($0.blueComponent - frame.blueComponent) < 0.03
+                    abs($0.redComponent - canvas.redComponent) + abs($0.greenComponent - canvas.greenComponent)
+                        + abs($0.blueComponent - canvas.blueComponent) < 0.03
                 } == 0
             })
-        // Within a step or two of 255: antialiased edges at 150% land a shade apart from one drawing to the next.
-        for (shown, was) in zip(stretches.map(harness.pixels), before) {
-            #expect(shown.count == was.count && zip(shown, was).allSatisfy { abs($0 - $1) < 0.01 })
-        }
+        // It covers the toolbar too: a click on the search field doesn't reach it.
         let hit = harness.hosting.hitTest(NSPoint(x: field.midX, y: field.midY))
         #expect(hit.map { $0 !== search && !$0.isDescendant(of: search) } ?? true)
     }

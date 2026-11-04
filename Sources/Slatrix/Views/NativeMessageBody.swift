@@ -56,7 +56,7 @@ struct NativeMessageBody: View {
         VStack(alignment: .leading, spacing: m.sp4) {
             NativeSelectableMessageText(
                 runs: MessageBodyRenderer.named(rendered.runs) { id in mentions.members.first { $0.id == id }?.name },
-                fontSize: m.size(.body), textColor: NSColor(colors.textBody), linkColor: NSColor(colors.accent),
+                fontSize: m.size(.reading), textColor: NSColor(colors.textBody), linkColor: NSColor(colors.accent),
                 mentions: MentionPalette(
                     me: mentions.me, text: NSColor(colors.mentionText), fill: NSColor(colors.mentionFill),
                     ownText: NSColor(colors.mentionYouText), ownFill: NSColor(colors.mentionYouFill)),
@@ -64,13 +64,13 @@ struct NativeMessageBody: View {
                     ? NSAttributedString(
                         string: " (edited)",
                         attributes: [
-                            .font: m.nsFont(.caption), .foregroundColor: NSColor(colors.textSecondary),
+                            .font: m.nsFont(.subheadline), .foregroundColor: NSColor(colors.textSecondary),
                         ]) : nil,
                 menuCommands: menuCommands, onOpenURL: { openURL($0) })
             if showsSpoilerControl && rendered.containsSpoilers {
                 Button(revealed ? "Hide spoilers" : "Show spoilers") {
                     revealedSpoilerKey = revealed ? nil : source
-                }.buttonStyle(.textLink).font(m.font(.caption)).accessibilityLabel(
+                }.buttonStyle(.textLink).font(m.font(.subheadline)).accessibilityLabel(
                     revealed ? "Hide message spoilers" : "Reveal message spoilers")
             }
         }

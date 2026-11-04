@@ -12,17 +12,19 @@ struct DirectMessagesColumn: View {
     var body: some View {
         let openID = matrix.selectedRoomID
         VStack(spacing: 0) {
-            HStack(spacing: m.sp8) {
-                Text("Direct messages").font(m.font(.title, .bold)).lineLimit(1)
+            HStack(spacing: m.sp4) {
+                Text("Direct messages").font(m.font(.title3, .semibold)).lineLimit(1)
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Spacer(minLength: m.sp2)
-                IconButton(symbol: "square.and.pencil", label: "New message", action: onCompose)
-            }.foregroundStyle(appearance.colors.textPrimary).padding(.horizontal, m.sp16).frame(height: m.paneHeader)
+                IconButton(symbol: "square.and.pencil", label: "New message", role: .body, action: onCompose)
+                    .foregroundStyle(appearance.colors.textSecondary)
+            }.padding(.leading, m.sp8).frame(height: m(36))
             // Slack has Unreads in the header; under the field it leaves the title whole in a sidebar this narrow.
             VStack(alignment: .trailing, spacing: m.sp8) {
                 SearchField(prompt: "Find a DM", text: $search)
-                Toggle(isOn: $unreadOnly) { Text("Unreads").font(m.font(.secondary)) }.toggleStyle(.switch)
+                Toggle(isOn: $unreadOnly) { Text("Unreads").font(m.font(.body)) }.toggleStyle(.switch)
                     .controlSize(.mini)
-            }.padding(.horizontal, m.sp12).padding(.bottom, m.sp8)
+            }.padding(.bottom, m.sp8)
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(
@@ -33,7 +35,7 @@ struct DirectMessagesColumn: View {
                             onSelect(room.id)
                         } label: {
                             DirectMessageRow(room: room, selected: room.id == openID, matrix: matrix)
-                        }.buttonStyle(.row).padding(.horizontal, m.sp8)
+                        }.buttonStyle(.row)
                             .accessibilityAddTraits(room.id == openID ? .isSelected : [])
                     }
                 }.padding(.bottom, m.sp24)
@@ -56,17 +58,17 @@ struct DirectMessageRow: View {
             AvatarView(name: room.name, size: m.avatar, matrix: matrix, source: room.avatarURL)
             VStack(alignment: .leading, spacing: m.sp2) {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
-                    Text(room.name).font(m.font(.body, badge != .none ? .bold : .regular))
-                        .foregroundStyle(selected ? colors.selectionText : colors.textPrimary).lineLimit(1)
+                    Text(room.name).font(m.font(.reading, badge != .none ? .bold : .regular))
+                        .foregroundStyle(colors.textPrimary).lineLimit(1)
                     Spacer(minLength: 0)
                     if let latest = room.latest {
-                        Text(latest.time()).font(m.font(.meta))
-                            .foregroundStyle(selected ? colors.selectionText : colors.textSecondary)
+                        Text(latest.time()).font(m.font(.subheadline))
+                            .foregroundStyle(colors.textSecondary)
                     }
                 }
                 // A space until the message arrives, so the row keeps its height.
-                Text(room.latest?.preview ?? " ").font(m.font(.secondary)).lineLimit(1).foregroundStyle(
-                    selected ? colors.selectionText : badge != .none ? colors.textPrimary : colors.textSecondary)
+                Text(room.latest?.preview ?? " ").font(m.font(.body)).lineLimit(1).foregroundStyle(
+                    badge != .none ? colors.textPrimary : colors.textSecondary)
             }
             if case .count(let count) = badge { CountBadge(text: count) }
         }.padding(m.sp8).modifier(SidebarRowFill(selected: selected)).contentShape(Rectangle())

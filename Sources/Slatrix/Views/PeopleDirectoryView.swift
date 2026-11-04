@@ -37,7 +37,7 @@ struct PeopleDirectoryView: View {
                 HStack(spacing: m.sp12) {
                     Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
                     TextField("Search people", text: $query).textFieldStyle(.plain).font(
-                        m.font(.body)
+                        m.font(.reading)
                     ).focused($searchFocused)
                         .onSubmit(openSelected)
                         .onKeyPress(.upArrow) { move(-1) }
@@ -47,7 +47,7 @@ struct PeopleDirectoryView: View {
                         DelayedProgress(interval: .peopleLoading).accessibilityLabel("Searching people")
                     }
                     if !query.isEmpty {
-                        IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body) {
+                        IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .reading) {
                             query = ""
                             searchFocused = true
                         }
@@ -110,7 +110,7 @@ struct PeopleDirectoryView: View {
                             ) { open(person) }.id(person.id)
                         }
                         if people.limited {
-                            Text("Showing top results").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                            Text("Showing top results").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                                 .padding(.horizontal, m.sp12).padding(.top, m.sp12)
                         }
                     }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
@@ -171,16 +171,16 @@ struct PersonRecipientPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: m.sp8) {
-            Text("To").font(m.font(.secondary, .semibold))
+            Text("To").font(m.font(.body, .semibold))
             if let chosen {
                 HStack(spacing: m.sp8) {
                     AvatarView(name: chosen.name, size: m.avatar, matrix: matrix, source: chosen.avatarURL)
                     VStack(alignment: .leading, spacing: m.sp4) {
-                        Text(chosen.name).font(m.font(.secondary, .medium))
-                        Text(chosen.id).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                        Text(chosen.name).font(m.font(.body, .medium))
+                        Text(chosen.id).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     }
                     Spacer()
-                    IconButton(symbol: "xmark", label: "Remove recipient", role: .caption) {
+                    IconButton(symbol: "xmark", label: "Remove recipient", role: .subheadline) {
                         self.chosen = nil
                         recipientID = ""
                         query = ""
@@ -189,13 +189,13 @@ struct PersonRecipientPicker: View {
                 }.padding(m.sp8).background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius)).overlay(
                     RoundedRectangle(cornerRadius: m.radius).stroke(colors.border))
                 if !chosen.profileAvailable {
-                    Text("No public profile; check the ID.").font(m.font(.caption))
+                    Text("No public profile; check the ID.").font(m.font(.subheadline))
                         .foregroundStyle(colors.textSecondary)
                 }
             } else {
                 HStack(spacing: m.sp8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
-                    TextField("Name or @name:server.org", text: $query).textFieldStyle(.plain).font(m.font(.body))
+                    TextField("Name or @name:server.org", text: $query).textFieldStyle(.plain).font(m.font(.reading))
                         .focused($focused)
                         .onSubmit(selectCurrent)
                         .onKeyPress(.upArrow) { move(-1) }.onKeyPress(.downArrow) { move(1) }
@@ -214,7 +214,7 @@ struct PersonRecipientPicker: View {
                         HStack(spacing: m.sp8) {
                             Text(people.searchErrorMessage ?? "Couldn’t search.")
                             Button("Retry") { retryRevision += 1 }.buttonStyle(.textLink)
-                        }.font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                        }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     }
                     if !results.isEmpty {
                         ScrollViewReader { proxy in
@@ -229,15 +229,16 @@ struct PersonRecipientPicker: View {
                                                     name: person.name, size: m.avatarMedium, matrix: matrix,
                                                     source: person.avatarURL)
                                                 VStack(alignment: .leading, spacing: m.sp4) {
-                                                    Text(person.name).font(m.font(.meta, .medium))
-                                                    Text(person.id).font(m.font(.caption)).foregroundStyle(
+                                                    Text(person.name).font(m.font(.subheadline, .medium))
+                                                    Text(person.id).font(m.font(.subheadline)).foregroundStyle(
                                                         colors.textSecondary
                                                     ).lineLimit(1)
                                                 }
                                                 Spacer()
                                                 if person.id == selection {
-                                                    Image(systemName: "return").font(m.font(.caption)).foregroundStyle(
-                                                        colors.textSecondary)
+                                                    Image(systemName: "return").font(m.font(.subheadline))
+                                                        .foregroundStyle(
+                                                            colors.textSecondary)
                                                 }
                                             }.padding(m.sp8).frame(maxWidth: .infinity, alignment: .leading).background(
                                                 person.id == selection ? colors.selection.opacity(0.4) : .clear
@@ -252,7 +253,7 @@ struct PersonRecipientPicker: View {
                             .onChange(of: selection) { _, id in if let id { proxy.scrollTo(id, anchor: .center) } }
                         }
                     } else if people.searchState == "ready" {
-                        Text("No matches. Enter a full ID like @name:server.org.").font(m.font(.caption))
+                        Text("No matches. Enter a full ID like @name:server.org.").font(m.font(.subheadline))
                             .foregroundStyle(colors.textSecondary)
                     }
                 }

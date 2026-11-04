@@ -59,10 +59,10 @@ private struct TabItem: View {
         let colors = appearance.colors
         Button(action: action) {
             HStack(spacing: m.sp4 + m.sp2) {
-                if let symbol { Image(systemName: symbol).font(m.font(.secondary)) }
+                if let symbol { Image(systemName: symbol).font(m.font(.body)) }
                 // The semibold title holds the width, so selecting a tab never moves the ones beside it.
-                Text(title).font(m.font(.secondary, .semibold)).hidden()
-                    .overlay { Text(title).font(m.font(.secondary, selected ? .semibold : .regular)) }
+                Text(title).font(m.font(.body, .semibold)).hidden()
+                    .overlay { Text(title).font(m.font(.body, selected ? .semibold : .regular)) }
                 if let count { CountBadge(text: "\(count)", neutral: true) }
             }
             .lineLimit(1).fixedSize()

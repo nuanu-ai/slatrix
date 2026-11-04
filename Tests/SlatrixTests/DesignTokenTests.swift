@@ -1,41 +1,31 @@
+import AppKit
 import SwiftUI
 import Testing
 
 @testable import Slatrix
 
-/// The Mac app draws what `design/tokens.json` says, the file the Android app draws from too.
+/// The Mac draws what `design/tokens.json` says under "mac", and the file colors both apps share.
 @MainActor
 struct DesignTokenTests {
     private struct Tokens: Decodable {
-        var colors: [String: ColorToken]
+        struct Mac: Decodable {
+            var colors: [String: ColorToken]
+            var radius: [String: Double]
+        }
+        var mac: Mac
         var fileColors: [String: String]
-        var radius: [String: Double]
     }
 
-    /// One color for every theme, or a light and a dark one; either side may name one color per palette.
+    /// One color for every theme, or a light and a dark one.
     private struct ColorToken: Decodable {
-        private enum Side: Decodable {
-            case one(String)
-            case perPalette([String: String])
-
-            init(from decoder: Decoder) throws {
-                let value = try decoder.singleValueContainer()
-                if let color = try? value.decode(String.self) {
-                    self = .one(color)
-                } else {
-                    self = .perPalette(try value.decode([String: String].self))
-                }
-            }
-        }
-
-        private let light: Side
-        private let dark: Side
+        private let light: String
+        private let dark: String
 
         init(from decoder: Decoder) throws {
             if let color = try? decoder.singleValueContainer().decode(String.self) {
-                (light, dark) = (.one(color), .one(color))
+                (light, dark) = (color, color)
             } else {
-                let sides = try decoder.singleValueContainer().decode([String: Side].self)
+                let sides = try decoder.singleValueContainer().decode([String: String].self)
                 guard let light = sides["light"], let dark = sides["dark"], sides.count == 2 else {
                     throw DecodingError.dataCorrupted(
                         .init(codingPath: decoder.codingPath, debugDescription: "\(sides)"))
@@ -44,12 +34,7 @@ struct DesignTokenTests {
             }
         }
 
-        func color(dark: Bool, palette: SidebarPalette) -> String? {
-            switch dark ? self.dark : light {
-            case .one(let color): color
-            case .perPalette(let colors): colors[String(describing: palette)]
-            }
-        }
+        func color(dark: Bool) -> String { dark ? self.dark : light }
     }
 
     private let tokens: Tokens
@@ -58,40 +43,38 @@ struct DesignTokenTests {
         tokens = try SharedSpec.decode("design/tokens.json")
     }
 
-    @Test("Every color role matches the shared tokens in both themes and every sidebar palette")
+    @Test("Every color role matches the shared tokens in both themes, with the accent the tokens name")
     func colors() throws {
         let roles: [String: KeyPath<AppColors, Color>] = [
             "textPrimary": \.textPrimary, "textBody": \.textBody, "textSecondary": \.textSecondary,
             "textTertiary": \.textTertiary, "canvas": \.canvas, "raised": \.raised, "sunken": \.sunken,
-            "overlay": \.overlay, "tooltip": \.tooltip, "onTooltip": \.onTooltip, "scrim": \.scrim,
-            "sidebar": \.sidebar, "frame": \.frame, "border": \.border, "borderStrong": \.borderStrong,
-            "hover": \.hover, "pressed": \.pressed, "selection": \.selection, "selectionStrong": \.selectionStrong,
-            "selectionText": \.selectionText, "highlight": \.highlight, "focusRing": \.focusRing, "accent": \.accent,
-            "accentTint": \.accentTint, "onAccent": \.onAccent, "buttonPrimary": \.buttonPrimary,
-            "success": \.success, "destructive": \.destructive, "warning": \.warning, "mention": \.mention,
+            "overlay": \.overlay, "control": \.control, "tooltip": \.tooltip, "onTooltip": \.onTooltip,
+            "scrim": \.scrim, "sidebar": \.sidebar, "border": \.border, "borderStrong": \.borderStrong,
+            "hover": \.hover, "pressed": \.pressed, "selection": \.selection, "highlight": \.highlight,
+            "accentFill": \.accentFill, "accent": \.accent, "accentTint": \.accentTint, "accentLine": \.accentLine,
+            "onAccent": \.onAccent, "success": \.success, "destructive": \.destructive, "warning": \.warning,
             "mentionText": \.mentionText, "mentionFill": \.mentionFill, "mentionYouText": \.mentionYouText,
-            "mentionYouFill": \.mentionYouFill, "presenceActive": \.presenceActive, "presenceAway": \.presenceAway,
-            "mediaBackdrop": \.mediaBackdrop, "mediaControl": \.mediaControl, "mediaShade": \.mediaShade,
-            "onMedia": \.onMedia, "onMediaEdge": \.onMediaEdge,
+            "mentionYouFill": \.mentionYouFill, "code": \.code, "presenceActive": \.presenceActive,
+            "presenceAway": \.presenceAway, "mediaBackdrop": \.mediaBackdrop, "mediaControl": \.mediaControl,
+            "mediaShade": \.mediaShade, "onMedia": \.onMedia, "onMediaEdge": \.onMediaEdge,
         ]
-        #expect(Set(tokens.colors.keys) == Set(roles.keys))
+        #expect(Set(tokens.mac.colors.keys) == Set(roles.keys))
         for (role, keyPath) in roles {
-            let token = try #require(tokens.colors[role], "\(role)")
+            let token = try #require(tokens.mac.colors[role], "\(role)")
             for dark in [false, true] {
-                for palette in SidebarPalette.allCases {
-                    let drawn = AppColors(dark: dark, palette: palette)[keyPath: keyPath]
-                    let expected = try #require(token.color(dark: dark, palette: palette), "\(role) \(palette)")
-                    #expect(
-                        Self.matches(drawn, expected),
-                        "\(role), \(dark ? "dark" : "light"), \(palette): \(drawn.resolve(in: .init())) ≠ \(expected)")
-                }
+                let colors = AppColors(dark: dark, accent: Self.blue(dark: dark))
+                let drawn = colors[keyPath: keyPath]
+                let expected = token.color(dark: dark)
+                #expect(
+                    Self.matches(drawn, expected),
+                    "\(role), \(dark ? "dark" : "light"): \(drawn.resolve(in: .init())) ≠ \(expected)")
             }
         }
     }
 
     @Test("Each file type's tile has its shared color")
     func fileColors() throws {
-        let colors = AppColors(dark: false, palette: .gray)
+        let colors = AppColors(dark: false)
         #expect(Set(tokens.fileColors.keys) == Set(FileKind.allCases.map { String(describing: $0) }))
         for kind in FileKind.allCases {
             let expected = try #require(tokens.fileColors[String(describing: kind)])
@@ -103,10 +86,17 @@ struct DesignTokenTests {
     func radii() {
         let m = Metrics()
         #expect(
-            tokens.radius == [
+            tokens.mac.radius == [
                 "small": Double(m.radiusSmall), "default": Double(m.radius), "large": Double(m.radiusLarge),
-                "panel": Double(m.radiusPanel),
+                "panel": Double(m.radiusPanel), "space": Double(m.radiusSpace),
             ])
+    }
+
+    /// The tokens' accent, fixed so the test doesn't follow the system blue from one macOS to the next.
+    static func blue(dark: Bool) -> NSColor {
+        dark
+            ? NSColor(srgbRed: 10 / 255, green: 132 / 255, blue: 1, alpha: 1)
+            : NSColor(srgbRed: 0, green: 122 / 255, blue: 1, alpha: 1)
     }
 
     /// Within half a step of 8-bit color, so a token written as hex matches the value SwiftUI resolves.

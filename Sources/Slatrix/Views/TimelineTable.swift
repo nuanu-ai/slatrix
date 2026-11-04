@@ -455,11 +455,11 @@ struct TimelineTable: NSViewRepresentable {
         switch entry.kind {
         case .spacer, .end, .loading: return m.sp40
         case .welcome: return m(220)
-        case .day: return m(56)
+        case .day: return m(38)
         case .unread: return m(40)
         case .message(let row):
-            let line = m.size(.body) * 1.4
-            let perLine = max(20, (width - m(100)) / (m.size(.body) * 0.5))
+            let line = m.lineHeight(.reading)
+            let perLine = max(20, (width - m(100)) / (m.size(.reading) * 0.5))
             // Characters counted as UTF-8 lead bytes: a whole room is estimated at once, and grapheme breaking costs
             // more than this guess is worth.
             var lines: CGFloat = 0
@@ -734,7 +734,8 @@ struct TimelineTable: NSViewRepresentable {
     private func updateSpacer() {
         guard !rows.isEmpty, configuration?.bottomAligned == true else { return }
         let content = table.rect(ofRow: rows.count - 1).maxY - table.rect(ofRow: 0).height
-        let height = max(0, viewportHeight - content)
+        // Whole points, so every row below it stays on the pixel grid.
+        let height = max(0, (viewportHeight - content).rounded(.down))
         guard abs(height - spacerHeight) > 0.25 else { return }
         spacerHeight = height
         noteHeights([0])
@@ -904,7 +905,7 @@ struct TimelineTable: NSViewRepresentable {
         let text = reaction.tooltip(me: context.matrix?.user?.id) { id in members.first { $0.id == id }?.name }
         let m = context.metrics
         tooltip.show(text, above: frame, in: window, metrics: m) {
-            Tooltip(text: text) { Text(key).font(m.font(.display)) }
+            Tooltip(text: text) { Text(key).font(m.font(.largeTitle)) }
                 .environment(\.metrics, m).environmentObject(appearance)
         }
     }
@@ -1100,7 +1101,7 @@ struct TimelineRow: View, Equatable {
                         source: message.avatarURL),
                     replierAvatar: message.lastReply.map {
                         AvatarView(
-                            name: $0.senderName, size: metrics.avatarMedium, matrix: matrix, source: $0.avatarURL)
+                            name: $0.senderName, size: metrics.avatarSmall, matrix: matrix, source: $0.avatarURL)
                     },
                     replyPreview: message.replyPreview.map {
                         ReplyPreviewView(
@@ -1141,19 +1142,20 @@ private struct TimelineWelcomeRow: View {
                 systemName: welcome.isDirect
                     ? "bubble.left.and.bubble.right.fill" : welcome.isPrivate ? "lock.fill" : "number"
             )
-            .font(m.font(.display, .bold)).frame(width: m(Self.tile), height: m(Self.tile))
+            .font(m.font(.title1, .semibold)).foregroundStyle(colors.textSecondary)
+            .frame(width: m(Self.tile), height: m(Self.tile))
             .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusPanel))
             Text(welcome.isDirect || welcome.isPrivate ? welcome.name : "# \(welcome.name)")
-                .font(m.font(.display, .bold)).foregroundStyle(colors.textPrimary)
+                .font(m.font(.largeTitle, .bold)).foregroundStyle(colors.textPrimary)
             Text(
                 !welcome.topic.isEmpty
                     ? welcome.topic
                     : welcome.isDirect
                         ? "This is the beginning of your conversation with \(welcome.name)."
                         : "This is the beginning of the \(welcome.name) channel."
-            ).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineSpacing(m.size(.body) / 5)
+            ).font(m.font(.reading)).foregroundStyle(colors.textSecondary).lineSpacing(m.lineSpacing(.reading))
             if welcome.isEncrypted {
-                Image(systemName: "lock.shield").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                Image(systemName: "lock.shield").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     .help("End-to-end encrypted").accessibilityLabel("End-to-end encrypted")
             }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(m.sp24)
@@ -1166,25 +1168,22 @@ private struct TimelineDayDivider: View {
     let label: String
     var body: some View {
         let colors = appearance.colors
-        HStack(spacing: 0) {
-            Rectangle().fill(colors.border).frame(height: 1)
-            Text(label).font(m.font(.meta, .semibold)).padding(.horizontal, m.sp12).padding(.vertical, m.sp4)
-                .background(colors.canvas, in: Capsule()).overlay(Capsule().stroke(colors.border))
-            Rectangle().fill(colors.border).frame(height: 1)
-        }.padding(.vertical, m.sp16)
+        Text(label).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
+            .frame(maxWidth: .infinity).padding(.top, m.sp16).padding(.bottom, m.sp8)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
-/// Slack's red rule over the first unread message, with "New" at its right end.
+/// A rule over the first unread message, with "New" at its right end, in the accent.
 private struct TimelineUnreadDivider: View {
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
         let colors = appearance.colors
         HStack(spacing: m.sp4) {
-            Rectangle().fill(colors.destructive).frame(height: 1)
-            Text("New").font(m.font(.caption, .bold)).foregroundStyle(colors.destructive)
-        }.padding(.leading, m.sp20).padding(.trailing, m.sp16).padding(.vertical, m.sp8)
+            Rectangle().fill(colors.accentFill).frame(height: 1)
+            Text("New").font(m.font(.subheadline, .semibold)).foregroundStyle(colors.accent)
+        }.padding(.leading, m.sp24).padding(.trailing, m.sp16).padding(.vertical, m.sp8)
             .accessibilityElement(children: .ignore).accessibilityLabel("New messages begin here")
     }
 }

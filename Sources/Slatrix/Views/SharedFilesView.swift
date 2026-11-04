@@ -107,7 +107,7 @@ struct SharedFilesView: View {
                                 HStack(spacing: m.sp8) {
                                     if service.isLoadingMore { DelayedProgress() }
                                     Text("Load more")
-                                }.font(m.font(.meta, .medium)).padding(m.sp12)
+                                }.font(m.font(.subheadline, .medium)).padding(m.sp12)
                             }.buttonStyle(.textLink).disabled(service.isLoadingMore || service.state == "loading")
                         }
                     }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
@@ -116,10 +116,11 @@ struct SharedFilesView: View {
                     HStack {
                         Label("\(service.unavailableEncryptedCount) locked", systemImage: "lock")
                         Spacer(minLength: 0)
-                    }.font(m.font(.caption)).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24).padding(
-                        .vertical, m.sp12
-                    )
-                    .background(colors.raised)
+                    }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24)
+                        .padding(
+                            .vertical, m.sp12
+                        )
+                        .background(colors.raised)
                 }
             }
         }.background(colors.canvas)
@@ -146,7 +147,7 @@ struct SharedFilesView: View {
                 SearchField(prompt: "Search files and links", text: $query).frame(maxWidth: m(Self.filterMaxWidth))
                 if channelID == nil { conversationMenu }
                 Spacer()
-                IconButton(symbol: "arrow.clockwise", label: "Refresh shared files and links", role: .body) {
+                IconButton(symbol: "arrow.clockwise", label: "Refresh shared files and links", role: .reading) {
                     if let id = roomID { Task { await service.reload(roomID: id) } }
                 }.disabled(service.state == "loading" || service.isLoadingMore || matrix.isPreview || roomID == nil)
             }.padding(.vertical, m.sp16)
@@ -165,8 +166,8 @@ struct SharedFilesView: View {
         } label: {
             HStack(spacing: m.sp4) {
                 Text("In: \(room?.writtenName ?? "")").lineLimit(1)
-                Image(systemName: "chevron.down").font(m.font(.caption, .semibold))
-            }.font(m.font(.secondary, .medium))
+                Image(systemName: "chevron.down").font(m.font(.subheadline, .semibold))
+            }.font(m.font(.body, .medium))
         }
         .menuStyle(.button).buttonStyle(.secondary).menuIndicator(.hidden).fixedSize()
         .disabled(rooms.isEmpty).accessibilityLabel("Conversation")

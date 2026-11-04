@@ -84,13 +84,13 @@ private struct MediaViewerPage: View {
     @ViewBuilder private func placeholder(_ loaded: Loaded?) -> some View {
         if let error = loaded?.error {
             VStack(spacing: m.sp12) {
-                Text(error).font(m.font(.secondary)).foregroundStyle(colors.onMedia)
+                Text(error).font(m.font(.body)).foregroundStyle(colors.onMedia)
                 Button("Retry") { Task { await load() } }.buttonStyle(.secondary)
             }
         } else if !message.isViewerMedia, loaded?.lease == nil {
             VStack(spacing: m.sp16) {
                 FileTypeIcon(kind: attachment.fileKind, side: 96, glyph: .hero)
-                Text(attachment.name).font(m.font(.title, .semibold)).foregroundStyle(colors.onMedia)
+                Text(attachment.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.onMedia)
                 DelayedProgress().environment(\.colorScheme, .dark)
             }
         } else if loaded == nil && (message.kind == "m.video" || matrix.cachedMediaImage(message) == nil) {
@@ -111,8 +111,8 @@ private struct MediaViewerPage: View {
         HStack(spacing: m.sp12) {
             AvatarView(name: message.senderName, size: m.avatar, matrix: matrix, source: message.avatarURL)
             VStack(alignment: .leading, spacing: m.sp2) {
-                Text(message.senderName).font(m.font(.secondary, .bold))
-                Text(subtitle).font(m.font(.meta)).opacity(0.7)
+                Text(message.senderName).font(m.font(.body, .bold))
+                Text(subtitle).font(m.font(.subheadline)).opacity(0.7)
             }.lineLimit(1)
             Spacer(minLength: m(Self.titleWidth))
             if downloading {
@@ -140,13 +140,13 @@ private struct MediaViewerPage: View {
             Menu {
                 AttachmentMenuItems(matrix: matrix, message: message, copyLink: copyLink)
             } label: {
-                Image(systemName: "ellipsis").font(m.font(.title)).frame(width: m.iconButton, height: m.iconButton)
+                Image(systemName: "ellipsis").font(m.font(.title3)).frame(width: m.iconButton, height: m.iconButton)
             }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m.iconButton).help("More actions")
             ViewerButton(symbol: "xmark", label: "Close", action: viewer.close)
         }
         .foregroundStyle(colors.onMedia)
         .overlay {
-            Text(attachment.name).font(m.font(.secondary, .semibold)).foregroundStyle(colors.onMedia).lineLimit(1)
+            Text(attachment.name).font(m.font(.body, .semibold)).foregroundStyle(colors.onMedia).lineLimit(1)
                 .truncationMode(.middle).frame(maxWidth: m(Self.titleWidth))
         }
         .padding(.horizontal, m.sp16).frame(height: m.paneHeader)
@@ -213,7 +213,7 @@ private struct ViewerButton: View {
     var body: some View {
         let colors = appearance.colors
         Button(action: action) {
-            Image(systemName: symbol).font(m.font(.title)).foregroundStyle(colors.onMedia)
+            Image(systemName: symbol).font(m.font(.title3)).foregroundStyle(colors.onMedia)
                 .frame(width: filled ? m.sp40 : m.iconButton, height: filled ? m.sp40 : m.iconButton)
                 .background(
                     filled ? colors.mediaControl : hovering ? colors.onMedia.opacity(0.12) : .clear,

@@ -30,9 +30,9 @@ struct Banner<Actions: View>: View {
             Text(text).foregroundStyle(colors.textPrimary).textSelection(.enabled).lineLimit(2)
             Spacer(minLength: m.sp8)
             actions().buttonStyle(.textLink)
-            if let onDismiss { IconButton(symbol: "xmark", label: "Dismiss", role: .secondary, action: onDismiss) }
+            if let onDismiss { IconButton(symbol: "xmark", label: "Dismiss", role: .body, action: onDismiss) }
         }
-        .font(m.font(.secondary)).padding(.horizontal, m.sp16).frame(minHeight: m.control)
+        .font(m.font(.body)).padding(.horizontal, m.sp16).frame(minHeight: m.control)
         .background(tone == .neutral ? colors.raised : tint.opacity(0.12)).background(colors.canvas)
         .overlay(alignment: .bottom) { Divider().overlay(colors.border) }
         .accessibilityElement(children: .contain)

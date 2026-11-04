@@ -64,8 +64,8 @@ struct RoomDetailsEditor: View {
         ) {
             VStack(alignment: .leading, spacing: m.sp24) {
                 VStack(alignment: .leading, spacing: m.sp4) {
-                    Text(destinationName).font(m.font(.secondary, .medium)).lineLimit(2)
-                    Text(roomID).font(m.font(.caption, design: .monospaced)).foregroundStyle(
+                    Text(destinationName).font(m.font(.body, .medium)).lineLimit(2)
+                    Text(roomID).font(m.font(.subheadline, design: .monospaced)).foregroundStyle(
                         colors.textSecondary
                     )
                     .textSelection(.enabled).lineLimit(2)
@@ -73,23 +73,23 @@ struct RoomDetailsEditor: View {
                 if loading {
                     HStack(spacing: m.sp12) {
                         DelayedProgress(interval: .sheetLoading)
-                        Text("Loading…").font(m.font(.secondary)).foregroundStyle(
+                        Text("Loading…").font(m.font(.body)).foregroundStyle(
                             colors.textSecondary)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, m.sp20)
                 } else if let snapshot, current {
                     detailField("Name", editable: snapshot.canEditName) {
                         TextField(snapshot.isSpace ? "Workspace name" : "Conversation name", text: $name)
-                            .textFieldStyle(.field).font(m.font(.body)).focused(
+                            .textFieldStyle(.field).font(m.font(.reading)).focused(
                                 $focusedField, equals: .name
                             )
                             .disabled(!snapshot.canEditName || saving)
                         if blankName {
-                            Text("Enter a name.").font(m.font(.meta)).foregroundStyle(
+                            Text("Enter a name.").font(m.font(.subheadline)).foregroundStyle(
                                 colors.destructive)
                         }
                     }
                     detailField("Description", editable: snapshot.canEditTopic) {
-                        TextEditor(text: $topic).font(m.font(.secondary)).scrollContentBackground(.hidden)
+                        TextEditor(text: $topic).font(m.font(.body)).scrollContentBackground(.hidden)
                             .padding(m.sp8).frame(
                                 minHeight: m(Self.topicMinHeight), maxHeight: m(Self.topicMaxHeight)
                             )
@@ -99,12 +99,12 @@ struct RoomDetailsEditor: View {
                     }
                     if !snapshot.canEditName && !snapshot.canEditTopic {
                         Label("You can’t edit these details.", systemImage: "lock")
-                            .font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                            .font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     }
                 }
                 if let error {
                     VStack(alignment: .leading, spacing: m.sp12) {
-                        Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive)
+                        Text(error).font(m.font(.subheadline)).foregroundStyle(colors.destructive)
                             .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                         if snapshot == nil && current && !loading {
                             Button("Try again") { Task { await load() } }.buttonStyle(.textLink)
@@ -135,9 +135,10 @@ struct RoomDetailsEditor: View {
     {
         VStack(alignment: .leading, spacing: m.sp8) {
             HStack(spacing: m.sp8) {
-                Text(title).font(m.font(.secondary, .semibold)).foregroundStyle(colors.textPrimary)
+                Text(title).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
                 if !editable {
-                    Label("Read only", systemImage: "lock").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                    Label("Read only", systemImage: "lock").font(m.font(.subheadline)).foregroundStyle(
+                        colors.textSecondary)
                 }
             }
             content()

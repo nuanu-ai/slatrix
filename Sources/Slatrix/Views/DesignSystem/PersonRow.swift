@@ -22,13 +22,13 @@ struct PersonRow: View {
                 AvatarView(name: name, size: m.avatar, presence: presence, matrix: matrix, source: avatarSource)
                 VStack(alignment: .leading, spacing: m.sp2) {
                     HStack(spacing: m.sp8) {
-                        Text(name).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
+                        Text(name).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
                         if isYou { TagLabel(text: "You") }
                     }
-                    Text(userID).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                    Text(userID).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                 }.lineLimit(1)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(m.font(.caption, .semibold))
+                Image(systemName: "chevron.right").font(m.font(.subheadline, .semibold))
                     .foregroundStyle(colors.textSecondary).opacity(hovering || selected ? 1 : 0)
             }
             .padding(.horizontal, m.sp12).frame(height: m.personRow)

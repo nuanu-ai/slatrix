@@ -1,13 +1,13 @@
+import AppKit
 import SwiftUI
 
+/// The sidebar: a panel inset in the window, with the window buttons on top, the space's name and its menu, the
+/// shortcuts, the conversations, and you at the bottom.
 struct SidebarView: View {
-    private static let dot: CGFloat = 6
-    @Environment(\.metrics) private var m
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     @Binding var route: AppRoute
     @Binding var workspaceID: String?
-    @Binding var search: String
     /// "Find a DM" and the Unreads switch of the DMs list, which takes the column while DMs is picked.
     @Binding var directMessageSearch: String
     @Binding var unreadDirectMessagesOnly: Bool
@@ -23,130 +23,110 @@ struct SidebarView: View {
     var onInviteWorkspace: (String) -> Void
     var onEditWorkspace: (String) -> Void
     var onNotifications: (String) -> Void
-    var listWidth: CGFloat = 280
+    var onHide: () -> Void
+    /// Set while an update waits or in the preview, for the button beside you at the bottom.
+    var accessory: (title: String, action: () -> Void)? = nil
+    var listWidth: CGFloat = 264
     var onBrowseChannels: () -> Void
     /// Section titles folded shut; held by the window, so they survive the sidebar moving into the drawer and back.
     @Binding var collapsed: Set<String>
+    @Environment(\.metrics) private var m
     private var colors: AppColors { appearance.colors }
     private var workspace: Workspace? { matrix.workspaces.first { $0.id == workspaceID } }
-    private var hasUnreadActivity: Bool {
-        matrix.rooms.contains { room in
-            (room.isSpace && room.membership == "invite")
-                || (room.membership != "leave"
-                    && WorkspaceMembership.includes(
-                        direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID)
-                    && (room.hasUnread || room.membership == "invite"))
+    /// Mentions and invitations in this space, which Activity lists.
+    private var activityCount: Int {
+        matrix.rooms.reduce(0) { count, room in
+            if room.isSpace { return count + (room.membership == "invite" ? 1 : 0) }
+            guard room.membership != "leave",
+                WorkspaceMembership.includes(direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID)
+            else { return count }
+            return count + (room.membership == "invite" ? 1 : room.mentions)
         }
     }
     private var visibleRooms: [ChatRoom] {
         matrix.rooms.filter { room in
             !room.isSpace
                 && WorkspaceMembership.includes(direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID)
-                && (search.isEmpty || room.name.localizedCaseInsensitiveContains(search)) && room.membership != "leave"
+                && room.membership != "leave"
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
+
     var body: some View {
-        HStack(spacing: 0) {
-            rail
+        VStack(spacing: 0) {
+            HStack {
+                // The window buttons are AppKit's and sit here, over the panel.
+                Spacer()
+                IconButton(symbol: "sidebar.left", label: "Hide sidebar", role: .body, action: onHide)
+                    .foregroundStyle(colors.textSecondary)
+            }.frame(height: m.paneHeader - m.sidebarInset).background(WindowDragArea())
             if route == .directMessages {
                 DirectMessagesColumn(
                     matrix: matrix, search: $directMessageSearch, unreadOnly: $unreadDirectMessagesOnly,
-                    onSelect: onSelect, onCompose: { onCreate(.directMessage) }
-                ).frame(width: listWidth).background(colors.sidebar)
+                    onSelect: onSelect, onCompose: { onCreate(.directMessage) })
             } else {
+                header
                 list
             }
-        }.foregroundStyle(colors.textBody)
+            footer
+        }
+        .padding(.horizontal, m(10))
+        .frame(width: listWidth)
+        .background(colors.sidebar, in: RoundedRectangle(cornerRadius: m.radiusPanel))
+        .elevation(.e1, cornerRadius: m.radiusPanel)
+        .foregroundStyle(colors.textBody)
     }
+
     private var list: some View {
         let visibleRooms = visibleRooms
-        return VStack(spacing: 0) {
-            header
-            HStack(spacing: m.sp8) {
-                Image(systemName: "line.3.horizontal.decrease").font(m.font(.body))
-                TextField("Find a conversation…", text: $search).textFieldStyle(.plain).font(m.font(.secondary))
-            }
-            .padding(.horizontal, m.sp12).frame(height: m.control).background(
-                colors.canvas.opacity(0.7), in: RoundedRectangle(cornerRadius: m.radiusLarge)
-            ).overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border)).padding(
-                .horizontal, m.sp12
-            ).padding(.bottom, m.sp16)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    shortcut(.threads, label: "Threads", count: nil)
-                    shortcut(
-                        .drafts, label: "Drafts",
-                        count: (draftCount ?? draftRoomIDs.count) == 0 ? nil : (draftCount ?? draftRoomIDs.count))
-                    shortcut(.directory, label: "People", count: nil)
-                    Divider().overlay(colors.border).padding(.horizontal, m.sp12).padding(.vertical, m.sp12)
-                    if visibleRooms.contains(where: \.favorite) {
-                        roomSection("Starred", rooms: visibleRooms.filter(\.favorite)) { EmptyView() }
-                    }
-                    roomSection(
-                        "Channels", rooms: visibleRooms.filter { !$0.isDirect && !$0.favorite },
-                        add: ("Add channels", .channel)
-                    ) {
-                        Button("Create a channel…") { onCreate(.channel) }
-                        Button("Browse channels…", action: onBrowseChannels)
-                    }
-                    actionRow("Browse channels", symbol: "magnifyingglass", action: onBrowseChannels)
-                    roomSection(
-                        "Direct messages", rooms: visibleRooms.filter { $0.isDirect && !$0.favorite },
-                        add: ("New message", .directMessage)
-                    ) {
-                        Button("New message…") { onCreate(.directMessage) }
-                        Button("Browse people…") { route = .directory }
-                    }
-                    actionRow("Add teammates", symbol: "plus") { onCreate(.directMessage) }
-                }.padding(.bottom, m.sp24)
-            }.scrollIndicators(.hidden)
-                .loadingInterval(
-                    .sidebarLoading, while: !matrix.roomsLoaded
-                )
-                .onChange(of: matrix.rooms.isEmpty, initial: true) { _, empty in
-                    if !empty { Performance.finishOnScreen(.launchRooms, ["rooms": matrix.rooms.count]) }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                shortcut(.activity, label: "Activity", badge: activityCount)
+                shortcut(.threads, label: "Threads")
+                shortcut(.saved, label: "Later", count: matrix.savedMessages.list.saved.count)
+                shortcut(.drafts, label: "Drafts", count: draftCount ?? draftRoomIDs.count)
+                if visibleRooms.contains(where: \.favorite) {
+                    roomSection("Starred", rooms: visibleRooms.filter(\.favorite)) { EmptyView() }
                 }
-        }.frame(width: listWidth).background(colors.sidebar)
+                roomSection(
+                    "Channels", rooms: visibleRooms.filter { !$0.isDirect && !$0.favorite },
+                    add: ("Add channels", .channel)
+                ) {
+                    Button("Create a channel…") { onCreate(.channel) }
+                    Button("Browse channels…", action: onBrowseChannels)
+                }
+                roomSection(
+                    "Direct messages", rooms: visibleRooms.filter { $0.isDirect && !$0.favorite },
+                    add: ("New message", .directMessage)
+                ) {
+                    Button("New message…") { onCreate(.directMessage) }
+                    Button("Browse people…") { route = .directory }
+                }
+            }.padding(.top, m.sp8).padding(.bottom, m.sp20)
+        }.scrollIndicators(.hidden)
+            .loadingInterval(.sidebarLoading, while: !matrix.roomsLoaded)
+            .onChange(of: matrix.rooms.isEmpty, initial: true) { _, empty in
+                if !empty { Performance.finishOnScreen(.launchRooms, ["rooms": matrix.rooms.count]) }
+            }
     }
+
+    /// The space's name, which opens the spaces menu, and a new message.
     private var header: some View {
         HStack(spacing: m.sp4) {
-            Menu {
-                if let workspace {
-                    Button("Edit workspace details…") { onEditWorkspace(workspace.id) }
-                        .disabled(matrix.isPreview)
-                    Button("Invite people to \(workspace.name)…") { onInviteWorkspace(workspace.id) }
-                        .disabled(matrix.isPreview || workspace.canInvite == false)
-                    Divider()
-                }
-                Button("Create a workspace…") { onCreate(.workspace) }
-                Button("Join a channel or workspace…") { onCreate(.join) }
-                Divider()
-                Button("Preferences…") { onPreferences() }
-            } label: {
-                HStack(spacing: m.sp8) {
-                    Text(workspace?.name ?? "All conversations").font(m.font(.title, .bold)).lineLimit(1)
-                        .truncationMode(.tail)
-                    Image(systemName: "chevron.down").font(m.font(.caption, .semibold))
-                }
-            }
-            // A borderless-button menu hands its label to AppKit, which moves the chevron before the name.
-            .menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden).fixedSize(horizontal: false, vertical: true)
-            .help(workspace?.name ?? "All conversations")
+            SpacesMenu(
+                matrix: matrix, workspaceID: workspaceID,
+                onSelect: {
+                    workspaceID = $0
+                    route = .home
+                }, onCreate: onCreate, onInvite: onInviteWorkspace, onEdit: onEditWorkspace)
             Spacer(minLength: m.sp2)
-            IconButton(symbol: "square.and.pencil", label: "New message") { onCreate(.directMessage) }
-        }.foregroundStyle(colors.textPrimary).padding(.horizontal, m.sp16).frame(height: m.paneHeader)
+            IconButton(symbol: "square.and.pencil", label: "New message", role: .body) { onCreate(.directMessage) }
+                .foregroundStyle(colors.textSecondary)
+        }.padding(.leading, m.sp8).frame(height: m(36))
     }
-    private var rail: some View {
-        VStack(spacing: m.sp16) {
-            // Tightens to fit, as Slack's rail does, and scrolls only once even that would push the window taller
-            // than the screen.
-            ViewThatFits(in: .vertical) {
-                railItems
-                ScrollView { railItems }.scrollIndicators(.hidden)
-            }.frame(maxHeight: .infinity, alignment: .top)
-            IconButton(symbol: appearance.mode == .dark ? "moon" : "sun.max", label: "Appearance", round: true) {
-                onPreferences()
-            }
+
+    /// You, with your status, Preferences and signing out; and an update or the preview's way out beside you.
+    private var footer: some View {
+        HStack(spacing: m.sp8) {
             Menu {
                 Text(matrix.user?.name ?? "Slatrix")
                 if let id = matrix.user?.id { Text(id) }
@@ -156,129 +136,45 @@ struct SidebarView: View {
                 Divider()
                 Button(matrix.isPreview ? "Leave preview" : "Sign out", action: onSignOut)
             } label: {
-                AvatarView(
-                    name: matrix.user?.name ?? "You", size: m.avatar, matrix: matrix, source: matrix.user?.avatarURL)
-            }.menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden).padding(.bottom, m.sp16)
-        }.frame(width: m.rail).background(colors.frame)
+                HStack(spacing: m.sp8) {
+                    AvatarView(
+                        name: matrix.user?.name ?? "You", size: m.avatarMedium, presence: .active,
+                        surface: colors.sidebar, matrix: matrix, source: matrix.user?.avatarURL)
+                    Text(matrix.user?.name ?? "You").font(m.font(.body)).foregroundStyle(colors.textPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }.padding(.leading, m(6)).frame(height: m.controlLarge).modifier(SidebarRowFill(selected: false))
+            }.menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden)
+                .accessibilityLabel("Your profile and status")
+            if let accessory {
+                Button(accessory.title, action: accessory.action).buttonStyle(.primary).controlSize(.small)
+            }
+        }.padding(.bottom, m(6))
     }
-    private var railItems: some View {
-        RailStack(spacing: m.sp16) {
-            VStack(spacing: m.sp8) {
-                ForEach(WorkspaceRail.entries(workspaces: matrix.workspaces, rooms: matrix.rooms), id: \.self) {
-                    workspaceIcon($0)
-                }
-                IconButton(symbol: "plus", label: "Create a workspace", role: .header, round: true) {
-                    onCreate(.workspace)
-                }
-            }
-            Rectangle().fill(colors.border).frame(width: m.sp24, height: 1)
-            ForEach([AppRoute.home, .directMessages, .activity, .files, .saved], id: \.self) { item in
-                Button {
-                    route = item
-                } label: {
-                    VStack(spacing: m.sp4) {
-                        Image(systemName: item.symbol).font(
-                            m.font(.header, route == item ? .semibold : .regular)
-                        ).frame(width: m.sp40, height: m.control).background(
-                            route == item ? colors.textPrimary.opacity(0.17) : .clear,
-                            in: RoundedRectangle(cornerRadius: m.radiusLarge)
-                        ).overlay(alignment: .topTrailing) {
-                            if item == .activity && hasUnreadActivity {
-                                Circle().fill(colors.accent).frame(width: m(Self.dot), height: m(Self.dot))
-                                    .padding(
-                                        m.sp4
-                                    ).accessibilityLabel(
-                                        "Unread conversations or invitations")
-                            }
-                        }
-                        Text(item.title).font(m.font(.caption, route == item ? .semibold : .medium))
-                    }
-                    .foregroundStyle(route == item ? colors.textPrimary : colors.textSecondary).frame(
-                        maxWidth: .infinity)
-                }.buttonStyle(.row).accessibilityLabel(item.title)
-            }
-        }.padding(.top, m.sp12)
-    }
-    /// Slack's workspace switcher: the space's avatar, ringed when selected, with its unread state when not.
-    private func workspaceIcon(_ space: Workspace?) -> some View {
-        let selected = workspaceID == space?.id
-        let name = space?.name ?? "All conversations"
-        let badge = selected ? UnreadBadge.none : WorkspaceRail.badge(space?.id, rooms: matrix.rooms)
-        let corner = m.avatar * 0.19
-        return Button {
-            workspaceID = space?.id
-            route = .home
-        } label: {
-            Group {
-                if let space {
-                    AvatarView(name: space.name, size: m.avatar, matrix: matrix, source: space.avatarURL)
-                } else {
-                    Image(systemName: "tray.2").font(m.font(.title)).foregroundStyle(colors.textPrimary).frame(
-                        width: m.avatar, height: m.avatar
-                    ).background(colors.textPrimary.opacity(0.12), in: RoundedRectangle(cornerRadius: corner))
-                }
-            }
-            .padding(m.sp4)
-            .overlay(
-                RoundedRectangle(cornerRadius: corner + m.sp4).stroke(
-                    selected ? colors.textPrimary : .clear, lineWidth: m.sp2)
-            )
-            .overlay(alignment: .topTrailing) {
-                switch badge {
-                case .count(let count): CountBadge(text: count)
-                case .bold:
-                    Circle().fill(colors.textPrimary).frame(width: m(Self.dot) * 1.5, height: m(Self.dot) * 1.5)
-                        .overlay(Circle().stroke(colors.frame, lineWidth: m.sp2))
-                case .none: EmptyView()
-                }
-            }
-        }.buttonStyle(.row).help(name)
-            .accessibilityLabel(name)
-            .accessibilityValue(
-                {
-                    switch badge {
-                    case .count(let count): "\(count) \(count == "1" ? "mention" : "mentions")"
-                    case .bold: "Unread messages"
-                    case .none: ""
-                    }
-                }()
-            )
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            .contextMenu {
-                if let space {
-                    Button("Invite people to \(space.name)…") { onInviteWorkspace(space.id) }
-                        .disabled(matrix.isPreview || space.canInvite == false)
-                    Button("Edit workspace details…") { onEditWorkspace(space.id) }.disabled(matrix.isPreview)
-                    Button("Notifications…") { onNotifications(space.id) }.disabled(matrix.isPreview)
-                }
-            }
-    }
-    private func shortcut(_ item: AppRoute, label: String, count: Int?) -> some View {
+
+    private func shortcut(_ item: AppRoute, label: String, badge: Int = 0, count: Int = 0) -> some View {
         let selected = route == item
         return Button {
             route = item
         } label: {
             HStack(spacing: m.sp8) {
-                Image(systemName: item.symbol).font(m.font(.body)).frame(width: m.avatarSmall)
+                Image(systemName: item.symbol).font(m.font(.body)).frame(width: m.sp16)
+                    .foregroundStyle(selected ? colors.accent : colors.textTertiary)
                 Text(label).font(m.font(.body))
-                Spacer()
-                if let count { Text("\(count)").font(m.font(.caption, .bold)) }
+                Spacer(minLength: 0)
+                if badge > 0 {
+                    CountBadge(text: UnreadBadge.label(badge))
+                } else if count > 0 {
+                    Text("\(count)").font(m.font(.subheadline)).monospacedDigit().foregroundStyle(colors.textSecondary)
+                        .padding(.trailing, m.sp2)
+                }
             }
-            .foregroundStyle(selected ? colors.selectionText : colors.textSecondary)
-            .padding(.leading, m.sp16).padding(.trailing, m.sp12).frame(height: m.row)
+            .foregroundStyle(colors.textPrimary)
+            .padding(.horizontal, m.sp8).frame(height: m.row)
             .modifier(SidebarRowFill(selected: selected))
-        }.buttonStyle(.row).padding(.horizontal, m.sp8).accessibilityAddTraits(selected ? .isSelected : [])
+        }.buttonStyle(.row).accessibilityAddTraits(selected ? .isSelected : [])
     }
-    private func actionRow(_ label: String, symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: m.sp8) {
-                Image(systemName: symbol).font(m.font(.body)).frame(width: m.avatarSmall)
-                Text(label).font(m.font(.body))
-                Spacer()
-            }.foregroundStyle(colors.textSecondary).padding(.leading, m.sp16).frame(height: m.row)
-                .modifier(SidebarRowFill(selected: false))
-        }.buttonStyle(.row).padding(.horizontal, m.sp8)
-    }
+
     private func roomSection(
         _ title: String, rooms: [ChatRoom], add: (label: String, kind: CreationKind)? = nil,
         @ViewBuilder menu: () -> some View
@@ -289,7 +185,7 @@ struct SidebarView: View {
                 onToggle: {
                     if collapsed.contains(title) { collapsed.remove(title) } else { collapsed.insert(title) }
                 }, addLabel: add?.label, onAdd: { add.map { onCreate($0.kind) } }, menu: menu
-            ).padding(.horizontal, m.sp8).padding(.top, m.sp12)
+            ).padding(.top, m.sp20)
             let selectedID = route == .home ? matrix.selectedRoomID : nil
             ForEach(SidebarLayout.sectionRooms(rooms, collapsed: collapsed.contains(title), selectedID: selectedID)) {
                 room in
@@ -300,6 +196,111 @@ struct SidebarView: View {
                 ).equatable()
             }
         }
+    }
+}
+
+/// The space's name at the top of the sidebar, opening a menu of every space, ⌘1–⌘9 beside each, with what to do
+/// in this one. A dot marks unread messages in the others.
+private struct SpacesMenu: View {
+    let matrix: MatrixService
+    let workspaceID: String?
+    let onSelect: (String?) -> Void
+    let onCreate: (CreationKind) -> Void
+    let onInvite: (String) -> Void
+    let onEdit: (String) -> Void
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+
+    private func item(_ space: Workspace?, index: Int, colors: AppColors) -> some View {
+        let badge: UnreadBadge = space?.id == workspaceID ? .none : WorkspaceRail.badge(space?.id, rooms: matrix.rooms)
+        let name = space?.name ?? "All conversations"
+        let title: String = if case .count(let count) = badge { "\(name)  \(count)" } else { name }
+        let key: KeyEquivalent? = index < 9 ? KeyEquivalent(Character("\(index + 1)")) : nil
+        return Toggle(isOn: Binding(get: { space?.id == workspaceID }, set: { _ in onSelect(space?.id) })) {
+            Label {
+                Text(title)
+            } icon: {
+                Image(nsImage: SpaceTile.image(space, unread: badge != .none, matrix: matrix, colors: colors))
+            }
+        }.keyboardShortcut(key.map { KeyboardShortcut($0) })
+    }
+
+    var body: some View {
+        let colors = appearance.colors
+        let entries = WorkspaceRail.entries(workspaces: matrix.workspaces, rooms: matrix.rooms)
+        let current = matrix.workspaces.first { $0.id == workspaceID }
+        let othersUnread = entries.contains {
+            $0?.id != workspaceID && WorkspaceRail.badge($0?.id, rooms: matrix.rooms) != .none
+        }
+        Menu {
+            ForEach(Array(entries.enumerated()), id: \.offset) { index, space in
+                item(space, index: index, colors: colors)
+            }
+            Divider()
+            if let current {
+                Button("Invite people to \(current.name)…") { onInvite(current.id) }
+                    .disabled(matrix.isPreview || current.canInvite == false)
+                Button("Space settings…") { onEdit(current.id) }.disabled(matrix.isPreview)
+                Divider()
+            }
+            Button("Create a space…") { onCreate(.workspace) }
+            Button("Join a space…") { onCreate(.join) }
+        } label: {
+            HStack(spacing: m(5)) {
+                Text(current?.name ?? "All conversations").font(m.font(.title3, .semibold))
+                    .foregroundStyle(colors.textPrimary).lineLimit(1).truncationMode(.tail)
+                Image(systemName: "chevron.down").font(m.font(.subheadline, .semibold))
+                    .foregroundStyle(colors.textSecondary)
+                if othersUnread {
+                    Circle().fill(colors.accentFill).frame(width: m(6), height: m(6))
+                }
+            }
+        }
+        // A borderless-button menu hands its label to AppKit, which moves the chevron before the name.
+        .menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden).fixedSize()
+        .help("Switch space")
+        .accessibilityLabel(
+            "\(current?.name ?? "All conversations"), switch space"
+                + (othersUnread ? ", other spaces have unread messages" : ""))
+    }
+}
+
+/// A space's tile for a menu item, which takes only an image: its photo or initial on its color, with a dot while
+/// it has unread messages.
+@MainActor enum SpaceTile {
+    static func image(_ space: Workspace?, unread: Bool, matrix: MatrixService, colors: AppColors) -> NSImage {
+        let side: CGFloat = 18
+        let photo = space?.avatarURL.flatMap { matrix.isPreview ? nil : matrix.avatarImages.cachedImage(for: $0) }
+        let fill = space.map { NSColor(avatarColor($0.name)) } ?? NSColor(colors.sunken)
+        let accent = NSColor(colors.accentFill)
+        let letter = space.map { String(initials($0.name).prefix(1)) } ?? "∗"
+        let letterColor = NSColor(space == nil ? colors.textSecondary : colors.onAccent)
+        let image = NSImage(size: NSSize(width: side + (unread ? 4 : 0), height: side), flipped: false) { _ in
+            let tile = NSRect(x: 0, y: 0, width: side, height: side)
+            let shape = NSBezierPath(roundedRect: tile, xRadius: 5, yRadius: 5)
+            if let photo {
+                NSGraphicsContext.current?.saveGraphicsState()
+                shape.addClip()
+                NSGraphicsContext.current?.cgContext.draw(photo, in: tile)
+                NSGraphicsContext.current?.restoreGraphicsState()
+            } else {
+                fill.setFill()
+                shape.fill()
+                let text = NSAttributedString(
+                    string: letter,
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: letterColor,
+                    ])
+                let size = text.size()
+                text.draw(at: NSPoint(x: (side - size.width) / 2, y: (side - size.height) / 2))
+            }
+            if unread {
+                accent.setFill()
+                NSBezierPath(ovalIn: NSRect(x: side - 2, y: side - 6, width: 6, height: 6)).fill()
+            }
+            return true
+        }
+        return image
     }
 }
 
@@ -330,26 +331,23 @@ private struct SidebarRoomRow: View, Equatable {
         } label: {
             HStack(spacing: m.sp8) {
                 if room.isDirect {
-                    AvatarView(name: room.name, size: m.avatarSmall, matrix: matrix, source: room.avatarURL)
-                        .opacity(room.muted && !selected ? 0.5 : 1)
+                    AvatarView(
+                        name: room.name, size: m.avatarSmall, matrix: matrix, source: room.avatarURL
+                    ).opacity(room.muted && !selected ? 0.5 : 1)
                 } else {
-                    Image(systemName: room.channelSymbol).font(m.font(.body)).frame(
-                        width: m.avatarSmall)
+                    Image(systemName: room.channelSymbol).font(m.font(.body)).frame(width: m.sp16)
+                        .foregroundStyle(selected ? colors.accent : colors.textTertiary)
                 }
-                Text(room.name).font(m.font(.body, badge != .none ? .bold : .regular)).lineLimit(1)
+                Text(room.name).font(m.font(.body, badge != .none ? .semibold : .regular)).lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: m.sp2)
-                if hasDraft { Image(systemName: "pencil").font(m.font(.caption)) }
+                if hasDraft { Image(systemName: "pencil").font(m.font(.subheadline)) }
                 if case .count(let count) = badge { CountBadge(text: count) }
             }
-            .foregroundStyle(
-                selected
-                    ? colors.selectionText
-                    : room.muted ? colors.textTertiary : badge != .none ? colors.textPrimary : colors.textSecondary
-            )
-            .padding(.leading, m.sp16).padding(.trailing, m.sp12).frame(height: m.row)
+            .foregroundStyle(room.muted && !selected ? colors.textSecondary : colors.textPrimary)
+            .padding(.leading, room.isDirect ? m(6) : m.sp8).padding(.trailing, m.sp8).frame(height: m.row)
             .modifier(SidebarRowFill(selected: selected))
-        }.buttonStyle(.row).padding(.horizontal, m.sp8).help(room.name)
+        }.buttonStyle(.row).help(room.name)
             // The pointer rests on a row before the click; opening the timeline then hides its cache read.
             .onHover { if $0 { matrix.prepareRoom(room.id) } }
             .accessibilityAddTraits(selected ? .isSelected : [])
@@ -377,8 +375,8 @@ private struct SidebarRoomRow: View, Equatable {
     }
 }
 
-/// A sidebar row's fill: Slack's strong selection, or a tint under the pointer. Hover is the row's own state, so
-/// moving the pointer redraws one row, never the list.
+/// A sidebar row's fill: a quiet gray for the open one, a lighter one under the pointer. Hover is the row's own
+/// state, so moving the pointer redraws one row, never the list.
 struct SidebarRowFill: ViewModifier {
     let selected: Bool
     @State private var hovering = false
@@ -387,42 +385,8 @@ struct SidebarRowFill: ViewModifier {
 
     func body(content: Content) -> some View {
         content.background(
-            selected ? appearance.colors.selectionStrong : hovering ? appearance.colors.hover : .clear,
+            selected ? appearance.colors.selection : hovering ? appearance.colors.hover : .clear,
             in: RoundedRectangle(cornerRadius: m.radius)
         ).onHover { hovering = $0 }
-    }
-}
-
-/// A column whose gaps shrink, down to a quarter, to fit the height offered. Its ideal height is the tightest, so
-/// `ViewThatFits` keeps it until even that overflows.
-private struct RailStack: Layout {
-    var spacing: CGFloat
-
-    private func measure(_ subviews: Subviews) -> (heights: [CGFloat], gaps: CGFloat) {
-        (subviews.map { $0.sizeThatFits(.unspecified).height }, CGFloat(max(subviews.count - 1, 0)))
-    }
-
-    private func gap(_ height: CGFloat?, _ subviews: Subviews) -> CGFloat {
-        let (heights, gaps) = measure(subviews)
-        guard let height, gaps > 0 else { return spacing / 4 }
-        return min(max((height - heights.reduce(0, +)) / gaps, spacing / 4), spacing)
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let (heights, gaps) = measure(subviews)
-        let width = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
-        return CGSize(
-            width: proposal.width ?? width, height: heights.reduce(0, +) + gaps * gap(proposal.height, subviews))
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let gap = gap(bounds.height, subviews)
-        var y = bounds.minY
-        for (subview, height) in zip(subviews, measure(subviews).heights) {
-            subview.place(
-                at: CGPoint(x: bounds.midX, y: y), anchor: .top,
-                proposal: ProposedViewSize(width: bounds.width, height: height))
-            y += height + gap
-        }
     }
 }

@@ -63,7 +63,7 @@ struct ProfileEditor: View {
                     label("Display name")
                     TextField("Display name", text: $name).textFieldStyle(.field).disabled(!editable)
                     if let error {
-                        Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive)
+                        Text(error).font(m.font(.subheadline)).foregroundStyle(colors.destructive)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
@@ -91,7 +91,7 @@ struct ProfileEditor: View {
     }
 
     private func label(_ text: String) -> some View {
-        Text(text).font(m.font(.body, .bold)).foregroundStyle(appearance.colors.textPrimary)
+        Text(text).font(m.font(.reading, .bold)).foregroundStyle(appearance.colors.textPrimary)
     }
 
     @ViewBuilder private var preview: some View {
