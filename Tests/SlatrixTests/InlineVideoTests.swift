@@ -68,7 +68,7 @@ struct InlineVideoTests {
     func unplayable() async throws {
         let (service, _) = try await videoConversation(file: Data("not a movie".utf8))
         video.play(try #require(service.messages.first), matrix: service, from: timeline)
-        #expect(await eventually { video.player != nil })
+        // The player for a bad file can fail before a poll sees it, so only where it ends up is checked.
         #expect(await eventually { video.eventID == nil && service.errorMessage != nil })
         #expect(video.player == nil)
     }
