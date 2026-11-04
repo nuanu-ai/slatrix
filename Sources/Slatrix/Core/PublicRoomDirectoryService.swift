@@ -218,14 +218,39 @@ private final class PublicDirectoryObserver: RoomDirectorySearchEntriesListener,
                 if let cached = self.spaceChannels {
                     channels = cached
                 } else {
-                    let list = try await client.spaceService().spaceRoomList(spaceId: spaceID)
-                    // shortcut: stops after 50 pages of the hierarchy; page on demand if a workspace outgrows it.
-                    for _ in 0..<50 {
-                        try self.check(token)
-                        if case .idle(endReached: true) = list.paginationState() { break }
-                        try await list.paginate()
+                    // The sidebar puts a nested space's channels in the workspace, so browsing walks into them too.
+                    let spaces = await client.spaceService()
+                    var pending = [spaceID]
+                    var visited: Set<String> = [spaceID]
+                    var found: [PublicDirectoryRoom] = []
+                    var seen = Set<String>()
+                    while let next = pending.first {
+                        pending.removeFirst()
+                        let rooms: [SpaceRoom]
+                        do {
+                            let list = try await spaces.spaceRoomList(spaceId: next)
+                            // shortcut: stops after 50 pages of each hierarchy; page on demand if one outgrows it.
+                            for _ in 0..<50 {
+                                try self.check(token)
+                                if case .idle(endReached: true) = list.paginationState() { break }
+                                try await list.paginate()
+                            }
+                            rooms = await list.rooms()
+                        } catch  where next != spaceID && !(error is CancellationError) {
+                            // A nested space this account can't read hides only its own channels.
+                            continue
+                        }
+                        for room in rooms {
+                            if room.roomType == .space {
+                                if visited.insert(room.roomId).inserted { pending.append(room.roomId) }
+                            } else if let channel = PublicDirectoryMapping.channel(room),
+                                seen.insert(channel.id).inserted
+                            {
+                                found.append(channel)
+                            }
+                        }
                     }
-                    channels = await list.rooms().compactMap(PublicDirectoryMapping.channel)
+                    channels = found
                     try self.check(token)
                     self.spaceChannels = channels
                 }

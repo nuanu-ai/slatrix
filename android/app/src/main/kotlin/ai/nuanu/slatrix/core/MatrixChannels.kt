@@ -131,15 +131,35 @@ class ChannelDirectory(private val scope: CoroutineScope, private val client: Cl
         job?.cancel()
     }
 
+    /** The sidebar puts a nested space's channels in the workspace, so browsing walks into them too, as the Mac does. */
     private suspend fun workspace(spaceId: String): List<DirectoryChannel> = client.spaceService().use { spaces ->
-        spaces.spaceRoomList(spaceId).use { list ->
-            // shortcut: stops after 50 pages of the hierarchy, as the Mac does; page on demand if a workspace outgrows it.
-            for (page in 0 until 50) {
-                if ((list.paginationState() as? SpaceRoomListPaginationState.Idle)?.endReached == true) break
-                list.paginate()
+        val pending = ArrayDeque(listOf(spaceId))
+        val visited = mutableSetOf(spaceId)
+        val found = LinkedHashMap<String, DirectoryChannel>()
+        while (pending.isNotEmpty()) {
+            val next = pending.removeFirst()
+            val rooms = try {
+                spaces.spaceRoomList(next).use { list ->
+                    // shortcut: stops after 50 pages of each hierarchy; page on demand if one outgrows it.
+                    for (page in 0 until 50) {
+                        if ((list.paginationState() as? SpaceRoomListPaginationState.Idle)?.endReached == true) break
+                        list.paginate()
+                    }
+                    list.rooms()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                // A nested space this account can't read hides only its own channels.
+                if (next == spaceId) throw error else continue
             }
-            list.rooms().mapNotNull { it.channel() }
+            for (room in rooms) {
+                if (room.roomType == RoomType.Space) {
+                    if (visited.add(room.roomId)) pending.add(room.roomId)
+                } else room.channel()?.let { found.putIfAbsent(it.id, it) }
+            }
         }
+        found.values.toList()
     }
 
     private fun DirectoryChannel.matches(term: String) =
