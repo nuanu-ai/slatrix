@@ -162,6 +162,21 @@ struct TimelineHostedTests {
         var showsImage: Bool { Self.views(in: hosting).contains { ($0 as? NSImageView)?.image != nil } }
     }
 
+    /// A message taller than the screen: a heading, a code block of long unbroken lines, a list and a reaction.
+    private static func longMessage(_ index: Int) -> ChatMessage {
+        let tunnel = String(repeating: "-L 27190:127.0.0.1:27190 ", count: 12)
+        let steps = (0..<8).map { "<li>Step \($0) with <code>inline code</code> and <strong>bold words</strong></li>" }
+        let html =
+            "<p><strong>Setting up the tunnel</strong></p><pre><code>ssh \(tunnel)\n\(tunnel)\n\(tunnel)</code></pre>"
+            + "<ul>\(steps.joined())</ul><p>" + String(repeating: "More prose that keeps going. ", count: 30) + "</p>"
+        var message = ChatMessage(
+            id: "Long-\(index)", roomID: room.id, senderID: "@other:example.org", senderName: "Other",
+            body: "Setting up the tunnel", formattedBody: html,
+            timestamp: Date(timeIntervalSince1970: 1_761_192_000 + Double(index) * 400))
+        message.reactions = [MessageReaction(key: "👍", count: 1, mine: false, senders: ["@other:example.org"])]
+        return message
+    }
+
     private static func messages(_ range: Range<Int>, prefix: String = "Message") -> [ChatMessage] {
         range.map { index in
             ChatMessage(
@@ -215,6 +230,20 @@ struct TimelineHostedTests {
         harness.layout()
         #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
         await settle(harness)
+        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+    }
+
+    @Test("A conversation at its newest message stays there when the space above or below it changes")
+    func staysPinnedThroughHeightChange() async throws {
+        let harness = Harness(messages: Self.messages(0..<20) + [Self.longMessage(20)], height: 700)
+        defer { harness.close() }
+        await settle(harness)
+        // The composer grows with a draft or queued files, or the header with a banner.
+        harness.window.setContentSize(NSSize(width: 620, height: 505))
+        harness.layout()
+        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        harness.window.setContentSize(NSSize(width: 620, height: 700))
+        harness.layout()
         #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
     }
 

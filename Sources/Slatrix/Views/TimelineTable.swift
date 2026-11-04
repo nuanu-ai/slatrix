@@ -204,6 +204,8 @@ struct TimelineTable: NSViewRepresentable {
     private var scrolledByReader = false
     private var atOlderMessage = false
     private var reported: (Bool, Bool)?
+    /// Where the reader was before the scroll view laid out its clip, which a new size has already moved.
+    private var tiling: Policy.Position?
     /// While the table waits for its first rows.
     private var loading: Performance.Interval?
 
@@ -231,6 +233,7 @@ struct TimelineTable: NSViewRepresentable {
         NotificationCenter.default.addObserver(
             self, selector: #selector(boundsChanged), name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView)
+        scrollView.willTile = { [weak self] in self?.tiling = self?.opened == true ? self?.position() : nil }
         scrollView.onTile = { [weak self] in self?.viewportResized() }
         scrollView.onPointer = { [weak self] point in self?.pointerMoved(point) }
         return scrollView
@@ -548,7 +551,7 @@ struct TimelineTable: NSViewRepresentable {
     private func remeasure() {
         known = [:]
         guard !rows.isEmpty else { return }
-        preservingPosition { noteHeights(IndexSet(integersIn: 0..<rows.count)) }
+        preservingPosition(keeping: tiling) { noteHeights(IndexSet(integersIn: 0..<rows.count)) }
     }
 
     /// Without an explicit zero duration the table animates row heights, drawing rows where they no longer are.
@@ -599,31 +602,25 @@ struct TimelineTable: NSViewRepresentable {
             of: viewport, live: configuration?.live ?? true, firstVisibleRow: firstVisibleRow(excluding: excluded))
     }
 
-    /// Applies a change to rows or heights and puts the viewport back where the policy says, before display.
-    private func preservingPosition(_ change: () -> Void) {
-        let position = opened ? position() : nil
-        let reading = readingRow()
+    /// Applies a change to rows or heights and puts the viewport back where the policy says, before display: where
+    /// it is now, or `kept` when the viewport has already moved.
+    private func preservingPosition(keeping kept: Policy.Position? = nil, _ change: () -> Void) {
+        let position = opened ? kept ?? position() : nil
         applying = true
         change()
         updateSpacer()
         if let position { scroll(to: position) }
         settle(keeping: position)
         applying = false
-        noteJump(from: reading)
+        noteJump(from: position)
         afterScroll()
     }
 
-    /// The row the reader is looking at and where it sits in the viewport, unless they are at the newest message.
-    private func readingRow() -> (id: String, top: CGFloat)? {
-        guard opened, !viewport.isAtBottom, let row = firstVisibleRow(excluding: []) else { return nil }
-        return (row.id, row.top - scrollView.contentView.bounds.minY)
-    }
-
-    /// The policy holds the reader's row still through every change; this counts each time it did not.
-    private func noteJump(from reading: (id: String, top: CGFloat)?) {
-        guard let reading, let row = frame(reading.id) else { return }
-        let moved = row.top - scrollView.contentView.bounds.minY - reading.top
-        if abs(moved) >= 1 { Performance.event(.timelineJump, ["px": Int(moved.rounded())]) }
+    /// The policy holds the reader's row, or the newest message they follow, still through every change; this counts
+    /// each time it did not.
+    private func noteJump(from position: Policy.Position?) {
+        guard let position, let moved = Policy.jump(from: position, to: viewport, frame: frame) else { return }
+        Performance.event(.timelineJump, ["px": Int(moved.rounded())])
     }
 
     private func open() {
@@ -714,7 +711,7 @@ struct TimelineTable: NSViewRepresentable {
         if widthChanged {
             remeasure()
         } else {
-            preservingPosition {}
+            preservingPosition(keeping: tiling) {}
         }
     }
 
@@ -728,7 +725,7 @@ struct TimelineTable: NSViewRepresentable {
         let top = scrollView.contentView.bounds.minY
         if top != lastTop { scrollingUp = top < lastTop }
         lastTop = top
-        let reading = readingRow()
+        let reading = opened ? position() : nil
         applying = true
         settle(keeping: nil)
         applying = false
@@ -886,11 +883,13 @@ extension TimelineEntry {
 }
 
 final class TimelineScrollView: NSScrollView {
+    var willTile: (() -> Void)?
     var onTile: (() -> Void)?
     var onPointer: ((NSPoint?) -> Void)?
     private var tracking: NSTrackingArea?
 
     override func tile() {
+        willTile?()
         super.tile()
         onTile?()
     }

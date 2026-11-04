@@ -55,6 +55,20 @@ enum TimelineScrollPolicy {
         return min(max(0, target), max(0, contentHeight - viewportHeight))
     }
 
+    /// How far a change the reader didn't make moved what they were reading at `position`: their row, or the newest
+    /// message they were following. Nil when it held still.
+    static func jump(from position: Position, to viewport: Viewport, frame: (String) -> RowFrame?) -> CGFloat? {
+        let moved: CGFloat
+        switch position {
+        case .bottom: moved = viewport.distanceFromBottom
+        case .anchored(let id, let offset):
+            guard let row = frame(id) else { return nil }
+            moved = row.top - viewport.top - offset
+        case .centered: return nil
+        }
+        return abs(moved) >= 1 ? moved : nil
+    }
+
     /// Where a timeline opens: at a linked message, else where the reader left this conversation, else the end.
     /// `startsAtUnread` puts the unread line at the top instead, when it is loaded.
     static func opening(
