@@ -2,7 +2,6 @@ package ai.nuanu.slatrix.push
 
 import android.app.Application
 import android.content.Context
-import android.os.Build
 import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountRuntime
 import ai.nuanu.slatrix.core.AccountState
@@ -71,7 +70,7 @@ class PushNotificationWorker(context: Context, parameters: WorkerParameters) : C
                 .setInputData(workDataOf("room_id" to roomId, "event_id" to eventId))
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-            if (Build.VERSION.SDK_INT >= 31 && highPriority) request.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            if (highPriority) request.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             WorkManager.getInstance(context).enqueueUniqueWork("push-${pushKey("", roomId, eventId)}", ExistingWorkPolicy.KEEP, request.build())
         }
     }

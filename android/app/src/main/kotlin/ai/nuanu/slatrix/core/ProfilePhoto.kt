@@ -2,11 +2,9 @@ package ai.nuanu.slatrix.core
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.graphics.Rect
 import android.net.Uri
-import android.os.Build
 import androidx.core.graphics.get
 import androidx.core.graphics.scale
 import java.io.ByteArrayOutputStream
@@ -63,21 +61,10 @@ object ProfilePhoto {
     /** The picked photo upright, at most twice the upload size, so a crop of half of it still makes a sharp photo. */
     suspend fun load(context: Context, uri: Uri): Bitmap? = withContext(Dispatchers.IO) {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
-                    val scale = min(1f, 2f * MaxPixels / max(info.size.width, info.size.height))
-                    decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
-                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                }
-            } else {
-                // shortcut: Android 7–8 ignore a photo's orientation tag; read it with ExifInterface if they ever matter.
-                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-                var sample = 1
-                while (max(bounds.outWidth, bounds.outHeight) / sample > 2 * MaxPixels) sample *= 2
-                context.contentResolver.openInputStream(uri)?.use {
-                    BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
-                }
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
+                val scale = min(1f, 2f * MaxPixels / max(info.size.width, info.size.height))
+                decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             }
         } catch (cancelled: CancellationException) {
             throw cancelled

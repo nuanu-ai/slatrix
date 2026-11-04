@@ -8,7 +8,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
 import ai.nuanu.slatrix.MainActivity
 import ai.nuanu.slatrix.R
 import ai.nuanu.slatrix.core.IdentityState
@@ -32,8 +31,8 @@ import org.matrix.rustcomponents.sdk.TimelineEventContent
 class PushNotifications(private val context: Context) {
     private val manager = context.getSystemService(NotificationManager::class.java)
     private val preferences = context.getSharedPreferences("push-delivery", Context.MODE_PRIVATE)
-    val enabled: Boolean get() = manager.areNotificationsEnabled() && (Build.VERSION.SDK_INT < 33 ||
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+    val enabled: Boolean get() = manager.areNotificationsEnabled() &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
     fun deliver(client: Client, userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState?) {
         // Anyone holding the push token can name any event; only a joined room earns an alert we can't resolve.
@@ -74,7 +73,7 @@ class PushNotifications(private val context: Context) {
             sender == null -> room to NotificationText.plain(body)
             else -> NotificationText.message(room, sender, item?.roomInfo?.isDirect == true, body)
         }
-        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel(CHANNEL, "Messages", NotificationManager.IMPORTANCE_DEFAULT))
+        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Messages", NotificationManager.IMPORTANCE_DEFAULT))
         val intent = Intent(context, MainActivity::class.java)
             .setAction("${context.packageName}.OPEN_NOTIFICATION")
             .setData("slatrix://notification/$key".toUri())
@@ -88,8 +87,7 @@ class PushNotifications(private val context: Context) {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(publicNotification)
             .setOnlyAlertOnce(true).setSilent(resolved?.isNoisy != true).build()
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
-                Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return@synchronized
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return@synchronized
         manager.notify(roomId, key.hashCode(), notification)
         check(preferences.edit().putString("delivered", (delivered + key).takeLast(512).joinToString("\n")).commit())
     }

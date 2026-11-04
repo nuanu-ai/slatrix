@@ -2,7 +2,6 @@ package ai.nuanu.slatrix.core
 
 import android.app.UiModeManager
 import android.content.Context
-import android.os.Build
 import androidx.core.content.edit
 
 class AppearancePreferences(private val context: Context) {
@@ -19,7 +18,6 @@ class AppearancePreferences(private val context: Context) {
 
     /** Hands the color mode to the system, which keeps it and draws the next starting window in it. */
     fun applyNightMode() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         context.getSystemService(UiModeManager::class.java).setApplicationNightMode(when (darkMode) {
             null -> UiModeManager.MODE_NIGHT_AUTO
             true -> UiModeManager.MODE_NIGHT_YES

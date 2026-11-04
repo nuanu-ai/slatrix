@@ -54,7 +54,7 @@ extensions.configure<ApplicationExtension> {
         applicationId = "ai.nuanu.slatrix"
         buildConfigField("String", "PUSH_GATEWAY", "\"$pushGateway\"")
         manifestPlaceholders["authRedirectScheme"] = "com.github.nuanu-ai.slatrix"
-        minSdk = 24
+        minSdk = 33
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
