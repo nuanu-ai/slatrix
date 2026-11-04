@@ -225,7 +225,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val loadOlder by rememberUpdatedState(onLoadOlder)
     // Asks again after every page while the top stays near, so pages of hidden events don't stall it.
     val canPage = !state.loading && state.hasMore && !state.loadingHistory && state.error == null
-    LaunchedEffect(list, canPage) {
+    // Keyed on the oldest row too, since a page from the local cache can land before the screen ever sees it loading.
+    LaunchedEffect(list, canPage, state.rows.firstOrNull()?.id) {
         // Waits for the cached messages, so a conversation that has plenty doesn't page on open, and after a
         // failure waits for Retry.
         if (!canPage) return@LaunchedEffect

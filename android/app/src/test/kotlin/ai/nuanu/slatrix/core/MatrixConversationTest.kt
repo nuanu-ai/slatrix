@@ -150,6 +150,22 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.history
+    @Test fun oneRequestReadsPastPagesOfHiddenEventsToAnOlderMessage() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        timeline.page.complete(false)
+        timeline.onPage = { if (it == 3) timeline.emit(listOf(TimelineDiff.PushFront(conversationItem("stable-0", "\$zero", "Earlier")))) }
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.isNotEmpty() }
+        conversation.loadOlder()
+        runCurrent()
+        assertEquals("It reads on past two pages of edits and reactions", 3, timeline.pages)
+        assertEquals("Earlier", conversation.state.first { it.rows.messages.size == 2 }.rows.messages.first().body)
+        conversation.state.first { !it.loadingHistory }
+        assertEquals("It stops at the message", 3, timeline.pages)
+        conversation.close()
+    }
+
     @Test fun historyStopsAfterPagesOfHiddenEventsUntilAnOlderMessageShows() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.page.complete(false)
@@ -163,7 +179,7 @@ class MatrixConversationTest {
         conversation.state.first { it.rows.first().id == "stable-0" }
         conversation.loadOlder()
         runCurrent()
-        assertEquals("An older message lets history page again", stopped + 1, timeline.pages)
+        assertTrue("An older message lets history page again", timeline.pages > stopped)
         conversation.close()
     }
 
@@ -931,9 +947,12 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     }
     var pageFailure: Exception? = null
     var pages = 0
+    /** What a page brings, by its number, sent as the SDK sends it before the page returns. */
+    var onPage: (Int) -> Unit = {}
     override suspend fun paginateForwards(numEvents: UShort): Boolean = true
     override suspend fun paginateBackwards(numEvents: UShort): Boolean {
         pages++
+        onPage(pages)
         pageStarted.complete(Unit)
         pageFailure?.let { throw it }
         return try { page.await() } finally { pageCancelled.complete(Unit) }

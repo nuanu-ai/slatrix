@@ -101,6 +101,23 @@ class LiveChannelScreenTest {
         compose.waitUntil("A page that showed nothing asks again while the top is near") { requests == 2 }
     }
 
+    // capability: conversation.history
+    @Test fun aPageThatLandsWithinAFrameAsksAgainWhileTheTopIsNear() {
+        val state = mutableStateOf(ConversationState(listOf(message("Message 100", minutes = 100)), loading = false))
+        var requests = 0
+        compose.setContent {
+            SlatrixTheme {
+                // A page from the local cache: its messages arrive before the screen ever sees it loading.
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {
+                    requests++
+                    if (requests < 5) state.value = state.value.copy(rows = listOf(message("Message ${100 - requests}", minutes = 100 - requests)) +
+                        state.value.rows)
+                }, {}, {}, {}, {})
+            }
+        }
+        compose.waitUntil("Each page that leaves the top in view asks for another") { requests >= 3 }
+    }
+
     @Test fun aFailedPageWaitsForRetryInsteadOfAskingAgain() {
         var requests = 0
         compose.setContent {
