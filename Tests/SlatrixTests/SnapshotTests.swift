@@ -694,6 +694,71 @@ struct Snapshots {
         try write(await settledImage(hosting), "channels-\(name)")
     }
 
+    @Test("A busy workspace: long posts, links, a bot, an edited message with a thread", arguments: Theme.allCases)
+    func realLife(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let channels = [
+            "Announcements", "Backend", "Mobile", "QA and Releases", "Customer Feedback", "Hiring", "Office Lisbon",
+            "Infra Alerts", "Data and Analytics", "Docs",
+        ]
+        matrix.rooms += channels.enumerated().map { index, name in
+            ChatRoom(
+                id: "real.room.\(index)", name: name, unreadMessages: index % 3 == 0 ? 5 : 0, memberCount: 12,
+                spaceIDs: ["preview.workspace"])
+        }
+        matrix.rooms += ["Priya Raman", "Tomás Herrera"].enumerated().map { index, name in
+            ChatRoom(id: "real.dm.\(index)", name: name, isDirect: true, isEncrypted: true, memberCount: 2)
+        }
+        let room = try #require(matrix.selectedRoom)
+        let now = Date()
+        func message(
+            _ id: String, _ sender: String, _ name: String, _ body: String, html: String? = nil, _ minutes: Double
+        ) -> ChatMessage {
+            ChatMessage(
+                id: id, roomID: room.id, senderID: sender, senderName: name, body: body, formattedBody: html,
+                timestamp: now.addingTimeInterval(-minutes * 60))
+        }
+        var edited = message(
+            "real.4", "preview.julia", "Julia",
+            "Moved the retro to Thursday 15:00 so Lisbon can join. Agenda is in the doc, add anything you want covered.",
+            40)
+        edited.isEdited = true
+        edited.replyCount = 6
+        edited.lastReply = ThreadReply(
+            senderID: "preview.sam", senderName: "Sam", avatarURL: nil, timestamp: now.addingTimeInterval(-600))
+        matrix.messages = [
+            message(
+                "real.1", "preview.alex", "Alex",
+                """
+                Quick summary of where the billing migration stands.
+
+                Invoices for March are generated on the new pipeline and match the old totals to the cent. The two \
+                accounts that drifted last week had a rounding rule nobody had written down; it's in the runbook now.
+
+                What's left: the tax export, the dunning emails and switching the dashboard to read from the new \
+                tables. I'd like to finish all three before the end of the month, so shout if you see something odd.
+                """, 180),
+            message(
+                "real.2", "preview.sam", "Sam",
+                "Draft of the release notes is at https://docs.harbor.example/releases/4.2 and the checklist lives at "
+                    + "https://harbor.example/wiki/release-checklist. Send copy fixes to support@harbor.example.",
+                html: "Draft of the release notes is at <a href=\"https://docs.harbor.example/releases/4.2\">"
+                    + "https://docs.harbor.example/releases/4.2</a> and the checklist lives at "
+                    + "<a href=\"https://harbor.example/wiki/release-checklist\">the wiki</a>. Send copy fixes to "
+                    + "<a href=\"mailto:support@harbor.example\">support@harbor.example</a>.",
+                95),
+            message(
+                "real.3", "preview.deploybot", "Deploy Bot",
+                "harbor-web 4.2.0-rc.3 deployed to staging by Sam. 148 tests passed, 0 failed. Rollout 100%.", 60),
+            edited,
+            message("real.5", "preview.you", "You", "Thanks! I'll bring the numbers from the last two sprints.", 12),
+        ]
+        try await render(
+            RootView(matrix: matrix).environment(\.metrics, Metrics()), theme: theme, name: "real-life")
+    }
+
     /// The window at 1440 × 900 and 100% with `view` as its content, after `prepare`.
     private func render(
         _ view: some View, theme: Theme, name: String, prepare: () -> Void = {}
