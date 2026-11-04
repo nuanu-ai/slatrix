@@ -12,6 +12,7 @@ import ai.nuanu.slatrix.core.ThreadOrigin
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
+import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.compose.ui.semantics.SemanticsActions
@@ -56,6 +57,7 @@ import org.robolectric.RuntimeEnvironment
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.swipeRight
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
@@ -376,6 +378,24 @@ class LiveChannelScreenTest {
         }
         compose.onNodeWithText("3 replies", useUnmergedTree = true).performTouchInput { click() }
         compose.runOnIdle { assertEquals("\$Can we ship Friday?", opened) }
+    }
+
+    // capability: message.reply
+    @Test fun swipingAMessageRightQuotesItAndASmallNudgeDoesNot() {
+        var quoted: String? = null
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message("Can we ship Friday?", 0), message("Yes", 1, sender = "Jordan")),
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    actions = MessageActions(onQuote = { quoted = it.body }))
+            }
+        }
+        compose.onNodeWithText("Can we ship Friday?").performTouchInput { swipeRight(startX = centerX, endX = centerX + width / 20f) }
+        compose.runOnIdle { assertEquals("A nudge doesn't reply", null, quoted) }
+        compose.onNodeWithText("Can we ship Friday?").performTouchInput { swipeRight(startX = left + width / 10f, endX = right) }
+        compose.runOnIdle { assertEquals("Can we ship Friday?", quoted) }
+        compose.onNodeWithText("Yes").performTouchInput { swipeRight(startX = left + width / 10f, endX = right) }
+        compose.runOnIdle { assertEquals("Your own message replies the same way", "Yes", quoted) }
     }
 
     @Test fun anEditedMessageKeepsItsRepliesBar() {
