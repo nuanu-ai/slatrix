@@ -176,7 +176,7 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<St
         items(people, key = { it.id }) { RoomSuggestion(it, onRoom) }
         items(others, key = { "person ${it.id}" }) { person ->
             SearchRow({ onPerson(person) }) {
-                Lead { LiveAvatar(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), UiMetrics.RowLead, person.avatarUrl) }
+                Lead { LiveAvatar(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), leadSize(), person.avatarUrl) }
                 Spacer(Modifier.width(UiMetrics.GapMedium))
                 // The Matrix ID tells namesakes apart, and someone you have a conversation with from their profile.
                 Text(buildAnnotatedString {
@@ -254,7 +254,7 @@ private fun RecentRow(recent: String, onRecent: (String) -> Unit) {
 private fun RoomSuggestion(room: RoomSummary, onRoom: (String) -> Unit) {
     SearchRow({ onRoom(room.id) }) {
         Lead {
-            if (room.direct) LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowLead, room.avatarUrl)
+            if (room.direct) LiveAvatar(room.initials, room.colorIndex, leadSize(), room.avatarUrl)
             else ChannelGlyph(room.isPrivate, SlatrixTheme.colors.textSecondary)
         }
         Spacer(Modifier.width(UiMetrics.GapMedium))

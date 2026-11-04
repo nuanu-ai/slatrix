@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.ui.designsystem
 
 import ai.nuanu.slatrix.R
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
@@ -37,3 +38,6 @@ internal val SlatrixTypography = Typography().run {
 
 /** A message's text: body large with a messenger's tighter leading, so a long message reads as one block in its bubble. */
 val Typography.message: TextStyle get() = bodyLarge.copy(lineHeight = 22.sp)
+
+/** A tab's label, shrinking to as little as two thirds of its size where a large font won't let it fit. */
+val Typography.tabFit: TextAutoSize get() = TextAutoSize.StepBased(minFontSize = labelSmall.fontSize * 2 / 3, maxFontSize = labelSmall.fontSize)

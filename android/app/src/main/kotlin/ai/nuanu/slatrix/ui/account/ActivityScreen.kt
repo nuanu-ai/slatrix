@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.ui.account
 import ai.nuanu.slatrix.core.ActivityItem
 import ai.nuanu.slatrix.core.ActivityKind
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.ui.designsystem.message
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -143,7 +144,7 @@ private fun ActivityRow(item: ActivityItem, onClick: () -> Unit) {
             }, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             // A reaction shows the message it reacted to, then the reaction, as Slack does.
             (if (item.kind == ActivityKind.Reaction) item.reactedTo else item.body)?.let {
-                Text(it, Modifier.padding(top = UiMetrics.GapTiny), style = MaterialTheme.typography.bodyLarge, color = colors.textBody,
+                Text(it, Modifier.padding(top = UiMetrics.GapTiny), style = MaterialTheme.typography.message, color = colors.textBody,
                     maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
             if (item.kind == ActivityKind.Reaction) Surface(Modifier.padding(top = UiMetrics.GapSmall)

@@ -20,6 +20,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,6 +38,21 @@ class LaterScreenTest {
     @get:Rule val compose = createComposeRule()
     private val rooms = listOf(RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0),
         RoomSummary("!general:example.org", "general", false, "", UnreadBadge.None, "G", 1))
+
+    // capability: message.save
+    @Config(qualifiers = "w320dp-h704dp-xxxhdpi")
+    @Test fun onANarrowPhoneTheSendersNameKeepsItsRoomAndTheTimeGivesWay() {
+        val name = "Alexandra Whitfield"
+        compose.setContent {
+            SlatrixTheme {
+                LaterScreen(listOf(SavedMessage("!design:example.org", "\$one", 1_000)), rooms,
+                    { SavedPreview("@alexandra:example.org", name, "Ship it on Thursday", 1_700_000_000_000L) }, {}, {})
+            }
+        }
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(name, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertFalse(layouts.single().isLineEllipsized(0))
+    }
 
     // capability: message.save
     @Test fun laterListsSavedMessagesNewestFirstOpensOneAndRemovesOne() {

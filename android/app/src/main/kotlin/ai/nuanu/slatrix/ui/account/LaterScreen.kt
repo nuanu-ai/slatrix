@@ -74,16 +74,17 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.Hairline * 4)) {
             Text(when {
                 room == null -> "Conversation unavailable"
-                room.direct -> room.name
+                room.direct -> "Direct message"
                 else -> "#${room.name}"
             }, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val shown = preview
             Row(horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
-                // The line keeps its height while the message loads, so the row never grows under the reader.
-                Text(shown?.senderName ?: "", Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
+                // The line keeps its height while the message loads, so the row never grows under the reader. The name
+                // takes what it needs and the time gives way.
+                Text(shown?.senderName ?: "", style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (shown != null) Text("${dayLabel(shown.timestamp)} at ${timeLabel(shown.timestamp)}", style = MaterialTheme.typography.bodySmall,
-                    color = colors.textSecondary, maxLines = 1)
+                if (shown != null) Text("${dayLabel(shown.timestamp)} at ${timeLabel(shown.timestamp)}", Modifier.weight(1f, fill = false),
+                    style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Text(when {
                 shown != null -> shown.body

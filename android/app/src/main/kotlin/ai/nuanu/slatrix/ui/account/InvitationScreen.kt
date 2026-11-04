@@ -169,7 +169,7 @@ internal fun InvitationRow(invitation: Invitation, onOpen: (String) -> Unit) {
         .semantics { stateDescription = "Invitation" }.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         Lead {
-            if (invitation.direct || invitation.space) LiveAvatar(invitation.initials, invitation.colorIndex, UiMetrics.RowLead)
+            if (invitation.direct || invitation.space) LiveAvatar(invitation.initials, invitation.colorIndex, leadSize())
             else ChannelGlyph(private = false, colors.textPrimary)
         }
         Column(Modifier.weight(1f)) {

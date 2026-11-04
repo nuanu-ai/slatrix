@@ -16,6 +16,7 @@ import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.glass
+import ai.nuanu.slatrix.ui.designsystem.tabFit
 import ai.nuanu.slatrix.ui.designsystem.glassSource
 import ai.nuanu.slatrix.ui.designsystem.rememberGlass
 import dev.chrisbanes.haze.HazeState
@@ -242,8 +243,10 @@ private fun TabCapsule(glass: HazeState, tab: HomeTab, modifier: Modifier, onTab
                 .selectable(selected, role = Role.Tab) { onTab(destination) },
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Icon(if (selected) destination.selectedIcon else destination.icon, null, Modifier.size(UiMetrics.LargeIcon), tint = tint)
-                Text(destination.label, style = MaterialTheme.typography.labelSmall,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, color = tint, maxLines = 1)
+                // A label too long for its tab at a large font shrinks rather than lose its end to the tab's round side.
+                Text(destination.label, Modifier.padding(horizontal = UiMetrics.GapSmall), style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, color = tint, maxLines = 1,
+                    autoSize = MaterialTheme.typography.tabFit)
             }
         }
     }
@@ -422,7 +425,7 @@ private fun AddChannelRow(onClick: () -> Unit) {
 /** The narrow column ahead of a row's name: a channel's #, a person's picture or a section's arrow. */
 @Composable
 internal fun Lead(content: @Composable () -> Unit) {
-    Box(Modifier.widthIn(min = UiMetrics.RowLead), contentAlignment = Alignment.Center) { content() }
+    Box(Modifier.widthIn(min = leadSize()), contentAlignment = Alignment.Center) { content() }
 }
 
 /** A row's # or arrow, at the size of its text, so it grows with the phone's font. */
@@ -439,7 +442,7 @@ private fun CompactRow(room: RoomSummary, onRoom: (String) -> Unit, onActions: (
         .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         Lead {
-            if (room.direct) LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowLead, room.avatarUrl)
+            if (room.direct) LiveAvatar(room.initials, room.colorIndex, leadSize(), room.avatarUrl)
             else ChannelGlyph(room.isPrivate, color)
         }
         Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = color,
@@ -454,8 +457,13 @@ internal fun ChannelGlyph(private: Boolean, color: Color) {
     Icon(if (private) SlackIcons.Lock else SlackIcons.Hash, if (private) "Private channel" else null, Modifier.size(glyph()), tint = color)
 }
 
-/** A 20 sp mark beside 16 sp text, as the boards draw it. */
+/** A person's picture in the same column, so it grows with the font as the # beside it does. */
+@Composable
+internal fun leadSize(): Dp = with(LocalDensity.current) { MaterialTheme.typography.bodyLarge.fontSize.toDp() * LeadScale }
+
+/** A 20 sp mark and a 24 sp picture beside 16 sp text, as the boards draw them. */
 private const val GlyphScale = 1.25f
+private const val LeadScale = 1.5f
 
 @Composable
 private fun DirectList(list: LazyListState, state: RoomListState, onRoom: (String) -> Unit, bottom: Dp, onActions: (RoomSummary) -> Unit) {

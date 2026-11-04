@@ -17,6 +17,7 @@ import ai.nuanu.slatrix.ui.account.LiveWorkspace
 import ai.nuanu.slatrix.ui.account.LiveYouScreen
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +53,9 @@ import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -110,6 +114,21 @@ class LiveHomeScreenTest {
         val button = compose.onNodeWithContentDescription("New message").bounds()
         assertTrue(button.bottom <= tab("Later").bounds().top)
         assertTrue(tab("Later").bounds().right > button.left)
+    }
+
+    @Config(qualifiers = "w320dp-h704dp-xxxhdpi")
+    @Test fun atTheLargestFontEveryTabLabelFitsInsideItsRoundedTab() {
+        showTabBar(2f)
+        val inset = with(compose.density) { UiMetrics.GapSmall.toPx() }
+        for (label in listOf("Home", "DMs", "Activity", "Later")) {
+            val layouts = mutableListOf<TextLayoutResult>()
+            val text = compose.onNodeWithText(label, useUnmergedTree = true)
+            text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertFalse(label, layouts.single().hasVisualOverflow)
+            val within = text.bounds()
+            val around = tab(label).bounds()
+            assertTrue(label, within.left - around.left >= inset && around.right - within.right >= inset)
+        }
     }
 
     @Test fun homeAndDmsListConversationsWithoutAPermanentSearchField() {
