@@ -10,15 +10,13 @@ import ai.nuanu.slatrix.ui.account.CreateChannelScreen
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -45,16 +43,6 @@ class ChannelScreensTest {
             LiveHomeScreen("@alex:example.org", RoomListState(listOf(general), loading = false, spacesKnown = true), {}, {}, {},
                 onBrowseChannels = { opened += "browse" }, onCreateChannel = { opened += "create" })
         }
-    }
-
-    // capability: home.browse-channels
-    @Test fun channelsHeaderOpensBrowseChannelsAndItsArrowStillCollapses() {
-        home()
-        compose.onNodeWithText("Channels").performClick()
-        compose.runOnIdle { assertEquals(listOf("browse"), opened) }
-        compose.onNodeWithContentDescription("Channels").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
-            .performClick()
-        compose.onNodeWithText("general").assertDoesNotExist()
     }
 
     // capability: home.browse-channels
@@ -86,6 +74,8 @@ class ChannelScreensTest {
         compose.onNodeWithContentDescription("12 members").assertIsDisplayed()
         compose.onNodeWithText("Joined").assertIsDisplayed()
         compose.onNodeWithText("Invite only").assertIsDisplayed()
+        fun end(members: String) = compose.onNodeWithContentDescription(members).fetchSemanticsNode().boundsInRoot.right
+        assertEquals("Member counts line up at the end, joined or not", end("40 members"), end("12 members"))
         compose.onNodeWithText("board").performClick()
         compose.onNodeWithText("design").performClick()
         compose.onNodeWithText("general").performClick()
@@ -94,6 +84,20 @@ class ChannelScreensTest {
             assertEquals(listOf(design.id, general.id), picked)
             assertEquals("des", searched.last())
         }
+    }
+
+    // capability: home.browse-channels
+    @Test fun aJoinedChannelsLongNameKeepsAsMuchRoomAsAnyOther() {
+        val name = "engineering-announcements-and-release-coordination"
+        compose.setContent {
+            SlatrixTheme {
+                BrowseChannelsScreen("Harbor", ChannelDirectoryState(listOf(DirectoryChannel("!a:example.org", name, null, 12, canJoin = true),
+                    DirectoryChannel("!b:example.org", name, null, 12, canJoin = true))), joined = setOf("!a:example.org"), joining = null,
+                    error = null, onSearch = {}, onMore = {}, onChannel = {}, onBack = {})
+            }
+        }
+        val (joined, other) = compose.onAllNodesWithText(name, useUnmergedTree = true).fetchSemanticsNodes().map { it.boundsInRoot.width }
+        assertEquals(other, joined)
     }
 
     // capability: home.browse-channels

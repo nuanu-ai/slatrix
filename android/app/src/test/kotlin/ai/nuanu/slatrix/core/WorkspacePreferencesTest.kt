@@ -22,4 +22,12 @@ class WorkspacePreferencesTest {
         preferences.selectedSpaceId = null
         assertNull(WorkspacePreferences(context, "@alex:example.org").selectedSpaceId)
     }
+
+    // capability: home.sections-collapse
+    @Test fun collapsedSectionsStayCollapsedAfterReopeningAndBelongToTheirAccount() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        WorkspacePreferences(context, "@alex:example.org").collapsedSections = setOf("Channels", "Starred")
+        assertEquals(setOf("Channels", "Starred"), WorkspacePreferences(context, "@alex:example.org").collapsedSections)
+        assertEquals(emptySet<String>(), WorkspacePreferences(context, "@sam:example.org").collapsedSections)
+    }
 }

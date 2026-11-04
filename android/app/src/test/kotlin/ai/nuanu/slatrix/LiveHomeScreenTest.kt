@@ -1,5 +1,10 @@
 package ai.nuanu.slatrix
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.platform.LocalDensity
 import android.app.Application
 import android.view.WindowInsetsController
 import ai.nuanu.slatrix.core.LatestMessage
@@ -12,6 +17,7 @@ import ai.nuanu.slatrix.ui.account.LiveWorkspace
 import ai.nuanu.slatrix.ui.account.LiveYouScreen
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +53,9 @@ import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -78,6 +87,48 @@ class LiveHomeScreenTest {
         compose.runOnIdle { open.value = false }
         tab("DMs").assertIsSelected()
         compose.onNodeWithText("Person 39").assertIsDisplayed()
+    }
+
+    private fun showTabBar(fontScale: Float) {
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
+                SlatrixTheme {
+                    LiveHomeScreen("@alex:example.org", RoomListState(emptyList(), loading = false, spacesKnown = true), {}, {}, {}, onNewMessage = {})
+                }
+            }
+        }
+    }
+
+    private fun SemanticsNodeInteraction.bounds() = fetchSemanticsNode().boundsInRoot
+
+    @Test fun newMessageSitsBesideTheTabBarWhereEveryTabFitsItsLabel() {
+        showTabBar(1f)
+        val button = compose.onNodeWithContentDescription("New message").bounds()
+        assertTrue(button.left >= tab("Later").bounds().right)
+        assertTrue(button.top < tab("Later").bounds().bottom)
+    }
+
+    @Config(qualifiers = "w320dp-h704dp-xxxhdpi")
+    @Test fun onANarrowPhoneAtALargeFontNewMessageRisesAboveATabBarAcrossTheWidth() {
+        showTabBar(1.15f)
+        val button = compose.onNodeWithContentDescription("New message").bounds()
+        assertTrue(button.bottom <= tab("Later").bounds().top)
+        assertTrue(tab("Later").bounds().right > button.left)
+    }
+
+    @Config(qualifiers = "w320dp-h704dp-xxxhdpi")
+    @Test fun atTheLargestFontEveryTabLabelFitsInsideItsRoundedTab() {
+        showTabBar(2f)
+        val inset = with(compose.density) { UiMetrics.GapSmall.toPx() }
+        for (label in listOf("Home", "DMs", "Activity", "Later")) {
+            val layouts = mutableListOf<TextLayoutResult>()
+            val text = compose.onNodeWithText(label, useUnmergedTree = true)
+            text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertFalse(label, layouts.single().hasVisualOverflow)
+            val within = text.bounds()
+            val around = tab(label).bounds()
+            assertTrue(label, within.left - around.left >= inset && around.right - within.right >= inset)
+        }
     }
 
     @Test fun homeAndDmsListConversationsWithoutAPermanentSearchField() {
@@ -112,6 +163,32 @@ class LiveHomeScreenTest {
         compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(listOf(channel("!general:example.org", "general")), loading = false, spacesKnown = true), {}, {}, {}) } }
         compose.onNodeWithText("Channels").assertIsDisplayed()
         compose.onNodeWithText("Starred").assertDoesNotExist()
+    }
+
+    // capability: home.channels
+    @Test fun homeListsEachConversationOnOneLineWhileDmsKeepTheirPreviews() {
+        val rooms = listOf(channel("!general:example.org", "general").copy(latest = LatestMessage("Lunch is on the roof", 1_000L, own = false)),
+            direct("!sam:example.org", "Sam", latest = LatestMessage("See you there", 2_000L, own = false)))
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {}) } }
+        compose.onNodeWithText("general").assertIsDisplayed()
+        compose.onNodeWithText("Lunch is on the roof", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("See you there", substring = true).assertDoesNotExist()
+        tab("DMs").performClick()
+        compose.onNodeWithText("See you there", substring = true).assertIsDisplayed()
+    }
+
+    @Test fun collapsedSectionsComeFromAndGoBackToTheAccount() {
+        val rooms = listOf(channel("!general:example.org", "general"), direct("!sam:example.org", "Sam"))
+        var collapsed by mutableStateOf(setOf("Channels"))
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
+                    collapsedSections = collapsed, onCollapsedSections = { collapsed = it })
+            }
+        }
+        compose.onNodeWithText("general").assertDoesNotExist()
+        compose.onNodeWithText("Direct messages").performClick()
+        compose.runOnIdle { assertEquals(setOf("Channels", "Direct"), collapsed) }
     }
 
     // capability: home.sections-collapse

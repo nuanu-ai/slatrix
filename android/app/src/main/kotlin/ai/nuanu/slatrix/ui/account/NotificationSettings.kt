@@ -76,7 +76,7 @@ fun NotificationRows(notifyAbout: NotifyAbout?, previews: Boolean, error: String
         )
     }
     Column {
-        Text("Notifications", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        PreferenceHeading("Notifications")
         PreferenceRow(Icons.Outlined.Notifications, "Notify me about", Modifier.clickable(role = Role.Button) { choosing = true }) {
             // Blank while loading or when rules set elsewhere match no choice, so the row keeps its height.
             Text(error ?: notifyAbout?.label.orEmpty(), style = MaterialTheme.typography.bodyMedium,
@@ -87,17 +87,30 @@ fun NotificationRows(notifyAbout: NotifyAbout?, previews: Boolean, error: String
     }
 }
 
+/** A setting: its icon level with the title's line, the title and what's chosen under it, and maybe a switch. */
 @Composable
-private fun PreferenceRow(icon: ImageVector, title: String, modifier: Modifier, trailing: @Composable () -> Unit = {},
+internal fun PreferenceRow(icon: ImageVector, title: String, modifier: Modifier, trailing: @Composable () -> Unit = {},
     subtitle: @Composable () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ComposerMinHeight).then(modifier)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        Icon(icon, null, Modifier.size(UiMetrics.GapSection))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            subtitle()
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+                Icon(icon, null, Modifier.size(UiMetrics.LargeIcon))
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+            }
+            Box(Modifier.padding(start = PreferenceInset - UiMetrics.GapLarge)) { subtitle() }
         }
         trailing()
     }
 }
+
+/** A group's heading, starting where the settings' titles do. */
+@Composable
+internal fun PreferenceHeading(text: String) {
+    Text(text, Modifier.padding(start = PreferenceInset, end = UiMetrics.GapLarge, top = UiMetrics.GapLarge, bottom = UiMetrics.GapSmall),
+        style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+}
+
+/** Where a setting's title starts: past the row's edge, its icon and the gap after it. */
+internal val PreferenceInset = UiMetrics.GapLarge + UiMetrics.LargeIcon + UiMetrics.GapLarge

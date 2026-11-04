@@ -104,6 +104,17 @@ class MessageContentTest {
         assertTrue("A list in a quote sits past the quote's bar", left("this") > left("one"))
     }
 
+    @Test fun aBlankLineBetweenParagraphsLeavesLessThanALineOfSpace() {
+        show(message("Lines one\nLines two"), message("Paragraph one\n\nParagraph two"))
+        fun span(first: String, second: String): Float {
+            fun bounds(text: String) = compose.onNodeWithText(text, substring = true, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            return bounds(second).bottom - bounds(first).top
+        }
+        val lines = span("Lines one", "Lines two")
+        val gap = span("Paragraph one", "Paragraph two") - lines
+        assertTrue("A blank line took $gap px against a line of ${lines / 2} px", gap > 0 && gap < lines / 4)
+    }
+
     // capability: message.edited
     @Test fun anEditedMessageEndsWithSlacksEditedMark() {
         show(message("Fixed the typo").copy(edited = true))

@@ -36,10 +36,11 @@ object UiMetrics {
     /** The floating tab capsule, its inset around the selected tab, and its gap above the screen's bottom. */
     val TabBar = 64.dp
     val TabInset = 4.dp
-    val TabBarGap = 24.dp
     /** A chat header's row, over the glass. */
     val HeaderRow = 64.dp
     val SectionHeader = 40.dp
+    /** Home's one-line row. */
+    val CompactRow = 48.dp
     val Badge = 20.dp
     val ChannelTile = 40.dp
     /** The faces on a thread's replies bar. */
@@ -48,6 +49,13 @@ object UiMetrics {
     /** A bubble's room on the side away from its author, so a long one never spans the screen. */
     val BubbleGutter = 56.dp
     val GlassBlur = 24.dp
+    /** The message menu: its card's width and rows, the reaction bar and its buttons, and the blur of the screen behind. */
+    val MenuWidth = 252.dp
+    val MenuItem = 44.dp
+    val MenuInset = 6.dp
+    val ReactionBar = 52.dp
+    val ReactionButton = 40.dp
+    val MenuBlur = 14.dp
     val GlassLift = 12.dp
     val WallpaperGrid = 20.dp
     val WallpaperDot = 1.dp

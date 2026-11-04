@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.ThreadFeedItem
 import ai.nuanu.slatrix.core.ThreadFeedMessage
 import ai.nuanu.slatrix.core.ThreadFeedState
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.ui.designsystem.message
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -92,7 +93,7 @@ private fun ThreadMessage(message: ThreadFeedMessage, avatar: Dp, lines: Int) {
                     fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(latestTime(message.timestamp), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1)
             }
-            Text(message.body, style = MaterialTheme.typography.bodyLarge, color = colors.textBody, maxLines = lines,
+            Text(message.body, style = MaterialTheme.typography.message, color = colors.textBody, maxLines = lines,
                 overflow = TextOverflow.Ellipsis)
         }
     }

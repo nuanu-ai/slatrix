@@ -52,14 +52,14 @@ class MotionTest {
         settles("Color mode") { shown = true }
     }
 
-    @Test fun aBottomSheetEasesInAndSettlesWithin150Milliseconds() {
+    @Test fun aMessageMenuEasesInAndSettlesWithin150Milliseconds() {
         val message = ConversationMessage("a", "\$a", "@mira:example.org", "Mira", "Ship it", null, 1_700_000_000_000L,
             MessageKind.Text, MessageSendState.Sent, false, "M", 0)
         var shown by mutableStateOf(false)
         compose.setContent {
             SlatrixTheme { if (shown) MessageActionsHost(message, MessageActions(), null, {}, {}) {} }
         }
-        settles("Copy message") { shown = true }
+        settles("Copy text") { shown = true }
     }
 
     @Test fun goingBackToAPageIsInstant() {

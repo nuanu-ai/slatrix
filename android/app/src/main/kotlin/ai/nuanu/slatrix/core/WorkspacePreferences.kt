@@ -9,4 +9,9 @@ class WorkspacePreferences(context: Context, userId: String) {
     var selectedSpaceId: String?
         get() = values.getString(key, null)
         set(value) { values.edit { if (value == null) remove(key) else putString(key, value) } }
+
+    /** Home's sections this account closed, so they stay closed when the app starts again. */
+    var collapsedSections: Set<String>
+        get() = values.getStringSet("$key collapsed", null).orEmpty().toSet()
+        set(value) { values.edit { putStringSet("$key collapsed", value) } }
 }

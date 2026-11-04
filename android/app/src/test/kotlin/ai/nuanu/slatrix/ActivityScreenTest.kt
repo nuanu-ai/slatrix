@@ -11,6 +11,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -69,6 +70,15 @@ class ActivityScreenTest {
         compose.onNodeWithText("Lunch?").assertDoesNotExist()
         compose.onNodeWithText("Unreads").performClick()
         compose.onNodeWithText("Lunch?").assertExists()
+    }
+
+    // capability: activity.feed
+    @Test fun anEmptyFeedSaysSoInTheMiddleWithUnreadsAmongTheFilters() {
+        compose.setContent { SlatrixTheme { ActivityScreen(emptyList(), {}, { _, _ -> }) } }
+        fun bounds(text: String) = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
+        assertEquals(root.center.x, bounds("You’re all caught up").center.x, 1f)
+        assertEquals(bounds("All").center.y, bounds("Unreads").center.y, 1f)
     }
 
     // capability: activity.open-item

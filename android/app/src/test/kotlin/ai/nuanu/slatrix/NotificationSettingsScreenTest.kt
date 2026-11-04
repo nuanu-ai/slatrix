@@ -59,6 +59,15 @@ class NotificationSettingsScreenTest {
         compose.runOnIdle { assertEquals(false, previews.value) }
     }
 
+    @Test fun everyPreferenceTitleAndHeadingStartsAtOneInset() {
+        compose.setContent {
+            SlatrixTheme { LivePreferencesScreen(false, null, false, {}, {}, {}) { NotificationRows(NotifyAbout.All, true, null, {}, {}) } }
+        }
+        val starts = listOf("Notifications", "Notify me about", "Show message previews", "Appearance", "Color mode", "Colors", "Slatrix")
+            .associateWith { compose.onNodeWithText(it, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.left }
+        assertEquals(starts.toString(), 1, starts.values.distinct().size)
+    }
+
     @Test fun aChoiceTheServerRefusesGoesBackAndSaysSo() {
         val rules = object : NotificationSettings(NoHandle) {
             override suspend fun getDefaultRoomNotificationMode(isEncrypted: Boolean, isOneToOne: Boolean) = RoomNotificationMode.ALL_MESSAGES

@@ -35,7 +35,7 @@ import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
 data class SavedMessage(val roomId: String, val eventId: String, val savedAt: Long)
 
 /** What Later shows of a saved message, read from its conversation as it is now. */
-data class SavedPreview(val senderName: String, val body: String, val timestamp: Long)
+data class SavedPreview(val senderId: String, val senderName: String, val body: String, val timestamp: Long, val avatarUrl: String? = null)
 
 /** The global account data event that holds an account's Later, as the Mac names it. */
 const val SAVED_MESSAGES_TYPE = "ai.nuanu.slatrix.later"
@@ -259,8 +259,9 @@ class MatrixSaved(private val client: Client) {
                     val event = timeline.getEventTimelineItemByEventId(saved.eventId)
                     if ((event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId != saved.eventId) return@use null
                     val body = previewText(event.content) ?: return@use null
-                    SavedPreview((event.senderProfile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: event.sender,
-                        body, event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
+                    val profile = event.senderProfile as? ProfileDetails.Ready
+                    SavedPreview(event.sender, profile?.displayName?.takeIf { it.isNotBlank() } ?: event.sender,
+                        body, event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong(), profile?.avatarUrl)
                 }
             }
         } catch (cancelled: CancellationException) {

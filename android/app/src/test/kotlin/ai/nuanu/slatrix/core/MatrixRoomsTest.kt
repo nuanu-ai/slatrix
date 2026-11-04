@@ -357,24 +357,12 @@ class MatrixRoomsTest {
         val state = rooms.state.first { !it.loading }
 
         assertEquals(listOf("Blake", "Avery"), state.rooms.filter { it.direct }.map { it.name })
-        assertEquals(LatestMessage("Shipped it", 2_000, own = true, sender = "Sam"), state.rooms.first { it.name == "Blake" }.latest)
+        assertEquals(LatestMessage("Shipped it", 2_000, own = true), state.rooms.first { it.name == "Blake" }.latest)
 
         older.latest = latest(3_000u, "Running late", own = false)
         older.emit(older.info.copy(numUnreadMessages = 1u))
         val updated = rooms.state.first { state -> state.rooms.any { it.latest?.body == "Running late" } }
         assertEquals(listOf("Avery", "Blake"), updated.rooms.filter { it.direct }.map { it.name })
-        rooms.close()
-    }
-
-    // capability: home.channels
-    @Test fun channelsPreviewTheirNewestMessageAndKeepTheirNameOrder() = runTest {
-        val zebra = TestRoom(roomInfo("!z:example.org", "Zebra"), latest(2_000u, "Merging the queue", own = false))
-        val alpha = TestRoom(roomInfo("!a:example.org", "Alpha"), latest(1_000u, "Lunch at one?", own = false))
-        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(zebra, alpha)))
-        val state = rooms.state.first { !it.loading }
-
-        assertEquals(listOf("Alpha", "Zebra"), state.rooms.map { it.name })
-        assertEquals(LatestMessage("Merging the queue", 2_000, own = false, sender = "Sam"), state.rooms.last().latest)
         rooms.close()
     }
 

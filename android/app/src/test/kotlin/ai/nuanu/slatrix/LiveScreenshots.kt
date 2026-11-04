@@ -66,7 +66,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean) {
             RoomSummary("!ds:example.org", "Dev Singh", true, "", UnreadBadge.Bold, "DS", 4,
                 latest = LatestMessage("Photos from the offsite are in the shared folder, have a look when you get a minute", now - 400 * hour, own = false)),
             RoomSummary("!design:example.org", "design", false, "", UnreadBadge.Count("1"), "D", 0, spaceIds = setOf(Harbor),
-                latest = LatestMessage("The new onboarding flow is up on staging", now - 2 * hour, own = false, sender = "Mira Lane")),
+                latest = LatestMessage("The new onboarding flow is up on staging", now - 2 * hour, own = false)),
             RoomSummary("!general:example.org", "general", false, "", UnreadBadge.None, "G", 2, spaceIds = setOf(Harbor),
                 latest = LatestMessage("Lunch is on the roof today", now - 26 * hour, own = true)),
             RoomSummary("!plans:example.org", "launch-plans", false, "", UnreadBadge.None, "L", 5, isPrivate = true, spaceIds = setOf(Harbor)),

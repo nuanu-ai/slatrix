@@ -15,6 +15,9 @@ import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -54,6 +57,14 @@ class MessageActionSheetTest {
     }
 
     private fun open(body: String) = compose.onNodeWithText(body).performTouchInput { longClick() }
+
+    @Test fun aLongPressOpensTheMessagesMenuWithReactionsOverItsActions() {
+        show(MessageActions(quick = listOf("🎉"), onReact = { _, _ -> }))
+        open("Ship it")
+        compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "Message from Mira")).assertExists()
+        fun bounds(node: SemanticsNodeInteraction) = node.fetchSemanticsNode().boundsInWindow
+        assertTrue(bounds(compose.onNodeWithContentDescription("React with 🎉")).bottom <= bounds(compose.onNodeWithText("Reply in thread")).top)
+    }
 
     // capability: message.react.quick
     @Test fun aQuickReactionReactsAtOnceAndClosesTheSheet() {
@@ -120,14 +131,14 @@ class MessageActionSheetTest {
     @Test fun withoutThePowerToPinThereIsNoPin() {
         show(MessageActions())
         open("Ship it")
-        compose.onNodeWithText("Copy message").assertIsDisplayed()
+        compose.onNodeWithText("Copy text").assertIsDisplayed()
         compose.onNodeWithText("Pin to channel").assertDoesNotExist()
     }
 
     @Test fun copyLinkPutsTheMessagesLinkOnTheClipboard() {
         show(MessageActions(link = { "https://matrix.to/#/!design:example.org/${it.eventId}" }))
         open("Ship it")
-        compose.onNodeWithText("Copy link to message").performClick()
+        compose.onNodeWithText("Copy link").performClick()
         compose.waitUntil { clip() == "https://matrix.to/#/!design:example.org/\$Ship it" }
     }
 
@@ -137,7 +148,7 @@ class MessageActionSheetTest {
         show(MessageActions(onDelete = { deleted = it }))
         open("Ship it")
         compose.onNodeWithText("Delete message").assertDoesNotExist()
-        compose.onNodeWithText("Copy message").performClick()
+        compose.onNodeWithText("Copy text").performClick()
 
         open("On it")
         compose.onNodeWithText("Delete message").performClick()
@@ -153,7 +164,7 @@ class MessageActionSheetTest {
         var thread: String? = null
         show(MessageActions(), onOpenThread = { thread = it })
         open("Ship it")
-        compose.onNodeWithText("Reply").performClick()
+        compose.onNodeWithText("Reply in thread").performClick()
         compose.runOnIdle { assertEquals("\$Ship it", thread) }
     }
 
@@ -193,7 +204,7 @@ class MessageActionSheetTest {
         }
         open("Ship it")
         compose.onNodeWithText("Edit message").assertDoesNotExist()
-        compose.onNodeWithText("Copy message").performClick()
+        compose.onNodeWithText("Copy text").performClick()
         open("On it")
         compose.onNodeWithText("Edit message").performClick()
         compose.runOnIdle {
