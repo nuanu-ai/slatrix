@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -113,8 +114,9 @@ fun GlassMenu(onDismissRequest: () -> Unit, title: String, end: Boolean, top: Fl
             val density = LocalDensity.current
             val safe = WindowInsets.safeDrawing
             Layout(contents = listOf(
-                { if (reactions != null) Row(Modifier.easesIn(1f).floating(CircleShape, card).height(UiMetrics.ReactionBar)
-                    .padding(horizontal = UiMetrics.MenuInset), verticalAlignment = Alignment.CenterVertically,
+                // A large font widens the emoji; the bar then scrolls rather than run off the screen.
+                { if (reactions != null) Row(Modifier.easesIn(1f).floating(CircleShape, card).heightIn(min = UiMetrics.ReactionBar)
+                    .horizontalScroll(rememberScrollState()).padding(horizontal = UiMetrics.MenuInset), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.Hairline * 4), content = reactions) },
                 // Drawn again only to be seen: the message itself stays where readers of the screen find it.
                 { if (lifted != null) Box(Modifier.clipToBounds().clearAndSetSemantics {}) {

@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddReaction
@@ -139,12 +140,12 @@ private fun MessageMenu(message: ConversationMessage, actions: MessageActions, o
     GlassMenu(onDismiss, "Message from ${message.senderName}", message.own, lifted?.top, lifted?.row,
         reactions = react?.let { { ->
             actions.quick.forEach { emoji ->
-                Box(Modifier.size(UiMetrics.ReactionButton).clip(CircleShape).clickable(role = Role.Button) { it(message, emoji); onDismiss() }
+                Box(Modifier.sizeIn(minWidth = UiMetrics.ReactionButton, minHeight = UiMetrics.ReactionButton).clip(CircleShape).clickable(role = Role.Button) { it(message, emoji); onDismiss() }
                     .semantics { contentDescription = "React with $emoji" }, contentAlignment = Alignment.Center) {
                     Text(emoji, style = MaterialTheme.typography.headlineSmall)
                 }
             }
-            Box(Modifier.size(UiMetrics.ReactionButton).clip(CircleShape).clickable(role = Role.Button) { onStep(Step.Picker) }
+            Box(Modifier.sizeIn(minWidth = UiMetrics.ReactionButton, minHeight = UiMetrics.ReactionButton).clip(CircleShape).clickable(role = Role.Button) { onStep(Step.Picker) }
                 .semantics { contentDescription = "Add reaction" }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Outlined.AddReaction, null, Modifier.size(UiMetrics.SheetIcon), tint = colors.textSecondary)
             }
