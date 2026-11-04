@@ -98,6 +98,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
+import androidx.compose.ui.unit.lerp
 import kotlin.math.roundToInt
 
 @Composable
@@ -546,13 +547,16 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
         else Modifier.pointerInput(message) { detectTapGestures(onLongPress = { menu() }) }
             .semantics(mergeDescendants = true) { onLongClick("Message actions") { menu(); true } })
         .padding(top = if (message.grouped) UiMetrics.Hairline * 4 else UiMetrics.GapSmall)
-        .padding(horizontal = UiMetrics.GapSmall)
         .layout { measurable, constraints ->
-            val gutter = (constraints.maxWidth * UiMetrics.BubbleGutter).roundToInt()
+            val gutter = if (own) (constraints.maxWidth * UiMetrics.BubbleGutter).roundToInt()
+            else lerp(UiMetrics.IncomingGutterNarrow, UiMetrics.IncomingGutterWide,
+                ((constraints.maxWidth.toDp() - UiMetrics.NarrowPhone) / (UiMetrics.WidePhone - UiMetrics.NarrowPhone)).coerceIn(0f, 1f)).roundToPx()
             val width = (constraints.maxWidth - gutter).coerceAtLeast(0)
             val row = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
             layout(constraints.maxWidth, row.height) { row.placeRelative(if (own) gutter else 0, 0) }
-        },
+        }
+        // The inset sits only on the author's side; the far side is the gutter alone.
+        .then(if (own) Modifier.padding(end = UiMetrics.GapSmall) else Modifier.padding(start = UiMetrics.GapSmall)),
         horizontalArrangement = if (own) Arrangement.spacedBy(UiMetrics.GapSmall, Alignment.End) else Arrangement.spacedBy(UiMetrics.GapSmall),
         verticalAlignment = Alignment.Bottom) {
         if (own && failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.padding(bottom = UiMetrics.GapSmall).size(UiMetrics.Icon),

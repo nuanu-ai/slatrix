@@ -569,7 +569,8 @@ class LiveChannelScreenTest {
         val width = compose.onRoot().getUnclippedBoundsInRoot().width
         val theirs = compose.onNodeWithText(long, useUnmergedTree = true).getUnclippedBoundsInRoot()
         val mine = compose.onNodeWithText("$long Agreed.", useUnmergedTree = true).getUnclippedBoundsInRoot()
-        assertTrue("Theirs reaches past 80% of the width, ending at ${theirs.right}", theirs.right >= width * 0.8f)
+        // At 320 dp theirs leaves a narrow gutter, as Telegram's do, not the room a wide phone gives it.
+        assertTrue("Theirs reaches past 87% of the width, ending at ${theirs.right}", theirs.right >= width * 0.87f)
         assertTrue("Mine starts within the first 20%, at ${mine.left}", mine.left <= width * 0.2f)
     }
 

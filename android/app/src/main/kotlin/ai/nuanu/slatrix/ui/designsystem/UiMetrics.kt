@@ -46,8 +46,13 @@ object UiMetrics {
     /** The faces on a thread's replies bar. */
     val Facepile = 20.dp
     val ThreadBar = 40.dp
-    /** The share of the width a bubble leaves on the side away from its author, so a long one reaches about 85%, as in Telegram. */
+    /** The share of the width your bubble leaves on its far side, so a long one reaches about 85%, as in Telegram. */
     const val BubbleGutter = 0.12f
+    /** Theirs leave a gutter that grows with the phone, from narrow at 320 dp to wide at 412 dp, past their picture's room. */
+    val IncomingGutterNarrow = 24.dp
+    val IncomingGutterWide = 56.dp
+    val NarrowPhone = 320.dp
+    val WidePhone = 412.dp
     val GlassBlur = 24.dp
     /** The message menu: its card's width and rows, the reaction bar and its buttons, and the blur of the screen behind. */
     val MenuWidth = 252.dp
