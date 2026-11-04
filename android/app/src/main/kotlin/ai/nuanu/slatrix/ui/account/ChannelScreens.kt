@@ -18,7 +18,6 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -112,13 +111,15 @@ private fun DirectoryRow(channel: DirectoryChannel, joined: Boolean, joining: Bo
         ChannelTile(private = !joined && !channel.canJoin, UiMetrics.RowAvatar)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                Text(channel.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (joined) Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(SlackIcons.Check, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.accent)
-                    Text("Joined", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 1)
+                // The name gives way only to Joined and the count, which keeps to the right edge.
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                    Text(channel.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (joined) Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(SlackIcons.Check, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.accent)
+                        Text("Joined", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 1)
+                    }
                 }
-                Spacer(Modifier.weight(1f))
                 // The progress takes the count's place, so the row never changes size.
                 if (joining) WaitingSpinner()
                 else Row(Modifier.semantics(mergeDescendants = true) { contentDescription = members },

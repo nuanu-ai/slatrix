@@ -86,6 +86,8 @@ class ChannelScreensTest {
         compose.onNodeWithContentDescription("12 members").assertIsDisplayed()
         compose.onNodeWithText("Joined").assertIsDisplayed()
         compose.onNodeWithText("Invite only").assertIsDisplayed()
+        fun end(members: String) = compose.onNodeWithContentDescription(members).fetchSemanticsNode().boundsInRoot.right
+        assertEquals("Member counts line up at the end, joined or not", end("40 members"), end("12 members"))
         compose.onNodeWithText("board").performClick()
         compose.onNodeWithText("design").performClick()
         compose.onNodeWithText("general").performClick()

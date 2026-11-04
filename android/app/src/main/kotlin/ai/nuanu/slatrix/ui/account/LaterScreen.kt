@@ -62,31 +62,31 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
     LaunchedEffect(key) { if (key !in previews) previews[key] = load(saved) }
     val loaded = key in previews
     val preview = previews[key]
-    Column(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen)
-        .padding(start = UiMetrics.GapLarge, bottom = UiMetrics.GapMedium), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen)
+        .padding(start = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapMedium)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.Hairline * 4)) {
             Text(when {
                 room == null -> "Conversation unavailable"
                 room.direct -> room.name
                 else -> "#${room.name}"
-            }, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            IconButton(onClick = onRemove) { Icon(SlackIcons.BookmarkFilled, "Remove from Later", Modifier.size(UiMetrics.Icon)) }
+            }, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val shown = preview
+            Row(horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
+                // The line keeps its height while the message loads, so the row never grows under the reader.
+                Text(shown?.senderName ?: "", Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (shown != null) Text("${dayLabel(shown.timestamp)} at ${timeLabel(shown.timestamp)}", style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary, maxLines = 1)
+            }
+            Text(when {
+                shown != null -> shown.body
+                loaded -> "This message is unavailable."
+                else -> ""
+            }, style = MaterialTheme.typography.bodyMedium,
+                color = if (shown != null) colors.textBody else colors.textSecondary, minLines = 1, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
-        val shown = preview
-        Row(Modifier.padding(end = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall),
-            verticalAlignment = Alignment.CenterVertically) {
-            // The line keeps its height while the message loads, so the card never grows under the reader.
-            Text(shown?.senderName ?: "", Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (shown != null) Text("${dayLabel(shown.timestamp)} at ${timeLabel(shown.timestamp)}", style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary, maxLines = 1)
+        IconButton(onClick = onRemove) {
+            Icon(SlackIcons.BookmarkFilled, "Remove from Later", Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
         }
-        Text(when {
-            shown != null -> shown.body
-            loaded -> "This message is unavailable."
-            else -> ""
-        }, Modifier.padding(end = UiMetrics.GapLarge), style = MaterialTheme.typography.bodyMedium,
-            color = if (shown != null) colors.textBody else colors.textSecondary, minLines = 1, maxLines = 3, overflow = TextOverflow.Ellipsis)
     }
 }
