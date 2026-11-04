@@ -471,6 +471,16 @@ struct TimelineHostedTests {
         #expect(jump != nil)
     }
 
+    @Test("An opened conversation logs whether its rows fit their content and it sits at its newest message")
+    func logsFitAfterOpening() async throws {
+        let since = Date()
+        let harness = Harness(messages: Self.messages(0..<40))
+        defer { harness.close() }
+        await settle(harness)
+        let fit = await firstPerformanceMessage(since: since) { $0.hasPrefix("event=timeline.fit ") }
+        #expect(fit == "event=timeline.fit misfit=0 px=0 bottom=0 remembered=0")
+    }
+
     @Test("Zooming in redraws the rows already on screen at the new size")
     func zoomRedrawsRows() async throws {
         let harness = Harness(messages: Self.messages(0..<40))
