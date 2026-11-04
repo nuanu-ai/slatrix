@@ -1399,17 +1399,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         dropPrepared()
         let token = UUID()
         let observer = mainObserver(roomID: id, token: token, focus: nil)
-        let task = Task { [weak self] () -> PreparedTimeline? in
+        let task = Task { () -> PreparedTimeline? in
             // A pointer passing over rows on its way elsewhere opens nothing.
             try? await Task.sleep(for: .milliseconds(50))
-            guard await self?.prepared?.token == token, let room = try? client.getRoom(roomId: id),
+            guard !Task.isCancelled, let room = try? client.getRoom(roomId: id),
                 room.membership() == .joined,
                 let timeline = try? await room.timelineWithConfiguration(
                     configuration: Self.timelineConfiguration(.live(hideThreadedEvents: true)))
             else { return nil }
             let listener = await timeline.addListener(listener: observer)
             let endReached = (try? await timeline.paginateBackwards(numEvents: 100)) ?? false
-            guard await self?.prepared?.token == token else {
+            // Taken by a click, it stays open; dropped for another room, it closes.
+            guard !Task.isCancelled else {
                 listener.cancel()
                 return nil
             }
@@ -1421,6 +1422,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func dropPrepared() {
         guard let prepared else { return }
         self.prepared = nil
+        prepared.task.cancel()
         Task { await prepared.task.value?.listener.cancel() }
     }
 
@@ -1944,16 +1946,16 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let token = selection
         let threadToken = UUID()
         let observer = threadObserver(root, token: token, threadToken: threadToken)
-        let task = Task { [weak self] () -> PreparedTimeline? in
+        let task = Task { () -> PreparedTimeline? in
             // A pointer passing over a row on its way elsewhere opens nothing.
             try? await Task.sleep(for: .milliseconds(50))
-            guard await self?.preparedThread?.threadToken == threadToken,
+            guard !Task.isCancelled,
                 let timeline = try? await room.timelineWithConfiguration(
                     configuration: Self.timelineConfiguration(.thread(rootEventId: root.eventID)))
             else { return nil }
             let listener = await timeline.addListener(listener: observer)
             let endReached = (try? await timeline.paginateBackwards(numEvents: 50)) ?? false
-            guard await self?.preparedThread?.threadToken == threadToken else {
+            guard !Task.isCancelled else {
                 listener.cancel()
                 return nil
             }
@@ -1965,6 +1967,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func dropPreparedThread() {
         guard let preparedThread else { return }
         self.preparedThread = nil
+        preparedThread.task.cancel()
         Task { await preparedThread.task.value?.listener.cancel() }
     }
 
