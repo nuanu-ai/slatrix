@@ -24,4 +24,18 @@ struct PerformanceLogTests {
         }
         #expect(milliseconds(try #require(hang)) >= 150)
     }
+
+    @Test("A stall while another app is in front is logged as one nobody saw")
+    func logsUnseenHangs() async throws {
+        Performance.watchMainThread()
+        let since = Date()
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                Performance.measure(.rowsMeasure) { () -> Void in _ = usleep(150_000) }
+            }
+        }
+        // The test runner is never the active app.
+        let hang = await firstPerformanceMessage(since: since) { $0.hasPrefix("hang ") && $0.contains("rows.measure") }
+        #expect(try #require(hang).split(separator: " ").contains("seen=0"))
+    }
 }
