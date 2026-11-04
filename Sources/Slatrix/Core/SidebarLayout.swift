@@ -38,9 +38,12 @@ enum SidebarLayout {
         !(availableWidth >= reserved + minimumWidth + (paneOpen ? handleWidth + minimumPaneWidth : 0))
     }
 
-    /// Whether the toolbar keeps its search field, which otherwise becomes a button; below this the field would
-    /// be too short for its prompt.
-    static func searchFits(availableWidth: CGFloat) -> Bool { availableWidth >= 640 }
+    /// Whether the toolbar keeps its search field, which otherwise becomes a button: below these the field would be
+    /// too short for its prompt, or push the conversation's buttons past the toolbar's edge. `toolbarWidth` is what
+    /// the conversation's toolbar has after the window buttons, when they sit in it.
+    static func searchFits(availableWidth: CGFloat, toolbarWidth: CGFloat = .infinity) -> Bool {
+        availableWidth >= 640 && toolbarWidth >= 520
+    }
 
     /// The thread or details pane width: the dragged width, or the pane's ideal one, narrowed to what fits beside
     /// a readable conversation and the narrowest sidebar while it shows. Nil when even the minimum does not fit, so

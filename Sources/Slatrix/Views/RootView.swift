@@ -140,7 +140,7 @@ struct RootView: View {
     private static let paneWidth: CGFloat = 380
     /// Where the window buttons end, in window points; they do not zoom.
     private static let windowButtonsWidth: CGFloat = 72
-    private static let searchWidth: CGFloat = 180
+    static let searchWidth: CGFloat = 180
     private var paneOpen: Bool { profilePane != nil || (room != nil && threadRoot != nil) }
     /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
     private var inspectorWidth: CGFloat? {
@@ -154,6 +154,16 @@ struct RootView: View {
     /// open pane.
     private var sidebarCollapsed: Bool {
         sidebarHidden || SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom, paneOpen: paneOpen)
+    }
+    private var searchFits: Bool {
+        let available = availableContentWidth / m.zoom
+        // Beside the sidebar, or after the window buttons and the button that brings it back.
+        let leading =
+            sidebarCollapsed
+            ? (Self.windowButtonsWidth + m.control + m.sp12) / m.zoom
+            : (sidebarListWidth + m.sidebarInset) / m.zoom + SidebarLayout.handleWidth
+        return SidebarLayout.searchFits(
+            availableWidth: available, toolbarWidth: available - leading - occupiedInspectorWidth)
     }
     /// Pane width plus its divider, at 100% zoom.
     private var occupiedInspectorWidth: CGFloat { inspectorWidth.map { $0 + SidebarLayout.handleWidth } ?? 0 }
@@ -1007,8 +1017,7 @@ struct RootView: View {
             }
             title().frame(maxWidth: .infinity, alignment: .leading).padding(.leading, m.sp4)
             trailing()
-            TitleSearch(bar: searchBar, fits: SidebarLayout.searchFits(availableWidth: availableContentWidth / m.zoom))
-            {
+            TitleSearch(bar: searchBar, fits: searchFits) {
                 SearchBarField(
                     bar: searchBar,
                     prompt: WorkspaceRail.searchPrompt(workspaceID: workspaceID, workspaces: matrix.workspaces),
@@ -1059,7 +1068,8 @@ struct RootView: View {
                 ).id("\(room.id):\(matrix.timelineSelectionID)")
                 VStack(spacing: 0) {
                     if room.canPostMessages == false {
-                        ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp20).padding(.vertical, m.sp4)
+                        ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp16).padding(.top, m.sp4)
+                            .padding(.bottom, m.sp16)
                     } else if let target = editTarget, target.surface == .conversation,
                         target.message.roomID == room.id
                     {
@@ -1204,7 +1214,8 @@ struct RootView: View {
             ).id(root.eventID)
             VStack(spacing: 0) {
                 if room.canPostMessages == false {
-                    ComposerNotice(text: Self.cannotPost).padding(m.sp12)
+                    ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp16).padding(.top, m.sp4)
+                        .padding(.bottom, m.sp16)
                 } else if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
                 {
