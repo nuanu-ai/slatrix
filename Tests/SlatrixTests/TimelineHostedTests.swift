@@ -843,7 +843,7 @@ extension TimelineHostedTests {
             rootView: TimelineTable(
                 entries: entries, context: context, live: true, bottomAligned: true, focusedEventID: nil, jumpID: nil,
                 startsAtUnread: false, memoryKey: nil, canLoadOlder: false, canLoadNewer: false,
-                scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {}, onScroll: { _, _ in }))
+                scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {}, onScroll: { _, _, _ in }))
         window.contentView = hosting
         defer {
             window.contentView = nil
@@ -864,6 +864,41 @@ extension TimelineHostedTests {
             #expect(cells().filter { $0.row?.hovered == true }.map(\.entry?.id) == [below], "\(divider)")
             #expect(scrollView.subviews.contains { $0 is TimelineToolbarView && !$0.isHidden }, "\(divider)")
         }
+    }
+}
+
+extension TimelineHostedTests {
+    @Test("The timeline says when messages sit above its top edge, so the header can draw its line")
+    func reportsContentAbove() async throws {
+        let context = TimelineRowContext()
+        context.matrix = MatrixService()
+        context.appearance = AppearanceStore()
+        let entries = Self.actionable(0..<40).map { message in
+            TimelineEntry(
+                id: message.id,
+                kind: .message(
+                    TimelineMessageEntry(
+                        message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false,
+                        canPin: false, highlighted: false, sendBusy: false)))
+        }
+        var above: Bool?
+        let window = offscreenWindow(NSSize(width: 620, height: 400))
+        let hosting = NSHostingView(
+            rootView: TimelineTable(
+                entries: entries, context: context, live: true, bottomAligned: true, focusedEventID: nil, jumpID: nil,
+                startsAtUnread: false, memoryKey: nil, canLoadOlder: false, canLoadNewer: false,
+                scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {}, onScroll: { _, _, top in above = top }))
+        window.contentView = hosting
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        // Opened at the newest message, older ones sit above.
+        #expect(await eventually { above == true })
+        let scrollView = try #require(Harness.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
+        scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        #expect(await eventually { above == false })
     }
 }
 
