@@ -15,6 +15,10 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks"
 cp "$bin/Slatrix" "$app/Contents/MacOS/"
 install_name_tool -add_rpath @executable_path/../Frameworks "$app/Contents/MacOS/Slatrix"
+# The symbol table is over a third of the binary. It goes to build/Slatrix.app.dSYM, which symbolicates crash reports.
+rm -rf build/Slatrix.app.dSYM
+dsymutil "$app/Contents/MacOS/Slatrix" -o build/Slatrix.app.dSYM
+strip "$app/Contents/MacOS/Slatrix"
 ditto "$bin/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"
 cp Config/Info.plist "$app/Contents/"
 if [[ -n ${SLATRIX_VERSION:-} ]]; then

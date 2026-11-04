@@ -78,6 +78,12 @@ jobs:
       - name: Build and sign
         run: scripts/build-app.sh
 
+      - name: Keep the symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: Slatrix-${{ env.SLATRIX_VERSION }}.dSYM
+          path: build/Slatrix.app.dSYM
+
       - name: Notarize and staple
         env:
           NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
