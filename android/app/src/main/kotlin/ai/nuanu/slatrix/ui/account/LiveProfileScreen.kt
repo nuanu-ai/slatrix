@@ -112,15 +112,15 @@ internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable (
         alpha = now
         translationX = (1 - now) * Motion.PushDistance * size.width
     }.background(SlatrixTheme.colors.canvas).navigationBarsPadding().imePadding()) {
-        Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.HeaderRow).padding(horizontal = UiMetrics.GapTiny),
+            verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack, modifier = Modifier.size(UiMetrics.Touch)) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
             }
             Text(title, Modifier.weight(1f).padding(start = UiMetrics.GapSmall),
-                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             action()
         }
-        HorizontalDivider(color = SlatrixTheme.colors.border)
         LazyColumn(Modifier.fillMaxSize(), content = content)
     }
 }
