@@ -145,11 +145,11 @@ internal fun InlineVideo(attachment: MessageAttachment, load: PictureLoader, vid
     var full by remember { mutableStateOf(false) }
     // A video scrolled away stops, as its row is gone.
     DisposableEffect(videos, key) { onDispose { videos.stop(key) } }
-    BoxWithConstraints(Modifier.padding(top = UiMetrics.GapTiny).fillMaxWidth()) {
+    BoxWithConstraints {
         val (width, height) = box(attachment.width, attachment.height, maxWidth, UiMetrics.MediaMaxHeight)
         val pixels = with(LocalDensity.current) { width.roundToPx() to height.roundToPx() }
         val poster = picture(attachment, pixels.first, pixels.second, false, load)
-        Box(Modifier.size(width, height).clip(shape).background(colors.sunken).border(UiMetrics.Divider, colors.border, shape)) {
+        Box(Modifier.size(width, height).clip(shape).background(colors.sunken)) {
             if (player != null && !full) AndroidView({ PlayerView(it).apply { useController = false } }, Modifier.fillMaxSize(),
                 update = { it.player = player }, onRelease = { it.player = null })
             else poster?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }

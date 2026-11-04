@@ -142,7 +142,8 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
     private fun select(requested: OpenChannel?) {
         if (!worker.isActive) return
         val token = generation.incrementAndGet()
-        if (current == null) mutableSelected.value = requested
+        // Shown at once, so the room left never shows again while its draft saves; a failed save brings it back.
+        mutableSelected.value = requested
         requests.trySend(token to requested)
     }
 

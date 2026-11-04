@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
+import ai.nuanu.slatrix.core.MessageThread
 import ai.nuanu.slatrix.core.ReplyPreview
 import ai.nuanu.slatrix.core.ThreadOrigin
 import ai.nuanu.slatrix.core.RoomSummary
@@ -44,10 +45,14 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.width
+import org.robolectric.RuntimeEnvironment
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
@@ -94,6 +99,23 @@ class LiveChannelScreenTest {
         compose.runOnIdle { state.value = state.value.copy(loadingHistory = false) }
         compose.waitForIdle()
         compose.waitUntil("A page that showed nothing asks again while the top is near") { requests == 2 }
+    }
+
+    // capability: conversation.history
+    @Test fun aPageThatLandsWithinAFrameAsksAgainWhileTheTopIsNear() {
+        val state = mutableStateOf(ConversationState(listOf(message("Message 100", minutes = 100)), loading = false))
+        var requests = 0
+        compose.setContent {
+            SlatrixTheme {
+                // A page from the local cache: its messages arrive before the screen ever sees it loading.
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {
+                    requests++
+                    if (requests < 5) state.value = state.value.copy(rows = listOf(message("Message ${100 - requests}", minutes = 100 - requests)) +
+                        state.value.rows)
+                }, {}, {}, {}, {})
+            }
+        }
+        compose.waitUntil("Each page that leaves the top in view asks for another") { requests >= 3 }
     }
 
     @Test fun aFailedPageWaitsForRetryInsteadOfAskingAgain() {
@@ -342,6 +364,30 @@ class LiveChannelScreenTest {
         compose.onNodeWithContentDescription("Message design").assertIsDisplayed()
     }
 
+    // capability: thread.open
+    @Test fun tappingAMessagesRepliesOpensItsThread() {
+        var opened: String? = null
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message("Can we ship Friday?", 0).copy(thread = MessageThread(3, "Sam", null))),
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    onOpenThread = { opened = it })
+            }
+        }
+        compose.onNodeWithText("3 replies", useUnmergedTree = true).performTouchInput { click() }
+        compose.runOnIdle { assertEquals("\$Can we ship Friday?", opened) }
+    }
+
+    @Test fun anEditedMessageKeepsItsRepliesBar() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message("Review: two nits", 0).copy(edited = true, thread = MessageThread(2, "Sam", null))),
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread = {})
+            }
+        }
+        compose.onNodeWithText("2 replies", useUnmergedTree = true).assertIsDisplayed()
+    }
+
     // capability: thread.send-to-channel
     @Test fun aCopyOfAThreadReplySaysItRepliedToAThreadAndOpensIt() {
         fun copy(id: String, body: String, reply: String) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", body, null,
@@ -509,6 +555,22 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Message 140").assertIsDisplayed()
         assertEquals(before, compose.onNodeWithText("Message 140").fetchSemanticsNode().boundsInRoot)
         compose.onNodeWithText("Message 201").assertIsNotDisplayed()
+    }
+
+    @Test fun aLongMessagesBubbleTakesMostOfANarrowPhonesWidth() {
+        RuntimeEnvironment.setQualifiers("w320dp-h704dp-xxhdpi")
+        val long = "The new onboarding flow is up on staging, and the empty states need a careful look before Friday."
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message(long, 0), message("$long Agreed.", 1, sender = "Jordan")),
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        val width = compose.onRoot().getUnclippedBoundsInRoot().width
+        val theirs = compose.onNodeWithText(long, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val mine = compose.onNodeWithText("$long Agreed.", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Theirs reaches past 80% of the width, ending at ${theirs.right}", theirs.right >= width * 0.8f)
+        assertTrue("Mine starts within the first 20%, at ${mine.left}", mine.left <= width * 0.2f)
     }
 
     private fun message(body: String, minutes: Int, sender: String = "Mira", state: MessageSendState = MessageSendState.Sent) =

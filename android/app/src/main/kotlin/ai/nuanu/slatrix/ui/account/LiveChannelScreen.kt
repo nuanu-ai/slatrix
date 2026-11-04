@@ -23,6 +23,7 @@ import ai.nuanu.slatrix.ui.designsystem.wallpaper
 import dev.chrisbanes.haze.HazeState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInWindow
@@ -42,7 +43,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -95,6 +98,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: ComposerState,
@@ -223,7 +227,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val loadOlder by rememberUpdatedState(onLoadOlder)
     // Asks again after every page while the top stays near, so pages of hidden events don't stall it.
     val canPage = !state.loading && state.hasMore && !state.loadingHistory && state.error == null
-    LaunchedEffect(list, canPage) {
+    // Keyed on the oldest row too, since a page from the local cache can land before the screen ever sees it loading.
+    LaunchedEffect(list, canPage, state.rows.firstOrNull()?.id) {
         // Waits for the cached messages, so a conversation that has plenty doesn't page on open, and after a
         // failure waits for Retry.
         if (!canPage) return@LaunchedEffect
@@ -541,8 +546,13 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
         else Modifier.pointerInput(message) { detectTapGestures(onLongPress = { menu() }) }
             .semantics(mergeDescendants = true) { onLongClick("Message actions") { menu(); true } })
         .padding(top = if (message.grouped) UiMetrics.Hairline * 4 else UiMetrics.GapSmall)
-        .padding(start = if (own) UiMetrics.BubbleGutter + UiMetrics.GapSmall else UiMetrics.GapMedium,
-            end = if (own) UiMetrics.GapMedium else UiMetrics.BubbleGutter),
+        .padding(horizontal = UiMetrics.GapSmall)
+        .layout { measurable, constraints ->
+            val gutter = (constraints.maxWidth * UiMetrics.BubbleGutter).roundToInt()
+            val width = (constraints.maxWidth - gutter).coerceAtLeast(0)
+            val row = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+            layout(constraints.maxWidth, row.height) { row.placeRelative(if (own) gutter else 0, 0) }
+        },
         horizontalArrangement = if (own) Arrangement.spacedBy(UiMetrics.GapSmall, Alignment.End) else Arrangement.spacedBy(UiMetrics.GapSmall),
         verticalAlignment = Alignment.Bottom) {
         if (own && failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.padding(bottom = UiMetrics.GapSmall).size(UiMetrics.Icon),
@@ -558,10 +568,27 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
         val bubble = @Composable {
             val fill = SlatrixTheme.colors
             Box(Modifier.weight(1f, fill = false).bubble(shape, fill.bubbleIn, if (own) fill.bubbleIn.copy(alpha = 0f) else fill.bubbleEdge)) {
-            Column(Modifier.padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall)) {
-                if (!own && !message.grouped) Text(message.senderName, Modifier.clickable(role = Role.Button) { onPerson(message.senderId) },
+            val attachment = message.attachment
+            // A picture or video runs to the bubble's edge with its time on it, as in a messenger; the rest keeps the text's inset.
+            val media = attachment?.kind == MessageAttachment.Kind.Image || attachment?.kind == MessageAttachment.Kind.Video
+            val inset = if (media) Modifier.padding(horizontal = UiMetrics.GapMedium - UiMetrics.GapTiny) else Modifier
+            // An attachment's text is its caption; without one it is the file's name, which the attachment shows.
+            val body: (@Composable () -> Unit)? = if (attachment == null || message.caption != null) {
+                { MessageBody(message, if (message.sendState == MessageSendState.Sending) fill.textSecondary else fill.textBody, me, onPerson) }
+            } else null
+            val time = @Composable { color: Color ->
+                Text(when (message.sendState) {
+                    MessageSendState.Sent -> remember(message.timestamp) { timeLabel(message.timestamp) }
+                    MessageSendState.Sending -> "Sending…"
+                    MessageSendState.Failed -> "Not sent"
+                }, style = MaterialTheme.typography.labelSmall, maxLines = 1, color = color)
+            }
+            val timeColor = if (failed && !own) fill.destructive else fill.textSecondary
+            Column(Modifier.padding(if (media) PaddingValues(UiMetrics.GapTiny)
+                else PaddingValues(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall))) {
+                if (!own && !message.grouped) Text(message.senderName, inset.clickable(role = Role.Button) { onPerson(message.senderId) },
                     style = MaterialTheme.typography.labelLarge, color = fill.person(message.colorIndex), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                message.replyTo?.let { reply ->
+                message.replyTo?.let { reply -> Box(inset) {
                     // A copy of a thread reply names its thread, and turns out an ordinary quote if its reply isn't in one.
                     var origin by remember(message.id) { mutableStateOf<ThreadOrigin?>(null) }
                     var notInThread by remember(message.id) { mutableStateOf(false) }
@@ -571,30 +598,31 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
                     }
                     if (message.repliedToThread && !notInThread) ThreadCopyQuote(origin, onOpenThread)
                     else ReplyQuote(reply) { onOpenReply(reply.eventId) }
-                }
-                val attachment = message.attachment
-                attachment?.let { Box(Modifier.padding(vertical = UiMetrics.GapTiny)) {
-                    Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, ::menu, onView)
                 } }
-                // An attachment's text is its caption; without one it is the file's name, which the attachment shows.
-                val body: (@Composable () -> Unit)? = if (attachment == null || message.caption != null) {
-                    { MessageBody(message, if (message.sendState == MessageSendState.Sending) fill.textSecondary else fill.textBody, me, onPerson) }
-                } else null
-                // Without a caption the time closes the attachment, at its end.
-                TimedBody(body, if (body == null) Modifier.align(Alignment.End) else Modifier) {
-                    Text(when (message.sendState) {
-                        MessageSendState.Sent -> remember(message.timestamp) { timeLabel(message.timestamp) }
-                        MessageSendState.Sending -> "Sending…"
-                        MessageSendState.Failed -> "Not sent"
-                    }, style = MaterialTheme.typography.labelSmall, maxLines = 1,
-                        color = if (failed && !own) fill.destructive else fill.textSecondary)
-                }
-                if (message.reactions.isNotEmpty()) {
+                val header = (!own && !message.grouped) || message.replyTo != null
+                attachment?.let { Box(when {
+                    !media -> Modifier.padding(vertical = UiMetrics.GapTiny)
+                    header -> Modifier.padding(top = UiMetrics.GapTiny)
+                    else -> Modifier
+                }) {
+                    Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, ::menu, onView)
+                    if (media && body == null) Box(Modifier.align(Alignment.BottomEnd).padding(UiMetrics.GapSmall)
+                        .background(fill.mediaShade, MaterialTheme.shapes.small).padding(horizontal = UiMetrics.GapTiny)) { time(fill.onMedia) }
+                } }
+                // Without a caption a file's time closes it, at its end.
+                if (body != null) TimedBody(body, if (media) inset.padding(vertical = UiMetrics.GapTiny) else Modifier) { time(timeColor) }
+                else if (!media) TimedBody(null, Modifier.align(Alignment.End)) { time(timeColor) }
+                if (message.reactions.isNotEmpty()) Box(inset) {
                     Reactions(message.reactions, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
                 }
                 val root = message.eventId
                 // Inside a thread the root's replies bar says it instead.
-                if (message.thread != null && root != null && onOpenThread != null) ThreadReplies(message.thread) { onOpenThread(root) }
+                // A summary that lands after the row is on screen eases the bar in instead of popping it.
+                AnimatedVisibility(message.thread != null && root != null && onOpenThread != null,
+                    enter = expandVertically(Motion.pane()) + fadeIn(Motion.pane()), exit = ExitTransition.None) {
+                    val thread = message.thread
+                    if (thread != null && root != null && onOpenThread != null) Box(inset) { ThreadReplies(thread) { onOpenThread(root) } }
+                }
             }
             // In the bubble's bottom padding, so the bar comes and goes without moving anything.
             message.uploadProgress?.let {
