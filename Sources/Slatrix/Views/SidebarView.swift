@@ -350,6 +350,8 @@ private struct SidebarRoomRow: View, Equatable {
             .padding(.leading, m.sp16).padding(.trailing, m.sp12).frame(height: m.row)
             .modifier(SidebarRowFill(selected: selected))
         }.buttonStyle(.row).padding(.horizontal, m.sp8).help(room.name)
+            // The pointer rests on a row before the click; opening the timeline then hides its cache read.
+            .onHover { if $0 { matrix.prepareRoom(room.id) } }
             .accessibilityAddTraits(selected ? .isSelected : [])
             // Bold, dimming and the lock don't reach VoiceOver.
             .accessibilityValue(

@@ -619,6 +619,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// The open conversation's live timeline; nil while it shows one opened at an older message.
     private var liveTimeline: KeptTimeline?
     private var recentTimelines = RecentTimelines<KeptTimeline>()
+    /// A live timeline opened ahead of a click, with its first page read; at most one, for the room last pointed at.
+    private var prepared: (roomID: String, token: UUID, task: Task<PreparedTimeline?, Never>)?
+    private typealias PreparedTimeline = (
+        timeline: Timeline, observer: TimelineObserver, listener: TaskHandle, endReached: Bool
+    )
     /// The open whose conversation is on screen, which can trail `selection` while the next one reads its cache.
     private var shownSelection: UUID?
     private var typingHandle: TaskHandle?
@@ -1141,6 +1146,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         typingHandle?.cancel()
         threadHandle?.cancel()
         for kept in recentTimelines.removeAll() { kept.listener.cancel() }
+        dropPrepared()
         liveTimeline = nil
         mainProjections = [:]
         threadProjections = [:]
@@ -1378,10 +1384,52 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// False, without showing the room, when its live timeline does not hold `anchor`.
     @discardableResult
+    /// Opens a conversation's live timeline before it is chosen, as the pointer rests on it, so choosing it shows
+    /// its first page in the frame of the click. Building one reads the event cache, which takes a few frames.
+    func prepareRoom(_ id: String) {
+        guard connectionStopTask == nil, let client, !isPreview, prepared?.roomID != id,
+            liveTimeline?.roomID != id, recentTimelines.entry(id) == nil, selectedRoomID != id
+        else { return }
+        dropPrepared()
+        let token = UUID()
+        let observer = mainObserver(roomID: id, token: token, focus: nil)
+        let task = Task { [weak self] () -> PreparedTimeline? in
+            // A pointer passing over rows on its way elsewhere opens nothing.
+            try? await Task.sleep(for: .milliseconds(50))
+            guard await self?.prepared?.token == token, let room = try? client.getRoom(roomId: id),
+                room.membership() == .joined,
+                let timeline = try? await room.timelineWithConfiguration(
+                    configuration: Self.timelineConfiguration(.live(hideThreadedEvents: true)))
+            else { return nil }
+            let listener = await timeline.addListener(listener: observer)
+            let endReached = (try? await timeline.paginateBackwards(numEvents: 100)) ?? false
+            guard await self?.prepared?.token == token else {
+                listener.cancel()
+                return nil
+            }
+            return (timeline, observer, listener, endReached)
+        }
+        prepared = (id, token, task)
+    }
+
+    private func dropPrepared() {
+        guard let prepared else { return }
+        self.prepared = nil
+        Task { await prepared.task.value?.listener.cancel() }
+    }
+
     private func setupRoom(_ id: String, focus: TimelineFocus, eventID: String?, containing anchor: String? = nil)
         async -> Bool
     {
-        let token = UUID()
+        let ahead: (token: UUID, task: Task<PreparedTimeline?, Never>)?
+        if case .live = focus, eventID == nil, let prepared, prepared.roomID == id {
+            ahead = (prepared.token, prepared.task)
+            self.prepared = nil
+        } else {
+            ahead = nil
+            dropPrepared()
+        }
+        let token = ahead?.token ?? UUID()
         selection = token
         updateSubscriptions(id)
         // The previous conversation stays up while this one reads its cache, so its rows replace the old ones in
@@ -1410,10 +1458,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 throw MatrixServiceError.request("This conversation is still loading. Try again in a moment.")
             }
             if room.membership() == .invited { return true }
-            let next = try await room.timelineWithConfiguration(configuration: Self.timelineConfiguration(focus))
-            guard selection == token else { return true }
-            let observer = mainObserver(roomID: id, token: token, focus: eventID)
-            let listenerHandle = await next.addListener(listener: observer)
+            let next: Timeline
+            let observer: TimelineObserver
+            let listenerHandle: TaskHandle
+            var firstPageEnded: Bool?
+            if let ready = await ahead?.task.value {
+                (next, observer, listenerHandle, firstPageEnded) = ready
+            } else {
+                next = try await room.timelineWithConfiguration(configuration: Self.timelineConfiguration(focus))
+                guard selection == token else { return true }
+                observer = mainObserver(roomID: id, token: token, focus: eventID)
+                listenerHandle = await next.addListener(listener: observer)
+            }
             guard selection == token else {
                 listenerHandle.cancel()
                 return true
@@ -1439,7 +1495,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 await self.loadMembers()
             }
             if eventID == nil {
-                let endReached = try await paginateBackwards(next)
+                // A timeline opened ahead of the click already read its first page.
+                let endReached: Bool
+                if let firstPageEnded {
+                    endReached = firstPageEnded
+                } else {
+                    endReached = try await paginateBackwards(next)
+                }
                 guard selection == token else { return true }
                 hasMoreHistory = !endReached
                 // Loading or restoring a timeline does not mean the user has seen it.
