@@ -53,7 +53,7 @@ class MatrixWorkspaceTest {
         reopened.close()
     }
 
-    @Test fun failedDraftSaveKeepsTheChannelOpenUntilTheDraftCanBeSaved() = runTest {
+    @Test fun failedDraftSaveBringsTheChannelBackUntilTheDraftCanBeSaved() = runTest {
         val saveStarted = CompletableDeferred<Unit>()
         val allowSave = CompletableDeferred<Unit>()
         val client = WorkspaceClient {
@@ -71,20 +71,14 @@ class MatrixWorkspaceTest {
         saveStarted.await()
 
         workspace.back()
-        runCurrent()
-        try {
-            assertSame("The channel must stay mounted while saving before Back", current, workspace.selected.value)
-        } finally {
-            allowSave.complete(Unit)
-        }
+        allowSave.complete(Unit)
         composer.state.first { it.error != null }
         runCurrent()
-        assertSame("A failed save must keep the same channel mounted", current, workspace.selected.value)
+        assertSame("A failed save brings the same channel back", current, workspace.selected.value)
 
         workspace.open(workspaceRoom("!beta:example.org", "Beta"))
-        assertSame("Opening another channel must wait for the draft save", current, workspace.selected.value)
         runCurrent()
-        assertSame("A refused channel change must keep the same channel mounted", current, workspace.selected.value)
+        assertSame("A refused channel change brings the same channel back", current, workspace.selected.value)
         assertEquals("Keep this even while storage is unavailable", workspace.selected.value?.composer?.state?.value?.text)
 
         client.failSaves = false
@@ -114,6 +108,33 @@ class MatrixWorkspaceTest {
         workspace.close()
     }
 
+    @Test fun leavingShowsWhereYouWentWhileTheDraftSaves() = runTest {
+        val saveStarted = CompletableDeferred<Unit>()
+        val allowSave = CompletableDeferred<Unit>()
+        val client = WorkspaceClient {
+            saveStarted.complete(Unit)
+            allowSave.await()
+        }
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        workspace.open(workspaceRoom("!alpha:example.org", "Alpha"))
+        runCurrent()
+        val composer = requireNotNull(workspace.selected.value?.composer)
+        composer.state.first { !it.loading }
+        composer.edit("Saved on the way out")
+        saveStarted.await()
+
+        workspace.back()
+        assertNull("Back shows Home at once", workspace.selected.value)
+        val beta = workspaceRoom("!beta:example.org", "Beta")
+        workspace.open(beta)
+        assertEquals("The next room shows at once, never the one left", beta, workspace.selected.value?.room)
+        allowSave.complete(Unit)
+        runCurrent()
+        assertEquals(beta, workspace.selected.value?.room)
+        assertNotNull(workspace.selected.value?.conversation)
+        workspace.close()
+    }
+
     // capability: composer.drafts
     @Test fun navigationRestoresEachRoomsDraftAndReleasesAllButTheKeptTimelines() = runTest {
         val client = WorkspaceClient()
@@ -131,7 +152,6 @@ class MatrixWorkspaceTest {
         composer.edit("Finish Alpha tomorrow")
 
         workspace.open(beta)
-        assertSame("Keep Alpha mounted until its draft is saved", first, workspace.selected.value)
         runCurrent()
         assertEquals(beta, workspace.selected.value?.room)
         val betaComposer = requireNotNull(workspace.selected.value?.composer)
@@ -144,9 +164,7 @@ class MatrixWorkspaceTest {
         val restored = requireNotNull(workspace.selected.value?.composer)
         assertEquals("Finish Alpha tomorrow", restored.state.first { !it.loading }.text)
         restored.edit("Last edit before Back")
-        val beforeBack = workspace.selected.value
         workspace.back()
-        assertSame("Keep the channel mounted until its draft is saved", beforeBack, workspace.selected.value)
         runCurrent()
         assertNull(workspace.selected.value)
         assertEquals("Only Alpha's and Beta's timelines stay open, kept for coming back", 2,
