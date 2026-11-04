@@ -1,6 +1,13 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.AvatarPlaceholder
+import ai.nuanu.slatrix.ui.designsystem.bubble
+import ai.nuanu.slatrix.ui.designsystem.bubbleShape
+import ai.nuanu.slatrix.ui.designsystem.message
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlin.math.roundToInt
 import ai.nuanu.slatrix.ui.designsystem.Motion
 import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.LaunchedEffect
@@ -135,6 +142,8 @@ fun LivePreferencesScreen(
     onColorMode: (Boolean?) -> Unit,
     onWallpaperColors: (Boolean) -> Unit,
     onBack: () -> Unit,
+    messageScale: Float = 1f,
+    onMessageScale: (Float) -> Unit = {},
     notifications: @Composable () -> Unit = {},
 ) {
     var choosingMode by rememberSaveable { mutableStateOf(false) }
@@ -168,6 +177,8 @@ fun LivePreferencesScreen(
                 PreferenceRow(Icons.Outlined.Brush, "Color mode", Modifier.clickable(role = Role.Button) { choosingMode = true }) {
                     Text(colorMode, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
                 }
+                PreferenceHeading("Message text size")
+                MessageTextSize(messageScale, onMessageScale)
                 PreferenceHeading("Colors")
                 Column(Modifier.selectableGroup()) {
                     listOf("Slatrix" to false, "From your wallpaper" to true).forEach { (label, choice) ->
@@ -181,4 +192,27 @@ fun LivePreferencesScreen(
                 }
             }
         }
+}
+
+/** What the message text size preview says. */
+internal const val MessagePreview = "Morning! The new onboarding copy is in the doc, take a look when you can."
+
+/** A message set at the chosen size over a slider of the sizes, as a messenger's text size setting shows it. */
+@Composable
+private fun MessageTextSize(scale: Float, onScale: (Float) -> Unit) {
+    val colors = SlatrixTheme.colors
+    val scales = AppearancePreferences.MessageScales
+    val shape = remember { bubbleShape(own = false, grouped = false) }
+    // Laid out as an incoming message is, keeping its gutter on the far side.
+    Text(MessagePreview, Modifier.padding(start = PreferenceInset, end = UiMetrics.GapLarge + UiMetrics.IncomingGutterNarrow)
+        .wrapContentWidth(Alignment.Start).bubble(shape, colors.bubbleIn, colors.bubbleEdge).padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall),
+        style = MaterialTheme.typography.message, color = colors.textBody)
+    Row(Modifier.fillMaxWidth().padding(start = PreferenceInset, end = UiMetrics.GapLarge, top = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+        Text("A", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+        Slider(scales.indexOf(scale).coerceAtLeast(0).toFloat(), { onScale(scales[it.roundToInt()]) },
+            Modifier.weight(1f).semantics { contentDescription = "Message text size" },
+            valueRange = 0f..scales.lastIndex.toFloat(), steps = scales.size - 2)
+        Text("A", style = MaterialTheme.typography.titleLarge, color = colors.textSecondary)
+    }
 }

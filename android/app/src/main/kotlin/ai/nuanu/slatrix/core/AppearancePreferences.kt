@@ -29,4 +29,14 @@ class AppearancePreferences(private val context: Context) {
     var wallpaperColors: Boolean
         get() = values.getBoolean("wallpaperColors", false)
         set(value) { values.edit { putBoolean("wallpaperColors", value) } }
+
+    /** How much larger or smaller than the phone's text size messages are set, on this phone only. */
+    var messageScale: Float
+        get() = values.getFloat("messageScale", 1f).takeIf { it in MessageScales } ?: 1f
+        set(value) { values.edit { putFloat("messageScale", value) } }
+
+    companion object {
+        /** From 14 to 24 sp at the phone's default text size, in 2 sp steps. */
+        val MessageScales = listOf(0.875f, 1f, 1.125f, 1.25f, 1.375f, 1.5f)
+    }
 }
