@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.MailOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -156,29 +155,28 @@ fun LiveInvitation(id: String, rooms: MatrixRooms?, onJoined: (RoomSummary) -> U
 /** Home's Invitations header: Slack's section look, with nothing to collapse, since every invitation stays in view. */
 @Composable
 internal fun InvitationsHeader() {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).padding(horizontal = UiMetrics.GapLarge),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        Icon(Icons.Outlined.MailOutline, null, Modifier.size(UiMetrics.Icon))
-        Text("Invitations", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1)
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.SectionHeader).padding(horizontal = UiMetrics.GapLarge),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text("Invitations", style = MaterialTheme.typography.labelLarge, color = SlatrixTheme.colors.textSecondary, maxLines = 1)
     }
 }
 
-/** An invitation on Home, bold as an unread conversation is; a tap opens it to accept or decline. */
+/** An invitation on Home, in a conversation's row and bold as an unread one is; a tap opens it to accept or decline. */
 @Composable
 internal fun InvitationRow(invitation: Invitation, onOpen: (String) -> Unit) {
     val colors = SlatrixTheme.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) { onOpen(invitation.id) }
-        .semantics { stateDescription = "Invitation" }.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapTiny),
-        verticalAlignment = Alignment.CenterVertically) {
-        // As Home's rows do, so every name starts at the same place.
-        if (invitation.direct || invitation.space) {
-            LiveAvatar(invitation.initials, invitation.colorIndex, UiMetrics.CompactAvatar)
-            Spacer(Modifier.width(UiMetrics.GapMedium))
-        } else {
-            Icon(SlackIcons.Hash, null, Modifier.size(UiMetrics.Icon), tint = colors.textPrimary)
-            Spacer(Modifier.width(UiMetrics.GapLarge))
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ConversationRow).clickable(role = Role.Button) { onOpen(invitation.id) }
+        .semantics { stateDescription = "Invitation" }.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+        if (invitation.direct || invitation.space) LiveAvatar(invitation.initials, invitation.colorIndex, UiMetrics.RowAvatar)
+        else ChannelTile(private = false, UiMetrics.RowAvatar)
+        Column(Modifier.weight(1f)) {
+            Text(invitation.name, style = MaterialTheme.typography.bodyLarge, color = colors.textPrimary,
+                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            invitation.inviter?.let {
+                Text("$it invited you", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
-        Text(invitation.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = colors.textPrimary,
-            fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
