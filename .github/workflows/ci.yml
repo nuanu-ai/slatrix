@@ -183,14 +183,16 @@ jobs:
     name: android (${{ matrix.name }})
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    # Three runners at once: each pays for setup and a compile, and none waits for another's slowest part.
+    # Four runners at once: each pays for setup and a compile, and none waits for another's slowest part.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: checks
-            tasks: :lint-rules:test :app:recordRoborazziDebug :app:lintDebug
+          - name: tests
+            tasks: :lint-rules:test :app:recordRoborazziDebug
             python: test_push_configuration.py
+          - name: lint
+            tasks: :app:lintDebug
           - name: release
             tasks: :app:assembleRelease
             python: test_release_apk.py
@@ -227,7 +229,7 @@ jobs:
       # Robolectric fetches Android's framework jars from Maven Central as tests start, which can fail mid-run.
       - name: Restore Robolectric's Android jars
         id: robolectric
-        if: matrix.name == 'checks'
+        if: matrix.name == 'tests'
         uses: actions/cache/restore@v4
         with:
           path: ~/.m2/repository/org/robolectric
@@ -240,7 +242,7 @@ jobs:
         if: matrix.python
         run: python3 -m unittest discover -s android/tests -p '${{ matrix.python }}'
       - name: Save Robolectric's Android jars
-        if: matrix.name == 'checks' && github.event_name == 'push' && steps.robolectric.outputs.cache-hit != 'true'
+        if: matrix.name == 'tests' && github.event_name == 'push' && steps.robolectric.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ~/.m2/repository/org/robolectric
