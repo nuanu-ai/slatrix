@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import os
 
 /// How long the flows people feel take, written to the unified log for `scripts/perf-report.sh`. Only names from
@@ -135,8 +135,9 @@ import os
             // Flows left open for long, like a room that never got messages, did not cause this pass.
             let recent = open.values.filter { now - $0.start < .seconds(30) }.map(\.name)
             let during = Set(recent).union(touched).map(\.label).sorted().joined(separator: ",")
+            // A stall behind another app shows no beachball, but it still delays what Slatrix shows on coming back.
             logger.log(
-                "hang ms=\(milliseconds(now - passStart), format: .fixed(precision: 0), privacy: .public) during=\(during.isEmpty ? "-" : during, privacy: .public)"
+                "hang ms=\(milliseconds(now - passStart), format: .fixed(precision: 0), privacy: .public) during=\(during.isEmpty ? "-" : during, privacy: .public) seen=\(NSApp?.isActive == true ? 1 : 0, privacy: .public)"
             )
         }
         touched.removeAll(keepingCapacity: true)

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Summarizes what Slatrix logged about its own speed over the last day, or over a `log show --last` duration such as
-# 2h or 7d: each timed flow, the loading states people saw, rows that moved under the reader, and main-thread hangs.
+# 2h or 7d: each timed flow, the loading states people saw, rows that moved under the reader, and main-thread hangs, listing those with Slatrix in front.
 set -euo pipefail
 duration=${1:-1d}
 
@@ -16,7 +16,7 @@ lines=$(/usr/bin/log show --last "$duration" --style compact \
             print (name ~ /\.loading$/ ? "loading" : "interval"), name, field("ms")
         }
         / event=/ { print "event", field("event"), field("px") }
-        / hang ms=/ { print "hang", field("during"), field("ms") }
+        / hang ms=/ { print "hang", field("during"), field("ms"), field("seen") }
     ')
 
 # Count, nearest-rank percentiles and max per name, from "kind name value" lines.
@@ -49,8 +49,10 @@ only "event timeline.jump" | awk '
     { n++; px = $3 < 0 ? -$3 : $3; if (px > max) max = px }
     END { printf "Rows that moved under the reader: %d%s\n", n, n ? sprintf(" (largest %d px)", max) : "" }'
 echo
+# Builds from before seen= was logged leave it blank, so they count as behind another app.
 hangs=$(only hang)
-echo "Main-thread hangs of 100 ms or more: $(grep -c . <<< "$hangs" || true)"
-if [[ -n $hangs ]]; then
-    sort -k3,3gr <<< "$hangs" | head -10 | awk '{ printf "  %7.0f  during %s\n", $3, $2 }'
+seen=$(awk '$4 == 1' <<< "$hangs")
+echo "Main-thread hangs of 100 ms or more: $(grep -c . <<< "$hangs" || true), $(grep -c . <<< "$seen" || true) with Slatrix in front"
+if [[ -n $seen ]]; then
+    sort -k3,3gr <<< "$seen" | head -10 | awk '{ printf "  %7.0f  during %s\n", $3, $2 }'
 fi
