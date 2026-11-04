@@ -9,23 +9,18 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class DesignTokensTest {
-    @Test fun `every theme and palette matches the shared token contract`() {
+    @Test fun `both themes match the shared token contract`() {
         val spec = JsonParser.parseString(File(System.getProperty("slatrix.root"), "design/tokens.json").readText()).asJsonObject
-        assertEquals(spec["palettes"].asJsonArray.map { it.asString }, SidebarPalette.entries.map { it.tokenName })
+        val android = spec["android"].asJsonObject
         for (dark in listOf(false, true)) {
-            for (palette in SidebarPalette.entries) {
-                val expected = spec["colors"].asJsonObject.entrySet().associate { (role, value) ->
-                    var leaf = value
-                    if (leaf.isJsonObject) leaf = leaf.asJsonObject[if (dark) "dark" else "light"]
-                    if (leaf.isJsonObject) leaf = leaf.asJsonObject[palette.tokenName]
-                    role to color(leaf).toArgb()
-                }
-                assertEquals("dark=$dark palette=$palette", expected, DesignTokens.colors(dark, palette).mapValues { it.value.toArgb() })
+            val expected = android["colors"].asJsonObject.entrySet().associate { (role, value) ->
+                role to color(if (value.isJsonObject) value.asJsonObject[if (dark) "dark" else "light"] else value).toArgb()
             }
+            assertEquals("dark=$dark", expected, DesignTokens.colors(dark).mapValues { it.value.toArgb() })
         }
         assertEquals(spec["fileColors"].asJsonObject.entrySet().associate { it.key to color(it.value).toArgb() }, DesignTokens.fileColors.mapValues { it.value.toArgb() })
         assertEquals(spec["avatarColors"].asJsonArray.map { color(it).toArgb() }, DesignTokens.avatarColors.map { it.toArgb() })
-        assertEquals(spec["radius"].asJsonObject.entrySet().associate { it.key to it.value.asInt }, DesignTokens.radii)
+        assertEquals(android["radius"].asJsonObject.entrySet().associate { it.key to it.value.asInt }, DesignTokens.radii)
     }
 
     private fun color(value: JsonElement): Color {

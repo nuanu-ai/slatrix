@@ -14,7 +14,6 @@ import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import android.graphics.Bitmap
@@ -117,7 +116,7 @@ class MessageContentTest {
             "<a href=\"https://matrix.to/#/@sam:example.org\">Sam</a>"))
         val text = compose.onNodeWithText("@Me @Sam", useUnmergedTree = true).text()
         fun fill(name: String) = text.spanStyles.single { text.substring(it.start, it.end) == name }.item.background
-        val tokens = DesignTokens.colors(false, SidebarPalette.Aubergine)
+        val tokens = DesignTokens.colors(false)
         assertEquals(tokens.getValue("mentionYouFill"), fill("@Me"))
         assertEquals(tokens.getValue("mentionFill"), fill("@Sam"))
     }

@@ -13,6 +13,21 @@ import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.ThreadOrigin
 import ai.nuanu.slatrix.ui.designsystem.Motion
+import ai.nuanu.slatrix.ui.designsystem.OnAccentFill
+import ai.nuanu.slatrix.ui.designsystem.bubble
+import ai.nuanu.slatrix.ui.designsystem.bubbleShape
+import ai.nuanu.slatrix.ui.designsystem.glassBar
+import ai.nuanu.slatrix.ui.designsystem.glassSource
+import ai.nuanu.slatrix.ui.designsystem.rememberGlass
+import ai.nuanu.slatrix.ui.designsystem.wallpaper
+import dev.chrisbanes.haze.HazeState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -237,35 +252,13 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
     }
     reacted?.let { ReactionsSheet(it.reactions, state.rows, state.ownUserId) { reacted = null } }
-    Column(Modifier.fillMaxSize().background(colors.canvas).navigationBarsPadding().imePadding()) {
-        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(end = UiMetrics.GapLarge,
-            top = UiMetrics.GapSmall, bottom = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
-            if (threadRoot != null) Column(Modifier.weight(1f).padding(start = UiMetrics.GapSection + UiMetrics.GapLarge)) {
-                Text("Thread", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = colors.textPrimary)
-                Text(if (room.direct) room.name else "#${room.name}", style = MaterialTheme.typography.bodyMedium,
-                    color = colors.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            } else Surface(onOpenDetails, Modifier.weight(1f), shape = MaterialTheme.shapes.extraLarge, color = colors.raised, contentColor = colors.textPrimary) {
-                Row(Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapTiny),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                    if (!room.direct) Icon(if (room.isPrivate) SlackIcons.Lock else SlackIcons.Hash,
-                        if (room.isPrivate) "Private channel" else null, Modifier.size(UiMetrics.Icon))
-                    Column {
-                        Text(room.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        // Slack's member line, as the Mac's facepile, except for a direct message with one person. Held empty
-                        // until the count is known, so the pill keeps its height.
-                        if (!room.direct || room.memberCount > 2) Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (room.memberCount == 0) "" else membersLabel(room.memberCount.toLong()),
-                                style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1)
-                            Icon(SlackIcons.ChevronDown, null, Modifier.size(UiMetrics.SmallIcon).alpha(if (room.memberCount > 0) 1f else 0f),
-                                tint = colors.textSecondary)
-                        }
-                    }
-                }
-            }
-        }
-        HorizontalDivider(color = colors.border)
+    val glass = rememberGlass()
+    // The header floats over the messages, so they start under it; its height is known before it draws, so they never move.
+    val density = LocalDensity.current
+    val statusBar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    var header by remember { mutableStateOf(statusBar + UiMetrics.HeaderRow) }
+    Box(Modifier.fillMaxSize().background(colors.canvas)) {
+    Column(Modifier.fillMaxSize().glassSource(glass).wallpaper().navigationBarsPadding().imePadding()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val rows = state.rows
             // A reset re-pages the thread; the last count stays until the new one is known, so the bar doesn't blank.
@@ -276,24 +269,27 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             val firstReply = remember(rows, threadRoot) {
                 rows.getOrNull(rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot } + 1)?.id.takeIf { threadRoot != null }
             }
-            // A thread reads down from its root, as in Slack, so a short one sits at the top.
+            // A row that starts a run again: after the replies bar or the New line, so it shows its sender.
+            fun restarts(row: ConversationMessage) = row.id == firstReply || line != null && row.eventId == line
+            // A thread reads down from its root, as in Slack, so a short one sits at the top, right under the header.
             LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none(::opens)) 1f else 0f),
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
-                contentPadding = PaddingValues(vertical = UiMetrics.GapSmall)) {
-                items(rows.asReversed(), key = { it.id }) { row ->
+                contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = UiMetrics.GapSmall)) {
+                itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row ->
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Column(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
                             val first = line != null && row.eventId == line
                             if (first) NewLine()
+                            // The newer row, below; a run of one sender's bubbles shows their picture by its last.
+                            val next = rows.getOrNull(rows.size - index) as? ConversationMessage
+                            val last = next == null || !next.grouped || restarts(next)
                             if (threadRoot != null && row.eventId == threadRoot) Column {
-                                LiveMessageRow(row, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson, loadThreadOrigin) { menu = it }
+                                LiveMessageRow(row.copy(grouped = false), true, state.ownUserId, actions.onReact, { reacted = it }, null, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson, loadThreadOrigin) { menu = it }
                                 // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                                 RepliesBar(replies)
-                            // The first reply starts under the replies bar, and the first unread under the New line, so
-                            // each shows its sender again.
-                            } else LiveMessageRow(if (row.id == firstReply || first) row.copy(grouped = false) else row, state.ownUserId,
+                            } else LiveMessageRow(if (restarts(row)) row.copy(grouped = false) else row, last, state.ownUserId,
                                 actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
                                 loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson, loadThreadOrigin) { menu = it }
                         }
@@ -319,11 +315,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     following = true
                     if (state.focused) onShowNewest() else jumps.launch { list.scrollToItem(0) }
                 }, Modifier.size(UiMetrics.Touch).semantics { contentDescription = "Jump to recent messages" }, shape = CircleShape,
-                    color = colors.raised, contentColor = colors.textPrimary, border = BorderStroke(UiMetrics.Divider, colors.border)) {
+                    color = colors.bubbleIn, contentColor = colors.textSecondary, shadowElevation = UiMetrics.Hairline * 2) {
                     Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.ArrowDownward, null, Modifier.size(UiMetrics.Icon)) }
                 }
             }
-            OfflineBanner()
+            Box(Modifier.padding(top = header)) { OfflineBanner() }
             state.notice?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
                 Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
@@ -336,11 +332,52 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             else -> "Message #${room.name}"
         }
         val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
-        TypingLine(typing)
         if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders,
             aboveField = if (threadRoot != null && composer.target !is ComposerTarget.Edit) {
                 { AlsoSendTo(room, composer.alsoToChannel, composerActions.onAlsoToChannel) }
             } else null) else CannotPost()
+    }
+    ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails,
+        Modifier.align(Alignment.TopCenter).onSizeChanged { header = with(density) { it.height.toDp() } })
+    }
+}
+
+/** The glass header over a conversation: back, who or what it is, and who's typing or how many are in it. */
+@Composable
+private fun ChatHeader(room: RoomSummary, thread: Boolean, typing: List<String>, glass: HazeState, onBack: () -> Unit,
+    onOpenDetails: () -> Unit, modifier: Modifier) {
+    val colors = SlatrixTheme.colors
+    Row(modifier.fillMaxWidth().glassBar(glass).statusBarsPadding().heightIn(min = UiMetrics.HeaderRow)
+        .padding(horizontal = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
+        val subtitle = when {
+            typing.isNotEmpty() -> typingLabel(typing)
+            thread -> if (room.direct) room.name else "#${room.name}"
+            // Slack's member line, except for a direct message with one person; blank until the count is known.
+            !room.direct || room.memberCount > 2 -> if (room.memberCount == 0) "" else membersLabel(room.memberCount.toLong())
+            else -> null
+        }
+        val lines = @Composable {
+            Column(Modifier.padding(start = UiMetrics.GapMedium)) {
+                Text(if (thread) "Thread" else room.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                subtitle?.let {
+                    Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium,
+                        color = if (typing.isNotEmpty()) colors.accent else colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        if (thread) Box(Modifier.weight(1f)) { lines() }
+        else Row(Modifier.weight(1f).heightIn(min = UiMetrics.Touch).clip(MaterialTheme.shapes.medium)
+            .clickable(role = Role.Button, onClickLabel = "Conversation details", onClick = onOpenDetails),
+            verticalAlignment = Alignment.CenterVertically) {
+            if (room.direct) LiveAvatar(room.initials, room.colorIndex, UiMetrics.ChannelTile, room.avatarUrl)
+            else ChannelTile(room.isPrivate, UiMetrics.ChannelTile)
+            lines()
+        }
+        if (!thread) IconButton(onClick = onOpenDetails) {
+            Icon(Icons.Outlined.MoreVert, "Conversation details", tint = colors.textSecondary)
+        }
     }
 }
 
@@ -383,9 +420,9 @@ private fun NewLine() {
 @Composable
 private fun CannotPost() {
     val colors = SlatrixTheme.colors
-    Text("You don’t have permission to post in this channel.", Modifier.fillMaxWidth()
-        .border(UiMetrics.Divider, colors.border, SlatrixTheme.topPanelShape).background(colors.canvas, SlatrixTheme.topPanelShape)
-        .heightIn(min = UiMetrics.ComposerMinHeight).wrapContentHeight().padding(horizontal = UiMetrics.GapLarge),
+    Text("You don’t have permission to post in this channel.", Modifier.fillMaxWidth().padding(UiMetrics.GapSmall)
+        .clip(MaterialTheme.shapes.extraLarge).background(colors.field)
+        .heightIn(min = UiMetrics.Touch).wrapContentHeight().padding(horizontal = UiMetrics.GapLarge),
         style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, textAlign = TextAlign.Center)
 }
 
@@ -396,12 +433,12 @@ internal fun membersLabel(count: Long) = if (count == 1L) "1 member" else "$coun
 private fun RepliesBar(count: Int?) {
     val colors = SlatrixTheme.colors
     if (count == 0) return
-    Column(Modifier.fillMaxWidth().padding(top = UiMetrics.GapSmall)) {
-        HorizontalDivider(color = colors.border)
-        Text(when (count) { null -> ""; 1 -> "1 reply"; else -> "$count replies" },
-            Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge).wrapContentHeight(),
-            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = colors.textPrimary)
-        HorizontalDivider(color = colors.border)
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+        HorizontalDivider(Modifier.weight(1f), color = colors.borderStrong)
+        Text(when (count) { null -> ""; 1 -> "1 reply"; else -> "$count replies" }, style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary)
+        HorizontalDivider(Modifier.weight(1f), color = colors.borderStrong)
     }
 }
 
@@ -435,12 +472,10 @@ private fun ConversationIntro(room: RoomSummary) {
 private fun DayDividerRow(timestamp: Long) {
     val colors = SlatrixTheme.colors
     val label = remember(timestamp) { dayLabel(timestamp) }
-    Box(Modifier.fillMaxWidth().padding(vertical = UiMetrics.GapMedium), contentAlignment = Alignment.Center) {
-        HorizontalDivider(color = colors.border)
-        Surface(shape = MaterialTheme.shapes.extraLarge, color = colors.canvas, border = BorderStroke(UiMetrics.Divider, colors.border)) {
-            Text(label, Modifier.padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapTiny),
-                style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary)
-        }
+    Box(Modifier.fillMaxWidth().padding(vertical = UiMetrics.GapSmall), contentAlignment = Alignment.Center) {
+        Text(label, Modifier.clip(CircleShape).background(colors.dateChip)
+            .padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapTiny),
+            style = MaterialTheme.typography.labelMedium, color = colors.onDateChip)
     }
 }
 
@@ -468,72 +503,117 @@ private fun HistoryProgress(loading: Boolean) {
 
 internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(timestamp))
 
+/**
+ * A message as a bubble: others' on the left in white, their picture by the last of a run and their name, in their
+ * color, atop the first; yours on the right in the accent. The time sits inside, after the last line when it fits.
+ */
 @Composable
-private fun LiveMessageRow(message: ConversationMessage, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
+private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?,
     onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
-    // A grouped row keeps the gutter, so its body lines up and its height doesn't depend on its send state.
+    val own = message.own
     Row(Modifier.fillMaxWidth()
         // Only a failed message answers a tap, as in Slack; any message opens its sheet on a long press.
         .then(if (failed) Modifier.combinedClickable(onClickLabel = "Message actions", onLongClickLabel = "Message actions",
             onLongClick = { onMenu(message) }) { onMenu(message) }
         else Modifier.pointerInput(message) { detectTapGestures(onLongPress = { onMenu(message) }) }
             .semantics(mergeDescendants = true) { onLongClick("Message actions") { onMenu(message); true } })
-        .then(if (message.grouped) Modifier else Modifier.padding(top = UiMetrics.GapSmall))
-        .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, bottom = UiMetrics.GapTiny),
-        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        if (message.grouped) Box(Modifier.width(UiMetrics.Avatar), contentAlignment = Alignment.Center) {
-            if (failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.size(UiMetrics.Icon), tint = colors.destructive)
-        } else Box(Modifier.clip(MaterialTheme.shapes.small).clickable(role = Role.Button) { onPerson(message.senderId) }
-            .semantics(mergeDescendants = true) { contentDescription = "${message.senderName}’s profile" }) {
-            LiveAvatar(message.initials, message.colorIndex, url = message.avatarUrl)
+        .padding(top = if (message.grouped) UiMetrics.Hairline * 4 else UiMetrics.GapSmall)
+        .padding(start = if (own) UiMetrics.BubbleGutter + UiMetrics.GapSmall else UiMetrics.GapMedium,
+            end = if (own) UiMetrics.GapMedium else UiMetrics.BubbleGutter),
+        horizontalArrangement = if (own) Arrangement.spacedBy(UiMetrics.GapSmall, Alignment.End) else Arrangement.spacedBy(UiMetrics.GapSmall),
+        verticalAlignment = Alignment.Bottom) {
+        if (own && failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.padding(bottom = UiMetrics.GapSmall).size(UiMetrics.Icon),
+            tint = colors.destructive)
+        // Every one of a run keeps the picture's room, so their bubbles line up.
+        if (!own) Box(Modifier.size(UiMetrics.FeedAvatar)) {
+            if (lastOfRun) Box(Modifier.clip(CircleShape).clickable(role = Role.Button) { onPerson(message.senderId) }
+                .semantics(mergeDescendants = true) { contentDescription = "${message.senderName}’s profile" }) {
+                LiveAvatar(message.initials, message.colorIndex, UiMetrics.FeedAvatar, message.avatarUrl)
+            }
         }
-        Column(Modifier.weight(1f)) {
-            if (!message.grouped) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
-                Text(message.senderName, Modifier.weight(1f, fill = false).clickable(role = Role.Button) { onPerson(message.senderId) }, style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(when (message.sendState) {
-                    MessageSendState.Sent -> remember(message.timestamp) { timeLabel(message.timestamp) }
-                    MessageSendState.Sending -> "Sending…"
-                    MessageSendState.Failed -> "Not sent"
-                }, style = MaterialTheme.typography.bodySmall, maxLines = 1, color = if (failed) colors.destructive else colors.textSecondary)
-            }
-            message.replyTo?.let { reply ->
-                // A copy of a thread reply names its thread, and turns out an ordinary quote if its reply isn't in one.
-                var origin by remember(message.id) { mutableStateOf<ThreadOrigin?>(null) }
-                var notInThread by remember(message.id) { mutableStateOf(false) }
-                if (message.repliedToThread) LaunchedEffect(message.id, reply.eventId) {
-                    origin = loadThreadOrigin(reply.eventId)
-                    notInThread = origin == null
-                }
-                if (message.repliedToThread && !notInThread) ThreadCopyQuote(origin, onOpenThread)
-                else ReplyQuote(reply) { onOpenReply(reply.eventId) }
-            }
-            Box {
-                Column {
-                    val attachment = message.attachment
-                    // An attachment's text is its caption; without one it is the file's name, which the attachment shows.
-                    if (attachment == null || message.caption != null) {
-                        MessageBody(message, if (message.sendState == MessageSendState.Sending) colors.textSecondary else colors.textBody, me, onPerson)
+        val shape = remember(own, message.grouped) { bubbleShape(own, message.grouped) }
+        val bubble = @Composable {
+            val fill = SlatrixTheme.colors
+            Box(Modifier.weight(1f, fill = false).bubble(shape, fill.bubbleIn, if (own) fill.bubbleIn.copy(alpha = 0f) else fill.bubbleEdge)) {
+            Column(Modifier.padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall)) {
+                if (!own && !message.grouped) Text(message.senderName, Modifier.clickable(role = Role.Button) { onPerson(message.senderId) },
+                    style = MaterialTheme.typography.labelLarge, color = fill.person(message.colorIndex), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                message.replyTo?.let { reply ->
+                    // A copy of a thread reply names its thread, and turns out an ordinary quote if its reply isn't in one.
+                    var origin by remember(message.id) { mutableStateOf<ThreadOrigin?>(null) }
+                    var notInThread by remember(message.id) { mutableStateOf(false) }
+                    if (message.repliedToThread) LaunchedEffect(message.id, reply.eventId) {
+                        origin = loadThreadOrigin(reply.eventId)
+                        notInThread = origin == null
                     }
-                    attachment?.let { Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, { onMenu(message) }, onView) }
+                    if (message.repliedToThread && !notInThread) ThreadCopyQuote(origin, onOpenThread)
+                    else ReplyQuote(reply) { onOpenReply(reply.eventId) }
                 }
-                // In the row's bottom padding, so the bar comes and goes without moving anything.
-                message.uploadProgress?.let {
-                    LinearProgressIndicator({ it }, Modifier.align(Alignment.BottomStart).fillMaxWidth().height(UiMetrics.GapTiny)
-                        .offset(y = UiMetrics.GapTiny))
+                val attachment = message.attachment
+                attachment?.let { Box(Modifier.padding(vertical = UiMetrics.GapTiny)) {
+                    Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, { onMenu(message) }, onView)
+                } }
+                // An attachment's text is its caption; without one it is the file's name, which the attachment shows.
+                val body: (@Composable () -> Unit)? = if (attachment == null || message.caption != null) {
+                    { MessageBody(message, if (message.sendState == MessageSendState.Sending) fill.textSecondary else fill.textBody, me, onPerson) }
+                } else null
+                TimedBody(body) {
+                    Text(when (message.sendState) {
+                        MessageSendState.Sent -> remember(message.timestamp) { timeLabel(message.timestamp) }
+                        MessageSendState.Sending -> "Sending…"
+                        MessageSendState.Failed -> "Not sent"
+                    }, style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                        color = if (failed && !own) fill.destructive else fill.textSecondary)
+                }
+                if (message.reactions.isNotEmpty()) {
+                    Reactions(message.reactions, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
+                }
+                val root = message.eventId
+                // Inside a thread the root's replies bar says it instead.
+                if (message.thread != null && root != null && onOpenThread != null) ThreadReplies(message.thread) { onOpenThread(root) }
+            }
+            // In the bubble's bottom padding, so the bar comes and goes without moving anything.
+            message.uploadProgress?.let {
+                Box(Modifier.matchParentSize().padding(start = UiMetrics.GapMedium, end = UiMetrics.GapMedium, bottom = UiMetrics.GapTiny),
+                    contentAlignment = Alignment.BottomStart) {
+                    LinearProgressIndicator({ it }, Modifier.fillMaxWidth().height(UiMetrics.GapTiny))
                 }
             }
-            if (message.reactions.isNotEmpty()) {
-                Reactions(message.reactions, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
             }
-            val root = message.eventId
-            // Inside a thread the root's replies bar says it instead.
-            if (message.thread != null && root != null && onOpenThread != null) ThreadReplies(message.thread) { onOpenThread(root) }
+        }
+        if (own) OnAccentFill(bubble) else bubble()
+    }
+}
+
+/**
+ * A bubble's text with its time: after the last line when there's room, as a messenger sets it, or else on a line of
+ * its own at the end.
+ */
+@Composable
+private fun TimedBody(body: (@Composable () -> Unit)?, time: @Composable () -> Unit) {
+    Layout({ Box { body?.invoke() }; Box { time() } }) { (text, stamp), constraints ->
+        val gap = UiMetrics.GapSmall.roundToPx()
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val t = text.measure(loose)
+        val m = stamp.measure(loose)
+        val beside = t.width + gap + m.width <= constraints.maxWidth && t.height > 0
+        val width = (if (beside) t.width + gap + m.width else maxOf(t.width, m.width)).coerceIn(constraints.minWidth, constraints.maxWidth)
+        val height = if (beside) t.height else t.height + m.height
+        layout(width, height) {
+            t.place(0, 0)
+            m.place(width - m.width, height - m.height)
         }
     }
+}
+
+/** Who is typing, in the header in place of its member line, as Telegram puts it; the header keeps its height. */
+internal fun typingLabel(names: List<String>) = when (names.size) {
+    1 -> "${names[0]} is typing…"
+    2 -> "${names[0]} and ${names[1]} are typing…"
+    else -> "Several people are typing…"
 }

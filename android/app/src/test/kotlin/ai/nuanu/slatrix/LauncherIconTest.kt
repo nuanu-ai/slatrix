@@ -7,7 +7,6 @@ import android.graphics.Canvas
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.view.ContextThemeWrapper
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import androidx.compose.ui.graphics.toArgb
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -55,6 +54,6 @@ class LauncherIconTest {
         val attributes = ContextThemeWrapper(context, theme).obtainStyledAttributes(intArrayOf(android.R.attr.windowSplashScreenBackground))
         val background = attributes.getColor(0, 0)
         attributes.recycle()
-        assertEquals(DesignTokens.colors(dark, SidebarPalette.Aubergine).getValue("canvas").toArgb(), background)
+        assertEquals(DesignTokens.colors(dark).getValue("canvas").toArgb(), background)
     }
 }

@@ -9,6 +9,7 @@ import ai.nuanu.slatrix.ui.account.LaterScreen
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -42,7 +43,7 @@ class LaterScreenTest {
         val opened = mutableListOf<String>()
         val removed = mutableListOf<String>()
         compose.setContent {
-            SlatrixTheme { LaterScreen(saved, rooms, { previews[it.eventId] }, { opened += it.eventId }, { removed += it.eventId }) {} }
+            SlatrixTheme { LaterScreen(saved, rooms, { previews[it.eventId] }, { opened += it.eventId }, { removed += it.eventId }) }
         }
         compose.onNodeWithText("Ship it on Thursday").assertIsDisplayed()
         val first = compose.onNodeWithText("Ship it on Thursday").fetchSemanticsNode().boundsInRoot.top
@@ -62,7 +63,7 @@ class LaterScreenTest {
         var reads = 0
         // Only the first read finds the message, so a card read again would say it's unavailable.
         val load: suspend (SavedMessage) -> SavedPreview? = { if (reads++ == 0) SavedPreview("Mira Chen", "Ship it on Thursday", 1_700_000_000_000L) else null }
-        compose.setContent { SlatrixTheme { LaterScreen(saved, rooms, load, {}, {}) {} } }
+        compose.setContent { SlatrixTheme { LaterScreen(saved, rooms, load, {}, {}) } }
         compose.onNodeWithText("Ship it on Thursday").assertIsDisplayed()
 
         saved = listOf(SavedMessage("!design:example.org", "\$one", 2_000))
@@ -71,21 +72,19 @@ class LaterScreenTest {
     }
 
     @Test fun nothingSavedSaysSo() {
-        compose.setContent { SlatrixTheme { LaterScreen(emptyList(), rooms, { null }, {}, {}) {} } }
+        compose.setContent { SlatrixTheme { LaterScreen(emptyList(), rooms, { null }, {}, {}) } }
         compose.onNodeWithText("Nothing saved for later").assertIsDisplayed()
     }
 
     // capability: message.save
-    @Test fun homesLaterCardCountsWhatIsSavedAndOpensIt() {
-        var opened = false
+    @Test fun homesLaterTabShowsWhatIsSaved() {
         compose.setContent {
             SlatrixTheme {
                 LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
-                    laterCount = 2, onLater = { opened = true })
+                    later = { Text("Saved list") })
             }
         }
-        compose.onNodeWithText("2 items").assertIsDisplayed()
         compose.onNodeWithText("Later").performClick()
-        compose.runOnIdle { assertTrue(opened) }
+        compose.onNodeWithText("Saved list").assertIsDisplayed()
     }
 }

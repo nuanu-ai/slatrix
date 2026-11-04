@@ -23,6 +23,32 @@ object UiMetrics {
     val Icon = 20.dp
     val LargeIcon = 24.dp
     val Divider = 1.dp
+    val Hairline = 0.5.dp
+    /** Design B's two-line conversation row and its 48 dp avatar or channel tile. */
+    val ConversationRow = 72.dp
+    val RowAvatar = 48.dp
+    /** A sender's picture beside their bubbles. */
+    val FeedAvatar = 32.dp
+    /** Material's search bar on Home. */
+    val SearchBar = 56.dp
+    /** The floating tab capsule, its inset around the selected tab, and its gap above the screen's bottom. */
+    val TabBar = 64.dp
+    val TabInset = 4.dp
+    val TabBarGap = 24.dp
+    /** A chat header's row, over the glass. */
+    val HeaderRow = 64.dp
+    val SectionHeader = 40.dp
+    val Badge = 20.dp
+    val ChannelTile = 40.dp
+    /** The faces on a thread's replies bar. */
+    val Facepile = 20.dp
+    val ThreadBar = 40.dp
+    /** A bubble's room on the side away from its author, so a long one never spans the screen. */
+    val BubbleGutter = 56.dp
+    val GlassBlur = 24.dp
+    val GlassLift = 12.dp
+    val WallpaperGrid = 20.dp
+    val WallpaperDot = 1.dp
     /** The grab handle atop a bottom sheet. */
     val SheetHandleWidth = 32.dp
     val SheetHandleHeight = 4.dp

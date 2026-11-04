@@ -12,7 +12,6 @@ import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
@@ -283,7 +282,7 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("design", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action ->
             val layouts = mutableListOf<TextLayoutResult>()
             action(layouts)
-            assertEquals(DesignTokens.colors(false, SidebarPalette.Aubergine).getValue("textPrimary"), layouts.single().layoutInput.style.color)
+            assertEquals(DesignTokens.colors(false).getValue("textPrimary"), layouts.single().layoutInput.style.color)
         }
         compose.onNodeWithContentDescription("Message #design").performClick()
         val field = compose.onNodeWithContentDescription("Message #design").fetchSemanticsNode().boundsInRoot

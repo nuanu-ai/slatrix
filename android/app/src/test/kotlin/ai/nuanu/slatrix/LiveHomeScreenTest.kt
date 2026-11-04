@@ -11,7 +11,6 @@ import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.account.LiveWorkspace
 import ai.nuanu.slatrix.ui.account.LiveYouScreen
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.Text
@@ -469,7 +468,7 @@ class LiveHomeScreenTest {
         compose.runOnIdle { assertEquals(listOf<String?>(null), chosen) }
     }
 
-    @Test fun theWorkspaceHeaderSitsOnTheWorkspaceColorInLightMode() {
+    @Test fun theWorkspaceHeaderSitsOnTheCanvasUnderDarkStatusIconsInLightMode() {
         compose.setContent { SlatrixTheme(dark = false) { LiveHomeScreen("@alex:example.org", RoomListState(loading = false, spacesKnown = true), {}, {}, {}) } }
 
         val header = compose.onNodeWithContentDescription("Switch workspace").fetchSemanticsNode().boundsInWindow
@@ -477,12 +476,13 @@ class LiveHomeScreenTest {
             val window = compose.activity.window.decorView
             val bitmap = Bitmap.createBitmap(window.width, window.height, Bitmap.Config.ARGB_8888)
             window.draw(Canvas(bitmap))
-            val pixel = Color(bitmap.getPixel(header.right.toInt() - 1, header.top.toInt()))
-            assertEquals(DesignTokens.colors(true, SidebarPalette.Aubergine).getValue("frame"), pixel)
+            val pixel = Color(bitmap.getPixel(header.right.toInt() + 1, header.top.toInt()))
+            assertEquals(DesignTokens.colors(false).getValue("canvas"), pixel)
         }
         compose.runOnIdle {
             val appearance = compose.activity.window.insetsController!!.systemBarsAppearance
-            assertEquals("Status bar icons must be light over the workspace color", 0, appearance and WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS)
+            assertEquals("Status bar icons must be dark over the light canvas", WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
+                appearance and WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS)
         }
     }
 

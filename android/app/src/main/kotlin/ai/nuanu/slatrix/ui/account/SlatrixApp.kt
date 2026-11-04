@@ -39,7 +39,6 @@ import ai.nuanu.slatrix.core.WorkspacePreferences
 import ai.nuanu.slatrix.core.WorkspaceRail
 import ai.nuanu.slatrix.push.NotificationTarget
 import ai.nuanu.slatrix.push.PushNotifications
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.compose.BackHandler
 import androidx.browser.customtabs.CustomTabsIntent
@@ -99,7 +98,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     val appearance = remember(context) { AppearancePreferences(context) }
     var darkOverride by rememberSaveable { mutableStateOf(appearance.darkMode) }
     val dark = darkOverride ?: isSystemInDarkTheme()
-    var palette by rememberSaveable { mutableStateOf(SidebarPalette.entries.firstOrNull { it.name == appearance.paletteName } ?: SidebarPalette.Aubergine) }
+    var wallpaperColors by rememberSaveable { mutableStateOf(appearance.wallpaperColors) }
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
     var preferences by rememberSaveable { mutableStateOf(false) }
@@ -120,7 +119,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     }
     var restoreFailed by remember { mutableStateOf(false) }
     LaunchedEffect(state) { if ((state as? AccountState.Failed)?.canRetryRestore == true) restoreFailed = true }
-    SlatrixTheme(dark = dark, palette = palette) {
+    SlatrixTheme(dark = dark, wallpaperColors = wallpaperColors) {
         val failure = state as? AccountState.Failed
         val connecting = state as? AccountState.Connecting
         val options = when (val current = state) {
@@ -135,7 +134,6 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 val client = (state as AccountState.Connected).client
                 val media = remember(client) { MatrixMedia(client, File(context.cacheDir, "media")) }
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
-                var later by rememberSaveable(userId) { mutableStateOf(false) }
                 val laterScope = rememberCoroutineScope()
                 // Later is the account's list, shared with the Mac through account data; Home's card, the message sheet
                 // and the Later page read it here. Once sync is back it reads the account again and writes what waited.
@@ -193,7 +191,6 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         invitation = null
                         channels = null
                         person = null
-                        later = false
                         editingProfile = false
                         newMessage = false
                         jump(room, target.eventId, target.threadRoot)
@@ -206,9 +203,9 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {
                         LiveWorkspace(when {
-                            preferences -> { val client = (state as AccountState.Connected).client; { LivePreferencesScreen(dark, darkOverride, palette,
+                            preferences -> { val client = (state as AccountState.Connected).client; { LivePreferencesScreen(dark, darkOverride, wallpaperColors,
                                 { darkOverride = it; appearance.darkMode = it },
-                                { palette = it; appearance.paletteName = it.name }, { preferences = false; returning = true }) {
+                                { wallpaperColors = it; appearance.wallpaperColors = it }, { preferences = false; returning = true }) {
                                     LiveNotificationSettings(userId) { client.getNotificationSettings() }
                                 } } }
                             invitation != null -> { { invitation?.let { id ->
@@ -238,15 +235,6 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     { preferences = true; returning = false }, account::signOut, onViewProfile = { person = userId to null },
                                     onBack = { you = false }, avatarUrl = userAvatarUrl)
                             } } }
-                            later -> { { LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
-                                { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
-                                    // A saved reply opens in its thread, so it is looked up first, with Later still up.
-                                    laterScope.launch {
-                                        val root = workspace?.threadRootOf(room.id, item.eventId)
-                                        later = false
-                                        jump(room, item.eventId, root)
-                                    }
-                                } }, { item -> setSaved(item.roomId, item.eventId, false) }) { later = false } } }
                             thread != null -> { { covered.SaveableStateProvider("${thread.room.id} ${thread.threadRoot}") { key(thread.room.id, thread.threadRoot) {
                                 LiveConversation(thread, threads, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name })
                             } } } }
@@ -259,7 +247,13 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             else -> null
                         }) {
                             LiveHome(userId, userAvatarUrl, rooms, workspace, search, people, jump, { you = true }, selectedSpaceId, chooseSpace,
-                                { channels = it }, saved.size, { later = true }, { invitation = it }, { newMessage = true }, { id, name -> person = id to name }) {
+                                { channels = it }, { invitation = it }, { newMessage = true }, { id, name -> person = id to name }, later = {
+                                    LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
+                                        { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
+                                            // A saved reply opens in its thread, so it is looked up first.
+                                            laterScope.launch { jump(room, item.eventId, workspace?.threadRootOf(room.id, item.eventId)) }
+                                        } }) { item -> setSaved(item.roomId, item.eventId, false) }
+                                }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
@@ -422,8 +416,8 @@ private fun rememberConversation(client: Client, roomId: String, view: Conversat
 private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
     people: MatrixPeople?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
-    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, laterCount: Int, onLater: () -> Unit, onInvitation: (String) -> Unit, onNewMessage: () -> Unit,
-    onPerson: (userId: String, name: String?) -> Unit,
+    selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, onInvitation: (String) -> Unit, onNewMessage: () -> Unit,
+    onPerson: (userId: String, name: String?) -> Unit, later: @Composable () -> Unit,
     activity: @Composable () -> Unit) {
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
@@ -442,8 +436,8 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
         onMarkAllRead = { ids ->
             (rooms?.markAllRead(ids) ?: ids).also { failed -> (ids - failed.toSet()).forEach(PushNotifications(context)::clear) }
         },
-        laterCount = laterCount, onLater = onLater,
-        search = {
+        later = later,
+        search = { onClose ->
             val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()
             val inScope = remember(state.rooms, selectedSpaceId) {
                 state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
@@ -458,7 +452,7 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
                         scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
                 }, recents, { recents = recentStore.add(it) }, people?.results?.collectAsState()?.value ?: PeopleSearchState(),
-                { people?.search(it) }, { onPerson(it.id, it.name) }, open)
+                { people?.search(it) }, { onPerson(it.id, it.name) }, onClose, open)
         }, userAvatarUrl = userAvatarUrl, activity = activity)
 }
 

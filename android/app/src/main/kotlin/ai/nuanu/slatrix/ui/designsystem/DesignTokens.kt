@@ -2,90 +2,55 @@ package ai.nuanu.slatrix.ui.designsystem
 
 import androidx.compose.ui.graphics.Color
 
-enum class SidebarPalette {
-    Aubergine, Clementine, Banana, Jade, Lagoon, Barbra, Gray, MoodIndigo;
-
-    /** The name Slack and the Mac show. */
-    val label: String get() = if (this == MoodIndigo) "Mood Indigo" else name
-
-    val tokenName: String get() = name.replaceFirstChar { it.lowercase() }
-}
-
+/** The Android theme in `design/tokens.json`: its own colors and radii, and the file and avatar colors both apps share. */
 object DesignTokens {
-    fun colors(dark: Boolean, palette: SidebarPalette): Map<String, Color> = if (dark) {
+    fun colors(dark: Boolean): Map<String, Color> = if (dark) {
         mapOf(
-            "textPrimary" to Color(0xfff5f5f5),
-            "textBody" to Color(0xffd1d2d3),
-            "textSecondary" to Color(0xffabadb1),
-            "textTertiary" to Color(0xff7c7f84),
-            "canvas" to Color(0xff1c1d21),
-            "raised" to Color(0xff24262a),
-            "sunken" to Color(0xff27282c),
-            "overlay" to Color(0xff222529),
-            "tooltip" to Color(0xff111214),
+            "textPrimary" to Color(0xfff1f2f4),
+            "textBody" to Color(0xfff1f2f4),
+            "textSecondary" to Color(0xff9a9ca3),
+            "textTertiary" to Color(0xff6f7279),
+            "canvas" to Color(0xff0f1012),
+            "raised" to Color(0xff222327),
+            "sunken" to Color(0xff2c2d31),
+            "overlay" to Color(0xff1b1c1f),
+            "field" to Color(0xff222327),
+            "tooltip" to Color(0xff2c2d31),
             "onTooltip" to Color(0xffffffff),
-            "scrim" to Color(0xff000000).copy(alpha = 0.48f),
-            "sidebar" to when (palette) {
-                SidebarPalette.Aubergine -> Color(0xff211323)
-                SidebarPalette.Clementine -> Color(0xff24170e)
-                SidebarPalette.Banana -> Color(0xff211e0f)
-                SidebarPalette.Jade -> Color(0xff15231d)
-                SidebarPalette.Lagoon -> Color(0xff13212b)
-                SidebarPalette.Barbra -> Color(0xff25121b)
-                SidebarPalette.Gray -> Color(0xff17181a)
-                SidebarPalette.MoodIndigo -> Color(0xff161833)
-            },
-            "frame" to when (palette) {
-                SidebarPalette.Aubergine -> Color(0xff350d36)
-                SidebarPalette.Clementine -> Color(0xff4a2410)
-                SidebarPalette.Banana -> Color(0xff3a3210)
-                SidebarPalette.Jade -> Color(0xff142b23)
-                SidebarPalette.Lagoon -> Color(0xff0e293b)
-                SidebarPalette.Barbra -> Color(0xff3f1328)
-                SidebarPalette.Gray -> Color(0xff202124)
-                SidebarPalette.MoodIndigo -> Color(0xff1e2154)
-            },
-            "border" to Color(0xff383a3e),
-            "borderStrong" to Color(0xff5a5c61),
+            "scrim" to Color(0xff000000).copy(alpha = 0.55f),
+            "border" to Color(0xff2c2e33),
+            "borderStrong" to Color(0xff45474d),
             "hover" to Color(0xffffffff).copy(alpha = 0.08f),
             "pressed" to Color(0xffffffff).copy(alpha = 0.14f),
-            "selection" to when (palette) {
-                SidebarPalette.Aubergine -> Color(0xff713783)
-                SidebarPalette.Clementine -> Color(0xff8a4a1f)
-                SidebarPalette.Banana -> Color(0xff6b5a12)
-                SidebarPalette.Jade -> Color(0xff2d6654)
-                SidebarPalette.Lagoon -> Color(0xff195b7c)
-                SidebarPalette.Barbra -> Color(0xff7a2a52)
-                SidebarPalette.Gray -> Color(0xff293b94)
-                SidebarPalette.MoodIndigo -> Color(0xff3a3f99)
-            },
-            "selectionStrong" to when (palette) {
-                SidebarPalette.Aubergine -> Color(0xff7c3085)
-                SidebarPalette.Clementine -> Color(0xffb35418)
-                SidebarPalette.Banana -> Color(0xff8f6c00)
-                SidebarPalette.Jade -> Color(0xff2a7d5f)
-                SidebarPalette.Lagoon -> Color(0xff0f7aa8)
-                SidebarPalette.Barbra -> Color(0xffb0306a)
-                SidebarPalette.Gray -> Color(0xff1164a3)
-                SidebarPalette.MoodIndigo -> Color(0xff4b52c9)
-            },
-            "selectionText" to Color(0xffffffff),
             "highlight" to Color(0xfff2c744).copy(alpha = 0.3f),
-            "focusRing" to Color(0xff1d9bd1),
-            "accent" to Color(0xff8195ff),
-            "accentTint" to Color(0xff8195ff).copy(alpha = 0.2f),
+            "accent" to Color(0xff7aa9ff),
+            "accentTint" to Color(0xff7aa9ff).copy(alpha = 0.14f),
+            "accentFill" to Color(0xff1a64d6),
             "onAccent" to Color(0xffffffff),
-            "buttonPrimary" to Color(0xff007a5a),
-            "success" to Color(0xff007a5a),
-            "destructive" to Color(0xffe01e5a),
+            "destructive" to Color(0xffff6369),
             "warning" to Color(0xfff0a030),
-            "mention" to Color(0xffe01e5a),
-            "mentionText" to Color(0xff1d9bd1),
-            "mentionFill" to Color(0xff1d9bd1).copy(alpha = 0.18f),
+            "mention" to Color(0xff1a64d6),
+            "mentionText" to Color(0xff7aa9ff),
+            "mentionFill" to Color(0xff7aa9ff).copy(alpha = 0.14f),
             "mentionYouText" to Color(0xfff2c744),
             "mentionYouFill" to Color(0xfff2c744).copy(alpha = 0.2f),
-            "presenceActive" to Color(0xff2bac76),
-            "presenceAway" to Color(0xffabadb1),
+            "presenceActive" to Color(0xff3ccf6b),
+            "presenceAway" to Color(0xff9a9ca3),
+            "wallpaperTop" to Color(0xff111827),
+            "wallpaperMiddle" to Color(0xff16132a),
+            "wallpaperBottom" to Color(0xff1f1320),
+            "wallpaperDot" to Color(0xffffffff).copy(alpha = 0.045f),
+            "bubbleIn" to Color(0xff212226),
+            "bubbleEdge" to Color(0xff000000).copy(alpha = 0f),
+            "bubbleOutMeta" to Color(0xffffffff).copy(alpha = 0.9f),
+            "bubbleOutRule" to Color(0xffffffff).copy(alpha = 0.22f),
+            "reaction" to Color(0xff2c2d31),
+            "dateChip" to Color(0xff000000).copy(alpha = 0.35f),
+            "onDateChip" to Color(0xffe6e7ea),
+            "glass" to Color(0xff28292e).copy(alpha = 0.55f),
+            "glassHeader" to Color(0xff16171a).copy(alpha = 0.62f),
+            "glassEdge" to Color(0xffffffff).copy(alpha = 0.06f),
+            "glassShadow" to Color(0xff000000).copy(alpha = 0.5f),
             "mediaBackdrop" to Color(0xff1a1b1e),
             "mediaControl" to Color(0xff000000).copy(alpha = 0.6f),
             "mediaShade" to Color(0xff000000).copy(alpha = 0.5f),
@@ -94,69 +59,51 @@ object DesignTokens {
         )
     } else {
         mapOf(
-            "textPrimary" to Color(0xff1d1c1d),
-            "textBody" to Color(0xff1d1c1d),
-            "textSecondary" to Color(0xff616061),
-            "textTertiary" to Color(0xff8d8c8d),
+            "textPrimary" to Color(0xff0f1115),
+            "textBody" to Color(0xff0f1115),
+            "textSecondary" to Color(0xff5f636b),
+            "textTertiary" to Color(0xff8b8e95),
             "canvas" to Color(0xffffffff),
-            "raised" to Color(0xfff8f8f8),
-            "sunken" to Color(0xfff4f4f4),
+            "raised" to Color(0xfff1f2f4),
+            "sunken" to Color(0xffe6e8eb),
             "overlay" to Color(0xffffffff),
-            "tooltip" to Color(0xff1d1c1d),
+            "field" to Color(0xffffffff),
+            "tooltip" to Color(0xff1f2024),
             "onTooltip" to Color(0xffffffff),
             "scrim" to Color(0xff000000).copy(alpha = 0.32f),
-            "sidebar" to Color(0xfff8f8f8),
-            "frame" to when (palette) {
-                SidebarPalette.Aubergine -> Color(0xffede4ef)
-                SidebarPalette.Clementine -> Color(0xfff8e9dd)
-                SidebarPalette.Banana -> Color(0xfff7f1d9)
-                SidebarPalette.Jade -> Color(0xffe4eee7)
-                SidebarPalette.Lagoon -> Color(0xffe2edf4)
-                SidebarPalette.Barbra -> Color(0xfff6e4ec)
-                SidebarPalette.Gray -> Color(0xfff0f0f0)
-                SidebarPalette.MoodIndigo -> Color(0xffe6e7f6)
-            },
-            "border" to Color(0xffe3e3e3),
-            "borderStrong" to Color(0xffbbbabb),
-            "hover" to Color(0xff1d1c1d).copy(alpha = 0.06f),
-            "pressed" to Color(0xff1d1c1d).copy(alpha = 0.11f),
-            "selection" to when (palette) {
-                SidebarPalette.Aubergine -> Color(0xfff0e6f4)
-                SidebarPalette.Clementine -> Color(0xfffbe9dc)
-                SidebarPalette.Banana -> Color(0xfffaf2cf)
-                SidebarPalette.Jade -> Color(0xffdeeee5)
-                SidebarPalette.Lagoon -> Color(0xffdceef8)
-                SidebarPalette.Barbra -> Color(0xfff9e4ee)
-                SidebarPalette.Gray -> Color(0xffe7ebff)
-                SidebarPalette.MoodIndigo -> Color(0xffe6e8fb)
-            },
-            "selectionStrong" to when (palette) {
-                SidebarPalette.Aubergine -> Color(0xff611f69)
-                SidebarPalette.Clementine -> Color(0xffa84c12)
-                SidebarPalette.Banana -> Color(0xff8a6a00)
-                SidebarPalette.Jade -> Color(0xff1d6b50)
-                SidebarPalette.Lagoon -> Color(0xff0b5c8a)
-                SidebarPalette.Barbra -> Color(0xff9e2a5e)
-                SidebarPalette.Gray -> Color(0xff1164a3)
-                SidebarPalette.MoodIndigo -> Color(0xff3a40b0)
-            },
-            "selectionText" to Color(0xffffffff),
+            "border" to Color(0xffe2e4e8),
+            "borderStrong" to Color(0xffc4c7cd),
+            "hover" to Color(0xff0f1115).copy(alpha = 0.06f),
+            "pressed" to Color(0xff0f1115).copy(alpha = 0.1f),
             "highlight" to Color(0xfff2c744).copy(alpha = 0.5f),
-            "focusRing" to Color(0xff1d9bd1),
-            "accent" to Color(0xff334ec9),
-            "accentTint" to Color(0xff334ec9).copy(alpha = 0.1f),
+            "accent" to Color(0xff1a64d6),
+            "accentTint" to Color(0xff1a64d6).copy(alpha = 0.1f),
+            "accentFill" to Color(0xff1a64d6),
             "onAccent" to Color(0xffffffff),
-            "buttonPrimary" to Color(0xff007a5a),
-            "success" to Color(0xff007a5a),
-            "destructive" to Color(0xffe01e5a),
+            "destructive" to Color(0xffd93036),
             "warning" to Color(0xffc46800),
-            "mention" to Color(0xffe01e5a),
-            "mentionText" to Color(0xff1264a3),
-            "mentionFill" to Color(0xff1d9bd1).copy(alpha = 0.1f),
-            "mentionYouText" to Color(0xff1264a3),
+            "mention" to Color(0xff1a64d6),
+            "mentionText" to Color(0xff1a64d6),
+            "mentionFill" to Color(0xff1a64d6).copy(alpha = 0.1f),
+            "mentionYouText" to Color(0xff8a5a00),
             "mentionYouFill" to Color(0xfff2c744).copy(alpha = 0.4f),
-            "presenceActive" to Color(0xff2bac76),
-            "presenceAway" to Color(0xff616061),
+            "presenceActive" to Color(0xff1e9e4a),
+            "presenceAway" to Color(0xff5f636b),
+            "wallpaperTop" to Color(0xffe2ebfa),
+            "wallpaperMiddle" to Color(0xffebe6f8),
+            "wallpaperBottom" to Color(0xfff6e8ee),
+            "wallpaperDot" to Color(0xff1a64d6).copy(alpha = 0.08f),
+            "bubbleIn" to Color(0xffffffff),
+            "bubbleEdge" to Color(0xff101828).copy(alpha = 0.1f),
+            "bubbleOutMeta" to Color(0xffffffff).copy(alpha = 0.9f),
+            "bubbleOutRule" to Color(0xffffffff).copy(alpha = 0.22f),
+            "reaction" to Color(0xffeef2f8),
+            "dateChip" to Color(0xffffffff).copy(alpha = 0.75f),
+            "onDateChip" to Color(0xff3d4048),
+            "glass" to Color(0xffffffff).copy(alpha = 0.6f),
+            "glassHeader" to Color(0xffffffff).copy(alpha = 0.72f),
+            "glassEdge" to Color(0xff0f1115).copy(alpha = 0.08f),
+            "glassShadow" to Color(0xff101828).copy(alpha = 0.14f),
             "mediaBackdrop" to Color(0xff1a1b1e),
             "mediaControl" to Color(0xff000000).copy(alpha = 0.6f),
             "mediaShade" to Color(0xff000000).copy(alpha = 0.5f),
@@ -188,9 +135,11 @@ object DesignTokens {
     )
 
     val radii: Map<String, Int> = mapOf(
-        "small" to 4,
-        "default" to 6,
-        "large" to 8,
-        "panel" to 12,
+        "extraSmall" to 4,
+        "small" to 8,
+        "medium" to 12,
+        "large" to 16,
+        "bubble" to 20,
+        "extraLarge" to 28,
     )
 }

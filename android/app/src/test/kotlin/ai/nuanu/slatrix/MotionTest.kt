@@ -10,7 +10,6 @@ import ai.nuanu.slatrix.ui.account.ChannelDetailsScreen
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.account.MessageActionsHost
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.runtime.getValue
@@ -43,7 +42,7 @@ class MotionTest {
     @Test fun aPushedPageEasesInAndSettlesWithin150Milliseconds() {
         var shown by mutableStateOf(false)
         compose.setContent {
-            SlatrixTheme { if (shown) LivePreferencesScreen(false, null, SidebarPalette.Aubergine, {}, {}, {}) }
+            SlatrixTheme { if (shown) LivePreferencesScreen(false, null, false, {}, {}, {}) }
         }
         settles("Color mode") { shown = true }
     }

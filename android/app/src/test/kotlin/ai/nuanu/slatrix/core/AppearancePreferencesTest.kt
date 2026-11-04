@@ -19,11 +19,11 @@ class AppearancePreferencesTest {
         val context = RuntimeEnvironment.getApplication()
         val settings = AppearancePreferences(context)
         settings.darkMode = false
-        settings.paletteName = "Lagoon"
+        settings.wallpaperColors = true
 
         val reopened = AppearancePreferences(context)
         assertEquals(false, reopened.darkMode)
-        assertEquals("Lagoon", reopened.paletteName)
+        assertEquals(true, reopened.wallpaperColors)
 
         reopened.darkMode = null
         assertNull(AppearancePreferences(context).darkMode)

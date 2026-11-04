@@ -25,7 +25,8 @@ class AppearancePreferences(private val context: Context) {
         })
     }
 
-    var paletteName: String?
-        get() = values.getString("palette", null)
-        set(value) { values.edit { putString("palette", value) } }
+    /** Material You's colors from the phone's wallpaper in place of Slatrix's own. */
+    var wallpaperColors: Boolean
+        get() = values.getBoolean("wallpaperColors", false)
+        set(value) { values.edit { putBoolean("wallpaperColors", value) } }
 }

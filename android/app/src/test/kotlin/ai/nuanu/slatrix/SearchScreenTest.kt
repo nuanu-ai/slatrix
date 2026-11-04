@@ -52,7 +52,7 @@ class SearchScreenTest {
                     search = { SearchScreen(rooms, "@alex:example.org", MessageSearchState(), {}, {}, {}, onRoom = {}) })
             }
         }
-        compose.onNode(hasText("Search") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected)).performClick()
+        compose.onNodeWithText("Search").performClick()
         compose.onNode(hasSetTextAction()).assertIsFocused()
     }
 

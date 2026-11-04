@@ -8,7 +8,7 @@ class AvatarContrastTest {
     // capability: people.avatars
     @Test fun initialsMeetTheContrastRequirementAcrossEveryAvatarColor() {
         val minimum = 4.5f
-        val foreground = DesignTokens.colors(false, SidebarPalette.Aubergine).getValue("onAccent").luminance()
+        val foreground = DesignTokens.colors(false).getValue("onAccent").luminance()
         for (background in DesignTokens.avatarColors) {
             val luminance = background.luminance()
             val ratio = (maxOf(foreground, luminance) + 0.05f) / (minOf(foreground, luminance) + 0.05f)

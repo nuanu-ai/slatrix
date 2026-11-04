@@ -42,7 +42,7 @@ class InvitationScreenshots(private val screen: String, private val dark: Boolea
             SlatrixTheme(dark = dark) {
                 val colors = SlatrixTheme.colors
                 Column {
-                    Box(Modifier.fillMaxWidth().height(48.8.dp).background(if (screen == "Home") colors.workspaceBar else colors.canvas))
+                    Box(Modifier.fillMaxWidth().height(48.8.dp).background(if (screen == "Home") colors.canvas else colors.canvas))
                     Box(Modifier.weight(1f)) {
                         when (screen) {
                             "Home" -> LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true,

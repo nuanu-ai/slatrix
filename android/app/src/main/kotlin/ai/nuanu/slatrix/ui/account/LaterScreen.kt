@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,12 +37,12 @@ import androidx.compose.ui.text.style.TextOverflow
 /** Slack's Later: what you saved, newest first, each read from its conversation; a tap opens it where it is. */
 @Composable
 fun LaterScreen(saved: List<SavedMessage>, rooms: List<RoomSummary>, load: suspend (SavedMessage) -> SavedPreview?,
-    onOpen: (SavedMessage) -> Unit, onRemove: (SavedMessage) -> Unit, onBack: () -> Unit) {
+    onOpen: (SavedMessage) -> Unit, onRemove: (SavedMessage) -> Unit) {
     val newestFirst = remember(saved) { saved.sortedByDescending { it.savedAt } }
     // Read once per message while the page is open, so scrolling back to a card shows it at once.
     // Kept by message, so a save time merged from another device doesn't read a card again.
     val previews = remember { mutableStateMapOf<Pair<String, String>, SavedPreview?>() }
-    PushedPage("Later", onBack) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = UiMetrics.GapSmall)) {
         if (saved.isEmpty()) item {
             Text("Nothing saved for later", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyLarge,
                 color = SlatrixTheme.colors.textSecondary)
@@ -85,20 +88,5 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
             else -> ""
         }, Modifier.padding(end = UiMetrics.GapLarge), style = MaterialTheme.typography.bodyLarge,
             color = if (shown != null) colors.textBody else colors.textSecondary, minLines = 1, maxLines = 4, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-/** Slack's Later card at the top of Home: how many messages wait there. */
-@Composable
-internal fun LaterCard(count: Int, onClick: () -> Unit) {
-    val colors = SlatrixTheme.colors
-    Surface(onClick, Modifier.width(UiMetrics.HomeCard), shape = MaterialTheme.shapes.large, color = colors.canvas,
-        border = BorderStroke(UiMetrics.Divider, colors.border)) {
-        Column(Modifier.padding(UiMetrics.GapMedium), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
-            Icon(SlackIcons.Bookmark, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.textPrimary)
-            Text("Later", style = MaterialTheme.typography.bodyLarge, color = colors.textPrimary, maxLines = 1)
-            Text(if (count == 1) "1 item" else "$count items", style = MaterialTheme.typography.bodyMedium,
-                color = colors.textSecondary, maxLines = 1)
-        }
     }
 }

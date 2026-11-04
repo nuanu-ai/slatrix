@@ -37,8 +37,8 @@ your direct message with them, made if there is none; a direct message's header 
 the other person.
 In You, View profile opens your profile; Edit profile there changes your display name and
 photo, cropped to a square.
-Open You, then Preferences, to change the color mode and sidebar palette.
-Color mode follows the system until you choose Light or Dark.
+Open You, then Preferences, to change the color mode, and to take the colors from your
+phone's wallpaper. Color mode follows the system until you choose Light or Dark.
 
 Use a dedicated test account and room for automated message checks.
 
@@ -66,5 +66,5 @@ Render Home, DMs, You and a conversation with fictional data, without signing in
 ./gradlew :app:recordRoborazziDebug
 ```
 
-The PNGs land in `app/build/outputs/roborazzi/`, in both themes, with the Lagoon palette
-and larger text for some. Android CI attaches them with its test reports and APKs.
+The PNGs land in `app/build/outputs/roborazzi/`, in both themes and with
+larger text for some. Android CI attaches them with its test reports and APKs.

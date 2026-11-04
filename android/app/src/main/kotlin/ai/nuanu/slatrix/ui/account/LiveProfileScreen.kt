@@ -1,14 +1,12 @@
 package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.AvatarPlaceholder
-import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.Motion
 import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.graphicsLayer
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -32,7 +30,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -130,9 +127,9 @@ internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable (
 fun LivePreferencesScreen(
     dark: Boolean,
     darkOverride: Boolean?,
-    palette: SidebarPalette,
+    wallpaperColors: Boolean,
     onColorMode: (Boolean?) -> Unit,
-    onPalette: (SidebarPalette) -> Unit,
+    onWallpaperColors: (Boolean) -> Unit,
     onBack: () -> Unit,
     notifications: @Composable () -> Unit = {},
 ) {
@@ -173,16 +170,14 @@ fun LivePreferencesScreen(
                         Text(colorMode, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
                     }
                 }
-                Text("Color theme", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text("Colors", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Column(Modifier.selectableGroup()) {
-                    SidebarPalette.entries.forEach { choice ->
+                    listOf("Slatrix" to false, "From your wallpaper" to true).forEach { (label, choice) ->
                         Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
-                            .selectable(selected = palette == choice, role = Role.RadioButton, onClick = { onPalette(choice) })
+                            .selectable(selected = wallpaperColors == choice, role = Role.RadioButton, onClick = { onWallpaperColors(choice) })
                             .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(UiMetrics.GapSection).clip(MaterialTheme.shapes.small)
-                                .background(DesignTokens.colors(dark, choice).getValue("selectionStrong")))
-                            Text(choice.label, Modifier.weight(1f).padding(horizontal = UiMetrics.GapMedium), style = MaterialTheme.typography.bodyLarge)
-                            RadioButton(selected = palette == choice, onClick = null)
+                            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                            RadioButton(selected = wallpaperColors == choice, onClick = null)
                         }
                     }
                 }

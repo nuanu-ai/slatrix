@@ -7,7 +7,6 @@ import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
-import ai.nuanu.slatrix.ui.designsystem.SidebarPalette
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
@@ -39,28 +38,26 @@ class LiveForegroundTest {
 
     @Test fun workspaceTitleInheritsReadableForegroundWhenAppearanceChanges() {
         val dark = mutableStateOf(false)
-        val palette = mutableStateOf(SidebarPalette.Aubergine)
         compose.setContent {
-            SlatrixTheme(dark = dark.value, palette = palette.value) {
+            SlatrixTheme(dark = dark.value) {
                 LiveHomeScreen("@alex:example.org", RoomListState(loading = false), {}, {}, {})
             }
         }
-        for (isDark in listOf(false, true)) for (sidebar in SidebarPalette.entries) {
-            compose.runOnIdle { dark.value = isDark; palette.value = sidebar }
+        for (isDark in listOf(false, true)) {
+            compose.runOnIdle { dark.value = isDark }
             compose.onNodeWithText("All conversations", useUnmergedTree = true).assertReadable()
         }
     }
 
     @Test fun selectedPhoneDestinationsStayReadableAndNavigateInBothThemes() {
         val dark = mutableStateOf(false)
-        val palette = mutableStateOf(SidebarPalette.Aubergine)
         compose.setContent {
-            SlatrixTheme(dark = dark.value, palette = palette.value) {
+            SlatrixTheme(dark = dark.value) {
                 LiveHomeScreen("@alex:example.org", RoomListState(loading = false), {}, {}, {})
             }
         }
-        for (isDark in listOf(false, true)) for (sidebar in SidebarPalette.entries) {
-            compose.runOnIdle { dark.value = isDark; palette.value = sidebar }
+        for (isDark in listOf(false, true)) {
+            compose.runOnIdle { dark.value = isDark }
             tab("Home").performClick()
             compose.onNodeWithText("Home", useUnmergedTree = true).assertReadable()
             tab("DMs").performClick()
