@@ -15,10 +15,11 @@ if [[ -n $(git status --porcelain -- Sources) ]]; then
     exit 1
 fi
 
-# --no-overlay also drops files that exist on only one side, so the index ends where it started.
-restore() { rm -rf Sources && git checkout -q --no-overlay HEAD -- Sources; }
+# --no-overlay also drops files that exist on only one side, so the index ends where it started. Git rewrites only
+# the files that differ, so the build recompiles just those.
+git update-index -q --refresh || true
+restore() { git checkout -q --no-overlay HEAD -- Sources; }
 trap restore EXIT
-rm -rf Sources
 git checkout -q --no-overlay "$(git merge-base "$base" HEAD)" -- Sources
 
 mkdir -p .build
