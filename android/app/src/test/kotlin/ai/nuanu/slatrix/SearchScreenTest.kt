@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix
 
+import ai.nuanu.slatrix.core.LatestMessage
 import ai.nuanu.slatrix.core.MessageSearchQuery
 import ai.nuanu.slatrix.core.MessageSearchState
 import ai.nuanu.slatrix.core.RoomListState
@@ -68,6 +69,18 @@ class SearchScreenTest {
         compose.onNodeWithText("general").assertDoesNotExist()
         compose.onNodeWithText("Desmond Fry").performClick()
         compose.runOnIdle { assertEquals(listOf("!desmond:example.org"), opened) }
+    }
+
+    // capability: search.rooms
+    @Test fun anEmptySearchOffersTheConversationsMostRecentlyActive() {
+        val active = listOf(rooms[1].copy(latest = LatestMessage("Ship it", 2_000, own = false)),
+            rooms[3].copy(latest = LatestMessage("Lunch?", 3_000, own = false)), rooms[2])
+        val opened = mutableListOf<String>()
+        compose.setContent { SlatrixTheme { SearchScreen(active, "@alex:example.org", MessageSearchState(), {}, {}, {}) { opened += it } } }
+        assertTrue(top("Desmond Fry") < top("design"))
+        compose.onNodeWithText("general").assertDoesNotExist()
+        compose.onNodeWithText("design").performClick()
+        compose.runOnIdle { assertEquals(listOf("!design:example.org"), opened) }
     }
 
     // capability: search.messages

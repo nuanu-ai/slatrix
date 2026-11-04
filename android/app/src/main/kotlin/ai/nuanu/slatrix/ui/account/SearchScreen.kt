@@ -112,6 +112,10 @@ fun SearchScreen(rooms: List<RoomSummary>, me: String, messages: MessageSearchSt
                 val offered = RecentSearches.offered(text, recents)
                 if (offered.isNotEmpty()) item { SearchSection("Recent searches") }
                 items(offered, key = { it }) { RecentRow(it, searchRecent) }
+                // Slack opens Search on where you've been, so it is never blank.
+                val active = rooms.filter { it.latest != null }.sortedByDescending { it.latest?.timestamp }.take(SuggestionCount)
+                if (active.isNotEmpty()) item { SearchSection("Recent conversations") }
+                items(active, key = { "room ${it.id}" }) { RoomSuggestion(it, onRoom) }
             }
         }
     }
@@ -166,22 +170,10 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<St
         items(recents, key = { "recent-$it" }) { RecentRow(it, onRecent) }
         if (channels.isNotEmpty()) {
             item { SearchSection("Channels") }
-            items(channels, key = { it.id }) { room ->
-                SearchRow({ onRoom(room.id) }) {
-                    Lead { ChannelGlyph(room.isPrivate, SlatrixTheme.colors.textSecondary) }
-                    Spacer(Modifier.width(UiMetrics.GapMedium))
-                    RowTitle(room.name)
-                }
-            }
+            items(channels, key = { it.id }) { RoomSuggestion(it, onRoom) }
         }
         if (people.isNotEmpty() || others.isNotEmpty()) item { SearchSection("People") }
-        items(people, key = { it.id }) { room ->
-            SearchRow({ onRoom(room.id) }) {
-                Lead { LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowLead, room.avatarUrl) }
-                Spacer(Modifier.width(UiMetrics.GapMedium))
-                RowTitle(room.name)
-            }
-        }
+        items(people, key = { it.id }) { RoomSuggestion(it, onRoom) }
         items(others, key = { "person ${it.id}" }) { person ->
             SearchRow({ onPerson(person) }) {
                 Lead { LiveAvatar(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), UiMetrics.RowLead, person.avatarUrl) }
@@ -257,9 +249,22 @@ private fun RecentRow(recent: String, onRecent: (String) -> Unit) {
     }
 }
 
+/** A conversation to open: a channel by its #, a person by their picture. */
+@Composable
+private fun RoomSuggestion(room: RoomSummary, onRoom: (String) -> Unit) {
+    SearchRow({ onRoom(room.id) }) {
+        Lead {
+            if (room.direct) LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowLead, room.avatarUrl)
+            else ChannelGlyph(room.isPrivate, SlatrixTheme.colors.textSecondary)
+        }
+        Spacer(Modifier.width(UiMetrics.GapMedium))
+        RowTitle(room.name)
+    }
+}
+
 @Composable
 private fun SearchRow(onClick: () -> Unit, content: @Composable RowScope.() -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ListRow).clickable(role = Role.Button, onClick = onClick)
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button, onClick = onClick)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
         content()
     }
