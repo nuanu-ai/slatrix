@@ -8,6 +8,7 @@ import ai.nuanu.slatrix.core.MessageTextStyle
 import ai.nuanu.slatrix.ui.designsystem.AppColors
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import ai.nuanu.slatrix.ui.designsystem.message
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -54,10 +55,14 @@ private class Line(val runs: MutableList<MessageRun> = mutableListOf(), var bloc
     val marker get() = runs.firstOrNull()?.takeIf { it.marker }
 }
 
-/** Lines that sit together: text, or a list item with its marker, which an item's continued text leaves empty. */
+/**
+ * Lines that sit together: text, or a list item with its marker, which an item's continued text leaves empty. One
+ * after a blank line starts a new paragraph, a short [gap] below the last instead of a whole empty line.
+ */
 private sealed interface Piece {
-    data class Text(val lines: List<Line>) : Piece
-    data class Item(val depth: Int, val marker: String, val lines: List<Line>) : Piece
+    val gap: Boolean
+    data class Text(val lines: List<Line>, override val gap: Boolean = false) : Piece
+    data class Item(val depth: Int, val marker: String, val lines: List<Line>, override val gap: Boolean = false) : Piece
 }
 
 private fun lines(runs: List<MessageRun>): List<Line> {
@@ -81,17 +86,24 @@ private fun lines(runs: List<MessageRun>): List<Line> {
 
 private fun pieces(lines: List<Line>): List<Piece> {
     val pieces = mutableListOf<Piece>()
+    var gap = false
     for (line in lines) {
         val depth = line.block?.list ?: 0
         val marker = line.marker
         val last = pieces.lastOrNull()
-        when {
-            marker != null -> pieces += Piece.Item(depth, marker.text.trimEnd(), listOf(Line(line.runs.drop(1).toMutableList(), line.block)))
-            depth > 0 && last is Piece.Item && last.depth == depth -> pieces[pieces.lastIndex] = last.copy(lines = last.lines + line)
-            depth > 0 -> pieces += Piece.Item(depth, "", listOf(line))
-            last is Piece.Text -> pieces[pieces.lastIndex] = last.copy(lines = last.lines + line)
-            else -> pieces += Piece.Text(listOf(line))
+        // A code block keeps its blank lines as written.
+        if (line.runs.isEmpty() && line.block?.code != true) {
+            gap = pieces.isNotEmpty()
+            continue
         }
+        when {
+            marker != null -> pieces += Piece.Item(depth, marker.text.trimEnd(), listOf(Line(line.runs.drop(1).toMutableList(), line.block)), gap)
+            depth > 0 && !gap && last is Piece.Item && last.depth == depth -> pieces[pieces.lastIndex] = last.copy(lines = last.lines + line)
+            depth > 0 -> pieces += Piece.Item(depth, "", listOf(line), gap)
+            !gap && last is Piece.Text -> pieces[pieces.lastIndex] = last.copy(lines = last.lines + line)
+            else -> pieces += Piece.Text(listOf(line), gap)
+        }
+        gap = false
     }
     return pieces
 }
@@ -149,7 +161,7 @@ private fun AnnotatedString.Builder.append(lines: List<Line>, colors: AppColors,
 @Composable
 fun MessageBody(message: ConversationMessage, color: Color, me: String?, onMention: ((String) -> Unit)? = null) {
     val colors = SlatrixTheme.colors
-    val textStyle = MaterialTheme.typography.bodyLarge
+    val textStyle = MaterialTheme.typography.message
     when (message.kind) {
         MessageKind.Deleted -> return Text(buildAnnotatedString {
             withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append("This message was deleted.") }
@@ -201,9 +213,10 @@ private fun MessagePieces(pieces: List<Piece>, colors: AppColors, color: Color, 
     Column {
         pieces.forEachIndexed { index, piece ->
             val last = index == pieces.lastIndex
+            val top = if (piece.gap) Modifier.padding(top = UiMetrics.GapSmall) else Modifier
             when (piece) {
-                is Piece.Text -> Text(text(piece.lines, last), style = style, color = color)
-                is Piece.Item -> Row(Modifier.padding(start = indent * (piece.depth - 1))) {
+                is Piece.Text -> Text(text(piece.lines, last), top, style = style, color = color)
+                is Piece.Item -> Row(top.padding(start = indent * (piece.depth - 1))) {
                     Text(piece.marker, Modifier.widthIn(min = indent), style = style, color = color)
                     Text(text(piece.lines, last), style = style, color = color)
                 }
