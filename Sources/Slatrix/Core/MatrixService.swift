@@ -1022,8 +1022,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         let allRooms = try await service.roomListService().allRooms()
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
-        roomList = allRooms.entriesWithDynamicAdapters(
-            pageSize: 100,
+        roomList = Self.observeAllRooms(
+            allRooms,
             listener: RoomsObserver { [weak self] updates in
                 Task { @MainActor [weak self] in
                     // The updates carry this account's rooms; a late batch must not list them under another.
@@ -1031,8 +1031,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     self.roomListRefresher.request(updates)
                 }
             })
-        // The dynamic list emits nothing until a filter is set; false means the list is already gone.
-        guard roomList?.controller().setFilter(kind: .all(filters: [])) == true else {
+        guard roomList != nil else {
             throw MatrixServiceError.request("Couldn’t load your conversations. Sign in again.")
         }
         try await connectionRecovery.retry()
@@ -3332,5 +3331,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             return "Can’t reach the server. Check your connection."
         }
         return "Something went wrong. Try again."
+    }
+}
+
+extension MatrixService {
+    /// Lists every room the account has through `listener`; nil when the list is already gone. One page of all of
+    /// them, as Android asks for: a first page alone leaves out the older direct messages and channels of a busy
+    /// account, though the sidebar lists them all.
+    nonisolated static func observeAllRooms(_ rooms: RoomList, listener: RoomListEntriesListener)
+        -> RoomListEntriesWithDynamicAdaptersResult?
+    {
+        let list = rooms.entriesWithDynamicAdapters(pageSize: .max, listener: listener)
+        // The dynamic list emits nothing until a filter is set; false means the list is already gone.
+        return list.controller().setFilter(kind: .all(filters: [])) ? list : nil
     }
 }
