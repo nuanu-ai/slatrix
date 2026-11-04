@@ -46,6 +46,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 
 private enum class ActivityFilter(val label: String) { All("All"), Dms("DMs"), Mentions("Mentions"), Threads("Threads") }
@@ -68,24 +69,23 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
             .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapLarge),
             horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+            // Slack's Unreads narrows any filter to what you haven't opened, so it leads the row.
+            ChoiceChip("Unreads", unreadOnly) { unreadOnly = !unreadOnly }
             ActivityFilter.entries.forEach { ChoiceChip(it.label, it == filter) { filter = it } }
         }
         // Threads lists the threads you're in, as Slack's Threads view does, rather than only the replies that notified you.
         if (filter == ActivityFilter.Threads) threads(onOpenThread)
-        else Box(Modifier.fillMaxSize()) {
-            // Room under the last item for the Unreads pill.
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = UiMetrics.Touch + UiMetrics.GapLarge * 2)) {
-                if (shown.isEmpty()) item(key = "empty") {
-                    Text(if (filter == ActivityFilter.All) "You’re all caught up" else "Nothing here yet",
-                        Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textSecondary)
-                }
-                items(shown, key = { it.id }) { item ->
-                    HorizontalDivider(color = SlatrixTheme.colors.border)
-                    ActivityRow(item) { onOpenItem(item) }
+        else LazyColumn(Modifier.fillMaxSize()) {
+            if (shown.isEmpty()) item(key = "empty") {
+                Box(Modifier.fillParentMaxSize().padding(UiMetrics.GapLarge), contentAlignment = Alignment.Center) {
+                    Text(if (filter == ActivityFilter.All && !unreadOnly) "You’re all caught up" else "Nothing here yet",
+                        style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textSecondary, textAlign = TextAlign.Center)
                 }
             }
-            // Slack's floating Unreads pill narrows any filter to what you haven't opened.
-            UnreadsPill(unreadOnly, Modifier.align(Alignment.BottomEnd).padding(UiMetrics.GapLarge)) { unreadOnly = !unreadOnly }
+            items(shown, key = { it.id }) { item ->
+                HorizontalDivider(color = SlatrixTheme.colors.border)
+                ActivityRow(item) { onOpenItem(item) }
+            }
         }
     }
 }
@@ -96,21 +96,10 @@ internal fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(onClick = onClick, Modifier.semantics { this.selected = selected }, shape = MaterialTheme.shapes.medium,
         color = if (selected) colors.textPrimary else colors.canvas, contentColor = if (selected) colors.canvas else colors.textPrimary,
         border = if (selected) null else BorderStroke(UiMetrics.Divider, colors.border)) {
-        Box(Modifier.heightIn(min = UiMetrics.Touch - UiMetrics.GapSmall).padding(horizontal = UiMetrics.GapLarge),
+        Box(Modifier.heightIn(min = UiMetrics.Touch - UiMetrics.GapSmall).padding(horizontal = UiMetrics.GapMedium),
             contentAlignment = Alignment.Center) {
-            Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
-        }
-    }
-}
-
-@Composable
-private fun UnreadsPill(selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    val colors = SlatrixTheme.colors
-    Surface(onClick = onClick, modifier.semantics { this.selected = selected }, shape = MaterialTheme.shapes.extraLarge,
-        color = if (selected) colors.textPrimary else colors.raised, contentColor = if (selected) colors.canvas else colors.textPrimary,
-        border = BorderStroke(UiMetrics.Divider, colors.border)) {
-        Box(Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapSection), contentAlignment = Alignment.Center) {
-            Text("Unreads", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1)
         }
     }
 }
