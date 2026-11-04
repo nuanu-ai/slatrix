@@ -289,8 +289,18 @@ struct TimelineTable: NSViewRepresentable {
             open()
             return
         }
-        preservingPosition {
-            let difference = next.map(\.id).difference(from: rows.map(\.id))
+        let difference = next.map(\.id).difference(from: rows.map(\.id))
+        let me = configuration.context.matrix?.user?.id
+        // As in Slack, what you send brings a live conversation to it, wherever you were reading.
+        let sent =
+            configuration.live
+            && difference.insertions.contains {
+                guard case .insert(let offset, _, _) = $0, case .message(let entry) = next[offset].kind else {
+                    return false
+                }
+                return entry.message.senderID == me && entry.message.sendState != "sent"
+            }
+        preservingPosition(keeping: sent ? .bottom : nil) {
             if !difference.isEmpty {
                 NSAnimationContext.beginGrouping()
                 NSAnimationContext.current.duration = 0
@@ -308,6 +318,9 @@ struct TimelineTable: NSViewRepresentable {
                 table.endUpdates()
                 NSAnimationContext.endGrouping()
                 reindex()
+                // The table guesses the height of a row inserted off screen from the rows around it until something
+                // asks for the row's frame, and puts the real one in at a later layout, past this wrapper.
+                for case .insert(let offset, _, _) in difference.insertions { _ = table.rect(ofRow: offset) }
             }
             var changed = IndexSet()
             if settingsChanged {

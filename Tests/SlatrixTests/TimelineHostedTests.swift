@@ -278,6 +278,37 @@ struct TimelineHostedTests {
         #expect(edges().top == before && edges().bottom >= 100)
     }
 
+    @Test("Sending files brings the conversation to them, from wherever you were reading")
+    func sendingBringsToBottom() async throws {
+        let earlier = Self.messages(0..<60)
+        let harness = Harness(messages: earlier, height: 700)
+        defer { harness.close() }
+        await settle(harness)
+        harness.scroll(toTop: harness.clip.bounds.minY - 1_500)
+        let files = [
+            ("wide.jpg", "image/jpeg", 4_032, 3_024, 3_400_000), ("tall.png", "image/png", 1_080, 1_920, 900_000),
+            ("pano.jpg", "image/jpeg", 3_000, 800, 1_200_000), ("square.png", "image/png", 800, 800, 300_000),
+            ("report.pdf", "application/pdf", 0, 0, 80_000), ("notes.txt", "text/plain", 0, 0, 2_000),
+        ]
+        let sent = files.enumerated().map { index, file in
+            var message = ChatMessage(
+                id: "sent-\(index)", roomID: Self.room.id, senderID: Self.user, senderName: "Reader", body: file.0,
+                timestamp: earlier[59].timestamp.addingTimeInterval(60), kind: file.2 > 0 ? "m.image" : "m.file")
+            message.timelineEventID = "transaction-\(index)"
+            message.sendState = "sending"
+            message.attachment = MessageAttachment(
+                name: file.0, url: "", mimeType: file.1, size: UInt64(file.4),
+                width: file.2 > 0 ? UInt64(file.2) : nil, height: file.3 > 0 ? UInt64(file.3) : nil)
+            return message
+        }
+        harness.service.messages = earlier + sent
+        await settle(harness) { harness.cell(showing: "transaction-5") != nil }
+        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        await drainMainActor()
+        await settle(harness)
+        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+    }
+
     @Test("New messages do not move what you are reading further up")
     func readingStaysStill() async throws {
         let harness = Harness(messages: Self.messages(0..<40))
