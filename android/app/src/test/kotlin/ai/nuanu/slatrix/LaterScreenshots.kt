@@ -31,9 +31,9 @@ class LaterScreenshots(private val dark: Boolean) {
         val saved = listOf(SavedMessage("!design:example.org", "\$a", 3), SavedMessage("!wm:example.org", "\$b", 2),
             SavedMessage("!design:example.org", "\$c", 1))
         val previews = mapOf(
-            "\$a" to SavedPreview("Mira Chen", "The new onboarding flow is up on staging. Would love eyes on the empty states.", 1_761_134_400_000L),
-            "\$b" to SavedPreview("Wanda Moss", "Can you look at the release notes before lunch?", 1_761_048_000_000L),
-            "\$c" to SavedPreview("Jordan Lee", "Launch review moved to Thursday at 3.", 1_760_961_600_000L),
+            "\$a" to SavedPreview("@mira:example.org", "Mira Chen", "The new onboarding flow is up on staging. Would love eyes on the empty states.", 1_761_134_400_000L),
+            "\$b" to SavedPreview("@wanda:example.org", "Wanda Moss", "Can you look at the release notes before lunch?", 1_761_048_000_000L),
+            "\$c" to SavedPreview("@jordan:example.org", "Jordan Lee", "Launch review moved to Thursday at 3.", 1_760_961_600_000L),
         )
         compose.setContent { SlatrixTheme(dark = dark) { LaterScreen(saved, rooms, { previews[it.eventId] }, {}, {}) } }
         compose.waitForIdle()

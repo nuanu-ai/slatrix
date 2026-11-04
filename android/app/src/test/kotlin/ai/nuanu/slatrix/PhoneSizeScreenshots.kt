@@ -107,8 +107,8 @@ class PhoneSizeScreenshots(private val screen: String, private val phone: String
                 onChannel = {}, onBack = {})
             "Later" -> {
                 val previews = mapOf(
-                    "\$a" to SavedPreview("Mira Chen", "The new onboarding flow is up on staging. Would love eyes on the empty states.", now - hour),
-                    "\$b" to SavedPreview("Wanda Moss", "Can you look at the release notes before lunch?", now - 26 * hour),
+                    "\$a" to SavedPreview("@mira:example.org", "Mira Chen", "The new onboarding flow is up on staging. Would love eyes on the empty states.", now - hour),
+                    "\$b" to SavedPreview("@wanda:example.org", "Wanda Moss", "Can you look at the release notes before lunch?", now - 26 * hour),
                 )
                 LaterScreen(listOf(SavedMessage("!design:example.org", "\$a", 2), SavedMessage("!wm:example.org", "\$b", 1)),
                     listOf(room, RoomSummary("!wm:example.org", "Wanda Moss", true, "", UnreadBadge.None, "WM", 1)),

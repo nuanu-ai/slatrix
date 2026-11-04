@@ -11,7 +11,7 @@ class MatrixSavedTest {
     @Test fun aSavedMessageReadsAsItIsNowFromItsConversation() = runTest {
         val room = SavedRoom(Membership.JOINED)
         val preview = MatrixSaved(SavedClient(room)).preview(SavedMessage("!design:example.org", "\$one", 0))
-        assertEquals(SavedPreview("Mira Chen", "Edited to this", 1_700_000_000_000L), preview)
+        assertEquals(SavedPreview("@mira:example.org", "Mira Chen", "Edited to this", 1_700_000_000_000L), preview)
     }
 
     @Test fun aConversationYouLeftHasNothingToShow() = runTest {

@@ -2,12 +2,14 @@ package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SavedMessage
+import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.SavedPreview
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -63,7 +65,12 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
     val loaded = key in previews
     val preview = previews[key]
     Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen)
-        .padding(start = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapMedium)) {
+        .padding(start = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapMedium),
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+        // The picture's place is kept while the message loads, so the text never shifts when it lands.
+        Box(Modifier.padding(top = UiMetrics.GapTiny).size(UiMetrics.Avatar)) {
+            preview?.let { LiveAvatar(AvatarPlaceholder.initials(it.senderName), AvatarPlaceholder.colorIndex(it.senderId), url = it.avatarUrl) }
+        }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.Hairline * 4)) {
             Text(when {
                 room == null -> "Conversation unavailable"
