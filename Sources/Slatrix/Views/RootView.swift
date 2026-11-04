@@ -6,7 +6,7 @@ import SwiftUI
 /// What the window shows. The window never sits on `directMessages`: that is the sidebar's DMs list, beside a
 /// conversation on `home`.
 enum AppRoute: String, CaseIterable {
-    case home, directMessages, activity, files, saved, threads, drafts, directory, search
+    case home, directMessages, activity, files, saved, threads, drafts, directory, search, channels
     var title: String {
         switch self {
         case .home: "Home"
@@ -18,6 +18,7 @@ enum AppRoute: String, CaseIterable {
         case .drafts: "Drafts"
         case .directory: "People"
         case .search: "Search"
+        case .channels: "Channels"
         }
     }
     var symbol: String {
@@ -31,6 +32,7 @@ enum AppRoute: String, CaseIterable {
         case .drafts: "paperplane"
         case .directory: "person.crop.square"
         case .search: "magnifyingglass"
+        case .channels: "number"
         }
     }
 }
@@ -69,7 +71,8 @@ struct RootView: View {
     @State private var recentSearches: [String] = []
     /// Any modal at all, such as a confirmation the timeline opened; read outside the body only.
     @State private var modalShown = false
-    @State private var publicDirectory: PublicDirectorySelection?
+    /// What a new channel starts out named, when Browse channels found nothing by that name.
+    @State private var creationName = ""
     @State private var showRecovery = false
     @State private var editingProfile = false
     @State private var creation: CreationKind?
@@ -260,14 +263,6 @@ struct RootView: View {
         let route: AppRoute
         let workspaceID: String?
     }
-    private struct PublicDirectorySelection: Identifiable {
-        let id = UUID()
-        let accountID: String
-        let session: UUID
-        let navigation: UUID
-        let route: AppRoute
-        let workspaceID: String?
-    }
     private var composerIdentity: ComposerIdentity {
         ComposerIdentity(userID: matrix.user?.id, isPreview: matrix.isPreview, sessionID: matrix.notificationSessionID)
     }
@@ -280,7 +275,7 @@ struct RootView: View {
             timelineID: matrix.timelineSelectionID, threadID: threadRoot?.eventID, readyThreadID: threadReadyID)
     }
     private var hasPresentedSheet: Bool {
-        publicDirectory != nil || showRecovery || creation != nil || channelDetails != nil || leaving != nil
+        showRecovery || creation != nil || channelDetails != nil || leaving != nil
             || roomDetails != nil || roomNotifications != nil || forwarding != nil
             || mediaCaption != nil || matrixJoin != nil || logoutConfirmation
             || logoutRecovery.request != nil || logoutRecovery.isBusy
@@ -558,16 +553,11 @@ struct RootView: View {
                     onEditDetails: { roomDetails = DetailsSelection(id: selection.room.id) },
                     onNotifications: { roomNotifications = DetailsSelection(id: selection.room.id) })
             }
-            .modal(item: $publicDirectory) { selection in
-                PublicRoomDirectoryView(
-                    matrix: matrix, service: matrix.publicDirectory,
-                    workspace: matrix.workspaces.first { $0.id == selection.workspaceID },
-                    onResolve: { finishPublicDirectory($0, selection: selection) }, onClose: { publicDirectory = nil })
-            }
             .modal(item: $creation) { kind in
                 CreationSheet(
                     matrix: matrix, kind: kind, workspaceID: workspaceID,
                     roomID: kind == .invite ? inviteTargetRoomID : matrix.selectedRoomID,
+                    initialName: kind == .channel ? creationName : "",
                     onCreated: { id, isWorkspace, notice in
                         if kind != .invite {
                             if isWorkspace {
@@ -1303,15 +1293,28 @@ struct RootView: View {
             }
         }.background(colors.canvas).dropToUpload("Upload to thread")
     }
+    private var browsedWorkspace: Workspace? { matrix.workspaces.first { $0.id == workspaceID } }
     private func collectionContent(_ route: AppRoute) -> some View {
         VStack(spacing: 0) {
             toolbar {
-                // Search results title themselves with the query.
-                if route != .search {
+                if route == .channels {
+                    VStack(alignment: .leading, spacing: m(1)) {
+                        Text(route.title).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
+                        Text(browsedWorkspace?.name ?? "").font(m.font(.subheadline))
+                            .foregroundStyle(colors.textSecondary)
+                    }.lineLimit(1)
+                } else if route != .search {
+                    // Search results title themselves with the query.
                     Text(route.title).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
                 }
             } trailing: {
-                if route == .directory {
+                if route == .channels {
+                    Button {
+                        handleMenu("new-channel")
+                    } label: {
+                        Label("Create Channel", systemImage: "plus")
+                    }.buttonStyle(.secondary).controlSize(.small)
+                } else if route == .directory {
                     Button {
                         creation = .directMessage
                     } label: {
@@ -1320,6 +1323,15 @@ struct RootView: View {
                 }
             }
             switch route {
+            case .channels:
+                PublicRoomDirectoryView(
+                    matrix: matrix, service: matrix.publicDirectory, workspace: browsedWorkspace,
+                    onResolve: openBrowsedChannel,
+                    onCreate: { name in
+                        creationName = name
+                        creation = .channel
+                    }
+                ).id(workspaceID)
             case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
             case .threads:
                 ThreadsFeedView(
@@ -1920,34 +1932,19 @@ struct RootView: View {
         }
     }
     private func presentPublicDirectory() {
-        guard !hasModal, !hasNativeModal, !matrix.verification.isPresented,
-            let accountID = matrix.user?.id, !matrix.isPreview
+        guard !hasModal, !hasNativeModal, !matrix.verification.isPresented else { return }
+        cancelMatrixLink()
+        route = .channels
+    }
+    /// A channel picked in Browse channels opens like a link to it: straight in when joined, else its join review.
+    private func openBrowsedChannel(_ resolution: MatrixLinkResolution) {
+        guard let accountID = matrix.user?.id, resolution.accountID == accountID,
+            resolution.sessionID == matrix.notificationSessionID, route == .channels
         else { return }
         cancelMatrixLink()
-        publicDirectory = PublicDirectorySelection(
-            accountID: accountID, session: matrix.notificationSessionID, navigation: navigationGeneration, route: route,
-            workspaceID: workspaceID)
-    }
-    private func finishPublicDirectory(_ resolution: MatrixLinkResolution, selection: PublicDirectorySelection) {
-        guard publicDirectory?.id == selection.id else { return }
-        guard matrix.user?.id == selection.accountID, matrix.notificationSessionID == selection.session,
-            resolution.accountID == selection.accountID, resolution.sessionID == selection.session, !matrix.isPreview
-        else {
-            publicDirectory = nil
-            return
-        }
-        guard navigationGeneration == selection.navigation, route == selection.route,
-            workspaceID == selection.workspaceID
-        else {
-            publicDirectory = nil
-            navigationNotice = "You moved on. Open Browse channels to try again."
-            return
-        }
-        cancelMatrixLink()
         pendingMatrixLink = PendingMatrixLink(
-            source: .resolved(resolution), accountID: selection.accountID, session: selection.session,
-            navigation: selection.navigation, route: selection.route, workspaceID: selection.workspaceID)
-        publicDirectory = nil
+            source: .resolved(resolution), accountID: accountID, session: matrix.notificationSessionID,
+            navigation: navigationGeneration, route: route, workspaceID: workspaceID)
         _ = resumeMatrixLink()
     }
     private func enqueueMatrixLink(_ url: URL) {
@@ -2561,7 +2558,6 @@ struct RootView: View {
         directMessageSearch = ""
         unreadDirectMessagesOnly = false
         modals.current = nil
-        publicDirectory = nil
         showRecovery = false
         creation = nil
         inviteTargetRoomID = nil
@@ -2638,7 +2634,9 @@ struct RootView: View {
             let name = room.map { $0.name.contains(" ") ? "\"\($0.name)\"" : ($0.isDirect ? "@" : "#") + $0.name }
             searchBar.focus(text: route == .home ? name.map { "in:\($0) " } : nil)
         case "new-message": creation = .directMessage
-        case "new-channel": creation = .channel
+        case "new-channel":
+            creationName = ""
+            creation = .channel
         case "back": navigateHistory(-1)
         case "forward": navigateHistory(1)
         case "threads": route = .threads

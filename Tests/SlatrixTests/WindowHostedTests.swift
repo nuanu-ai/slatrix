@@ -323,6 +323,26 @@ struct WindowHostedTests {
         #expect(card(older) === shown)
     }
 
+    // capability: home.browse-channels
+    @Test("Browse channels opens as a page in place of the conversation, and picking a channel brings it back")
+    func browseChannelsPage() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        func search() -> Bool {
+            harness.shown().contains { ($0 as? NSTextField)?.placeholderString == "Search by name or topic" }
+        }
+        func editors() -> Int { harness.shown().filter { ($0 as? NSTextView)?.isEditable == true }.count }
+        #expect(!search() && editors() > 0)
+
+        harness.menu("browse-channels")
+        #expect(await eventually { search() && editors() == 0 })
+        #expect(harness.sidebarShown)
+
+        harness.menu("next-conversation")
+        #expect(await eventually { !search() && editors() > 0 })
+    }
+
     @Test("A save from another device lands above a scrolled Later without moving the cards in view")
     func laterKeepsItsPlace() async throws {
         let harness = Harness()

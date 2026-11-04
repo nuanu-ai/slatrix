@@ -139,6 +139,8 @@ struct CreationSheet: View {
     var kind: CreationKind
     var workspaceID: String? = nil
     var roomID: String? = nil
+    /// The name a new channel starts with.
+    var initialName = ""
     var onCreated: (String, Bool, String?) -> Void
     var onClose: () -> Void
     @EnvironmentObject private var appearance: AppearanceStore
@@ -257,7 +259,10 @@ struct CreationSheet: View {
             }.disabled(busy)
             if let error { InlineErrorView(message: error).clipShape(RoundedRectangle(cornerRadius: m.radius)) }
         }
-        .onAppear { selectedWorkspaceID = workspaceID ?? "" }
+        .onAppear {
+            selectedWorkspaceID = workspaceID ?? ""
+            name = initialName
+        }
         .onChange(of: formIdentity) { _, _ in
             submission = UUID()
             busy = false
