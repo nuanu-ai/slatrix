@@ -29,6 +29,8 @@ struct PublicDirectoryRoom: Identifiable, Hashable {
     var via: [String] = []
     /// Listed by a workspace the person belongs to, which is what a restricted channel usually admits.
     var inWorkspace = false
+    /// The nested space that lists it, for grouping; nil for the workspace's own channels.
+    var spaceName: String?
     var displayName: String { name ?? alias ?? id }
     var canJoin: Bool {
         joinRule == .publicRoom || (inWorkspace && [.restricted, .knockRestricted].contains(joinRule))
@@ -224,6 +226,7 @@ private final class PublicDirectoryObserver: RoomDirectorySearchEntriesListener,
                     var visited: Set<String> = [spaceID]
                     var found: [PublicDirectoryRoom] = []
                     var seen = Set<String>()
+                    var spaceNames: [String: String] = [:]
                     while let next = pending.first {
                         pending.removeFirst()
                         let rooms: [SpaceRoom]
@@ -242,10 +245,14 @@ private final class PublicDirectoryObserver: RoomDirectorySearchEntriesListener,
                         }
                         for room in rooms {
                             if room.roomType == .space {
-                                if visited.insert(room.roomId).inserted { pending.append(room.roomId) }
-                            } else if let channel = PublicDirectoryMapping.channel(room),
+                                if visited.insert(room.roomId).inserted {
+                                    pending.append(room.roomId)
+                                    spaceNames[room.roomId] = room.displayName
+                                }
+                            } else if var channel = PublicDirectoryMapping.channel(room),
                                 seen.insert(channel.id).inserted
                             {
+                                channel.spaceName = spaceNames[next]
                                 found.append(channel)
                             }
                         }

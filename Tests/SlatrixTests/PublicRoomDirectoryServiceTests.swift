@@ -355,5 +355,7 @@ extension PublicRoomDirectoryServiceTests {
         service.open(client: client, spaceID: "!lab:example.org", validate: {})
         await service.search(query: "")
         #expect(ids() == ["!welcome:example.org", "!design:example.org"])
+        // Browse groups each channel under the space that lists it; the workspace's own have none.
+        #expect(service.entries.map(\.spaceName) == [nil, "Team"])
     }
 }
