@@ -24,6 +24,8 @@ object UiMetrics {
     val LargeIcon = 24.dp
     val Divider = 1.dp
     val Hairline = 0.5.dp
+    /** A grey bar standing in for a line of text while it loads. */
+    val SkeletonLine = 12.dp
     /** Design B's two-line conversation row and its 48 dp avatar or channel tile. */
     val ConversationRow = 72.dp
     val RowAvatar = 48.dp

@@ -82,9 +82,10 @@ class ChannelScreensTest {
                     error = null, onSearch = { searched += it }, onMore = {}, onChannel = { picked += it.id }, onBack = {})
             }
         }
-        compose.onNodeWithText("12 members · Reviews and crits").assertIsDisplayed()
+        compose.onNodeWithText("Reviews and crits").assertIsDisplayed()
+        compose.onNodeWithContentDescription("12 members").assertIsDisplayed()
         compose.onNodeWithText("Joined").assertIsDisplayed()
-        compose.onNodeWithText("3 members · Invite only").assertIsDisplayed()
+        compose.onNodeWithText("Invite only").assertIsDisplayed()
         compose.onNodeWithText("board").performClick()
         compose.onNodeWithText("design").performClick()
         compose.onNodeWithText("general").performClick()
@@ -93,6 +94,19 @@ class ChannelScreensTest {
             assertEquals(listOf(design.id, general.id), picked)
             assertEquals("des", searched.last())
         }
+    }
+
+    // capability: home.browse-channels
+    @Test fun aSearchThatFindsNothingSaysWhatItLookedFor() {
+        compose.setContent {
+            SlatrixTheme {
+                BrowseChannelsScreen("Harbor", ChannelDirectoryState(emptyList(), loading = false), joined = emptySet(), joining = null,
+                    error = null, onSearch = {}, onMore = {}, onChannel = {}, onBack = {})
+            }
+        }
+        compose.onNodeWithText("No channels yet").assertIsDisplayed()
+        compose.onNode(hasSetTextAction()).performTextInput("figma")
+        compose.onNodeWithText("No channels match “figma”").assertIsDisplayed()
     }
 
     // capability: home.create-channel
