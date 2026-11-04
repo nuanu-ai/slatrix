@@ -249,7 +249,6 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             if let link = run.link.flatMap({ MessageBodyRenderer.safeLink($0.absoluteString) }) {
                 attributes[.link] = link
                 attributes[.foregroundColor] = linkColor
-                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
             }
             if let mention = run.mention, let mentions {
                 let own = mention == mentions.me || mention == "@room"
@@ -317,7 +316,7 @@ final class MessageTextView: NSTextView {
         (over ? NSCursor.iBeam : NSCursor.arrow).set()
     }
 
-    // Slack underlines the mention under the pointer.
+    // Slack underlines the mention or link under the pointer, and only that one.
     private var underlinedMention: NSRange?
     private lazy var exitTracking = NSTrackingArea(
         rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
@@ -337,12 +336,15 @@ final class MessageTextView: NSTextView {
             let glyph = layout.glyphIndex(for: point, in: container)
             var range = NSRange()
             if glyph < layout.numberOfGlyphs,
-                layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(point),
-                storage.attribute(
-                    .mentionPill, at: layout.characterIndexForGlyph(at: glyph), longestEffectiveRange: &range,
-                    in: NSRange(location: 0, length: storage.length)) != nil
+                layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(point)
             {
-                mention = range
+                let index = layout.characterIndexForGlyph(at: glyph)
+                let all = NSRange(location: 0, length: storage.length)
+                if storage.attribute(.mentionPill, at: index, longestEffectiveRange: &range, in: all) != nil
+                    || storage.attribute(.link, at: index, longestEffectiveRange: &range, in: all) != nil
+                {
+                    mention = range
+                }
             }
         }
         guard mention != underlinedMention else { return }

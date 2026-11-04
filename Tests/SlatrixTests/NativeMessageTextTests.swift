@@ -45,10 +45,45 @@ struct NativeMessageTextTests {
         #expect(text.attribute(.underlineStyle, at: 14, effectiveRange: nil) as? Int == 1)
     }
 
-    @Test("A safe link is clickable and a file link is not")
+    @Test("A safe link is clickable in the link color without an underline, and a file link is not")
     func links() {
         #expect(text.attribute(.link, at: 20, effectiveRange: nil) as? URL == link)
+        #expect(text.attribute(.foregroundColor, at: 20, effectiveRange: nil) as? NSColor == .systemBlue)
+        #expect(text.attribute(.underlineStyle, at: 20, effectiveRange: nil) == nil)
         #expect(text.attribute(.link, at: 24, effectiveRange: nil) == nil)
+    }
+
+    @Test("A link is underlined only while the pointer is over it")
+    func linkHover() throws {
+        let view = MessageTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 40))
+        view.textStorage?.setAttributedString(
+            NativeSelectableMessageText.attributed(
+                [MessageBodyRun(text: "Read "), MessageBodyRun(text: "the notes", link: link)], fontSize: 15,
+                textColor: .labelColor, linkColor: .systemBlue))
+        let window = offscreenWindow(NSSize(width: 400, height: 40))
+        defer { window.close() }
+        window.contentView = view
+        let layout = try #require(view.layoutManager)
+        let container = try #require(view.textContainer)
+        layout.ensureLayout(for: container)
+        func move(toCharacter index: Int) throws {
+            let glyph = layout.glyphIndexForCharacter(at: index)
+            let rect = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container)
+            let point = view.convert(
+                NSPoint(x: rect.midX + view.textContainerOrigin.x, y: rect.midY + view.textContainerOrigin.y), to: nil)
+            view.mouseMoved(
+                with: try #require(
+                    NSEvent.mouseEvent(
+                        with: .mouseMoved, location: point, modifierFlags: [], timestamp: 0,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)))
+        }
+        func underlined(_ index: Int) -> Bool {
+            layout.temporaryAttribute(.underlineStyle, atCharacterIndex: index, effectiveRange: nil) != nil
+        }
+        try move(toCharacter: 7)
+        #expect(underlined(7) && underlined(5) && !underlined(2))
+        try move(toCharacter: 1)
+        #expect(!underlined(7))
     }
 
     // capability: message.mention-pills
