@@ -265,12 +265,16 @@ class MatrixConversationTest {
             override fun latestEvent(): EmbeddedEventDetails = EmbeddedEventDetails.Ready(reply, "@sam:example.org",
                 ProfileDetails.Ready("Sam Okafor", false, "mxc://example.org/sam", null, null), 1_700_000_600_000u, EventOrTransactionId.EventId("\$r"))
         }
-        val root = TimelineItemContent.MsgLike(MsgLikeContent(
-            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Plan?", null)), "Plan?", false, null)), null, null, summary))
-        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Plan?", content = root), conversationItem("b", "\$b", "Solo")))
+        fun root(body: String, edited: Boolean) = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, edited, null)), null, null, summary))
+        // A bot posts a review and then edits it; the edit keeps its thread.
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Plan?", content = root("Plan?", false)),
+            conversationItem("b", "\$b", "Solo"), conversationItem("c", "\$c", "Review", content = root("Review", true))))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
         val messages = conversation.state.first { it.rows.isNotEmpty() }.rows.messages
-        assertEquals(listOf(MessageThread(3, "Sam Okafor", 1_700_000_600_000L, "mxc://example.org/sam"), null), messages.map { it.thread })
+        val thread = MessageThread(3, "Sam Okafor", 1_700_000_600_000L, "mxc://example.org/sam")
+        assertEquals(listOf(thread, null, thread), messages.map { it.thread })
+        assertTrue(messages.last().edited)
         conversation.close()
     }
 

@@ -43,7 +43,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -615,7 +617,12 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
                 }
                 val root = message.eventId
                 // Inside a thread the root's replies bar says it instead.
-                if (message.thread != null && root != null && onOpenThread != null) Box(inset) { ThreadReplies(message.thread) { onOpenThread(root) } }
+                // A summary that lands after the row is on screen eases the bar in instead of popping it.
+                AnimatedVisibility(message.thread != null && root != null && onOpenThread != null,
+                    enter = expandVertically(Motion.pane()) + fadeIn(Motion.pane()), exit = ExitTransition.None) {
+                    val thread = message.thread
+                    if (thread != null && root != null && onOpenThread != null) Box(inset) { ThreadReplies(thread) { onOpenThread(root) } }
+                }
             }
             // In the bubble's bottom padding, so the bar comes and goes without moving anything.
             message.uploadProgress?.let {

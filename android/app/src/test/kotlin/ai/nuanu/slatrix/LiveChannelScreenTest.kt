@@ -378,6 +378,16 @@ class LiveChannelScreenTest {
         compose.runOnIdle { assertEquals("\$Can we ship Friday?", opened) }
     }
 
+    @Test fun anEditedMessageKeepsItsRepliesBar() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message("Review: two nits", 0).copy(edited = true, thread = MessageThread(2, "Sam", null))),
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread = {})
+            }
+        }
+        compose.onNodeWithText("2 replies", useUnmergedTree = true).assertIsDisplayed()
+    }
+
     // capability: thread.send-to-channel
     @Test fun aCopyOfAThreadReplySaysItRepliedToAThreadAndOpensIt() {
         fun copy(id: String, body: String, reply: String) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", body, null,
