@@ -178,11 +178,11 @@ internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, vide
 private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onLongPress: () -> Unit, onView: (tile: Pair<Int, Int>) -> Unit) {
     val colors = SlatrixTheme.colors
     val shape = MaterialTheme.shapes.large
-    BoxWithConstraints(Modifier.padding(top = UiMetrics.GapTiny).fillMaxWidth()) {
+    BoxWithConstraints {
         val (width, height) = box(attachment.width, attachment.height, maxWidth, UiMetrics.MediaMaxHeight)
         val pixels = with(LocalDensity.current) { width.roundToPx() to height.roundToPx() }
         val shown = picture(attachment, pixels.first, pixels.second, false, load)
-        Box(Modifier.size(width, height).clip(shape).background(colors.sunken).border(UiMetrics.Divider, colors.border, shape)
+        Box(Modifier.size(width, height).clip(shape).background(colors.sunken)
             .semantics { contentDescription = attachment.name }
             .combinedClickable(onClickLabel = "View image", onLongClickLabel = "Message actions", onLongClick = onLongPress) { onView(pixels) }) {
             shown?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
@@ -200,9 +200,9 @@ private fun FileRow(attachment: MessageAttachment, opening: Boolean, onLongPress
         listOfNotNull(kind.label(attachment.name), attachment.size?.let { Formatter.formatShortFileSize(context, it) }).joinToString(" · ")
     }
     val shape = MaterialTheme.shapes.large
-    Row(Modifier.padding(top = UiMetrics.GapTiny).fillMaxWidth().clip(shape).border(UiMetrics.Divider, colors.border, shape)
-        .combinedClickable(onClickLabel = "Open file", onLongClickLabel = "Message actions", onLongClick = onLongPress) { if (!opening) onOpen() }
-        .padding(UiMetrics.GapMedium),
+    // Straight on the bubble, as a messenger sets a file, without a card of its own.
+    Row(Modifier.clip(shape)
+        .combinedClickable(onClickLabel = "Open file", onLongClickLabel = "Message actions", onLongClick = onLongPress) { if (!opening) onOpen() },
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
         FileTile(kind)
         Column(Modifier.weight(1f)) {
