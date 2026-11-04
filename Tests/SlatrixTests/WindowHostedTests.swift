@@ -499,7 +499,7 @@ struct WindowHostedTests {
         #expect(
             await eventually {
                 harness.dividers == 1 && !harness.sidebarShown
-                    && harness.conversationLeft ?? .infinity < Metrics().rail
+                    && harness.conversationLeft == 0
             })
         harness.resize(700)
         #expect(await eventually { harness.dividers == 0 && harness.searchFieldShown })
@@ -538,7 +538,7 @@ struct WindowHostedTests {
         #expect(await eventually { !harness.sidebarShown })
     }
 
-    @Test("Hiding the sidebar by hand at full width hides the rail too, and it comes back")
+    @Test("Hiding the sidebar by hand at full width gives the conversation the whole window, and it comes back")
     func hiddenByHand() async {
         let key = "layout.sidebarHidden"
         let saved = UserDefaults.standard.object(forKey: key)
@@ -548,7 +548,7 @@ struct WindowHostedTests {
         defer { harness.close() }
         #expect(await harness.settle())
         harness.menu("toggle-sidebar")
-        #expect(await eventually { !harness.sidebarShown && harness.conversationLeft ?? .infinity < Metrics().rail })
+        #expect(await eventually { !harness.sidebarShown && harness.conversationLeft == 0 })
         harness.menu("toggle-sidebar")
         #expect(await eventually { harness.sidebarShown && harness.dividers == 1 })
     }
@@ -622,7 +622,7 @@ struct WindowHostedTests {
         #expect(await eventually { harness.shown().contains { $0 is NSSwitch } })
 
         // The scrim is in once the window's frame color along its bottom edge, under the panel, is dimmed.
-        let frame = try #require(NSColor(harness.appearance.colors.frame).usingColorSpace(.sRGB))
+        let frame = try #require(NSColor(harness.appearance.colors.canvas).usingColorSpace(.sRGB))
         let edge = CGRect(x: 0, y: 0, width: harness.hosting.bounds.width, height: 2)
         #expect(
             await eventually {

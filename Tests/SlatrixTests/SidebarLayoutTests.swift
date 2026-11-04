@@ -8,7 +8,7 @@ struct SidebarLayoutTests {
         "A corrupt or out-of-range stored width restores the default",
         arguments: [Double.nan, .infinity, -.infinity, -1, 0, 219, 421, .greatestFiniteMagnitude])
     func corruptStoredWidth(value: Double) {
-        #expect(SidebarLayout.validatedPreferred(value) == 280)
+        #expect(SidebarLayout.validatedPreferred(value) == 264)
     }
 
     @Test("A valid stored width is kept exactly", arguments: [220.0, 239.5, 280, 420])
@@ -20,12 +20,12 @@ struct SidebarLayoutTests {
         "The sidebar gives up width so the conversation stays readable, never below its minimum",
         arguments: [
             // (preferred, available, inspector, expected)
-            (340.0, 1_200.0, 386.0, 256.0),  // a thread beside: the sidebar gives way
+            (340.0, 1_200.0, 386.0, 320.0),  // a thread beside: the sidebar gives way
             (340, 1_400, 380, 340),  // room to spare: the preference returns
-            (420, 978, 0, 420),  // exact boundary keeps the maximum
-            (280, 837, 0, 279),  // one point short shrinks by one point
+            (420, 914, 0, 420),  // exact boundary keeps the maximum
+            (280, 773, 0, 279),  // one point short shrinks by one point
             (280, 400, 380, 220),  // far too small: hold the minimum
-            (.nan, 1_400, 0, 280),  // corrupt preference uses the default
+            (.nan, 1_400, 0, 264),  // corrupt preference uses the default
             (340, .nan, 0, 220),  // corrupt window width stays finite
             (340, 1_400, .infinity, 220),  // corrupt inspector width cannot widen the sidebar
             (340, 1_400, -380, 340),  // negative inspector width cannot widen the sidebar
@@ -46,8 +46,8 @@ struct SidebarLayoutTests {
             (500, 380, 1_440, 500),
             (100, 380, 1_440, 280),  // never narrower than the minimum
             (2_000, 380, 2_400, 720),  // never wider than the maximum
-            (600, 380, 1_200, 416),  // gives way to a 480 pt conversation beside the narrowest sidebar
-            (600, 380, 1_064, 280),  // exactly the minimum fits
+            (600, 380, 1_136, 416),  // gives way to a 480 pt conversation beside the narrowest sidebar
+            (600, 380, 1_000, 280),  // exactly the minimum fits
         ] as [(CGFloat, CGFloat, CGFloat, CGFloat)])
     func paneWidth(preferred: CGFloat, ideal: CGFloat, available: CGFloat, expected: CGFloat) {
         #expect(SidebarLayout.paneWidth(preferred: preferred, ideal: ideal, availableWidth: available) == expected)
@@ -55,14 +55,14 @@ struct SidebarLayoutTests {
 
     @Test(
         "Without room for the minimum pane beside a readable conversation, the pane covers it",
-        arguments: [1_063.0, 1_000, .nan])
+        arguments: [999.0, 936, .nan])
     func paneCovers(available: CGFloat) {
         #expect(SidebarLayout.paneWidth(preferred: 380, ideal: 380, availableWidth: available) == nil)
     }
 
     @Test(
         "With the sidebar folded away, the pane covers the conversation only once it would be too narrow alone",
-        arguments: [(900.0, 380.0), (774, 280), (773.5, nil)] as [(CGFloat, CGFloat?)])
+        arguments: [(900.0, 380.0), (766, 280), (765.5, nil)] as [(CGFloat, CGFloat?)])
     func paneBesideCollapsedSidebar(available: CGFloat, expected: CGFloat?) {
         #expect(
             SidebarLayout.paneWidth(preferred: 380, ideal: 380, availableWidth: available, sidebarShown: false)
@@ -70,21 +70,21 @@ struct SidebarLayoutTests {
     }
 
     // capability: app.narrow-window
-    @Test("The rail and sidebar leave once the narrowest sidebar no longer fits beside a readable conversation")
+    @Test("The sidebar leaves once the narrowest sidebar no longer fits beside a readable conversation")
     func sidebarCollapses() {
-        #expect(!SidebarLayout.collapses(availableWidth: 778))
-        #expect(SidebarLayout.collapses(availableWidth: 777.5))
+        #expect(!SidebarLayout.collapses(availableWidth: 714))
+        #expect(SidebarLayout.collapses(availableWidth: 713.5))
         #expect(SidebarLayout.collapses(availableWidth: .nan))
     }
 
     @Test("With a pane open, the sidebar leaves first, so the conversation and the pane stay side by side")
     func sidebarCollapsesForPane() {
-        #expect(!SidebarLayout.collapses(availableWidth: 1_064, paneOpen: true))
-        #expect(SidebarLayout.collapses(availableWidth: 1_063.5, paneOpen: true))
-        #expect(SidebarLayout.paneWidth(preferred: 380, ideal: 380, availableWidth: 1_064) == 280)
+        #expect(!SidebarLayout.collapses(availableWidth: 1_000, paneOpen: true))
+        #expect(SidebarLayout.collapses(availableWidth: 999.5, paneOpen: true))
+        #expect(SidebarLayout.paneWidth(preferred: 380, ideal: 380, availableWidth: 1_000) == 280)
     }
 
-    @Test("The title bar's search becomes a button in a narrow window")
+    @Test("The toolbar's search becomes a button in a narrow window")
     func searchField() {
         #expect(SidebarLayout.searchFits(availableWidth: 640))
         #expect(!SidebarLayout.searchFits(availableWidth: 639.5))

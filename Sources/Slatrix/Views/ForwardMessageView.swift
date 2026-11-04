@@ -64,7 +64,7 @@ struct ForwardMessageView: View {
                 if loading {
                     HStack(spacing: m.sp8) {
                         DelayedProgress(interval: .sheetLoading)
-                        Text("Loading…").font(m.font(.meta))
+                        Text("Loading…").font(m.font(.subheadline))
                     }
                 }
                 if let review {
@@ -72,8 +72,8 @@ struct ForwardMessageView: View {
                         Text(
                             "From \(matrix.rooms.first(where: { $0.id == review.message.roomID })?.name ?? review.message.roomID)"
                         )
-                        .font(m.font(.meta, .semibold)).foregroundStyle(colors.textSecondary)
-                        Text(review.message.senderName).font(m.font(.meta, .semibold))
+                        .font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
+                        Text(review.message.senderName).font(m.font(.subheadline, .semibold))
                         ScrollView { messagePreview(review).frame(maxWidth: .infinity, alignment: .leading) }
                             .frame(
                                 maxHeight: m(
@@ -82,7 +82,7 @@ struct ForwardMessageView: View {
                         colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
                 }
                 if let notice {
-                    Text(notice).font(m.font(.meta)).foregroundStyle(colors.accent).fixedSize(
+                    Text(notice).font(m.font(.subheadline)).foregroundStyle(colors.accent).fixedSize(
                         horizontal: false, vertical: true)
                 }
                 if let error { InlineErrorView(message: error).clipShape(RoundedRectangle(cornerRadius: m.radius)) }
@@ -95,7 +95,8 @@ struct ForwardMessageView: View {
                     ForEach(destinations) { room in Text(room.name).tag(room.id) }
                 }.disabled(sending || loading || !current)
                 if destinations.isEmpty {
-                    Text("No conversations to forward to.").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                    Text("No conversations to forward to.").font(m.font(.subheadline)).foregroundStyle(
+                        colors.textSecondary)
                 }
             }
         }
@@ -144,12 +145,12 @@ struct ForwardMessageView: View {
     private func attachmentCard(filename: String, mimeType: String?, size: UInt64?, image: Bool) -> some View {
         HStack(alignment: .center, spacing: m.sp12) {
             Image(systemName: image ? "photo" : "doc.text")
-                .font(m.font(.header)).foregroundStyle(colors.accent)
+                .font(m.font(.title1)).foregroundStyle(colors.accent)
                 .frame(width: m(Self.fileTile), height: m(Self.fileTile))
                 .background(colors.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: m.radiusLarge))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: m.sp4) {
-                Text(filename).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
+                Text(filename).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
                     .lineLimit(2).textSelection(.enabled).help(filename)
                 HStack(spacing: m.sp8) {
                     Text(attachmentType(filename: filename, mimeType: mimeType, image: image))
@@ -157,7 +158,7 @@ struct ForwardMessageView: View {
                         Text("·")
                         Text(ByteCountFormatter.string(fromByteCount: Int64(clamping: size), countStyle: .file))
                     }
-                }.font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             }
             Spacer(minLength: 0)
         }.padding(m.sp12).frame(maxWidth: .infinity, alignment: .leading)

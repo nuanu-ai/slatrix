@@ -225,7 +225,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         mentions: MentionPalette? = nil
     ) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
-        let lineSpacing = fontSize / 5  // 3 pt at the 15 pt body, scaling with zoom.
+        let lineSpacing = fontSize / 5  // 20 pt lines at the 14 pt reading size, scaling with zoom.
         var paragraph = NSParagraphStyle()
         var lineStart = true
         for run in runs {

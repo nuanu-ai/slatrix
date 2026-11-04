@@ -14,9 +14,9 @@ struct SavedMessagesView: View {
         VStack(spacing: 0) {
             HStack(spacing: m.sp8) {
                 Spacer()
-                Text("\(saved.count) \(saved.count == 1 ? "message" : "messages")").font(m.font(.caption))
+                Text("\(saved.count) \(saved.count == 1 ? "message" : "messages")").font(m.font(.subheadline))
                     .foregroundStyle(appearance.colors.textSecondary)
-                IconButton(symbol: "arrow.clockwise", label: "Refresh", role: .body) { refresh = UUID() }
+                IconButton(symbol: "arrow.clockwise", label: "Refresh", role: .reading) { refresh = UUID() }
             }.padding(.horizontal, m.sp24).frame(height: m.control + m.sp16)
             Divider().overlay(appearance.colors.border)
             if saved.isEmpty {
@@ -59,10 +59,10 @@ private struct SavedMessageCard: View {
                     systemName: room?.isDirect == true
                         ? "bubble.left.and.bubble.right" : room?.channelSymbol ?? "number"
                 ).font(
-                    m.font(.caption))
-                Text(room?.name ?? "Conversation unavailable").font(m.font(.meta, .semibold)).lineLimit(1)
+                    m.font(.subheadline))
+                Text(room?.name ?? "Conversation unavailable").font(m.font(.subheadline, .semibold)).lineLimit(1)
                 Spacer()
-                IconButton(symbol: "bookmark.fill", label: "Remove from Later", role: .body, action: onRemove)
+                IconButton(symbol: "bookmark.fill", label: "Remove from Later", role: .reading, action: onRemove)
             }.foregroundStyle(colors.textSecondary)
             if let message {
                 HStack(alignment: .top, spacing: m.sp12) {
@@ -76,13 +76,13 @@ private struct SavedMessageCard: View {
                             Button {
                                 profile(message)
                             } label: {
-                                Text(message.senderName).font(m.font(.secondary, .semibold))
+                                Text(message.senderName).font(m.font(.body, .semibold))
                             }.buttonStyle(.row)
                             Text(message.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
-                                m.font(.caption)
+                                m.font(.subheadline)
                             ).foregroundStyle(colors.textSecondary)
                             if message.isEdited {
-                                Text("edited").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                                Text("edited").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                             }
                         }
                         if message.isRedacted {
@@ -92,7 +92,7 @@ private struct SavedMessageCard: View {
                                 body: message.body, formattedBody: message.formattedBody, showsSpoilerControl: false
                             ).lineLimit(6)
                             if let attachment = message.attachment {
-                                Label(attachment.name, systemImage: "paperclip").font(m.font(.meta))
+                                Label(attachment.name, systemImage: "paperclip").font(m.font(.subheadline))
                                     .foregroundStyle(colors.textSecondary).lineLimit(1)
                             }
                         }
@@ -101,27 +101,27 @@ private struct SavedMessageCard: View {
             } else if loading {
                 HStack(spacing: m.sp8) {
                     DelayedProgress()
-                    Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                    Text("Loading…").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                 }.padding(.vertical, m.sp12)
             } else {
                 HStack(alignment: .top, spacing: m.sp8) {
                     Image(systemName: "exclamationmark.bubble").foregroundStyle(colors.textSecondary)
                     VStack(alignment: .leading, spacing: m.sp4) {
-                        Text(error ?? "Preview unavailable").font(m.font(.secondary, .medium))
-                        Button("Retry") { retry = UUID() }.buttonStyle(.textLink).font(m.font(.caption))
+                        Text(error ?? "Preview unavailable").font(m.font(.body, .medium))
+                        Button("Retry") { retry = UUID() }.buttonStyle(.textLink).font(m.font(.subheadline))
                     }
                 }.padding(.vertical, m.sp8)
             }
             HStack {
                 Text("Saved \(reference.savedAt.formatted(.dateTime.month(.abbreviated).day()))").font(
-                    m.font(.caption)
+                    m.font(.subheadline)
                 ).foregroundStyle(colors.textSecondary)
                 Spacer()
                 Button(action: onOpen) {
                     HStack(spacing: m.sp8) {
                         Text("Open")
-                        Image(systemName: "arrow.up.right").font(m.font(.caption, .semibold))
-                    }.font(m.font(.meta, .semibold)).foregroundStyle(colors.accent)
+                        Image(systemName: "arrow.up.right").font(m.font(.subheadline, .semibold))
+                    }.font(m.font(.subheadline, .semibold)).foregroundStyle(colors.accent)
                 }.buttonStyle(.row).disabled(room?.membership != "join")
             }
         }.padding(m.sp20).frame(maxWidth: .infinity, alignment: .leading)

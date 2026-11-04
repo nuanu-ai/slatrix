@@ -37,31 +37,31 @@ struct MediaCaptionEditor: View {
                 Label("Caption saved", systemImage: "checkmark.circle").foregroundStyle(colors.success)
             } else {
                 Text(snapshot?.filename ?? target.message.attachment?.name ?? "Attachment")
-                    .font(m.font(.secondary, .semibold)).textSelection(.enabled)
+                    .font(m.font(.body, .semibold)).textSelection(.enabled)
                 if loading {
                     HStack {
                         DelayedProgress(interval: .sheetLoading)
-                        Text("Loading…").font(m.font(.meta))
+                        Text("Loading…").font(m.font(.subheadline))
                     }
                 }
                 if let snapshot {
                     if notice != nil {
                         VStack(alignment: .leading, spacing: m.sp4) {
-                            Text("Current caption").font(m.font(.caption, .semibold)).foregroundStyle(
+                            Text("Current caption").font(m.font(.subheadline, .semibold)).foregroundStyle(
                                 colors.textSecondary)
-                            Text(snapshot.caption ?? "No caption").font(m.font(.meta)).textSelection(.enabled)
+                            Text(snapshot.caption ?? "No caption").font(m.font(.subheadline)).textSelection(.enabled)
                         }.padding(m.sp12).frame(maxWidth: .infinity, alignment: .leading).background(
                             colors.raised, in: RoundedRectangle(cornerRadius: m.radius))
                     }
                     TextEditor(text: Binding(get: { draft ?? "" }, set: { draft = $0.isEmpty ? nil : $0 }))
-                        .font(m.font(.body)).frame(height: m(Self.editorHeight)).padding(m.sp8)
+                        .font(m.font(.reading)).frame(height: m(Self.editorHeight)).padding(m.sp8)
                         .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border))
                         .accessibilityLabel("Attachment caption").disabled(loading || saving || !current)
                     Button("Remove caption") { draft = nil }.buttonStyle(.textLink)
                         .disabled(saving || loading || !current || (draft == nil && snapshot.caption == nil))
                 }
                 if let notice {
-                    Text(notice).font(m.font(.meta)).foregroundStyle(colors.accent).fixedSize(
+                    Text(notice).font(m.font(.subheadline)).foregroundStyle(colors.accent).fixedSize(
                         horizontal: false, vertical: true)
                 }
                 if let error { InlineErrorView(message: error).clipShape(RoundedRectangle(cornerRadius: m.radius)) }

@@ -17,14 +17,14 @@ struct ThreadsFeedView: View {
             HStack(spacing: m.sp12) {
                 Spacer()
                 FeedWorkspacePicker(matrix: matrix, workspaceID: $workspaceID)
-                IconButton(symbol: "arrow.clockwise", label: "Refresh threads", role: .body) { refresh() }.disabled(
+                IconButton(symbol: "arrow.clockwise", label: "Refresh threads", role: .reading) { refresh() }.disabled(
                     feed.isLoading)
             }.padding(.horizontal, m.sp24).frame(height: m.control + m.sp16)
             Divider().overlay(colors.border)
             if let error = feed.errorMessage {
                 HStack {
                     InlineErrorView(message: error)
-                    Button("Retry", action: refresh).buttonStyle(.textLink).font(m.font(.meta)).padding(
+                    Button("Retry", action: refresh).buttonStyle(.textLink).font(m.font(.subheadline)).padding(
                         .trailing, m.sp20)
                 }.disabled(feed.isLoading)
             }
@@ -68,11 +68,11 @@ struct ThreadsFeedView: View {
             HStack(alignment: .center) {
                 if failedRoomCount > 0 {
                     Button("\(failedRoomCount) couldn’t load") { coverageExpanded = true }.buttonStyle(.textLink).font(
-                        m.font(.caption))
+                        m.font(.subheadline))
                 }
                 Spacer()
                 if feed.canCheckMore {
-                    Button("Look further") { Task { await matrix.checkMoreThreads() } }.font(m.font(.caption))
+                    Button("Look further") { Task { await matrix.checkMoreThreads() } }.font(m.font(.subheadline))
                         .disabled(feed.isLoading)
                 }
             }
@@ -81,28 +81,28 @@ struct ThreadsFeedView: View {
                     LazyVStack(spacing: m.sp8) {
                         ForEach(feed.roomStates) { state in
                             HStack(spacing: m.sp8) {
-                                Text(state.name).font(m.font(.caption)).lineLimit(1)
+                                Text(state.name).font(m.font(.subheadline)).lineLimit(1)
                                 Spacer()
                                 if state.state == .loading {
                                     DelayedProgress()
                                 } else if state.state == .error {
                                     Button("Retry") { Task { await matrix.retryThreads(roomID: state.id) } }
-                                        .buttonStyle(.textLink).font(m.font(.caption)).help(
+                                        .buttonStyle(.textLink).font(m.font(.subheadline)).help(
                                             state.errorMessage ?? "Retry this conversation")
                                 } else if state.state == .unloaded {
-                                    Text("Not loaded").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                                    Text("Not loaded").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                                 } else if state.hasMore {
                                     Button("Load older") { Task { await matrix.loadOlderThreads(roomID: state.id) } }
-                                        .buttonStyle(.textLink).font(m.font(.caption)).disabled(feed.isLoading)
+                                        .buttonStyle(.textLink).font(m.font(.subheadline)).disabled(feed.isLoading)
                                 } else {
-                                    Text("Done").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                                    Text("Done").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                                 }
                             }
                         }
                     }.padding(.top, m.sp8).padding(.leading, m.sp16)
                 }.frame(maxHeight: m(Self.historyMaxHeight))
             } label: {
-                Text("\(feed.checkedRoomCount) of \(feed.totalRoomCount) conversations").font(m.font(.caption))
+                Text("\(feed.checkedRoomCount) of \(feed.totalRoomCount) conversations").font(m.font(.subheadline))
                     .foregroundStyle(colors.textSecondary)
             }
         }.padding(.horizontal, m.sp24).padding(.vertical, m.sp12).background(colors.raised)
@@ -147,20 +147,20 @@ private struct ThreadFeedRow: View {
                     Image(
                         systemName: item.isDirect ? "bubble.left.and.bubble.right" : item.isPrivate ? "lock" : "number"
                     ).font(
-                        m.font(.caption))
-                    Text(item.roomName).font(m.font(.meta, .semibold)).lineLimit(1)
+                        m.font(.subheadline))
+                    Text(item.roomName).font(m.font(.subheadline, .semibold)).lineLimit(1)
                     Spacer()
                     Text(item.lastActivityAt, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
-                        m.font(.caption)
+                        m.font(.subheadline)
                     ).foregroundStyle(colors.textSecondary)
                 }.foregroundStyle(colors.textSecondary)
                 HStack(alignment: .top, spacing: m.sp12) {
                     AvatarView(
                         name: rootMessage.senderName, size: m.avatar, matrix: matrix, source: rootMessage.avatarURL)
                     VStack(alignment: .leading, spacing: m.sp4) {
-                        Text(rootMessage.senderName).font(m.font(.secondary, .semibold)).foregroundStyle(
+                        Text(rootMessage.senderName).font(m.font(.body, .semibold)).foregroundStyle(
                             colors.textPrimary)
-                        previewBody(rootMessage, state: root.state).font(m.font(.body)).foregroundStyle(
+                        previewBody(rootMessage, state: root.state).font(m.font(.reading)).foregroundStyle(
                             colors.textBody
                         ).lineLimit(3).multilineTextAlignment(.leading)
                     }.frame(maxWidth: .infinity, alignment: .leading)
@@ -174,26 +174,26 @@ private struct ThreadFeedRow: View {
                             name: message.senderName, size: m.avatarMedium, matrix: matrix, source: message.avatarURL)
                         VStack(alignment: .leading, spacing: m.sp4) {
                             HStack(spacing: m.sp8) {
-                                Text(message.senderName).font(m.font(.meta, .semibold))
-                                Text("Latest reply").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                                Text(message.senderName).font(m.font(.subheadline, .semibold))
+                                Text("Latest reply").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                             }
-                            previewBody(message, state: latest.state).font(m.font(.meta)).foregroundStyle(
+                            previewBody(message, state: latest.state).font(m.font(.subheadline)).foregroundStyle(
                                 colors.textSecondary
                             ).lineLimit(2).multilineTextAlignment(.leading)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }.fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: m.sp8) {
-                    Image(systemName: "bubble.left.and.bubble.right").font(m.font(.caption))
+                    Image(systemName: "bubble.left.and.bubble.right").font(m.font(.subheadline))
                     Text(
                         item.replyCount > 0
                             ? "\(item.replyCount) \(item.replyCount == 1 ? "reply" : "replies")" : "Open thread"
-                    ).font(m.font(.caption, .semibold))
+                    ).font(m.font(.subheadline, .semibold))
                     Spacer()
-                    Image(systemName: "chevron.right").font(m.font(.caption, .semibold))
+                    Image(systemName: "chevron.right").font(m.font(.subheadline, .semibold))
                 }.foregroundStyle(colors.accent).padding(.leading, m.avatar + m.sp12)
                 if failed {
-                    Text("Preview unavailable").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                    Text("Preview unavailable").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                         .padding(.leading, m.avatar + m.sp12).help(
                             root.error ?? latest?.error ?? "Right-click to retry")
                 }

@@ -78,17 +78,17 @@ struct PublicRoomDirectoryView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: m.sp16) {
-            Text(workspace?.name ?? serverName).font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+            Text(workspace?.name ?? serverName).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                 .lineLimit(2).textSelection(.enabled)
             HStack(spacing: m.sp8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary)
                 TextField("Search by channel name or topic", text: $query).textFieldStyle(.plain).font(
-                    m.font(.body)
+                    m.font(.reading)
                 ).focused($searchFocused)
                     .accessibilityLabel("Search channels")
                 if searching { DelayedProgress().accessibilityLabel("Searching") }
                 if !query.isEmpty {
-                    IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .secondary) {
+                    IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body) {
                         query = ""
                         searchFocused = true
                     }
@@ -150,16 +150,16 @@ struct PublicRoomDirectoryView: View {
         return HStack(alignment: .top, spacing: m.sp12) {
             AvatarView(name: entry.displayName, size: m.avatar, matrix: matrix, source: entry.avatarURL)
             VStack(alignment: .leading, spacing: m.sp8) {
-                Text(entry.displayName).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
+                Text(entry.displayName).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
                     .lineLimit(2).help(entry.displayName)
                 // A workspace's own channels need no address unless they have a readable one.
                 if workspace == nil || entry.alias != nil {
-                    Text(entry.alias ?? entry.id).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                    Text(entry.alias ?? entry.id).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                         .lineLimit(1)
                         .help(entry.alias ?? entry.id)
                 }
                 if let topic = entry.topic, !topic.isEmpty {
-                    Text(topic).font(m.font(.meta)).foregroundStyle(colors.textSecondary).lineLimit(2)
+                    Text(topic).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).lineLimit(2)
                 }
                 HStack(spacing: m.sp12) {
                     Label(
@@ -170,7 +170,7 @@ struct PublicRoomDirectoryView: View {
                     } else if workspace == nil || !entry.canJoin {
                         Text(ruleLabel(entry.joinRule))
                     }
-                }.font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
             if joined || entry.canJoin {
                 Button {
@@ -179,7 +179,7 @@ struct PublicRoomDirectoryView: View {
                     HStack(spacing: m.sp8) {
                         if resolvingID == entry.id { DelayedProgress() }
                         Text(joined ? "Open" : "Join")
-                    }.font(m.font(.meta, .medium))
+                    }.font(m.font(.subheadline, .medium))
                 }.buttonStyle(.secondary).disabled(!current || searching || resolvingID != nil)
                     .accessibilityLabel("\(joined ? "Open" : "Join") \(entry.displayName)")
             }
@@ -191,7 +191,7 @@ struct PublicRoomDirectoryView: View {
             HStack(spacing: m.sp8) {
                 if service.isLoading { DelayedProgress() }
                 Text(service.isLoading ? "Loading…" : "Load more")
-            }.font(m.font(.meta, .medium))
+            }.font(m.font(.subheadline, .medium))
         }.buttonStyle(.textLink).disabled(!current || searching || resolvingID != nil)
     }
 

@@ -1,35 +1,44 @@
 import AppKit
 import SwiftUI
 
-/// Text roles at 100% zoom, following Slack's hierarchy. Views pick a role, never a point size.
-enum TextRole {
-    /// 11: badges, counts, keyboard hints, rail labels, "edited".
-    case caption
-    /// 12: timestamps, status lines, helper text under controls.
-    case meta
-    /// 13: descriptions, tabs, buttons, search fields, secondary list lines.
-    case secondary
-    /// 15: messages, sender names, sidebar rows, the composer, primary list lines.
+/// Text roles at 100% zoom: the macOS text styles, plus Reading for messages. Views pick a role, never a point size.
+enum TextRole: CaseIterable {
+    /// 11/14: times, section titles, day dividers, badges, captions.
+    case subheadline
+    /// 13/16: the sidebar, lists, buttons and fields. Unread is semibold.
     case body
-    /// 18: channel and pane titles, sheet titles.
-    case title
-    /// 22: page headers and large icons.
-    case header
-    /// 28: welcome headings.
-    case display
+    /// 14/20: messages, their authors, and the composer. The one size off the macOS scale.
+    case reading
+    /// 15/20: window, thread and sheet titles; the space name.
+    case title3
+    /// 22/26: page headers and large icons.
+    case title1
+    /// 26/32: empty states and sign-in.
+    case largeTitle
     /// 40: hero glyphs in empty states and sign-in.
     case hero
 
     var points: CGFloat {
         switch self {
-        case .caption: 11
-        case .meta: 12
-        case .secondary: 13
-        case .body: 15
-        case .title: 18
-        case .header: 22
-        case .display: 28
+        case .subheadline: 11
+        case .body: 13
+        case .reading: 14
+        case .title3: 15
+        case .title1: 22
+        case .largeTitle: 26
         case .hero: 40
+        }
+    }
+
+    /// The style's line height, which AppKit text and multi-line SwiftUI text both keep.
+    var lineHeight: CGFloat {
+        switch self {
+        case .subheadline: 14
+        case .body: 16
+        case .reading, .title3: 20
+        case .title1: 26
+        case .largeTitle: 32
+        case .hero: 48
         }
     }
 }
@@ -48,6 +57,12 @@ struct Metrics: Equatable {
             size: size(role), weight: weight, design: design)
     }
     func nsFont(_ role: TextRole) -> NSFont { .systemFont(ofSize: size(role)) }
+    func lineHeight(_ role: TextRole) -> CGFloat { role.lineHeight * zoom }
+    /// The gap SwiftUI adds between wrapped lines, so they sit at the role's line height.
+    func lineSpacing(_ role: TextRole) -> CGFloat {
+        let font = nsFont(role)
+        return max(0, lineHeight(role) - (font.ascender - font.descender + font.leading).rounded(.up))
+    }
 
     // 4-pt spacing scale (2 is the hairline half-step).
     var sp2: CGFloat { 2 * zoom }
@@ -60,36 +75,38 @@ struct Metrics: Equatable {
     var sp32: CGFloat { 32 * zoom }
     var sp40: CGFloat { 40 * zoom }
 
-    /// Badges, chips, hover backgrounds of small icons.
+    /// Radii nest: a row inside the sidebar inside the window. Code spans, mention pills and tags.
     var radiusSmall: CGFloat { 4 * zoom }
-    /// Buttons, fields, sidebar rows, toolbars.
-    var radius: CGFloat { 6 * zoom }
-    /// Cards, attachments, the composer, popovers.
-    var radiusLarge: CGFloat { 8 * zoom }
-    /// The conversation panel and large tiles.
-    var radiusPanel: CGFloat { 12 * zoom }
+    /// Sidebar and list rows, menu items, tiles.
+    var radius: CGFloat { 8 * zoom }
+    /// Cards, attachments, popovers and menus.
+    var radiusLarge: CGFloat { 12 * zoom }
+    /// The sidebar, the switcher and modals.
+    var radiusPanel: CGFloat { 16 * zoom }
+    /// A space's tile at avatar size: spaces are rounded squares, people are round.
+    var radiusSpace: CGFloat { 10 * zoom }
 
     var avatarSmall: CGFloat { 20 * zoom }
     var avatarMedium: CGFloat { 24 * zoom }
-    var avatar: CGFloat { 36 * zoom }
+    var avatar: CGFloat { 32 * zoom }
     var avatarLarge: CGFloat { 72 * zoom }
     /// The photo at the top of a profile.
     var profilePhoto: CGFloat { 240 * zoom }
     /// The rounded square behind the icon that labels a detail, such as a profile's contact rows.
-    var iconTile: CGFloat { 36 * zoom }
+    var iconTile: CGFloat { 32 * zoom }
     /// Sidebar rows, list rows, menu-like buttons.
     var row: CGFloat { 28 * zoom }
     /// Square hit target of an icon-only button.
     var iconButton: CGFloat { 28 * zoom }
-    /// Text fields and push buttons.
+    /// Text fields, push buttons and the toolbar's capsules.
     var control: CGFloat { 32 * zoom }
     /// A row in a menu-like list: the ⌘K switcher and the search menu.
     var menuRow: CGFloat { 32 * zoom }
     /// Small buttons in dense rows.
     var controlSmall: CGFloat { 28 * zoom }
-    /// Modal footers and sign-in.
-    var controlLarge: CGFloat { 36 * zoom }
-    /// Where a tooltip's text wraps, so a long one makes a bubble about as wide as Slack's.
+    /// Modal footers, sign-in, and the composer's single line.
+    var controlLarge: CGFloat { 40 * zoom }
+    /// Where a tooltip's text wraps.
     var tooltipText: CGFloat { 200 * zoom }
     /// Anchored cards such as the emoji picker.
     var popoverWidth: CGFloat { 320 * zoom }
@@ -98,29 +115,34 @@ struct Metrics: Equatable {
     var modalMedium: CGFloat { 560 * zoom }
     var modalLarge: CGFloat { 680 * zoom }
     var tabBar: CGFloat { 40 * zoom }
-    /// A person in a list: a 36 pt photo beside two lines.
+    /// A person in a list: a 32 pt photo beside two lines.
     var personRow: CGFloat { 48 * zoom }
-    var rail: CGFloat { 68 * zoom }
-    /// Sidebar, channel and side-pane headers share one height so their dividers line up.
-    var paneHeader: CGFloat { 56 * zoom }
+    /// How far the sidebar floats in from the window's edges.
+    var sidebarInset: CGFloat { 8 * zoom }
+    /// The toolbar over the conversation and side panes, and the window buttons' row in the sidebar with the inset
+    /// above it, so the window buttons sit at one height whether the sidebar shows or not.
+    var paneHeader: CGFloat { 52 * zoom }
 }
 
-/// How far a surface floats above the one under it. In dark mode a hairline replaces most of what a shadow shows.
+/// How far a surface floats above the one under it: a hairline edge and a soft shadow, darker in dark mode where
+/// shadows barely show.
 enum Elevation {
-    /// Toolbars and chips.
+    /// The toolbar's capsules, the composer and chips.
     case e1
-    /// Popovers, menus, toasts and the jump pill.
+    /// Menus, popovers, the switcher, toasts and the jump pill.
     case e2
     /// Modals.
     case e3
 
     fileprivate var shadow: (opacity: Double, radius: CGFloat, y: CGFloat) {
         switch self {
-        case .e1: (0.12, 3, 2)
-        case .e2: (0.14, 8, 3)
-        case .e3: (0.25, 24, 8)
+        case .e1: (0.06, 1.5, 1)
+        case .e2: (0.18, 24, 16)
+        case .e3: (0.24, 32, 20)
         }
     }
+
+    fileprivate var edge: Double { self == .e1 ? 0.1 : 0.14 }
 }
 
 /// Durations and curves. Each is nil under Reduce Motion, so the change is instant.
@@ -153,17 +175,17 @@ private struct ElevationModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let shadow = level.shadow
+        let dark = scheme == .dark
         content
             .overlay {
-                if scheme == .dark {
-                    RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(Color.white.opacity(0.1))
-                }
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .strokeBorder((dark ? Color.white : Color.black).opacity(level.edge), lineWidth: 0.5)
             }
             // One shadow for the surface, not one under every glyph on it.
             .compositingGroup()
             .shadow(
-                color: .black.opacity(scheme == .dark ? shadow.opacity * 2 : shadow.opacity), radius: m(shadow.radius),
-                y: m(shadow.y))
+                color: .black.opacity(dark ? min(shadow.opacity * 2.5, 0.6) : shadow.opacity),
+                radius: m(shadow.radius), y: m(shadow.y))
     }
 }
 

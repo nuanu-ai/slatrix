@@ -8,7 +8,7 @@ struct Toast: View {
     @EnvironmentObject private var appearance: AppearanceStore
 
     var body: some View {
-        Text(text).font(m.font(.secondary, .semibold)).foregroundStyle(appearance.colors.onTooltip)
+        Text(text).font(m.font(.body, .semibold)).foregroundStyle(appearance.colors.onTooltip)
             .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
             .background(appearance.colors.tooltip, in: RoundedRectangle(cornerRadius: m.radiusLarge))
             .elevation(.e2, cornerRadius: m.radiusLarge)

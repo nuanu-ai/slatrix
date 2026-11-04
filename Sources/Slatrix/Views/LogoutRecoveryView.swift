@@ -16,10 +16,10 @@ struct LogoutRecoveryView: View {
             primary: ModalAction(
                 "Sign out on this Mac only", kind: .destructive, shortcut: nil, action: onLocalSignOut)
         ) {
-            Text(request.message).font(m.font(.secondary)).textSelection(.enabled)
+            Text(request.message).font(m.font(.body)).textSelection(.enabled)
             // The one consequence a person must know before choosing the local option.
             Text("Signing out only on this Mac leaves the session active on the server.")
-                .font(m.font(.secondary)).foregroundStyle(appearance.colors.textSecondary)
+                .font(m.font(.body)).foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

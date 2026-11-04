@@ -172,8 +172,9 @@ private struct InlineMedia: View {
             } label: {
                 HStack(spacing: m.sp4) {
                     Text(attachment.name).lineLimit(1).truncationMode(.middle)
-                    Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(m.font(.caption, .semibold))
-                }.font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                    Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(
+                        m.font(.subheadline, .semibold))
+                }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             }.buttonStyle(.row).help(collapsed ? "Show" : "Hide")
                 .accessibilityLabel("\(collapsed ? "Show" : "Hide") \(attachment.name)")
             if !collapsed { media }
@@ -237,7 +238,7 @@ private struct InlineMedia: View {
     }
 
     private func chip(_ text: String) -> some View {
-        Text(text).font(m.font(.caption, .semibold)).monospacedDigit().foregroundStyle(colors.onMedia)
+        Text(text).font(m.font(.subheadline, .semibold)).monospacedDigit().foregroundStyle(colors.onMedia)
             .padding(.horizontal, m.sp4 + m.sp2).padding(.vertical, m.sp2)
             .background(colors.mediaControl, in: Capsule())
     }
@@ -254,7 +255,7 @@ private struct InlineMedia: View {
     }
 
     private var playBadge: some View {
-        Image(systemName: "play.fill").font(m.font(.title)).foregroundStyle(colors.onMedia)
+        Image(systemName: "play.fill").font(m.font(.title3)).foregroundStyle(colors.onMedia)
             .frame(width: m.sp40 + m.sp8, height: m.sp40 + m.sp8).background(colors.mediaControl, in: Circle())
     }
 
@@ -302,13 +303,13 @@ private struct MediaActionsToolbar: View {
         HStack(spacing: 0) {
             if let fullScreen {
                 IconButton(
-                    symbol: "arrow.up.left.and.arrow.down.right", label: "Full screen", role: .body, side: side,
+                    symbol: "arrow.up.left.and.arrow.down.right", label: "Full screen", role: .reading, side: side,
                     action: fullScreen)
             }
             if downloading {
                 DelayedProgress().frame(width: m(side), height: m(side))
             } else {
-                IconButton(symbol: "arrow.down.to.line", label: "Download", role: .body, side: side) {
+                IconButton(symbol: "arrow.down.to.line", label: "Download", role: .reading, side: side) {
                     downloading = true
                     Task {
                         await AttachmentFiles.shared.download(message, matrix: matrix)
@@ -318,12 +319,12 @@ private struct MediaActionsToolbar: View {
             }
             if let forward = actions.forward {
                 IconButton(
-                    symbol: "arrowshape.turn.up.right", label: "Forward", role: .body, side: side, action: forward)
+                    symbol: "arrowshape.turn.up.right", label: "Forward", role: .reading, side: side, action: forward)
             }
             Menu {
                 AttachmentMenuItems(matrix: matrix, message: message, copyLink: actions.copyLink)
             } label: {
-                Image(systemName: "ellipsis").font(m.font(.body)).frame(width: m(side), height: m(side))
+                Image(systemName: "ellipsis").font(m.font(.reading)).frame(width: m(side), height: m(side))
             }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m(side)).help("More actions")
         }.padding(.horizontal, m.sp2).frame(height: m(side))
             .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radius))
@@ -366,9 +367,9 @@ private struct FileCard: View {
             HStack(spacing: m.sp12) {
                 FileTypeIcon(kind: attachment.fileKind)
                 VStack(alignment: .leading, spacing: m.sp2) {
-                    Text(attachment.name).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
+                    Text(attachment.name).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
                         .lineLimit(1).truncationMode(.middle)
-                    Text(caption).font(m.font(.secondary)).foregroundStyle(colors.textSecondary).lineLimit(1)
+                    Text(caption).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 }
                 Spacer(minLength: m.sp8)
             }
@@ -404,7 +405,7 @@ struct FileTypeIcon: View {
     let kind: FileKind
     /// The tile's side at 100% zoom.
     var side: CGFloat = 40
-    var glyph: TextRole = .title
+    var glyph: TextRole = .title3
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 

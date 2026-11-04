@@ -89,7 +89,7 @@ struct TimelineView: View {
                         scroller.scrollToBottom()
                     }
                 } label: {
-                    Label("Jump to recent", systemImage: "arrow.down").font(m.font(.meta, .semibold))
+                    Label("Jump to recent", systemImage: "arrow.down").font(m.font(.subheadline, .semibold))
                         .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
                         .background(colors.raised, in: Capsule()).overlay(Capsule().stroke(colors.border))
                         .elevation(.e2, cornerRadius: m.sp20)
@@ -474,7 +474,7 @@ struct MessageRow: View {
             if !compact {
                 if grouped || !appearance.showAvatars {
                     // One line: "12:00 AM" is wider than the gutter, and a wrap would grow the row on hover.
-                    Text(hovered ? time : "").font(m.font(.caption)).lineLimit(1).fixedSize()
+                    Text(hovered ? time : "").font(m.font(.subheadline)).lineLimit(1).fixedSize()
                         .foregroundStyle(colors.textSecondary).frame(width: m.avatar, alignment: .trailing)
                         .overlay(alignment: .trailing) { if grouped && sending && !hovered { clock } }
                         .padding(.top, m.sp4)
@@ -489,34 +489,34 @@ struct MessageRow: View {
             }
             VStack(alignment: .leading, spacing: m.sp4) {
                 if isPinned {
-                    Label("Pinned", systemImage: "pin.fill").font(m.font(.caption))
+                    Label("Pinned", systemImage: "pin.fill").font(m.font(.subheadline))
                         .foregroundStyle(colors.textSecondary)
                 }
                 if !grouped || compact {
                     HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                         if compact {
-                            Text(time).font(m.font(.caption))
+                            Text(time).font(m.font(.subheadline))
                                 .foregroundStyle(colors.textSecondary)
                         }
                         Button {
                             actions.openProfile?()
                         } label: {
-                            Text(message.senderName).font(m.font(.body, .bold))
+                            Text(message.senderName).font(m.font(.reading, .semibold))
                                 .foregroundStyle(colors.textPrimary)
                         }.buttonStyle(.row).disabled(actions.openProfile == nil).help("View profile")
                         if !compact {
-                            Text(time).font(m.font(.caption))
+                            Text(time).font(m.font(.subheadline))
                                 .foregroundStyle(colors.textSecondary)
                         }
                         if isSaved {
-                            Image(systemName: "bookmark.fill").font(m.font(.caption)).foregroundStyle(colors.accent)
+                            Image(systemName: "bookmark.fill").font(m.font(.subheadline)).foregroundStyle(colors.accent)
                         }
                     }.overlay(alignment: .trailing) {
                         if sending { clock.padding(.leading, m.sp8).frame(width: 0, alignment: .leading) }
                     }
                 }
                 if message.isRedacted {
-                    Text("This message was deleted.").italic().font(m.font(.body)).foregroundStyle(
+                    Text("This message was deleted.").italic().font(m.font(.reading)).foregroundStyle(
                         colors.textSecondary
                     )
                 } else {
@@ -524,7 +524,7 @@ struct MessageRow: View {
                     if let replyPreview { replyPreview.id(message.id) }
                     if message.kind == "m.room.encrypted" {
                         // One quiet line per message; the header offers the recovery key once for all of them.
-                        Label(message.body, systemImage: "lock").font(m.font(.secondary)).italic()
+                        Label(message.body, systemImage: "lock").font(m.font(.body)).italic()
                             .foregroundStyle(colors.textSecondary)
                     } else if message.showsMessageBody {
                         // Slack draws a message that hasn't reached the server lighter, and nothing else.
@@ -534,7 +534,7 @@ struct MessageRow: View {
                         ).opacity(pendingSend ? 0.5 : 1)
                     }
                     if message.isEdited && (!message.showsMessageBody || message.kind == "m.room.encrypted") {
-                        Text("(edited)").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
+                        Text("(edited)").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     }
                     // A reused cell shows another message: a download or preview in flight must not carry over.
                     if let attachment { attachment.padding(.vertical, m.sp4).id(message.id) }
@@ -562,11 +562,12 @@ struct MessageRow: View {
                             if failure.kind != .recoverable {
                                 Text(failure.message).foregroundStyle(colors.textSecondary)
                             }
-                        }.font(m.font(.caption)).padding(.top, m.sp2)
+                        }.font(m.font(.subheadline)).padding(.top, m.sp2)
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(.horizontal, m.sp20).padding(.top, grouped || compact ? 3 : 12).padding(.bottom, m.sp4)
+        }.padding(.horizontal, isThread ? m.sp20 : m.sp24).padding(.top, grouped || compact ? 3 : 12)
+            .padding(.bottom, m.sp4)
     }
     private var clock: some View { SendingClock(since: message.timestamp) }
 
@@ -577,8 +578,8 @@ struct MessageRow: View {
                     actions.react?(reaction.key)
                 } label: {
                     ReactionChip(mine: reaction.mine) {
-                        Text(reaction.key).font(m.font(.secondary))
-                        Text("\(reaction.count)").font(m.font(.caption, .semibold))
+                        Text(reaction.key).font(m.font(.body))
+                        Text("\(reaction.count)").font(m.font(.subheadline, .semibold))
                             .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
                     }
                 }.buttonStyle(.row).disabled(actions.react == nil)
@@ -601,7 +602,7 @@ struct MessageRow: View {
                 actions.openReactions?()
             } label: {
                 ReactionChip(mine: false) {
-                    Image(systemName: "face.smiling").font(m.font(.secondary)).foregroundStyle(colors.textSecondary)
+                    Image(systemName: "face.smiling").font(m.font(.body)).foregroundStyle(colors.textSecondary)
                 }
             }.buttonStyle(.row).disabled(actions.openReactions == nil).help("Add reaction")
                 .opacity(hovered ? 1 : 0).allowsHitTesting(hovered).accessibilityHidden(!hovered)
@@ -627,7 +628,7 @@ private struct SendingClock: View {
     }
 
     var body: some View {
-        Image(systemName: "clock").font(m.font(.caption)).foregroundStyle(appearance.colors.textSecondary)
+        Image(systemName: "clock").font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary)
             .opacity(shown ? 1 : 0).accessibilityHidden(!shown).accessibilityLabel("Sending")
             .task(id: since) {
                 shown = Self.shows(since)
@@ -649,12 +650,12 @@ private struct ReactionChip<Content: View>: View {
         let colors = appearance.colors
         HStack(spacing: m.sp4) { content }.padding(.horizontal, m.sp8).frame(height: m.sp24)
             .background(mine ? colors.accentTint : colors.sunken, in: Capsule())
-            .overlay(Capsule().strokeBorder(mine ? colors.accent : .clear))
+            .overlay(Capsule().strokeBorder(mine ? colors.accentLine : .clear))
     }
 }
 
-/// Slack's replies bar: who replied last, how many replies and when. Hovering outlines it and offers the thread,
-/// at the same height.
+/// The replies bar: who replied last, how many replies and when. Hovering fills it and offers the thread, at the same
+/// height.
 private struct ThreadRepliesBar: View {
     private static let maxWidth: CGFloat = 600
     let count: Int
@@ -671,20 +672,19 @@ private struct ThreadRepliesBar: View {
         Button(action: action) {
             HStack(spacing: m.sp8) {
                 if let avatar { avatar }
-                Text("\(count) \(count == 1 ? "reply" : "replies")").font(m.font(.meta, .semibold))
+                Text("\(count) \(count == 1 ? "reply" : "replies")").font(m.font(.body, .semibold))
                     .foregroundStyle(colors.accent)
                 if hovering {
-                    Text("View thread").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                    Text("View thread").font(m.font(.body)).foregroundStyle(colors.textSecondary)
                     Spacer(minLength: m.sp8)
-                    Image(systemName: "chevron.right").font(m.font(.caption, .semibold))
+                    Image(systemName: "chevron.right").font(m.font(.subheadline, .semibold))
                         .foregroundStyle(colors.textSecondary)
                 } else if let lastReply {
-                    Text(ThreadReply.lastReplyText(lastReply.timestamp, now: Date())).font(m.font(.meta))
+                    Text(ThreadReply.lastReplyText(lastReply.timestamp, now: Date())).font(m.font(.body))
                         .foregroundStyle(colors.textSecondary)
                 }
             }.lineLimit(1).padding(m.sp4).frame(maxWidth: m(Self.maxWidth), minHeight: m.sp32, alignment: .leading)
-                .background(hovering ? colors.canvas : .clear, in: shape)
-                .overlay(shape.strokeBorder(hovering ? colors.border : .clear))
+                .background(hovering ? colors.hover : .clear, in: shape)
         }.buttonStyle(.row)
             .onHover {
                 hovering = $0
@@ -720,7 +720,7 @@ struct MessageToolbar: View {
                         Button {
                             react(emoji)
                         } label: {
-                            Text(emoji).font(m.font(.body)).frame(width: m(Self.button), height: m(Self.button))
+                            Text(emoji).font(m.font(.reading)).frame(width: m(Self.button), height: m(Self.button))
                         }.buttonStyle(.icon).help("React with \(EmojiCatalog.shortcode(for: emoji))")
                     }
                 }
@@ -738,18 +738,17 @@ struct MessageToolbar: View {
             Menu {
                 NativeMessageMenuCommands(commands: actions.menu())
             } label: {
-                Image(systemName: "ellipsis").rotationEffect(.degrees(90)).font(m.font(.body))
+                Image(systemName: "ellipsis").font(m.font(.reading))
                     .frame(width: m(Self.button), height: m(Self.button))
             }.menuStyle(.button).buttonStyle(.icon).menuIndicator(.hidden).help("More actions")
                 .accessibilityLabel("More actions")
         }
         .foregroundStyle(colors.textSecondary).padding(m.sp2)
-        .background(colors.overlay, in: shape).overlay(shape.strokeBorder(colors.border))
-        .elevation(.e1, cornerRadius: m.radiusLarge)
+        .background(colors.overlay, in: shape).elevation(.e2, cornerRadius: m.radiusLarge)
     }
 
     private func button(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
-        IconButton(symbol: symbol, label: label, role: .body, side: Self.button, action: action)
+        IconButton(symbol: symbol, label: label, role: .reading, side: Self.button, action: action)
     }
 }
 

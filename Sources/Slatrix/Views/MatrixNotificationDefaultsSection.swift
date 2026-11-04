@@ -40,19 +40,20 @@ struct MatrixNotificationDefaultsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: m.sp20) {
             HStack(alignment: .top, spacing: m.sp12) {
-                Text("Notify me about").font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
+                Text("Notify me about").font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
                 Spacer(minLength: 0)
                 if current {
-                    Button("Reload") { Task { await load() } }.buttonStyle(.textLink).font(m.font(.meta)).disabled(busy)
+                    Button("Reload") { Task { await load() } }.buttonStyle(.textLink).font(m.font(.subheadline))
+                        .disabled(busy)
                         .accessibilityLabel("Reload notification defaults")
                 }
             }
             if context.preview || context.accountID == nil {
-                Text("Sign in to change these.").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                Text("Sign in to change these.").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             } else if loading {
                 HStack(spacing: m.sp8) {
                     DelayedProgress(interval: .sheetLoading)
-                    Text("Loading…").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                    Text("Loading…").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                 }
             } else if snapshot != nil && current {
                 categoryGroup("Encrypted conversations", encrypted: true)
@@ -62,21 +63,23 @@ struct MatrixNotificationDefaultsSection: View {
                 HStack(spacing: m.sp8) {
                     DelayedProgress()
                     Text("Saving…")
-                }.font(m.font(.meta))
+                }.font(m.font(.subheadline))
             }
             if let notice {
-                Label(notice, systemImage: "info.circle").font(m.font(.meta)).foregroundStyle(colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Label(notice, systemImage: "info.circle").font(m.font(.subheadline)).foregroundStyle(
+                    colors.textSecondary
+                )
+                .fixedSize(horizontal: false, vertical: true)
             }
             if let error {
-                Text(error).font(m.font(.meta)).foregroundStyle(colors.destructive).fixedSize(
+                Text(error).font(m.font(.subheadline)).foregroundStyle(colors.destructive).fixedSize(
                     horizontal: false, vertical: true
                 )
                 .textSelection(.enabled)
             }
             if needsReload, current {
                 Text("Reload, then try again.")
-                    .font(m.font(.meta)).foregroundStyle(colors.textSecondary)
+                    .font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             }
         }
         .task(id: context) {
@@ -111,12 +114,12 @@ struct MatrixNotificationDefaultsSection: View {
 
     private func categoryGroup(_ title: String, encrypted: Bool) -> some View {
         VStack(alignment: .leading, spacing: m.sp12) {
-            Label(title, systemImage: encrypted ? "lock" : "lock.open").font(m.font(.meta, .semibold))
+            Label(title, systemImage: encrypted ? "lock" : "lock.open").font(m.font(.subheadline, .semibold))
                 .foregroundStyle(colors.textPrimary)
             ForEach(AccountNotificationCategory.allCases.filter { $0.isEncrypted == encrypted }) { category in
                 HStack(spacing: m.sp12) {
                     Text(category.isOneToOne ? "Direct messages" : "Group conversations")
-                        .font(m.font(.meta)).frame(maxWidth: .infinity, alignment: .leading)
+                        .font(m.font(.subheadline)).frame(maxWidth: .infinity, alignment: .leading)
                     Picker(
                         "\(title), \(category.isOneToOne ? "conversations with two people" : "other conversations")",
                         selection: Binding(

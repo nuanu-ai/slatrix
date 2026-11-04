@@ -13,7 +13,7 @@ struct Tooltip<Leading: View>: View {
         let colors = appearance.colors
         VStack(spacing: m.sp4) {
             leading
-            WrapWidth(width: m.tooltipText) { Text(text).font(m.font(.meta)).multilineTextAlignment(.center) }
+            WrapWidth(width: m.tooltipText) { Text(text).font(m.font(.subheadline)).multilineTextAlignment(.center) }
         }
         .foregroundStyle(colors.onTooltip).padding(.horizontal, m.sp8).padding(.vertical, m.sp4)
         .fixedSize()

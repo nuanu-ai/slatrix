@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// A sidebar section's header, as in Slack: a chevron and a muted title that fold the section, then a ⋮ menu and a
-/// "+" that show while the pointer is over the header or keyboard focus is on one of them.
+/// A sidebar section's header: a small gray title that folds the section, with a chevron, a ⋮ menu and a "+" that
+/// show while the pointer is over the header or keyboard focus is on one of them. A folded section keeps its chevron.
 struct SectionHeader<MenuItems: View>: View {
     let title: String
     let collapsed: Bool
@@ -22,10 +22,11 @@ struct SectionHeader<MenuItems: View>: View {
         let revealed = hovering || focus != nil
         HStack(spacing: m.sp2) {
             Button(action: onToggle) {
-                HStack(spacing: m.sp8) {
-                    Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(m.font(.caption, .bold))
-                        .frame(width: m.avatarSmall)
-                    Text(title).font(m.font(.body, .medium)).lineLimit(1)
+                HStack(spacing: m.sp4) {
+                    Text(title).font(m.font(.subheadline, .semibold)).lineLimit(1)
+                    Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                        .font(m.font(.subheadline, .semibold)).imageScale(.small)
+                        .opacity(revealed || collapsed ? 1 : 0)
                     Spacer(minLength: 0)
                 }.frame(height: m.row)
             }.buttonStyle(.row).accessibilityValue(collapsed ? "Collapsed" : "Expanded")
@@ -33,18 +34,18 @@ struct SectionHeader<MenuItems: View>: View {
                 Menu {
                     menu
                 } label: {
-                    Image(systemName: "ellipsis").rotationEffect(.degrees(90)).font(m.font(.secondary, .bold))
+                    Image(systemName: "ellipsis").font(m.font(.body))
                         .frame(width: m(24), height: m(24))
                 }
                 .menuStyle(.button).buttonStyle(.icon).menuIndicator(.hidden).fixedSize()
                 .help("Section options").accessibilityLabel("\(title) options")
                 .focused($focus, equals: .menu).opacity(revealed ? 1 : 0)
-                IconButton(symbol: "plus", label: addLabel, role: .secondary, side: 24, action: onAdd)
+                IconButton(symbol: "plus", label: addLabel, role: .body, side: 24, action: onAdd)
                     .focused($focus, equals: .add).opacity(revealed ? 1 : 0)
             }
         }
         .foregroundStyle(appearance.colors.textSecondary)
-        .padding(.leading, m.sp16).padding(.trailing, m.sp4)
+        .padding(.leading, m.sp8)
         .contentShape(Rectangle()).onHover { hovering = $0 }
     }
 }
