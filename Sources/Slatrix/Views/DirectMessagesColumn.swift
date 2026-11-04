@@ -59,16 +59,16 @@ struct DirectMessageRow: View {
             VStack(alignment: .leading, spacing: m.sp2) {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                     Text(room.name).font(m.font(.reading, badge != .none ? .bold : .regular))
-                        .foregroundStyle(selected ? colors.onAccent : colors.textPrimary).lineLimit(1)
+                        .foregroundStyle(colors.textPrimary).lineLimit(1)
                     Spacer(minLength: 0)
                     if let latest = room.latest {
                         Text(latest.time()).font(m.font(.subheadline))
-                            .foregroundStyle(selected ? colors.onAccent : colors.textSecondary)
+                            .foregroundStyle(colors.textSecondary)
                     }
                 }
                 // A space until the message arrives, so the row keeps its height.
                 Text(room.latest?.preview ?? " ").font(m.font(.body)).lineLimit(1).foregroundStyle(
-                    selected ? colors.onAccent : badge != .none ? colors.textPrimary : colors.textSecondary)
+                    badge != .none ? colors.textPrimary : colors.textSecondary)
             }
             if case .count(let count) = badge { CountBadge(text: count) }
         }.padding(m.sp8).modifier(SidebarRowFill(selected: selected)).contentShape(Rectangle())
