@@ -4,6 +4,21 @@ import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SavedMessage
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.SavedPreview
+import ai.nuanu.slatrix.ui.designsystem.Motion
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import kotlinx.coroutines.launch
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -64,7 +79,43 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
     LaunchedEffect(key) { if (key !in previews) previews[key] = load(saved) }
     val loaded = key in previews
     val preview = previews[key]
-    Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen)
+    val haptics = LocalHapticFeedback.current
+    // A swipe left removes the card, as Slack's Later does: the card follows the finger and the bookmark fades in behind
+    // it. Only a leftward start is the card's; a rightward one stays with the tabs, so DMs is still a swipe away.
+    val drag = remember { Animatable(0f) }
+    val reach = with(LocalDensity.current) { UiMetrics.Swipe.toPx() }
+    val swipes = rememberCoroutineScope()
+    Box(Modifier.fillMaxWidth().pointerInput(saved) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            awaitHorizontalTouchSlopOrCancellation(down.id) { change, over -> if (over < 0) change.consume() }
+                ?: return@awaitEachGesture
+            var past = false
+            horizontalDrag(down.id) { change ->
+                val next = (drag.value + change.positionChange().x * if (drag.value < -reach) 0.3f else 1f).coerceIn(-reach * 1.5f, 0f)
+                change.consume()
+                swipes.launch { drag.snapTo(next) }
+                if (next <= -reach && !past) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                past = next <= -reach
+            }
+            swipes.launch {
+                if (past) {
+                    drag.animateTo(-size.width.toFloat(), Motion.pane())
+                    onRemove()
+                }
+                drag.snapTo(0f)
+            }
+        }
+    }) {
+    Icon(SlackIcons.Bookmark, null, Modifier.align(Alignment.CenterEnd).padding(end = UiMetrics.GapLarge).size(UiMetrics.Icon)
+        .graphicsLayer {
+            val shown = (-drag.value / reach).coerceIn(0f, 1f)
+            alpha = shown
+            scaleX = 0.6f + 0.4f * shown
+            scaleY = scaleX
+        }, tint = colors.textSecondary)
+    Row(Modifier.fillMaxWidth().graphicsLayer { translationX = drag.value }.background(colors.canvas)
+        .clickable(role = Role.Button, onClick = onOpen)
         .padding(start = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapMedium),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         // The picture's place is kept while the message loads, so the text never shifts when it lands.
@@ -96,5 +147,6 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
         IconButton(onClick = onRemove) {
             Icon(SlackIcons.BookmarkFilled, "Remove from Later", Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
         }
+    }
     }
 }
