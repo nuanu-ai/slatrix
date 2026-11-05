@@ -956,7 +956,10 @@ final class TimelineScrollView: NSScrollView {
     var willTile: (() -> Void)?
     var onTile: (() -> Void)?
     var onPointer: ((NSPoint?) -> Void)?
-    private var tracking: NSTrackingArea?
+    /// One area for the view's life: `.inVisibleRect` follows every resize, and replacing it would send the hovered
+    /// message an exit and an enter at each step of a live resize or a pane drag, blinking its highlight.
+    private lazy var tracking = NSTrackingArea(
+        rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
 
     override func tile() {
         willTile?()
@@ -966,12 +969,7 @@ final class TimelineScrollView: NSScrollView {
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(
-            rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
-            owner: self)
-        addTrackingArea(area)
-        tracking = area
+        if !trackingAreas.contains(tracking) { addTrackingArea(tracking) }
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -986,8 +984,8 @@ final class TimelineScrollView: NSScrollView {
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
-        // Rows and the toolbar pass their controls' exits up the responder chain; only one from an area of this view
-        // (the current one, or one an update replaced) means the pointer left.
+        // Rows and the toolbar pass their controls' exits up the responder chain; only this view's own means the
+        // pointer left.
         if event.trackingArea?.owner === self { onPointer?(nil) }
     }
 

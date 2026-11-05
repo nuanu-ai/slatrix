@@ -30,6 +30,7 @@ offsystem "use TabBar" 'pickerStyle\(\.segmented\)'
 # A bare number skips the zoom (⌘= / ⌘-); a one-off size goes through m(_:).
 offsystem "scale sizes with m(_:) or a Metrics token" \
     '\.(padding|offset)\(([.a-zA-Z]+, )?(x: |y: )?-?([2-9]|[1-9][0-9]+)(\.[0-9]+)?\)|\.padding\([^)]*\? -?([2-9]|[1-9][0-9]+)(\.[0-9]+)? : -?([2-9]|[1-9][0-9]+)(\.[0-9]+)?\)|\.frame\(((min|max)?([Ww]idth|[Hh]eight)): -?([2-9]|[1-9][0-9]+)(\.[0-9]+)?[,)]|cornerRadius: -?([2-9]|[1-9][0-9]+)(\.[0-9]+)?[,)]'
+scripts/lint-buttons.py || failed=1
 # Tests must never show a window on the screen of whoever runs them.
 if grep -rn 'NSWindow(' Tests --exclude-dir=Support; then
     echo "error: open test windows with offscreenWindow(_:)" >&2

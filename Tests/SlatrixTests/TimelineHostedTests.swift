@@ -1154,6 +1154,23 @@ struct TimelineHoverTests {
 }
 
 @MainActor
+struct TimelinePointerTests {
+    @Test("Resizing the timeline keeps its one pointer area, so the hovered message gets no exit and never blinks")
+    func resizeKeepsHoverArea() throws {
+        let scrollView = TimelineScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        scrollView.updateTrackingAreas()
+        let area = try #require(scrollView.trackingAreas.first { $0.owner === scrollView })
+        // A live resize or a pane drag, which has AppKit update tracking areas at every step.
+        for width in [380.0, 440, 360, 420] {
+            scrollView.setFrameSize(NSSize(width: width, height: 300))
+            scrollView.updateTrackingAreas()
+        }
+        let areas = scrollView.trackingAreas.filter { $0.owner === scrollView }
+        #expect(areas.count == 1 && areas.first === area)
+    }
+}
+
+@MainActor
 struct ReplyPreviewLayoutTests {
     @Test(
         "A reply keeps its height while its original loads, arrives or fails",

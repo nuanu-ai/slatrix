@@ -35,27 +35,27 @@ struct AppColors {
     /// Times, descriptions, section titles, secondary lines.
     var textSecondary: Color { Color(hex: dark ? 0x98989f : 0x6a6a6f) }
     /// Icons at rest, placeholders, disabled text and hints.
-    var textTertiary: Color { Color(hex: dark ? 0x8a8a90 : 0x86868b) }
+    var textTertiary: Color { Color(hex: dark ? 0x8e8e94 : 0x86868b) }
 
     // MARK: Surfaces
 
-    /// The window: the conversation, panes and modals.
-    var canvas: Color { Color(hex: dark ? 0x1e1e20 : 0xffffff) }
+    /// The window: the conversation, panes and modals. Near black in dark mode, as Apple's own apps are.
+    var canvas: Color { Color(hex: dark ? 0x141416 : 0xffffff) }
     /// Cards and tiles that sit on the canvas, in the sidebar's gray.
     var raised: Color { sidebar }
     /// Wells: reserved media boxes, chips, skeletons, filled round buttons.
     var sunken: Color { dark ? Color.white.opacity(0.07) : Color.black.opacity(0.05) }
     /// Menus, popovers, the switcher and toasts that float over content.
-    var overlay: Color { Color(hex: dark ? 0x2c2c2f : 0xfbfbfd) }
+    var overlay: Color { Color(hex: dark ? 0x252528 : 0xfbfbfd) }
     /// The toolbar's capsules and the composer, which sit a hair above the canvas.
-    var control: Color { Color(hex: dark ? 0x2c2c2f : 0xffffff) }
-    /// Tooltips: a dark bubble in both themes, lighter than every surface in dark mode.
-    var tooltip: Color { Color(hex: dark ? 0x111113 : 0x1d1d1f) }
+    var control: Color { Color(hex: dark ? 0x1f1f22 : 0xffffff) }
+    /// Tooltips: a dark bubble in both themes, darker than the conversation in dark mode.
+    var tooltip: Color { Color(hex: dark ? 0x0b0b0c : 0x1d1d1f) }
     var onTooltip: Color { Color(hex: 0xffffff) }
     /// Dims the window under a modal.
     var scrim: Color { Color.black.opacity(dark ? 0.48 : 0.32) }
     /// The sidebar, a panel inset in the window.
-    var sidebar: Color { Color(hex: dark ? 0x2a2a2d : 0xf3f3f5) }
+    var sidebar: Color { Color(hex: dark ? 0x1d1d20 : 0xf3f3f5) }
 
     // MARK: Lines
 

@@ -66,14 +66,14 @@ struct PinnedMessagesView: View {
                     profile(message)
                 } label: {
                     AvatarView(name: message.senderName, size: m.avatar, matrix: matrix, source: message.avatarURL)
-                }.buttonStyle(.row).help("View profile")
+                }.buttonStyle(.row).linkCursor().help("View \(message.senderName)’s profile")
                 VStack(alignment: .leading, spacing: m.sp8) {
                     HStack(spacing: m.sp8) {
                         Button {
                             profile(message)
                         } label: {
                             Text(message.senderName).font(m.font(.body, .semibold))
-                        }.buttonStyle(.row)
+                        }.buttonStyle(.row).linkCursor().help("View profile")
                         Text(message.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
                             m.font(.subheadline)
                         ).foregroundStyle(colors.textSecondary)

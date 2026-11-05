@@ -51,7 +51,7 @@ struct FileRow<Menu: View>: View {
                     if let image { Image(decorative: image, scale: 1).resizable().scaledToFill().transition(.opacity) }
                 }
                 .frame(width: m(Self.tileSide), height: m(Self.tileSide)).clipShape(shape)
-                .overlay(shape.strokeBorder(colors.border)).animation(Motion.content, value: image != nil)
+                .overlay(shape.strokeBorder(colors.border))
         case .file(let kind): FileTypeIcon(kind: kind, side: Self.tileSide)
         case .link:
             shape.fill(colors.sunken)

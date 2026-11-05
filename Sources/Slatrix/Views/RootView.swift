@@ -1177,19 +1177,10 @@ struct RootView: View {
     /// Pinned messages or files, beside the conversation as a thread is, so the conversation stays put.
     private func listPanel(_ panel: ChannelPanel, room: ChatRoom) -> some View {
         VStack(spacing: 0) {
-            HStack(spacing: m.sp8) {
-                VStack(alignment: .leading, spacing: m(1)) {
-                    Text(panel == .pins ? "Pinned" : "Files").font(m.font(.title3, .semibold))
-                        .foregroundStyle(colors.textPrimary)
-                    Text(room.writtenName).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                }.lineLimit(1)
-                Spacer()
-                IconButton(
-                    symbol: "xmark", label: panel == .pins ? "Close pinned" : "Close files", role: .subheadline,
-                    round: true
-                ) { channelPanel = nil }.fontWeight(.semibold).foregroundStyle(colors.textSecondary)
-            }.padding(.leading, m.sp16).padding(.trailing, m.sp12).frame(height: m.paneHeader)
-                .background(WindowDragArea())
+            PaneHeader(
+                title: panel == .pins ? "Pinned" : "Files", subtitle: room.writtenName,
+                closeLabel: panel == .pins ? "Close pinned" : "Close files"
+            ) { channelPanel = nil }
             switch panel {
             case .pins:
                 PinnedMessagesView(
@@ -1206,17 +1197,7 @@ struct RootView: View {
     }
     private func threadPanel(root: ChatMessage, room: ChatRoom) -> some View {
         VStack(spacing: 0) {
-            HStack(spacing: m.sp8) {
-                VStack(alignment: .leading, spacing: m(1)) {
-                    Text("Thread").font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
-                    Text(room.writtenName).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                }.lineLimit(1)
-                Spacer()
-                IconButton(
-                    symbol: "xmark", label: "Close thread", role: .subheadline, round: true, action: closeThread
-                ).fontWeight(.semibold).foregroundStyle(colors.textSecondary)
-            }.padding(.leading, m.sp16).padding(.trailing, m.sp12).frame(height: m.paneHeader)
-                .background(WindowDragArea())
+            PaneHeader(title: "Thread", subtitle: room.writtenName, closeLabel: "Close thread", onClose: closeThread)
             if let threadLoadError {
                 Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
                     Button("Retry") { [open = openThreadAction] in open(root) }
