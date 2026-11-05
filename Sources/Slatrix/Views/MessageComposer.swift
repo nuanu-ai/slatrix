@@ -146,7 +146,10 @@ struct MessageComposer: View {
                 }.padding(.bottom, m(6)).disabled(sending)
             }.padding(.horizontal, m(6))
         }
-        .background(colors.control, in: RoundedRectangle(cornerRadius: m.controlLarge / 2))
+        .glass(
+            colors.control, in: RoundedRectangle(cornerRadius: m.controlLarge / 2), cornerRadius: m.controlLarge / 2,
+            elevated: false
+        )
         .overlay(
             RoundedRectangle(cornerRadius: m.controlLarge / 2).strokeBorder(
                 editor.isFocused ? colors.accentLine : colors.border, lineWidth: 1)

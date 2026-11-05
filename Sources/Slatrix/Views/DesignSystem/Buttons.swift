@@ -251,7 +251,6 @@ struct ToolbarCapsule<Content: View>: View {
 
     var body: some View {
         HStack(spacing: 0) { content }.padding(.horizontal, padding).frame(height: m.control)
-            .background(appearance.colors.control, in: Capsule())
-            .elevation(.e1, cornerRadius: m.control / 2)
+            .glass(appearance.colors.control, in: Capsule(), cornerRadius: m.control / 2)
     }
 }

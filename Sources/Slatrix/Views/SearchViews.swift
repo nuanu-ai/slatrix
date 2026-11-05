@@ -61,9 +61,8 @@ struct SearchBarField: View {
         }
         .padding(.horizontal, m.sp12).frame(height: m.control)
         .foregroundStyle(colors.textPrimary)
-        .background(colors.control, in: Capsule())
+        .glass(colors.control, in: Capsule(), cornerRadius: m.control / 2)
         .overlay { if focused { Capsule().strokeBorder(colors.accentFill, lineWidth: 1) } }
-        .elevation(.e1, cornerRadius: m.control / 2)
         .onGeometryChange(for: CGRect.self) {
             $0.frame(in: .named(SearchBar.space))
         } action: {

@@ -150,8 +150,25 @@ struct SidebarView: View {
                 Button(accessory.title, action: accessory.action).buttonStyle(.primary).controlSize(.small)
             }
         }.padding(.horizontal, m(10)).padding(.vertical, m(6))
-            .background(.bar)
-            .overlay(alignment: .top) { VStack(spacing: 0) { Divider().overlay(colors.border) } }
+            .modifier(FooterPlate())
+    }
+
+    /// You, on a glass plate the list scrolls under, as macOS 26 floats its chrome; a bar with a hairline before it.
+    private struct FooterPlate: ViewModifier {
+        @Environment(\.metrics) private var m
+        @EnvironmentObject private var appearance: AppearanceStore
+        func body(content: Content) -> some View {
+            if #available(macOS 26, *) {
+                content.glass(
+                    appearance.colors.sidebar, in: RoundedRectangle(cornerRadius: m.radiusLarge),
+                    cornerRadius: m.radiusLarge
+                ).padding(m.sp8)
+            } else {
+                content.background(.bar).overlay(alignment: .top) {
+                    VStack(spacing: 0) { Divider().overlay(appearance.colors.border) }
+                }
+            }
+        }
     }
 
     private func shortcut(_ item: AppRoute, label: String, badge: Int = 0, count: Int = 0) -> some View {
