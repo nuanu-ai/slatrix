@@ -1,5 +1,8 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.BuildConfig
+import androidx.compose.ui.platform.LocalUriHandler
+
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.ui.designsystem.bubble
@@ -176,8 +179,26 @@ fun LivePreferencesScreen(
                         }
                     }
                 }
+                PreferenceHeading("About")
+                AboutRow("Version", BuildConfig.VERSION_NAME)
+                AboutRow("Copyright", "© 2026 Nuanu AI Lab", "https://nuanu.ai")
+                AboutRow("Source code", "GitHub", "https://github.com/nuanu-ai/slatrix")
             }
         }
+}
+
+/** One of About's lines: what it is, and its value, a link when [url] is given, as on the Mac. */
+@Composable
+private fun AboutRow(label: String, value: String, url: String? = null) {
+    val colors = SlatrixTheme.colors
+    val uris = LocalUriHandler.current
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
+        .then(if (url != null) Modifier.clickable(role = Role.Button) { uris.openUri(url) } else Modifier)
+        .padding(start = PreferenceInset, end = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = if (url != null) colors.accent else colors.textSecondary, maxLines = 1)
+    }
 }
 
 /** What the message text size preview says. */
