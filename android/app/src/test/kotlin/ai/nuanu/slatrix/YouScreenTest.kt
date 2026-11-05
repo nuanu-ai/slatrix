@@ -24,10 +24,16 @@ class YouScreenTest {
 
     @Test fun aLongMatrixIdStaysOnOneLineOnANarrowPhone() {
         val id = "@alexandra.doe-whitfield:matrix.harbor-collective.example.org"
-        compose.setContent { SlatrixTheme { LiveYouScreen(id, { "Alexandra" }, {}, {}, onBack = {}) } }
+        compose.setContent { SlatrixTheme { LiveYouScreen(id, "Alexandra", {}, {}, onBack = {}) } }
         val layouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithText(id, substring = true, useUnmergedTree = true).fetchSemanticsNode()
             .config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts)
         assertEquals(1, layouts.single().lineCount)
+    }
+
+    @Test fun youOpensOnYourNameRatherThanSwappingItIn() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", "Alex Doe", {}, {}, onBack = {}) } }
+        compose.onNodeWithText("Alex Doe").assertExists()
     }
 }

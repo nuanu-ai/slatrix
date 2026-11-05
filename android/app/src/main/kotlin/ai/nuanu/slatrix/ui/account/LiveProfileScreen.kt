@@ -32,7 +32,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,20 +39,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import kotlinx.coroutines.CancellationException
 
 /**
- * You, pushed from Home's avatar as Slack does: who is signed in, Preferences, and signing out. The profile's name
- * replaces the ID's localpart once [loadName] returns it.
+ * You, pushed from Home's avatar as Slack does: who is signed in, Preferences, and signing out. Without a profile
+ * [name], the ID's localpart stands in.
  */
 @Composable
-fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
+fun LiveYouScreen(userId: String, name: String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
     onViewProfile: ((name: String?) -> Unit)? = null, onBack: () -> Unit, avatarUrl: String? = null) {
     val colors = SlatrixTheme.colors
     val localpart = userId.removePrefix("@").substringBefore(':')
-    val name by produceState<String?>(null, userId) {
-        value = try { loadName()?.takeIf { it.isNotBlank() } } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
-    }
     var confirming by rememberSaveable { mutableStateOf(false) }
     if (confirming) {
         AlertDialog(
