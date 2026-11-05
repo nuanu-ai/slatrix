@@ -53,9 +53,10 @@ enum ActivityBadge {
 
     /// Only notifications delivered by SDK sync enter this session-local feed.
     @discardableResult
-    func receive(_ notification: NotificationItem, roomID: String, ownUserID: String, receivedAt: Date = Date())
-        -> ActivityItem?
-    {
+    func receive(
+        _ notification: NotificationItem, roomID: String, ownUserID: String, names: [String: String] = [:],
+        receivedAt: Date = Date()
+    ) -> ActivityItem? {
         var item: ActivityItem
         switch notification.event {
         case .timeline(let event):
@@ -66,9 +67,11 @@ enum ActivityBadge {
                 switch like {
                 case .roomMessage(let type, _):
                     switch type {
-                    case .text(let value): body = Self.previewBody(value.body, formatted: value.formatted)
-                    case .notice(let value): body = Self.previewBody(value.body, formatted: value.formatted)
-                    case .emote(let value): body = Self.previewBody(value.body, formatted: value.formatted)
+                    case .text(let value): body = Self.previewBody(value.body, formatted: value.formatted, names: names)
+                    case .notice(let value):
+                        body = Self.previewBody(value.body, formatted: value.formatted, names: names)
+                    case .emote(let value):
+                        body = Self.previewBody(value.body, formatted: value.formatted, names: names)
                     default: body = "Shared an attachment"
                     }
                 case .poll(let question): body = "Poll: " + String(question.prefix(4096))
@@ -106,8 +109,28 @@ enum ActivityBadge {
         "\(roomID.utf8.count):\(roomID)\(eventID)"
     }
 
-    nonisolated static func previewBody(_ body: String, formatted: FormattedBody?) -> String {
-        String(MatrixMapping.previewText(body, formatted: formatted).prefix(4096))
+    nonisolated static func previewBody(_ body: String, formatted: FormattedBody?, names: [String: String] = [:])
+        -> String
+    {
+        String(MatrixMapping.previewText(body, formatted: formatted, names: names).prefix(4096))
+    }
+
+    /// The people a message notification mentions, so their names can be looked up before it shows.
+    nonisolated static func mentionedIDs(_ notification: NotificationItem) -> Set<String> {
+        guard case .timeline(let event) = notification.event,
+            case .messageLike(.roomMessage(let type, _))? = try? event.content()
+        else { return [] }
+        let text: (body: String, formatted: FormattedBody?)
+        switch type {
+        case .text(let value): text = (value.body, value.formatted)
+        case .notice(let value): text = (value.body, value.formatted)
+        case .emote(let value): text = (value.body, value.formatted)
+        default: return []
+        }
+        let runs = MessageBodyRenderer.shared.render(
+            body: text.body, formattedBody: MatrixMapping.htmlBody(text.formatted)
+        ).runs
+        return Set(runs.compactMap(\.mention).filter { $0 != "@room" })
     }
 
     func markThreadOpened(roomID: String, rootID: String) {

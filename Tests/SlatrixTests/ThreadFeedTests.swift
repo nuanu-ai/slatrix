@@ -129,6 +129,21 @@ struct ActivityTests {
         #expect(activity.items.count == 1)
     }
 
+    // capability: people.names
+    @Test("A notification names the people it mentions, and finds whom to look up")
+    func namedMentions() {
+        let event = NotificationEvent(noHandle: .init())
+        event.value = .messageLike(
+            content: .roomMessage(
+                messageType: .text(
+                    content: TextMessageContent(body: "@sam:example.org and @kai:example.org, look", formatted: nil)),
+                inReplyToEventId: nil))
+        #expect(ActivityService.mentionedIDs(notification(event)) == ["@sam:example.org", "@kai:example.org"])
+        let item = activity.receive(
+            notification(event), roomID: room.id, ownUserID: me, names: ["@sam:example.org": "Sam Okafor"])
+        #expect(item?.body == "@Sam Okafor and @kai, look")
+    }
+
     enum Ignored: CaseIterable { case own, roomState, verification }
 
     @Test("My own messages, room state and verification signalling stay out of Activity", arguments: Ignored.allCases)
