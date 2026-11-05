@@ -68,32 +68,24 @@ struct ChannelHeader: View {
         var body: some View {
             let colors = appearance.colors
             Button(action: open) {
-                VStack(alignment: .leading, spacing: m(1)) {
-                    HStack(spacing: m(3)) {
-                        if ConversationHeader.isOneToOne(room) {
-                            AvatarView(
-                                name: room.name, size: m.avatarSmall, matrix: matrix, source: room.avatarURL
-                            ).padding(.trailing, m.sp4)
-                        } else if !room.isDirect {
-                            Image(systemName: room.channelSymbol).font(m.font(.body, .medium))
-                                .foregroundStyle(colors.textSecondary)
-                        }
-                        Text(room.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
+                HStack(spacing: m.sp8) {
+                    if ConversationHeader.isOneToOne(room) {
+                        AvatarView(name: room.name, size: m.avatar, matrix: matrix, source: room.avatarURL)
                     }
-                    if !room.topic.isEmpty {
+                    VStack(alignment: .leading, spacing: m(1)) {
+                        HStack(spacing: m(3)) {
+                            if !room.isDirect {
+                                Image(systemName: room.channelSymbol).font(m.font(.body, .medium))
+                                    .foregroundStyle(colors.textSecondary)
+                            }
+                            Text(room.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
+                        }
+                        // Always a line under the name, so the name sits at one height in every conversation; who
+                        // is typing shows there, as Telegram shows it.
                         Text(typing ?? room.topic).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                    }
-                }.lineLimit(1).truncationMode(.tail)
-                    // Under the name, as Telegram shows it; with no topic line it hangs below, so the name stays put.
-                    .overlay(alignment: .bottomLeading) {
-                        if room.topic.isEmpty, let typing {
-                            Text(typing).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                                .lineLimit(1).fixedSize()
-                                .offset(
-                                    x: ConversationHeader.isOneToOne(room) ? m.avatarSmall + m.sp4 + m(3) : 0,
-                                    y: m.lineHeight(.subheadline) + m(1))
-                        }
-                    }.animation(Motion.content, value: typing)
+                            .frame(height: m.lineHeight(.subheadline))
+                    }.lineLimit(1).truncationMode(.tail).animation(Motion.content, value: typing)
+                }
             }.buttonStyle(.row).help(room.isDirect ? room.name : "Open channel details")
                 .contextMenu {
                     NativeMessageMenuCommands(

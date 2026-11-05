@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import Testing
 
 @testable import Slatrix
@@ -22,6 +24,21 @@ struct ChannelHeaderTests {
     func faces() {
         #expect(ConversationHeader.faces([you, alex, julia, sam, kim], me: you.id) == [alex, julia, sam])
         #expect(ConversationHeader.faces([you, alex], me: you.id) == [alex, you])
+    }
+
+    @Test("A conversation's name sits at one height whether it has a topic, someone typing, or neither")
+    func nameHeight() {
+        func height(_ room: ChatRoom, typing: [String] = []) -> CGFloat {
+            let matrix = MatrixService()
+            matrix.typingUsers = typing
+            let title = ChannelHeader.Title(matrix: matrix, room: room, perform: { _ in })
+                .environmentObject(AppearanceStore()).environment(\.metrics, Metrics(zoom: 1))
+            return NSHostingView(rootView: title).fittingSize.height
+        }
+        let topic = height(ChatRoom(id: "!team", name: "Team", topic: "Ideas and questions"))
+        #expect(height(ChatRoom(id: "!quiet", name: "Quiet")) == topic)
+        #expect(height(ChatRoom(id: "!quiet", name: "Quiet"), typing: ["Alex"]) == topic)
+        #expect(height(ChatRoom(id: "!dm", name: "Alex", isDirect: true, memberCount: 2)) == topic)
     }
 
     private func menu(
