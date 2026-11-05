@@ -117,7 +117,11 @@ data class ConversationMessage(
 }
 
 /** One emoji's reactions: how many, whether one is yours, and who, as user IDs in the order they reacted. */
-data class MessageReaction(val key: String, val count: Int, val mine: Boolean, val senders: List<String>)
+data class MessageReaction(val key: String, val count: Int, val mine: Boolean, val senders: List<String>) {
+    /** The people a pill shows in place of its count, yours first; null past three or while someone is unknown. */
+    fun faces(me: String?): List<String>? =
+        if (count > 3 || senders.size != count) null else senders.filter { it == me } + senders.filter { it != me }
+}
 
 /** The quoted parent above a reply; until it loads, or when it can't, only its event ID is known. */
 data class ReplyPreview(val eventId: String, val state: State, val senderName: String = "", val body: String = "") {
