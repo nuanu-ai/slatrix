@@ -289,7 +289,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }, topBar = { ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails) },
         bottomBar = {
             // On the header's glass, fading in without an edge, so the capsule floats over the messages.
-            Column(Modifier.glassFoot(glass).navigationBarsPadding().imePadding()) {
+            Column(Modifier.imePadding().glassFoot(glass).navigationBarsPadding()) {
                 val placeholder = when {
                     threadRoot != null -> "Add a reply"
                     room.direct || room.isPrivate -> "Message ${room.name}"
