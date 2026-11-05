@@ -1,0 +1,11 @@
+{
+  "about": "A reaction's pill, as Telegram draws it: the emoji, then the faces of up to three people who reacted, you first and then in the order they reacted. Past three, or while the room hasn't said who all of them are, the pill shows the count instead. me is your user ID, senders are user IDs in the order they reacted, and count is the server's count. A pill shows either faces, a list of user IDs, or label, the count as written.",
+  "pill": [
+    { "name": "One person shows their face", "me": "@me:x", "count": 1, "senders": ["@a:x"], "faces": ["@a:x"] },
+    { "name": "Three people show three faces in the order they reacted", "me": "@me:x", "count": 3, "senders": ["@a:x", "@b:x", "@c:x"], "faces": ["@a:x", "@b:x", "@c:x"] },
+    { "name": "Your face comes first", "me": "@me:x", "count": 2, "senders": ["@a:x", "@me:x"], "faces": ["@me:x", "@a:x"] },
+    { "name": "Four people show the count", "me": "@me:x", "count": 4, "senders": ["@a:x", "@b:x", "@c:x", "@d:x"], "label": "4" },
+    { "name": "Nobody known yet shows the count", "me": "@me:x", "count": 2, "senders": [], "label": "2" },
+    { "name": "Fewer known than counted shows the count", "me": "@me:x", "count": 3, "senders": ["@a:x", "@b:x"], "label": "3" }
+  ]
+}

@@ -459,6 +459,8 @@ struct MessageRow: View {
     /// The thread's last replier, in the replies bar.
     var replierAvatar: AvatarView? = nil
     var replyPreview: ReplyPreviewView? = nil
+    /// The faces each reaction shows in place of its count, by its key.
+    var reactionFaces: [String: [AvatarView]] = [:]
     var attachment: AttachmentView? = nil
     var actions = MessageRowActions()
     /// Where each reaction sits while the row is hovered, for the timeline's tooltip naming who reacted.
@@ -590,8 +592,17 @@ struct MessageRow: View {
                 } label: {
                     ReactionChip(mine: reaction.mine) {
                         Text(reaction.key).font(m.font(.body))
-                        Text("\(reaction.count)").font(m.font(.subheadline, .semibold))
-                            .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
+                        if let faces = reactionFaces[reaction.key] {
+                            // Overlapping, each ringed in the canvas so the one beneath shows where it ends.
+                            HStack(spacing: -m.sp4) {
+                                ForEach(faces.indices, id: \.self) { index in
+                                    faces[index].overlay(Circle().strokeBorder(colors.canvas, lineWidth: m(1.5)))
+                                }
+                            }.alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + m.sp4 }
+                        } else {
+                            Text("\(reaction.count)").font(m.font(.subheadline, .semibold))
+                                .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
+                        }
                     }
                 }.buttonStyle(.row).disabled(actions.react == nil)
                     .accessibilityLabel(
