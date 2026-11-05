@@ -53,7 +53,7 @@ private sealed interface PickerItem {
 internal fun EmojiPickerSheet(recent: List<String>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
     val context = LocalContext.current
-    val catalog by produceState<EmojiCatalog?>(null, context) { value = withContext(Dispatchers.IO) { EmojiCatalog.load(context) } }
+    val catalog by produceState(EmojiCatalog.loaded, context) { value = withContext(Dispatchers.IO) { EmojiCatalog.load(context) } }
     var query by remember { mutableStateOf("") }
     val items = remember(catalog, query, recent) {
         val all = catalog ?: return@remember emptyList()

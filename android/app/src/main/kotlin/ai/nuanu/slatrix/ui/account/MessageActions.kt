@@ -42,6 +42,11 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material3.AlertDialog
+import ai.nuanu.slatrix.core.EmojiCatalog
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -105,6 +110,9 @@ private val forwardKinds = textKinds + MessageKind.Attachment
 internal fun MessageActionsHost(message: ConversationMessage, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
     onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit, onDismiss: () -> Unit) {
     var step by remember(message.id) { mutableStateOf(Step.Sheet) }
+    // Read while the sheet is up, so Add reaction opens on every emoji at once.
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { EmojiCatalog.load(context) } }
     when (step) {
         Step.Sheet -> MessageSheet(message, actions, onOpenThread, onRetrySend, onDeleteUnsent, { step = it }, onDismiss)
         Step.Picker -> EmojiPickerSheet(actions.recent, { emoji -> actions.onReact?.invoke(message, emoji); onDismiss() }, onDismiss)

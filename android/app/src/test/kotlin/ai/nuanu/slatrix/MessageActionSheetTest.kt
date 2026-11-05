@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.EmojiCatalog
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
@@ -99,6 +100,16 @@ class MessageActionSheetTest {
         compose.waitUntil { compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("thumbs up sign")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithContentDescription("thumbs up sign").performClick()
         compose.runOnIdle { assertEquals(listOf("Ship it" to "👍"), reactions) }
+    }
+
+    @Test fun theEmojiPickerOpensFullOnceItsEmojiWereRead() {
+        val first = EmojiCatalog.load(ApplicationProvider.getApplicationContext()).all.first()
+        show(MessageActions(onReact = { _, _ -> }))
+        open("Ship it")
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithContentDescription("Add reaction").performClick()
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithContentDescription(first.name).assertExists()
     }
 
     // capability: conversation.mark-unread
