@@ -1175,10 +1175,25 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
     override func shouldChangeText(in range: NSRange, replacementString: String?) -> Bool {
         let whole = widened(range)
         guard whole != range, let replacementString else {
+            caretAfterEdit = replacementString.map { range.location + ($0 as NSString).length }
             return super.shouldChangeText(in: range, replacementString: replacementString)
         }
         insertText(replacementString, replacementRange: whole)
         return false
+    }
+    private var caretAfterEdit: Int?
+
+    /// AppKit puts the caret at the end of everything an edit touched, and joining paragraphs restyles the whole
+    /// paragraph, so the caret goes back to where the typed text ends.
+    override func didChangeText() {
+        let selection = selectedRange()
+        if let caret = caretAfterEdit, !hasMarkedText(), selection.length == 0, selection.location != caret,
+            caret <= (string as NSString).length
+        {
+            setSelectedRange(NSRange(location: caret, length: 0))
+        }
+        caretAfterEdit = nil
+        super.didChangeText()
     }
 
     // MARK: Keys
