@@ -78,10 +78,10 @@ class LaterScreenTest {
 
         compose.onNodeWithText("Ship it on Thursday").performClick()
         compose.onAllNodesWithContentDescription("Remove from Later")[1].performClick()
-        compose.runOnIdle {
-            assertEquals(listOf("\$two"), opened)
-            assertEquals(listOf("\$one"), removed)
-        }
+        compose.onNodeWithText("Undo").assertIsDisplayed()
+        compose.waitUntil(10_000) { removed.isNotEmpty() }
+        assertEquals(listOf("\$two"), opened)
+        assertEquals(listOf("\$one"), removed)
     }
 
     @Test fun aSaveTimeMergedFromAnotherDeviceKeepsTheCardAsItShows() {
@@ -113,7 +113,7 @@ class LaterScreenTest {
         compose.onNodeWithText("Saved list").assertIsDisplayed()
     }
 
-    @Test fun inLaterASwipeLeftOnARowRemovesItAndASwipeRightStillGoesToDms() {
+    @Test fun aSwipeLeftMarksACardDoneWithAnUndoAndLeavesTheTabAsItIs() {
         val saved = listOf(SavedMessage("!design:example.org", "\$one", 1_000))
         val removed = mutableListOf<String>()
         compose.setContent {
@@ -124,12 +124,18 @@ class LaterScreenTest {
         }
         tab("Later").performClick()
         compose.onNodeWithText("Ship the draft").performTouchInput { swipeLeft() }
-        compose.waitUntil { removed.isNotEmpty() }
-        assertEquals(listOf("\$one"), removed)
+        compose.onNodeWithText("Marked as done").assertIsDisplayed()
+        compose.onNodeWithText("Ship the draft").assertDoesNotExist()
+        compose.onNodeWithText("Undo").performClick()
+        compose.onNodeWithText("Ship the draft").assertIsDisplayed()
+        compose.onNodeWithText("Marked as done").assertDoesNotExist()
+        assertEquals(emptyList<String>(), removed)
         assertTrue(tab("Later").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false })
 
-        compose.onNodeWithText("Ship the draft").performTouchInput { swipeRight() }
-        compose.waitUntil { tab("DMs").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false } }
+        compose.onNodeWithText("Ship the draft").performTouchInput { swipeLeft() }
+        compose.waitUntil(10_000) { removed.isNotEmpty() }
+        assertEquals(listOf("\$one"), removed)
+        compose.onNodeWithText("Marked as done").assertDoesNotExist()
     }
 
     private fun tab(label: String) =
