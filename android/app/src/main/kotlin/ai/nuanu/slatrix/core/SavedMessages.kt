@@ -260,7 +260,7 @@ class MatrixSaved(private val client: Client) {
                     if ((event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId != saved.eventId) return@use null
                     val body = previewText(event.content) ?: return@use null
                     val profile = event.senderProfile as? ProfileDetails.Ready
-                    SavedPreview(event.sender, profile?.displayName?.takeIf { it.isNotBlank() } ?: event.sender,
+                    SavedPreview(event.sender, event.senderProfile.nameOf(event.sender),
                         body, event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong(), profile?.avatarUrl)
                 }
             }

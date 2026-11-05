@@ -279,7 +279,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             try { onOpenFile(attachment)?.let { fileError = it } } finally { opening -= message.id }
         }
     }
-    reacted?.let { ReactionsSheet(it.reactions, state.rows, state.ownUserId) { reacted = null } }
+    reacted?.let { ReactionsSheet(it.reactions, state.names, state.ownUserId) { reacted = null } }
     val glass = rememberGlass()
     // The header and the composer float over the messages, which pass under both; the scaffold measures them first, so
     // the messages never move.
@@ -340,7 +340,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val next = rows.getOrNull(rows.size - index) as? ConversationMessage
                             val last = next == null || !next.grouped || restarts(next)
                             val root = threadRoot != null && row.eventId == threadRoot
-                            LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId,
+                            LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId, state.names,
                                 actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
                                 loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
                                 loadThreadOrigin, actions.onQuote) { menu = it }
@@ -547,7 +547,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
  * color, atop the first; yours on the right in the accent. The time sits inside, after the last line when it fits.
  */
 @Composable
-private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me: String?, onReact: ((ConversationMessage, String) -> Unit)?,
+private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me: String?, names: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?, onReply: ((ConversationMessage) -> Unit)?,
@@ -625,7 +625,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             val inset = if (media) Modifier.padding(horizontal = UiMetrics.BubbleInset - UiMetrics.GapTiny) else Modifier
             // An attachment's text is its caption; without one it is the file's name, which the attachment shows.
             val body: (@Composable () -> Unit)? = if (attachment == null || message.caption != null) {
-                { MessageBody(message, if (message.sendState == MessageSendState.Sending) fill.textSecondary else fill.textBody, me, onPerson) }
+                { MessageBody(message, if (message.sendState == MessageSendState.Sending) fill.textSecondary else fill.textBody, me, names, onPerson) }
             } else null
             val time = @Composable { color: Color ->
                 Text(when (message.sendState) {

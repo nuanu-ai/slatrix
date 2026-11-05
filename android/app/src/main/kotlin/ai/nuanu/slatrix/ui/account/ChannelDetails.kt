@@ -325,7 +325,7 @@ private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpe
                         Text("${dayLabel(message.timestamp)} at ${timeLabel(message.timestamp)}", style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary, maxLines = 1)
                     }
-                    MessageBody(message, colors.textBody, me)
+                    MessageBody(message, colors.textBody, me, pins.state.names)
                 }
                 // Holds its place without the power to unpin, so rows line up either way.
                 Box(Modifier.size(UiMetrics.Touch), contentAlignment = Alignment.Center) {

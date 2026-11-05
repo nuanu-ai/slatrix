@@ -287,13 +287,15 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             followed.remove(info.id)?.release()
             return
         }
-        val name = info.displayName?.takeIf { it.isNotBlank() } ?: info.id
+        // A direct message without a name of its own is named for the other person, as everyone is named everywhere.
+        val counterpart = info.heroes.singleOrNull()?.takeIf { info.isDirect && info.rawName.isNullOrBlank() }
+        val name = counterpart?.let { DisplayNames.name(it.userId, it.displayName) } ?: info.displayName?.takeIf { it.isNotBlank() } ?: info.id
         // Still followed, so accepting it, here or on another device, turns it into the conversation or workspace it is.
         if (info.membership == Membership.INVITED) {
             summaries.remove(info.id)
             spaces.remove(info.id)
             val invitation = Invitation(info.id, name, direct = info.isDirect, space = info.isSpace,
-                inviter = info.inviter?.let { it.displayName?.takeIf(String::isNotBlank) ?: it.userId })
+                inviter = info.inviter?.nameOf())
             if (invitations[info.id] != invitation) invitations[info.id] = invitation
             return
         }

@@ -35,7 +35,7 @@ class MatrixTyping(private val scope: CoroutineScope, private val client: Client
         })
         launch {
             for (typing in ids) send((typing - room.ownUserId()).map { id ->
-                quietly { room.memberDisplayName(id) }?.takeIf { it.isNotBlank() } ?: id.removePrefix("@").substringBefore(':')
+                quietly { room.member(id).nameOf() } ?: DisplayNames.localpart(id)
             })
         }
         awaitClose {
