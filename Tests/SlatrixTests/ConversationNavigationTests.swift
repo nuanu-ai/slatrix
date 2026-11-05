@@ -109,15 +109,15 @@ struct ConversationNavigationTests {
         "A conversation picked from #a's Files leaves Files up until it shows, never #a's messages in between",
         arguments: [
             // Still reading its cached rows.
-            ("a", "b", ChannelTab.files),
-            ("b", "b", .messages),
+            ("a", "b", AppRoute.files),
+            ("b", "b", .home),
             // "View in conversation" goes to #a's messages at once.
-            ("a", "a", .messages),
-            ("a", nil, .messages),
-        ] as [(String?, String?, ChannelTab)])
-    func screenWhileOpening(showing: String?, opening: String?, expected: ChannelTab) {
+            ("a", "a", .home),
+            ("a", nil, .home),
+        ] as [(String?, String?, AppRoute)])
+    func screenWhileOpening(showing: String?, opening: String?, expected: AppRoute) {
         #expect(
-            ConversationNavigation.shown(.messages, from: ChannelTab.files, showing: showing, opening: opening)
+            ConversationNavigation.shown(AppRoute.home, from: AppRoute.files, showing: showing, opening: opening)
                 == expected)
     }
 }

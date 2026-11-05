@@ -832,6 +832,41 @@ struct Snapshots {
         }
     }
 
+    @Test("A channel's files beside its messages", arguments: Theme.allCases)
+    func filesPane(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        matrix.selectPreviewRoom(PreviewMedia.roomID)
+        let appearance = AppearanceStore()
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let window = offscreenWindow(NSSize(width: 1440, height: 900))
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        _ = try await settledImage(hosting)
+        // Files sits just left of the toolbar capsule's ⋯, which ends a gap short of the search field.
+        let m = Metrics()
+        let x = 1440 - m.sp16 - m(RootView.searchWidth) - m.sp12 - m.sp4 - 1.5 * m.control
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            window.sendEvent(
+                try #require(
+                    NSEvent.mouseEvent(
+                        with: type, location: NSPoint(x: x, y: 900 - m.paneHeader / 2), modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                        context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+        }
+        try write(await settledImage(hosting), "files-pane-\(theme.rawValue)")
+    }
+
     @Test("Emoji picker, empty and searching", arguments: Theme.allCases)
     func emojiPicker(theme: Theme) async throws {
         let (window, hosting) = try themedWindow(

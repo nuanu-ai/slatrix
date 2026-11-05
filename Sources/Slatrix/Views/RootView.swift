@@ -87,7 +87,7 @@ struct RootView: View {
     @State private var channelDetails: ChannelDetailsSelection?
     @State private var leaving: ChatRoom?
     @State private var toasts = Toasts()
-    @State private var channelTab = ChannelTab.messages
+    @State private var channelPanel: ChannelPanel?
     /// The screen a conversation was picked on, which stays up until that conversation can replace it.
     @State private var pickedFrom: Screen?
     @State private var pinPermissionRoomID: String?
@@ -146,7 +146,7 @@ struct RootView: View {
     /// 14-point buttons 20 points apart.
     private var windowButtonsWidth: CGFloat { (m.paneHeader - 14) / 2 + 54 }
     static let searchWidth: CGFloat = 180
-    private var paneOpen: Bool { profilePane != nil || (room != nil && threadRoot != nil) }
+    private var paneOpen: Bool { profilePane != nil || (room != nil && (threadRoot != nil || channelPanel != nil)) }
     /// Whether an open pane sits beside the conversation; otherwise it lies over it.
     private var paneBeside: Bool { sidebarCollapsed ? arrangement.paneFitsAlone : arrangement.paneFitsBesideSidebar }
     /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
@@ -196,11 +196,10 @@ struct RootView: View {
     private var room: ChatRoom? { shownRoom(matrix, workspaceID: workspaceID) }
     private struct Screen {
         var route: AppRoute
-        var tab: ChannelTab
     }
     private var screen: Screen {
         ConversationNavigation.shown(
-            Screen(route: route, tab: channelTab), from: pickedFrom, showing: room?.id, opening: pendingRoomID)
+            Screen(route: route), from: pickedFrom, showing: room?.id, opening: pendingRoomID)
     }
     /// Opened at its unread line, from the cache or at the line from the server.
     private var isResumingUnread: Bool {
@@ -231,7 +230,6 @@ struct RootView: View {
         let workspace: String?
         let sourceRoute: AppRoute
         let selectedRoomID: String?
-        let tab: ChannelTab
     }
     private struct ProfileSelection: Identifiable {
         var id: String
@@ -483,7 +481,7 @@ struct RootView: View {
                     directMessagesColumn = false
                     cancelCurrentEdit()
                     cancelReply()
-                    channelTab = .messages
+                    channelPanel = nil
                     navigationGeneration = UUID()
                     pendingRoomID = nil
                     matrix.setMessageActionThread(rootID: nil)
@@ -494,7 +492,10 @@ struct RootView: View {
             }
             .onChange(of: threadRoot?.eventID) { _, id in
                 updateActionThreadVisibility()
-                if id != nil { profilePane = nil }
+                if id != nil {
+                    profilePane = nil
+                    channelPanel = nil
+                }
             }
             .onChange(of: threadReadyID) { _, _ in updateActionThreadVisibility() }
             .onChange(of: navigationGeneration) { _, _ in
@@ -515,15 +516,6 @@ struct RootView: View {
                     target.threadID != threadRoot?.eventID
                 {
                     cancelReply()
-                }
-            }
-            .onChange(of: channelTab) { _, tab in
-                cancelStaleThreadOpen()
-                if tab != .messages {
-                    cancelCurrentEdit()
-                    cancelReply()
-                    cancelStaleForward()
-                    cancelStaleCaption()
                 }
             }
     }
@@ -651,7 +643,7 @@ struct RootView: View {
                     Task {
                         guard appearance.notifications, composerIdentity == identity,
                             matrix.notificationSessionID == session,
-                            !(platform.conversationWindowIsVisible && route == .home && channelTab == .messages
+                            !(platform.conversationWindowIsVisible && route == .home
                                 && matrix.focusedEventID == nil && matrix.selectedRoomID == notification.target.roomID
                                 && !hasModal && !hasNativeModal && !matrix.verification.isPresented)
                         else { return }
@@ -830,6 +822,8 @@ struct RootView: View {
                 onEditProfile: { editingProfile = true }, onClose: { self.profilePane = nil })
         } else if let room, let root = threadRoot {
             threadPanel(root: root, room: room)
+        } else if let room, let channelPanel {
+            listPanel(channelPanel, room: room)
         }
     }
 
@@ -909,7 +903,7 @@ struct RootView: View {
     }
     private var readInputs: ReadInputs {
         ReadInputs(
-            route: screen.route, tab: screen.tab, workspaceID: workspaceID, visibleBottomRoomID: visibleBottomRoomID,
+            route: screen.route, workspaceID: workspaceID, visibleBottomRoomID: visibleBottomRoomID,
             windowCanRead: windowCanRead, hasPresentedSheet: hasPresentedSheet, threadRootID: threadRoot?.eventID,
             threadReadyID: threadReadyID, openingThreadID: openingThreadID, threadLoadFailed: threadLoadError != nil,
             localReady: localReady, threadReadViewport: threadReadViewport, readHold: readHold)
@@ -1046,16 +1040,6 @@ struct RootView: View {
             channelHeader(room)
             if room.membership == "invite" {
                 inviteView(room)
-            } else if screen.tab == .pins {
-                PinnedMessagesView(
-                    matrix: matrix, service: matrix.pinnedMessages, room: room,
-                    onOpen: { message in selectRoom(message.roomID, record: true, eventID: message.eventID) },
-                    onOpenProfile: openProfile)
-            } else if screen.tab == .files {
-                SharedFilesView(
-                    matrix: matrix, service: matrix.sharedFiles, workspaceID: workspaceID, channelID: room.id,
-                    onOpen: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
-                    onOpenMedia: { [viewer] in viewer.open($0, files: $1) })
             } else {
                 TimelineView(
                     matrix: matrix, room: room, savedIDs: savedIDs,
@@ -1149,12 +1133,12 @@ struct RootView: View {
             .dropToUpload("Upload to \(room.writtenName)")
     }
     private static let cannotPost = "You don’t have permission to post in this channel."
-    private func openChannelTab(_ tab: ChannelTab) {
-        if tab != .messages {
-            matrix.setMessageActionThread(rootID: nil)
-            threadRoot = nil
+    private func openChannelPanel(_ panel: ChannelPanel?) {
+        if panel != nil {
+            if threadRoot != nil { closeThread() }
+            profilePane = nil
         }
-        channelTab = tab
+        channelPanel = panel
     }
     private func channelHeader(_ room: ChatRoom) -> some View {
         toolbar {
@@ -1166,7 +1150,7 @@ struct RootView: View {
                     .disabled(matrix.isPreview)
             }
             ChannelHeader(
-                matrix: matrix, room: room, tab: Binding(get: { screen.tab }, set: openChannelTab)
+                matrix: matrix, room: room, panel: Binding(get: { channelPanel }, set: openChannelPanel)
             ) { headerAction($0, room: room) }
         }
     }
@@ -1189,6 +1173,36 @@ struct RootView: View {
         case .search: handleMenu("search-conversation")
         case .leave: leaving = room
         }
+    }
+    /// Pinned messages or files, beside the conversation as a thread is, so the conversation stays put.
+    private func listPanel(_ panel: ChannelPanel, room: ChatRoom) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: m.sp8) {
+                VStack(alignment: .leading, spacing: m(1)) {
+                    Text(panel == .pins ? "Pinned" : "Files").font(m.font(.title3, .semibold))
+                        .foregroundStyle(colors.textPrimary)
+                    Text(room.writtenName).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                }.lineLimit(1)
+                Spacer()
+                IconButton(
+                    symbol: "xmark", label: panel == .pins ? "Close pinned" : "Close files", role: .subheadline,
+                    round: true
+                ) { channelPanel = nil }.fontWeight(.semibold).foregroundStyle(colors.textSecondary)
+            }.padding(.leading, m.sp20).padding(.trailing, m.sp12).frame(height: m.paneHeader)
+                .background(WindowDragArea())
+            switch panel {
+            case .pins:
+                PinnedMessagesView(
+                    matrix: matrix, service: matrix.pinnedMessages, room: room,
+                    onOpen: { message in selectRoom(message.roomID, record: true, eventID: message.eventID) },
+                    onOpenProfile: openProfile)
+            case .files:
+                SharedFilesView(
+                    matrix: matrix, service: matrix.sharedFiles, workspaceID: workspaceID, channelID: room.id,
+                    onOpen: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
+                    onOpenMedia: { [viewer] in viewer.open($0, files: $1) })
+            }
+        }.background(colors.canvas)
     }
     private func threadPanel(root: ChatMessage, room: ChatRoom) -> some View {
         VStack(spacing: 0) {
@@ -1623,7 +1637,7 @@ struct RootView: View {
     }
     private func startReply(_ message: ChatMessage, surface: MessageReplyTarget.Surface, session: UUID, timeline: UUID)
     {
-        guard !matrix.isPreview, localReady, pendingRoomID == nil, route == .home, channelTab == .messages,
+        guard !matrix.isPreview, localReady, pendingRoomID == nil, route == .home,
             room?.id == message.roomID, room?.membership == "join",
             matrix.notificationSessionID == session, matrix.timelineSelectionID == timeline
         else { return }
@@ -1637,7 +1651,7 @@ struct RootView: View {
     }
     private func prepareReply(_ target: MessageReplyTarget) {
         guard target.isCurrent(replyTarget, owner: replyOwner), !matrix.isPreview,
-            route == .home, channelTab == .messages, room?.id == target.message.roomID, room?.membership == "join"
+            route == .home, room?.id == target.message.roomID, room?.membership == "join"
         else { return }
         replyError = nil
         if pendingRoomID == nil, matrix.isLiveTimelineReady(roomID: target.message.roomID),
@@ -1652,7 +1666,7 @@ struct RootView: View {
         Task { @MainActor in
             @MainActor func isCurrent() -> Bool {
                 navigationGeneration == generation && target.isCurrent(replyTarget, owner: replyOwner) && route == .home
-                    && channelTab == .messages && room?.id == target.message.roomID && room?.membership == "join"
+                    && room?.id == target.message.roomID && room?.membership == "join"
             }
             guard isCurrent() else { return }
             do {
@@ -1741,7 +1755,7 @@ struct RootView: View {
             workspaceInitialized = true
         }
         route = .home
-        channelTab = .messages
+        if id != matrix.selectedRoomID { channelPanel = nil }
         matrix.setMessageActionThread(rootID: nil)
         threadRoot = nil
         threadReadyID = nil
@@ -1766,9 +1780,7 @@ struct RootView: View {
             Task { @MainActor in
                 guard navigationGeneration == generation, composerIdentity == identity else { return }
                 if let restoringReply {
-                    guard restoringReply.isCurrent(replyTarget, owner: replyOwner), route == .home,
-                        channelTab == .messages,
-                        room?.id == id
+                    guard restoringReply.isCurrent(replyTarget, owner: replyOwner), route == .home, room?.id == id
                     else {
                         pendingRoomID = nil
                         return
@@ -1786,9 +1798,7 @@ struct RootView: View {
                 else { return }
                 pendingRoomID = nil
                 if let restoringReply {
-                    guard restoringReply.isCurrent(replyTarget, owner: replyOwner), route == .home,
-                        channelTab == .messages,
-                        room?.id == id
+                    guard restoringReply.isCurrent(replyTarget, owner: replyOwner), route == .home, room?.id == id
                     else { return }
                     guard matrix.isLiveTimelineReady(roomID: id) else {
                         replyOpening = false
@@ -1810,7 +1820,7 @@ struct RootView: View {
     /// A thread in the conversation on screen opens beside it, which stays as it is; one elsewhere opens with its
     /// conversation.
     private func openThread(_ root: ChatMessage, room id: String) {
-        guard id == matrix.selectedRoomID, pendingRoomID == nil, route == .home, channelTab == .messages,
+        guard id == matrix.selectedRoomID, pendingRoomID == nil, route == .home,
             matrix.isPreview || matrix.isLiveTimelineReady(roomID: id)
         else { return selectRoom(id, record: true, thread: root) }
         let generation = UUID()
@@ -1898,7 +1908,7 @@ struct RootView: View {
             message: message, owner: composerIdentity,
             selection: matrix.timelineSelectionID, navigation: navigationGeneration,
             workspace: workspaceID, sourceRoute: route,
-            selectedRoomID: matrix.selectedRoomID, tab: channelTab)
+            selectedRoomID: matrix.selectedRoomID)
         pendingThreadOpen = request
         threadOpenTask = Task { @MainActor in
             do {
@@ -1928,7 +1938,7 @@ struct RootView: View {
         pendingThreadOpen?.id == request.id && request.owner == composerIdentity && !matrix.isPreview
             && request.selection == matrix.timelineSelectionID && request.navigation == navigationGeneration
             && request.workspace == workspaceID
-            && route == request.sourceRoute && channelTab == request.tab && pendingRoomID == nil && localReady
+            && route == request.sourceRoute && pendingRoomID == nil && localReady
             && matrix.selectedRoomID == request.selectedRoomID
             && matrix.rooms.contains(where: { $0.id == request.message.roomID && $0.membership == "join" })
     }
@@ -2110,7 +2120,7 @@ struct RootView: View {
     }
     private func startForward(_ target: MessageActionTarget) {
         guard !hasModal, !hasNativeModal, !matrix.verification.isPresented,
-            !matrix.isPreview, localReady, pendingRoomID == nil, route == .home, channelTab == .messages,
+            !matrix.isPreview, localReady, pendingRoomID == nil, route == .home,
             room?.id == target.message.roomID, room?.membership == "join",
             matrix.isCurrentMessageAction(target)
         else { return }
@@ -2119,7 +2129,7 @@ struct RootView: View {
     private func cancelStaleForward() {
         guard let selection = forwarding else { return }
         guard selection.navigation == navigationGeneration, selection.workspaceID == workspaceID,
-            route == .home, channelTab == .messages, pendingRoomID == nil,
+            route == .home, pendingRoomID == nil,
             room?.id == selection.target.message.roomID, room?.membership == "join",
             matrix.isCurrentMessageAction(selection.target)
         else {
@@ -2129,7 +2139,7 @@ struct RootView: View {
     }
     private func startCaption(_ target: MessageActionTarget) {
         guard !hasModal, !hasNativeModal, !matrix.verification.isPresented,
-            !matrix.isPreview, localReady, pendingRoomID == nil, route == .home, channelTab == .messages,
+            !matrix.isPreview, localReady, pendingRoomID == nil, route == .home,
             room?.id == target.message.roomID, room?.membership == "join",
             matrix.isCurrentMessageAction(target)
         else { return }
@@ -2138,7 +2148,7 @@ struct RootView: View {
     private func cancelStaleCaption() {
         guard let selection = mediaCaption else { return }
         guard selection.navigation == navigationGeneration, selection.workspaceID == workspaceID,
-            route == .home, channelTab == .messages, pendingRoomID == nil,
+            route == .home, pendingRoomID == nil,
             room?.id == selection.target.message.roomID, room?.membership == "join",
             matrix.isCurrentMessageAction(selection.target)
         else {
@@ -2148,7 +2158,7 @@ struct RootView: View {
     }
     private func startEdit(_ action: MessageActionTarget) {
         let message = action.message
-        guard !matrix.isPreview, localReady, pendingRoomID == nil, route == .home, channelTab == .messages,
+        guard !matrix.isPreview, localReady, pendingRoomID == nil, route == .home,
             room?.id == message.roomID, room?.membership == "join", matrix.isCurrentMessageAction(action),
             let target = MessageEditTarget(message: message, surface: action.surface, context: editContext)
         else { return }
@@ -2167,7 +2177,7 @@ struct RootView: View {
             action.surface == target.surface,
             matrix.isCurrentMessageAction(action)
         else { return false }
-        return isCurrentComposer(context) && pendingRoomID == nil && route == .home && channelTab == .messages
+        return isCurrentComposer(context) && pendingRoomID == nil && route == .home
             && room?.id == target.message.roomID && room?.membership == "join"
             && target.isCurrent(editTarget, in: editContext)
     }
@@ -2276,7 +2286,7 @@ struct RootView: View {
             MessageReplyTarget.authorizes(
                 reply, current: replyTarget, owner: replyOwner, roomID: room.id, threadID: threadID),
             reply == nil
-                || (route == .home && channelTab == .messages && room.id == self.room?.id
+                || (route == .home && room.id == self.room?.id
                     && matrix.isLiveTimelineReady(roomID: room.id) && !replyOpening && replyError == nil
                     && !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         else {
@@ -2587,7 +2597,7 @@ struct RootView: View {
         workspaceInitialized = false
         channelDetails = nil
         leaving = nil
-        channelTab = .messages
+        channelPanel = nil
         pinPermissionRoomID = nil
         pinPermission = false
         route = .home
@@ -2709,6 +2719,7 @@ struct RootView: View {
                 return
             }
             if route == .home, threadRoot != nil { closeThread() }
+            channelPanel = nil
         case "mark-read":
             if sidebarCollapsed && sidebarDrawer {
                 sidebarDrawer = false
@@ -2722,7 +2733,7 @@ struct RootView: View {
                 markReadState(room, unread: false)
             }
         case "react-last":
-            guard route == .home, channelTab == .messages, editTarget == nil,
+            guard route == .home, editTarget == nil,
                 let last = matrix.messages.last(where: { $0.sendState == "sent" && !$0.isRedacted }),
                 let target = matrix.captureMessageAction(message: last, surface: .conversation)
             else { return }
@@ -2758,7 +2769,6 @@ struct RootView: View {
 /// What the read policies need from the window's own state.
 private struct ReadInputs {
     var route: AppRoute
-    var tab: ChannelTab
     var workspaceID: String?
     var visibleBottomRoomID: String?
     var windowCanRead: Bool
@@ -2785,7 +2795,7 @@ private struct ReadInputs {
             selectedRoomID: matrix.selectedRoomID,
             latestVisibleEventID: latest?.kind == "m.room.encrypted" ? nil : latest?.eventID,
             isPreview: matrix.isPreview, isJoined: shownRoom(matrix, workspaceID: workspaceID)?.membership == "join",
-            isMainTimeline: route == .home && tab == .messages,
+            isMainTimeline: route == .home,
             isLiveTimeline: matrix.focusedEventID == nil && matrix.status == .ready,
             isAtBottom: visibleBottomRoomID == matrix.selectedRoomID && visibleBottomRoomID != nil,
             isWindowActive: visible, isWindowVisible: visible, isWindowUnoccluded: visible,

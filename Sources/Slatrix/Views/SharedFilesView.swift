@@ -80,10 +80,8 @@ struct SharedFilesView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         if items.isEmpty {
-                            EmptyStateView(
-                                symbol: filter == .links ? "link" : "doc.on.doc",
-                                title: query.isEmpty ? "Nothing shared yet" : "No matches"
-                            ).frame(minHeight: m(Self.emptyMinHeight))
+                            Text(query.isEmpty ? "Nothing shared yet" : "No matches").font(m.font(.body))
+                                .foregroundStyle(colors.textSecondary).frame(minHeight: m(Self.emptyMinHeight))
                         } else {
                             let shown = items
                             ForEach(shown) { item in
@@ -145,12 +143,11 @@ struct SharedFilesView: View {
         VStack(spacing: 0) {
             HStack(spacing: m.sp12) {
                 SearchField(prompt: "Search files and links", text: $query).frame(maxWidth: m(Self.filterMaxWidth))
-                if channelID == nil { conversationMenu }
-                Spacer()
-                IconButton(symbol: "arrow.clockwise", label: "Refresh shared files and links", role: .reading) {
-                    if let id = roomID { Task { await service.reload(roomID: id) } }
-                }.disabled(service.state == "loading" || service.isLoadingMore || matrix.isPreview || roomID == nil)
-            }.padding(.vertical, m.sp16)
+                if channelID == nil {
+                    conversationMenu
+                    Spacer()
+                }
+            }.padding(.vertical, m.sp12)
             TabBar(tabs: ContentFilter.allCases.map { .init(value: $0, title: $0.rawValue) }, selection: $filter)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }.padding(.horizontal, m.sp24)

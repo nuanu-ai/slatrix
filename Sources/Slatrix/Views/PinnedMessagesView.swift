@@ -16,15 +16,6 @@ struct PinnedMessagesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: m.sp8) {
-                Spacer()
-                Text("\(service.totalPinned) \(service.totalPinned == 1 ? "pin" : "pins")").font(m.font(.subheadline))
-                    .foregroundStyle(colors.textSecondary)
-                IconButton(symbol: "arrow.clockwise", label: "Refresh", role: .reading) {
-                    Task { await service.retry() }
-                }.disabled(service.state == "loading")
-            }.padding(.horizontal, m.sp24).frame(height: m.control + m.sp16)
-            Divider().overlay(colors.border)
             if let error = service.errorMessage {
                 HStack {
                     InlineErrorView(message: error)
@@ -35,8 +26,9 @@ struct PinnedMessagesView: View {
                 if service.state == "loading" {
                     SkeletonRows(interval: .pinsLoading)
                 } else if service.state != "error" {
-                    EmptyStateView(
-                        symbol: "pin", title: service.totalPinned == 0 ? "No pinned messages" : "Couldn’t load pins")
+                    Text(service.totalPinned == 0 ? "No pinned messages" : "Couldn’t load pins")
+                        .font(m.font(.body)).foregroundStyle(colors.textSecondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Spacer()
                 }
@@ -49,7 +41,7 @@ struct PinnedMessagesView: View {
                                 m.font(.subheadline)
                             ).padding(m.sp16)
                         }
-                    }.padding(m.sp24)
+                    }.padding(m.sp16)
                 }
             }
             if let coverage = service.coverageMessage {
@@ -57,7 +49,7 @@ struct PinnedMessagesView: View {
                     Image(systemName: "info.circle")
                     Text(coverage)
                     Spacer()
-                }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24).padding(
+                }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp16).padding(
                     .vertical, m.sp12
                 )
                 .background(colors.raised)

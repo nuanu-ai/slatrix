@@ -303,7 +303,7 @@ struct WindowHostedTests {
     }
 
     // capability: conversation.files
-    @Test("Files and links in the toolbar shows the channel's files in place of its messages, and brings them back")
+    @Test("Files and links in the toolbar opens the channel's files beside its messages, closing like a thread")
     func filesTab() async throws {
         let harness = Harness()
         defer { harness.close() }
@@ -315,9 +315,11 @@ struct WindowHostedTests {
         // Files sits just left of the capsule's ⋯.
         let files = harness.toolbarCapsule(inset: 1.5 * Metrics().control)
         try await harness.click(files)
-        #expect(await eventually { filesShown() })
-        try await harness.click(files)
-        #expect(await eventually { !filesShown() && (try? harness.newest().window) != nil })
+        #expect(await eventually { filesShown() && harness.dividers == 2 })
+        // Beside the conversation, which keeps its messages.
+        #expect((try? harness.newest().window) != nil)
+        harness.menu("toggle-pane")
+        #expect(await eventually { !filesShown() && harness.dividers == 1 })
     }
 
     // capability: message.save
