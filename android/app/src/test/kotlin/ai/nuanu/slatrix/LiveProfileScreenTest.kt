@@ -7,6 +7,10 @@ import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.MessagePreview
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.isHeading
+import androidx.compose.ui.test.isSelectable
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.TextUnit
@@ -43,9 +47,10 @@ class LiveProfileScreenTest {
                 SlatrixTheme { LivePreferencesScreen(false, null, false, {}, {}, {}) }
             }
         }
-        compose.onNodeWithText(ai.nuanu.slatrix.BuildConfig.VERSION_NAME).performScrollTo()
+        compose.onNode(hasText("Slatrix") and isHeading()).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Version ${ai.nuanu.slatrix.BuildConfig.VERSION_NAME}").assertIsDisplayed()
         compose.onNodeWithText("© 2026 Nuanu AI Lab").performScrollTo().performClick()
-        compose.onNodeWithText("Source code").performScrollTo().performClick()
+        compose.onNodeWithText("Source code on GitHub").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(listOf("https://nuanu.ai", "https://github.com/nuanu-ai/slatrix"), opened) }
     }
 
@@ -72,7 +77,7 @@ class LiveProfileScreenTest {
                 LivePreferencesScreen(false, null, wallpaper.value, {}, { wallpaper.value = it }, { returned = true })
             }
         }
-        compose.onNodeWithText("Slatrix").assertIsSelected()
+        compose.onNode(hasText("Slatrix") and isSelectable()).assertIsSelected()
         compose.onNodeWithText("From your wallpaper").performScrollTo().performClick().assertIsSelected()
         compose.runOnIdle { assertEquals(true, wallpaper.value) }
         compose.onNodeWithContentDescription("Back").performClick()

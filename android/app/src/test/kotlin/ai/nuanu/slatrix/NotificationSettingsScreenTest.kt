@@ -63,7 +63,7 @@ class NotificationSettingsScreenTest {
         compose.setContent {
             SlatrixTheme { LivePreferencesScreen(false, null, false, {}, {}, {}) { NotificationRows(NotifyAbout.All, true, null, {}, {}) } }
         }
-        val starts = listOf("Notifications", "Notify me about", "Show message previews", "Appearance", "Color mode", "Colors", "Slatrix")
+        val starts = listOf("Notifications", "Notify me about", "Show message previews", "Appearance", "Color mode", "Colors", "From your wallpaper")
             .associateWith { compose.onNodeWithText(it, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.left }
         assertEquals(starts.toString(), 1, starts.values.distinct().size)
     }

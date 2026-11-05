@@ -1,5 +1,16 @@
 package ai.nuanu.slatrix.ui.account
 
+import androidx.compose.foundation.layout.PaddingValues
+import ai.nuanu.slatrix.R
+import ai.nuanu.slatrix.ui.designsystem.ListHeading
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import ai.nuanu.slatrix.BuildConfig
 import androidx.compose.ui.platform.LocalUriHandler
 
@@ -174,25 +185,33 @@ fun LivePreferencesScreen(
                         }
                     }
                 }
-                PreferenceHeading("About")
-                AboutRow("Version", BuildConfig.VERSION_NAME)
-                AboutRow("Copyright", "© 2026 Nuanu AI Lab", "https://nuanu.ai")
-                AboutRow("Source code", "GitHub", "https://github.com/nuanu-ai/slatrix")
+                About()
             }
         }
 }
 
-/** One of About's lines: what it is, and its value, a link when [url] is given, as on the Mac. */
+/** About, a card set apart from the settings above it, as on the Mac: the app's icon beside its name, version and links. */
 @Composable
-private fun AboutRow(label: String, value: String, url: String? = null) {
+private fun About() {
     val colors = SlatrixTheme.colors
     val uris = LocalUriHandler.current
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
-        .then(if (url != null) Modifier.clickable(role = Role.Button) { uris.openUri(url) } else Modifier)
-        .padding(start = PreferenceInset, end = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        Text(value, style = MaterialTheme.typography.bodyMedium, color = if (url != null) colors.accent else colors.textSecondary, maxLines = 1)
+    val icon = UiMetrics.ProfileAvatar
+    // No side padding, so the links line up with the name above them and fit a narrow phone; they keep their touch height.
+    val flush = PaddingValues()
+    Row(Modifier.padding(UiMetrics.GapLarge).fillMaxWidth().background(colors.raised, MaterialTheme.shapes.large).padding(UiMetrics.GapLarge),
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
+        // The launcher's two layers, cut to the 72 of their 108 dp a launcher shows.
+        Box(Modifier.size(icon).clip(CircleShape), contentAlignment = Alignment.Center) {
+            listOf(R.drawable.ic_launcher_background, R.drawable.ic_launcher_foreground).forEach {
+                Image(painterResource(it), null, Modifier.requiredSize(icon * 108 / 72))
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            ListHeading("Slatrix")
+            Text("Version ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+            TextButton({ uris.openUri("https://nuanu.ai") }, contentPadding = flush) { Text("© 2026 Nuanu AI Lab") }
+            TextButton({ uris.openUri("https://github.com/nuanu-ai/slatrix") }, contentPadding = flush) { Text("Source code on GitHub") }
+        }
     }
 }
 
