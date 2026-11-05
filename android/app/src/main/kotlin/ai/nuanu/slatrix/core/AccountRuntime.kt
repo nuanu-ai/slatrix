@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.core
 
 import android.app.Application
 import ai.nuanu.slatrix.BuildConfig
+import ai.nuanu.slatrix.push.LaterReminders
 import ai.nuanu.slatrix.push.PushRegistration
 import ai.nuanu.slatrix.push.PushRegistrationWorker
 import android.app.NotificationManager
@@ -38,6 +39,7 @@ class AccountRuntime private constructor(application: Application) {
             staticRegistrations = emptyMap()),
         onSignOut = { client ->
             application.getSystemService(NotificationManager::class.java).cancelAll()
+            LaterReminders(application).sync(null, SavedList()) { "" to "" }
             PushRegistration(application).unregister(client, client.userId())
         })
     private val mutableIdentity = MutableStateFlow<IdentityVerification?>(null)

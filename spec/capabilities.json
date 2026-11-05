@@ -93,9 +93,9 @@
     {"id": "message.pin", "what": "Pin or unpin a message.", "mac": "done", "android": "done"},
     {"id": "message.save", "what": "Save a message for later and find it again in Later.", "mac": "done", "android": "done"},
     {"id": "message.save.sync", "what": "Later is one list on every device signed in to your account.", "mac": "done", "android": "done"},
-    {"id": "later.complete", "what": "Mark something in Later complete, find it under Completed, and bring it back.", "mac": "done", "android": "missing"},
-    {"id": "later.archive", "what": "Archive something in Later, find it under Archived, and bring it back.", "mac": "done", "android": "missing"},
-    {"id": "later.remind", "what": "Set a reminder on something in Later and get a notification when it's due.", "mac": "done", "android": "missing"},
+    {"id": "later.complete", "what": "Mark something in Later complete, find it under Completed, and bring it back.", "mac": "done", "android": "done"},
+    {"id": "later.archive", "what": "Archive something in Later, find it under Archived, and bring it back.", "mac": "done", "android": "done"},
+    {"id": "later.remind", "what": "Set a reminder on something in Later and get a notification when it's due.", "mac": "done", "android": "done"},
     {"id": "message.edit-caption", "what": "Change the caption of an image or file you sent.", "mac": "done", "android": "done"},
 
     {"id": "thread.open", "what": "Open a message's thread.", "mac": "done", "android": "done"},

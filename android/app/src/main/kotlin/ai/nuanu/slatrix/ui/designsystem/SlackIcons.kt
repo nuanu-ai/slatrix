@@ -53,6 +53,12 @@ object SlackIcons {
     val Compose = outline("compose", "M4 20 H8 L19 9 L15 5 L4 16 Z M13.5 6.5 L17.5 10.5", width = 2f)
     /** Slack's forward: an arrow that turns off to the right. */
     val Forward = outline("forward", "M14 5.5 L19.5 10.75 L14 16 M19.5 10.75 H11.5 A6.5 6.5 0 0 0 5 17.25 V18.5")
+    val Clock = outline("clock", "M12 4.5 A7.5 7.5 0 1 1 12 19.5 A7.5 7.5 0 1 1 12 4.5 Z M12 8 V12 L14.75 13.75")
+    val Archive = outline("archive", "M4.5 5 H19.5 V8.5 H4.5 Z M5.5 8.5 V18 A1.5 1.5 0 0 0 7 19.5 H17 A1.5 1.5 0 0 0 18.5 18 V8.5 " +
+        "M10 12 H14")
+    /** An arrow turning back, to bring something back where it was. */
+    val Undo = outline("undo", "M8.5 5.5 L4.5 9.5 L8.5 13.5 M4.5 9.5 H14 A5 5 0 0 1 14 19.5 H10")
+    val Trash = outline("trash", "M4.5 6.5 H19.5 M9.5 6.5 V4.5 H14.5 V6.5 M6.5 6.5 L7.5 19.5 H16.5 L17.5 6.5")
     val Bookmark = outline("bookmark", BookmarkShape)
     val BookmarkFilled = filled("bookmark-filled", BookmarkShape)
     val Tray = outline("tray", "M4 13 H8.5 L9.5 15.5 H14.5 L15.5 13 H20 M4 13 V18.5 A1.5 1.5 0 0 0 5.5 20 H18.5 " +

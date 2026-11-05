@@ -42,6 +42,8 @@ import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.WorkspacePreferences
 import ai.nuanu.slatrix.core.WorkspaceRail
 import ai.nuanu.slatrix.push.NotificationTarget
+import ai.nuanu.slatrix.push.LaterReminders
+import ai.nuanu.slatrix.push.NotificationText
 import ai.nuanu.slatrix.push.PushNotifications
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.compose.BackHandler
@@ -151,8 +153,19 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         rooms?.offline?.map { !it } ?: flowOf(true))
                 }
                 DisposableEffect(laterSync) { onDispose { laterSync.close() } }
-                val saved = laterSync.list.collectAsState().value.saved
+                val later = laterSync.list.collectAsState().value
+                val saved = later.saved
                 val setSaved: (String, String, Boolean) -> Unit = { roomId, eventId, save -> laterSync.set(roomId, eventId, save) }
+                // Each reminder still to come waits in WorkManager, so it notifies even with the app closed.
+                LaunchedEffect(later, userId) {
+                    LaterReminders(context).sync(userId, later) { item ->
+                        val room = rooms?.state?.value?.rooms?.firstOrNull { it.id == item.roomId }
+                        val preview = rooms?.client?.let { MatrixSaved(it).preview(item) }
+                        if (preview == null) (room?.name ?: "Slatrix") to "Reminder"
+                        else NotificationText.message(room?.name.orEmpty(), preview.senderName, room?.direct == true, preview.body)
+                            .let { (title, text) -> title to "Reminder: $text" }
+                    }
+                }
                 var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
@@ -278,11 +291,13 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         )) {
                             LiveHome(userId, userAvatarUrl, rooms, workspace, search, people, activity, jump, { you = true }, selectedSpaceId, chooseSpace,
                                 { channels = it }, { invitation = it }, { newMessage = true }, { id, name -> person = id to name }, later = {
-                                    LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
-                                        { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
+                                    LaterScreen(later, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
+                                        LaterActions({ item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
                                             // A saved reply opens in its thread, so it is looked up first.
                                             laterScope.launch { jump(room, item.eventId, workspace?.threadRootOf(room.id, item.eventId)) }
-                                        } }, { item -> setSaved(item.roomId, item.eventId, false) }, laterPreviews, laterList)
+                                        } }, { item, state -> laterSync.set(item.roomId, item.eventId, state) },
+                                            { item, at -> laterSync.remind(item.roomId, item.eventId, at) },
+                                            { item -> setSaved(item.roomId, item.eventId, false) }), laterPreviews, laterList)
                                 }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list

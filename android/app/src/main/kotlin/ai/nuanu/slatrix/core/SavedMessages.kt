@@ -16,6 +16,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.temporal.TemporalAdjusters
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
@@ -31,8 +36,37 @@ import org.matrix.rustcomponents.sdk.TimelineFocus
 import uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode
 import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
 
-/** A message saved for later; [savedAt] is in milliseconds since 1970. */
-data class SavedMessage(val roomId: String, val eventId: String, val savedAt: Long)
+/** Where a message stands in Later: Slack's In progress, Archived and Completed tabs. */
+enum class LaterState(val key: String, val title: String) {
+    IN_PROGRESS("in_progress", "In progress"), ARCHIVED("archived", "Archived"), COMPLETED("completed", "Completed")
+}
+
+/**
+ * A message saved for later; [savedAt], when it was saved, removed or last changed, and [remindAt], when its reminder
+ * is due, are in milliseconds since 1970. Only a message in progress has a reminder.
+ */
+data class SavedMessage(val roomId: String, val eventId: String, val savedAt: Long,
+    val state: LaterState = LaterState.IN_PROGRESS, val remindAt: Long? = null) {
+    fun overdue(now: Long) = remindAt != null && remindAt <= now
+}
+
+/** Remind me's choices, as Slack offers them. */
+enum class ReminderPreset(val title: String) {
+    IN_20_MINUTES("In 20 minutes"), IN_1_HOUR("In 1 hour"), IN_3_HOURS("In 3 hours"), TOMORROW("Tomorrow"), NEXT_WEEK("Next week");
+
+    /** Real minutes and hours from [now]; tomorrow and next week at 9:00 on [zone]'s clock. */
+    fun at(now: Long, zone: ZoneId = ZoneId.systemDefault()): Long {
+        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+        val nine = { day: LocalDate -> day.atTime(9, 0).atZone(zone).toInstant().toEpochMilli() }
+        return when (this) {
+            IN_20_MINUTES -> now + 20 * 60_000L
+            IN_1_HOUR -> now + 60 * 60_000L
+            IN_3_HOURS -> now + 3 * 60 * 60_000L
+            TOMORROW -> nine(today.plusDays(1))
+            NEXT_WEEK -> nine(today.with(TemporalAdjusters.next(DayOfWeek.MONDAY)))
+        }
+    }
+}
 
 /** What Later shows of a saved message, read from its conversation as it is now. */
 data class SavedPreview(val senderId: String, val senderName: String, val body: String, val timestamp: Long, val avatarUrl: String? = null)
@@ -59,10 +93,41 @@ data class SavedList(val saved: List<SavedMessage> = emptyList(), val removed: L
      * already as asked stays as it is.
      */
     fun setting(roomId: String, eventId: String, saved: Boolean, now: Long): SavedList {
-        val same = { item: SavedMessage -> item.roomId == roomId && item.eventId == eventId }
-        if (this.saved.any(same) == saved) return this
-        val previous = (this.saved + removed).filter(same).maxOfOrNull { it.savedAt }
-        val entry = SavedMessage(roomId, eventId, maxOf(now, previous?.plus(1) ?: 0))
+        if ((find(roomId, eventId) != null) == saved) return this
+        return stamped(SavedMessage(roomId, eventId, now), saved)
+    }
+
+    /** Moves a saved message to another tab, clearing its reminder; one already there stays as it is. */
+    fun changing(roomId: String, eventId: String, state: LaterState, now: Long): SavedList {
+        val current = find(roomId, eventId) ?: return this
+        if (current.state == state) return this
+        return stamped(SavedMessage(roomId, eventId, now, state), true)
+    }
+
+    /** Sets the message's reminder, or clears it with null, keeping it in progress and saving it if it wasn't. */
+    fun reminding(roomId: String, eventId: String, remindAt: Long?, now: Long): SavedList {
+        val current = find(roomId, eventId)
+        if (remindAt == null && current?.remindAt == null) return this
+        if (current != null && current.state == LaterState.IN_PROGRESS && current.remindAt == remindAt) return this
+        return stamped(SavedMessage(roomId, eventId, now, remindAt = remindAt), true)
+    }
+
+    /** A tab's messages: In progress puts reminders first, soonest due first; every tab is otherwise newest first. */
+    fun tab(state: LaterState): List<SavedMessage> {
+        val shown = saved.filter { it.state == state }
+        if (state != LaterState.IN_PROGRESS) return shown
+        return shown.filter { it.remindAt != null }.sortedBy { it.remindAt } + shown.filter { it.remindAt == null }
+    }
+
+    /** The reminders still to come, soonest first: what a device notifies of. */
+    fun reminders(now: Long) = tab(LaterState.IN_PROGRESS).filter { (it.remindAt ?: 0) > now }
+
+    private fun find(roomId: String, eventId: String) = saved.firstOrNull { it.roomId == roomId && it.eventId == eventId }
+
+    /** The new entry lands after any the message has, so a slow clock can't lose the change. */
+    private fun stamped(change: SavedMessage, saved: Boolean): SavedList {
+        val previous = (this.saved + removed).filter { it.roomId == change.roomId && it.eventId == change.eventId }.maxOfOrNull { it.savedAt }
+        val entry = change.copy(savedAt = maxOf(change.savedAt, previous?.plus(1) ?: 0))
         return if (saved) normalized(this.saved + entry, removed) else normalized(this.saved, removed + entry)
     }
 
@@ -79,25 +144,39 @@ data class SavedList(val saved: List<SavedMessage> = emptyList(), val removed: L
             fun entries(name: String): List<SavedMessage>? {
                 if (content.isNull(name)) return emptyList()
                 val array = content.opt(name) as? JSONArray ?: return null
+                fun whole(value: Any?) = (value as? Number)?.takeIf { it is Int || it is Long }?.toLong()?.takeIf { it in 0..MAX_TIMESTAMP }
                 return List(array.length()) { array.opt(it) as? JSONObject }.mapNotNull { item ->
                     val roomId = item?.opt("room_id") as? String
                     val eventId = item?.opt("event_id") as? String
-                    val ts = (item?.opt("ts") as? Number)?.takeIf { it is Int || it is Long }?.toLong()
-                    if (roomId == null || eventId == null || ts == null || ts !in 0..MAX_TIMESTAMP ||
-                        !isMatrixId(roomId, "!") || !isMatrixId(eventId, "$")) null
-                    else SavedMessage(roomId, eventId, ts)
+                    val ts = whole(item?.opt("ts"))
+                    if (roomId == null || eventId == null || ts == null || !isMatrixId(roomId, "!") || !isMatrixId(eventId, "$")) null
+                    // What an entry adds to the ID and time never costs it its place.
+                    else SavedMessage(roomId, eventId, ts, LaterState.entries.firstOrNull { it.key == item.opt("state") } ?: LaterState.IN_PROGRESS,
+                        whole(item.opt("remind_at")))
                 }
             }
             return normalized(entries("saved") ?: return SavedList(), entries("removed") ?: return SavedList())
         }
 
-        /** One entry per message, the latest, saved winning a tie; newest first, and no more than each list keeps. */
+        /**
+         * One entry per message, the latest; at the same moment saved beats removed, completed beats archived beats in
+         * progress, and a later reminder beats an earlier one or none, so a list an older build wrote back can't erase
+         * them. Newest first, and no more than each list keeps.
+         */
         fun normalized(saved: List<SavedMessage>, removed: List<SavedMessage>): SavedList {
+            val rank = compareBy<Pair<SavedMessage, Boolean>>({ it.first.savedAt }, { if (it.second) 1 + it.first.state.ordinal else 0 },
+                { it.first.remindAt ?: -1L })
             val latest = HashMap<Pair<String, String>, Pair<SavedMessage, Boolean>>()
-            for ((entry, isSaved) in saved.map { it to true } + removed.map { it to false }) {
-                val kept = latest[entry.roomId to entry.eventId]?.first
-                if (kept != null && (kept.savedAt > entry.savedAt || (kept.savedAt == entry.savedAt && !isSaved))) continue
-                latest[entry.roomId to entry.eventId] = entry to isSaved
+            for ((item, isSaved) in saved.map { it to true } + removed.map { it to false }) {
+                // Only a message in progress keeps a reminder, and a removal keeps neither.
+                val entry = when {
+                    !isSaved -> item.copy(state = LaterState.IN_PROGRESS, remindAt = null)
+                    item.state != LaterState.IN_PROGRESS -> item.copy(remindAt = null)
+                    else -> item
+                } to isSaved
+                val kept = latest[item.roomId to item.eventId]
+                if (kept != null && rank.compare(kept, entry) >= 0) continue
+                latest[item.roomId to item.eventId] = entry
             }
             val ordered = latest.values.sortedWith(compareByDescending<Pair<SavedMessage, Boolean>> { it.first.savedAt }
                 .thenBy { it.first.roomId }.thenBy { it.first.eventId })
@@ -106,7 +185,10 @@ data class SavedList(val saved: List<SavedMessage> = emptyList(), val removed: L
         }
 
         private fun entries(list: List<SavedMessage>) = JSONArray(list.map {
-            JSONObject().put("room_id", it.roomId).put("event_id", it.eventId).put("ts", it.savedAt)
+            JSONObject().put("room_id", it.roomId).put("event_id", it.eventId).put("ts", it.savedAt).apply {
+                if (it.state != LaterState.IN_PROGRESS) put("state", it.state.key)
+                it.remindAt?.let { at -> put("remind_at", at) }
+            }
         })
     }
 }
@@ -202,8 +284,17 @@ class MatrixLater(scope: CoroutineScope, private val client: Client, private val
         }
     }
 
-    fun set(roomId: String, eventId: String, saved: Boolean, now: Long = System.currentTimeMillis()) {
-        update(list.value.setting(roomId, eventId, saved, now))
+    fun set(roomId: String, eventId: String, saved: Boolean, now: Long = System.currentTimeMillis()) =
+        change(list.value.setting(roomId, eventId, saved, now))
+
+    fun set(roomId: String, eventId: String, state: LaterState, now: Long = System.currentTimeMillis()) =
+        change(list.value.changing(roomId, eventId, state, now))
+
+    fun remind(roomId: String, eventId: String, remindAt: Long?, now: Long = System.currentTimeMillis()) =
+        change(list.value.reminding(roomId, eventId, remindAt, now))
+
+    private fun change(next: SavedList) {
+        update(next)
         // Until the account is read nothing is written, so a read that failed must not hold this back.
         if (published == null) read()
     }

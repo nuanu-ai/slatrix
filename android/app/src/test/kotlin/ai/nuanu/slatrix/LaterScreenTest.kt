@@ -2,10 +2,15 @@ package ai.nuanu.slatrix
 
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.SavedList
 import ai.nuanu.slatrix.core.SavedMessage
 import ai.nuanu.slatrix.core.SavedPreview
 import ai.nuanu.slatrix.core.UnreadBadge
+import ai.nuanu.slatrix.ui.account.LaterActions
 import ai.nuanu.slatrix.ui.account.LaterScreen
+import ai.nuanu.slatrix.core.LaterState
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithContentDescription
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
@@ -53,8 +58,8 @@ class LaterScreenTest {
         val name = "Alexandra Whitfield"
         compose.setContent {
             SlatrixTheme {
-                LaterScreen(listOf(SavedMessage("!design:example.org", "\$one", 1_000)), rooms,
-                    { SavedPreview("@alexandra:example.org", name, "Ship it on Thursday", 1_700_000_000_000L) }, {}, {})
+                LaterScreen(SavedList(listOf(SavedMessage("!design:example.org", "\$one", 1_000))), rooms,
+                    { SavedPreview("@alexandra:example.org", name, "Ship it on Thursday", 1_700_000_000_000L) }, LaterActions({}))
             }
         }
         val layouts = mutableListOf<TextLayoutResult>()
@@ -70,7 +75,10 @@ class LaterScreenTest {
         val opened = mutableListOf<String>()
         val removed = mutableListOf<String>()
         compose.setContent {
-            SlatrixTheme { LaterScreen(saved, rooms, { previews[it.eventId] }, { opened += it.eventId }, { removed += it.eventId }) }
+            SlatrixTheme {
+                LaterScreen(SavedList.normalized(saved, emptyList()), rooms, { previews[it.eventId] },
+                    LaterActions({ opened += it.eventId }, remove = { removed += it.eventId }))
+            }
         }
         compose.onNodeWithText("Ship it on Thursday").assertIsDisplayed()
         val first = compose.onNodeWithText("Ship it on Thursday").fetchSemanticsNode().boundsInRoot.top
@@ -79,11 +87,61 @@ class LaterScreenTest {
         compose.onNodeWithText("MC", useUnmergedTree = true).assertIsDisplayed()
 
         compose.onNodeWithText("Ship it on Thursday").performClick()
-        compose.onAllNodesWithContentDescription("Remove from Later")[1].performClick()
-        compose.onNodeWithText("Undo").assertIsDisplayed()
+        compose.onNodeWithText("Budget is in the doc").performTouchInput { longClick() }
+        compose.onNodeWithText("Remove from Later").performClick()
+        compose.onNodeWithText("Removed from Later").assertIsDisplayed()
         compose.waitUntil(10_000) { removed.isNotEmpty() }
         assertEquals(listOf("\$two"), opened)
         assertEquals(listOf("\$one"), removed)
+    }
+
+    // capability: later.complete
+    // capability: later.archive
+    @Test fun eachTabListsItsOwnAndAnArchivedMessageComesBackToInProgress() {
+        val saved = SavedList(listOf(SavedMessage("!design:example.org", "\$open", 3_000),
+            SavedMessage("!design:example.org", "\$done", 2_000, LaterState.COMPLETED),
+            SavedMessage("!design:example.org", "\$kept", 1_000, LaterState.ARCHIVED)))
+        val bodies = mapOf("\$open" to "Ship the draft", "\$done" to "Budget is in the doc", "\$kept" to "Old launch plan")
+        val moved = mutableListOf<Pair<String, LaterState>>()
+        compose.setContent {
+            SlatrixTheme {
+                LaterScreen(saved, rooms, { SavedPreview("@sam:example.org", "Sam", bodies.getValue(it.eventId), 1_000) },
+                    LaterActions({}, move = { item, state -> moved += item.eventId to state }))
+            }
+        }
+        compose.onNodeWithText("Ship the draft").assertIsDisplayed()
+        compose.onNodeWithText("Budget is in the doc").assertDoesNotExist()
+        compose.onNodeWithText("Completed").performClick()
+        compose.onNodeWithText("Budget is in the doc").assertIsDisplayed()
+        compose.onNodeWithText("Ship the draft").assertDoesNotExist()
+        compose.onNodeWithText("Archived").performClick()
+        compose.onNodeWithText("Old launch plan").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Move to In progress").performClick()
+        compose.onNodeWithText("Moved to In progress").assertIsDisplayed()
+        compose.waitUntil(10_000) { moved.isNotEmpty() }
+        assertEquals(listOf("\$kept" to LaterState.IN_PROGRESS), moved)
+    }
+
+    // capability: later.remind
+    @Test fun remindMeOffersSlacksChoicesAndAnOverdueReminderSaysSo() {
+        val now = 1_761_955_200_000L
+        val saved = SavedList(listOf(SavedMessage("!design:example.org", "\$one", 2_000),
+            SavedMessage("!design:example.org", "\$late", 1_000, remindAt = now - 60_000)))
+        val reminders = mutableListOf<Pair<String, Long?>>()
+        compose.setContent {
+            SlatrixTheme {
+                LaterScreen(saved, rooms, { SavedPreview("@sam:example.org", "Sam", "Body ${it.eventId}", 1_000) },
+                    LaterActions({}, remind = { item, at -> reminders += item.eventId to at }), now = { now })
+            }
+        }
+        compose.onNodeWithText("Overdue").assertIsDisplayed()
+        // An overdue reminder comes first.
+        assertTrue(compose.onNodeWithText("Body \$late").fetchSemanticsNode().boundsInRoot.top <
+            compose.onNodeWithText("Body \$one").fetchSemanticsNode().boundsInRoot.top)
+        compose.onNodeWithText("Body \$one").performTouchInput { longClick() }
+        compose.onNodeWithText("Remind me").performClick()
+        compose.onNode(hasText("In 20 minutes", substring = true)).performClick()
+        assertEquals(listOf("\$one" to now + 20 * 60_000), reminders)
     }
 
     @Test fun aSaveTimeMergedFromAnotherDeviceKeepsTheCardAsItShows() {
@@ -91,7 +149,7 @@ class LaterScreenTest {
         var reads = 0
         // Only the first read finds the message, so a card read again would say it's unavailable.
         val load: suspend (SavedMessage) -> SavedPreview? = { if (reads++ == 0) SavedPreview("@mira:example.org", "Mira Chen", "Ship it on Thursday", 1_700_000_000_000L) else null }
-        compose.setContent { SlatrixTheme { LaterScreen(saved, rooms, load, {}, {}) } }
+        compose.setContent { SlatrixTheme { LaterScreen(SavedList(saved), rooms, load, LaterActions({})) } }
         compose.onNodeWithText("Ship it on Thursday").assertIsDisplayed()
 
         saved = listOf(SavedMessage("!design:example.org", "\$one", 2_000))
@@ -100,7 +158,7 @@ class LaterScreenTest {
     }
 
     @Test fun nothingSavedSaysSo() {
-        compose.setContent { SlatrixTheme { LaterScreen(emptyList(), rooms, { null }, {}, {}) } }
+        compose.setContent { SlatrixTheme { LaterScreen(SavedList(), rooms, { null }, LaterActions({})) } }
         compose.onNodeWithText("Nothing saved for later").assertIsDisplayed()
     }
 
@@ -115,39 +173,41 @@ class LaterScreenTest {
         compose.onNodeWithText("Saved list").assertIsDisplayed()
     }
 
-    @Test fun aSwipeLeftMarksACardDoneWithAnUndoAndLeavesTheTabAsItIs() {
-        val saved = listOf(SavedMessage("!design:example.org", "\$one", 1_000))
-        val removed = mutableListOf<String>()
+    // capability: later.complete
+    @Test fun aSwipeLeftMarksACardCompleteWithAnUndoAndLeavesTheTabAsItIs() {
+        val saved = SavedList(listOf(SavedMessage("!design:example.org", "\$one", 1_000)))
+        val moved = mutableListOf<Pair<String, LaterState>>()
         compose.setContent {
             SlatrixTheme {
                 LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
-                    later = { LaterScreen(saved, rooms, { SavedPreview("@sam:example.org", "Sam", "Ship the draft", 1_000) }, {}, { removed += it.eventId }) })
+                    later = { LaterScreen(saved, rooms, { SavedPreview("@sam:example.org", "Sam", "Ship the draft", 1_000) },
+                        LaterActions({}, move = { item, state -> moved += item.eventId to state })) })
             }
         }
         tab("Later").performClick()
         compose.onNodeWithText("Ship the draft").performTouchInput { swipeLeft() }
-        compose.onNodeWithText("Marked as done").assertIsDisplayed()
+        compose.onNodeWithText("Marked as complete").assertIsDisplayed()
         compose.onNodeWithText("Ship the draft").assertDoesNotExist()
         compose.onNodeWithText("Undo").performClick()
         compose.onNodeWithText("Ship the draft").assertIsDisplayed()
-        compose.onNodeWithText("Marked as done").assertDoesNotExist()
-        assertEquals(emptyList<String>(), removed)
+        compose.onNodeWithText("Marked as complete").assertDoesNotExist()
+        assertEquals(emptyList<Pair<String, LaterState>>(), moved)
         assertTrue(tab("Later").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false })
 
         compose.onNodeWithText("Ship the draft").performTouchInput { swipeLeft() }
-        compose.waitUntil(10_000) { removed.isNotEmpty() }
-        assertEquals(listOf("\$one"), removed)
-        compose.onNodeWithText("Marked as done").assertDoesNotExist()
+        compose.waitUntil(10_000) { moved.isNotEmpty() }
+        assertEquals(listOf("\$one" to LaterState.COMPLETED), moved)
+        compose.onNodeWithText("Marked as complete").assertDoesNotExist()
     }
 
     // capability: home.swipe-tabs
     @Test fun inLaterASwipeChangesTabsUnlessItStartsLeftOnACard() {
-        val saved = listOf(SavedMessage("!design:example.org", "\$one", 1_000))
+        val saved = SavedList(listOf(SavedMessage("!design:example.org", "\$one", 1_000)))
         val removed = mutableListOf<String>()
         compose.setContent {
             SlatrixTheme {
                 LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
-                    later = { LaterScreen(saved, rooms, { SavedPreview("@sam:example.org", "Sam", "Ship the draft", 1_000) }, {}, { removed += it.eventId }) })
+                    later = { LaterScreen(saved, rooms, { SavedPreview("@sam:example.org", "Sam", "Ship the draft", 1_000) }, LaterActions({}, move = { item, _ -> removed += item.eventId }, remove = { removed += it.eventId })) })
             }
         }
         tab("Later").performClick()
@@ -161,7 +221,7 @@ class LaterScreenTest {
             swipe(Offset(width * 0.9f, height * 0.6f), Offset(width * 0.1f, height * 0.6f))
         }
         compose.waitUntil { tab("Activity").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false } }
-        compose.onNodeWithText("Marked as done").assertDoesNotExist()
+        compose.onNodeWithText("Marked as complete").assertDoesNotExist()
         assertEquals(emptyList<String>(), removed)
     }
 

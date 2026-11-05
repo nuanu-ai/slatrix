@@ -51,7 +51,6 @@ class PushNotifications(private val context: Context) {
 
     fun clear(roomId: String) = manager.activeNotifications.filter { it.tag == roomId }.forEach { manager.cancel(it.tag, it.id) }
 
-    @SuppressLint("UseKtx") // KTX edit discards the commit result.
     fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState? = null,
         mentioned: Map<String, String> = emptyMap()) = synchronized(deliveryLock) {
         val settings = NotificationPreferences(context, userId)
@@ -74,20 +73,37 @@ class PushNotifications(private val context: Context) {
             else -> NotificationText.message(room, sender, item?.roomInfo?.isDirect == true, body)
         }
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Messages", NotificationManager.IMPORTANCE_DEFAULT))
+        post(CHANNEL, userId, roomId, eventId, resolved?.threadId, key, delivered, "New message", title, text, silent = resolved?.isNoisy != true)
+    }
+
+    /** A reminder about something in Later, due now; a tap opens the message, as a message's alert does. */
+    fun remind(userId: String, roomId: String, eventId: String, title: String, text: String) = synchronized(deliveryLock) {
+        val settings = NotificationPreferences(context, userId)
+        if (!enabled || settings.paused) return@synchronized
+        val key = pushKey(userId, roomId, eventId)
+        val delivered = preferences.getString("delivered", "").orEmpty().split('\n').filter { it.isNotEmpty() && it != key }
+        manager.createNotificationChannel(NotificationChannel(REMINDERS, "Reminders", NotificationManager.IMPORTANCE_DEFAULT))
+        val (shownTitle, shownText) = if (settings.previews) title to text else "Slatrix" to "Reminder"
+        post(REMINDERS, userId, roomId, eventId, null, key, delivered, "Reminder", shownTitle, shownText, silent = false)
+    }
+
+    @SuppressLint("UseKtx") // KTX edit discards the commit result.
+    private fun post(channel: String, userId: String, roomId: String, eventId: String, threadId: String?, key: String,
+        delivered: List<String>, publicText: String, title: String, text: String, silent: Boolean) {
         val intent = Intent(context, MainActivity::class.java)
             .setAction("${context.packageName}.OPEN_NOTIFICATION")
             .setData("slatrix://notification/$key".toUri())
-            .putExtra(USER_ID, userId).putExtra(ROOM_ID, roomId).putExtra(EVENT_ID, eventId).putExtra(THREAD_ID, resolved?.threadId)
+            .putExtra(USER_ID, userId).putExtra(ROOM_ID, roomId).putExtra(EVENT_ID, eventId).putExtra(THREAD_ID, threadId)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val tap = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        fun builder() = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification)
+        fun builder() = NotificationCompat.Builder(context, channel).setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(tap).setAutoCancel(true)
-        val publicNotification = builder().setContentTitle("Slatrix").setContentText("New message").build()
+        val publicNotification = builder().setContentTitle("Slatrix").setContentText(publicText).build()
         val notification = builder().setContentTitle(title).setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(publicNotification)
-            .setOnlyAlertOnce(true).setSilent(resolved?.isNoisy != true).build()
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return@synchronized
+            .setOnlyAlertOnce(true).setSilent(silent).build()
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         manager.notify(roomId, key.hashCode(), notification)
         check(preferences.edit().putString("delivered", (delivered + key).takeLast(512).joinToString("\n")).commit())
     }
@@ -106,6 +122,7 @@ class PushNotifications(private val context: Context) {
             withTimeoutOrNull(5_000) { it.first { state -> state.status != IdentityStatus.Unknown } } ?: it.value
         }
         private const val CHANNEL = "messages"
+        private const val REMINDERS = "reminders"
         private val deliveryLock = Any()
     }
 }
