@@ -507,6 +507,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 }
                 echo?.let { copyToChannel(message, it) }
                 currentCoroutineContext().ensureActive()
+                // Posting reads the conversation, as in Slack, even one marked unread on this visit; an edit isn't a post.
+                if (message.target !is ComposerTarget.Edit) readLock.withLock { heldUnread = false }
                 // A message sent from an older place goes to the present, as sending in Slack takes you there.
                 if (shown?.focused == true) operations.launch {
                     pageLock.withLock {

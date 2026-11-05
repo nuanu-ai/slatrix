@@ -669,6 +669,20 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    @Test fun postingInAConversationMarkedUnreadReadsItAgainAsInSlack() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        val room = ConversationRoom(timeline)
+        val conversation = MatrixConversation(backgroundScope, room)
+        conversation.state.first { it.rows.isNotEmpty() }
+        assertTrue(conversation.markUnread())
+
+        timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
+        assertTrue(conversation.send(ComposerMessage("On it", null, emptyList(), false)))
+        assertTrue(conversation.markRead("\$one"))
+        assertFalse(room.markedUnread)
+        conversation.close()
+    }
+
     @Test fun comingBackToAKeptConversationLeavesLastVisitsJumpUnreadStartAndHoldBehind() = runTest {
         val live = ConversationTimeline(listOf(conversationItem("a", "\$a", "Hello"), conversationItem("b", "\$b", "World")))
         val conversation = MatrixConversation(backgroundScope, JumpRoom(live, ConversationTimeline(emptyList())), at = "\$a")
