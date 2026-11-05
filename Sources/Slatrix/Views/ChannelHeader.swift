@@ -81,14 +81,32 @@ struct ChannelHeader: View {
                         Text(room.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
                     }
                     if !room.topic.isEmpty {
-                        Text(room.topic).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                        Text(typing ?? room.topic).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     }
                 }.lineLimit(1).truncationMode(.tail)
+                    // Under the name, as Telegram shows it; with no topic line it hangs below, so the name stays put.
+                    .overlay(alignment: .bottomLeading) {
+                        if room.topic.isEmpty, let typing {
+                            Text(typing).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                                .lineLimit(1).fixedSize()
+                                .offset(
+                                    x: ConversationHeader.isOneToOne(room) ? m.avatarSmall + m.sp4 + m(3) : 0,
+                                    y: m.lineHeight(.subheadline) + m(1))
+                        }
+                    }.animation(Motion.content, value: typing)
             }.buttonStyle(.row).help(room.isDirect ? room.name : "Open channel details")
                 .contextMenu {
                     NativeMessageMenuCommands(
                         commands: ChannelHeader.menu(for: room, isPreview: matrix.isPreview, perform: perform))
                 }
+        }
+
+        private var typing: String? {
+            let names = matrix.typingUsers
+            if names.isEmpty { return nil }
+            if names.count == 1 { return names[0] + " is typing…" }
+            if names.count == 2 { return names.joined(separator: " and ") + " are typing…" }
+            return "Several people are typing…"
         }
 
         private func open() {
