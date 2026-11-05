@@ -25,55 +25,44 @@ struct ProfilePane: View {
                 Spacer()
                 IconButton(symbol: "xmark", label: "Close profile", role: .reading, action: onClose)
             }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
-            Divider().overlay(colors.border)
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: m.sp16) {
-                        AvatarView(
-                            name: person.name, size: m.profilePhoto, matrix: matrix,
-                            source: person.avatarURL
-                        ).frame(maxWidth: .infinity)
-                        VStack(alignment: .leading, spacing: m.sp4) {
-                            HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
-                                Text(person.name).font(m.font(.title1, .bold)).foregroundStyle(colors.textPrimary)
-                                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                                if own { TagLabel(text: "You") }
-                            }
-                            // Where Slack shows a title; Matrix has a status instead.
-                            if let status = person.status {
-                                Text(status).font(m.font(.title3)).fixedSize(horizontal: false, vertical: true)
-                            }
+                // A contact card, as Contacts lays one out: the photo, name and status centered over the actions,
+                // then the details in a grouped box.
+                VStack(spacing: m.sp20) {
+                    VStack(spacing: m.sp8) {
+                        AvatarView(name: person.name, size: m.contactPhoto, matrix: matrix, source: person.avatarURL)
+                            .padding(.bottom, m.sp4)
+                        HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
+                            Text(person.name).font(m.font(.title1, .bold)).foregroundStyle(colors.textPrimary)
+                                .textSelection(.enabled)
+                            if own { TagLabel(text: "You") }
+                        }.multilineTextAlignment(.center)
+                        // Where Slack shows a title; Matrix has a status instead.
+                        if let status = person.status {
+                            Text(status).font(m.font(.reading)).foregroundStyle(colors.textSecondary)
                         }
                         if person.inCall {
                             Label {
                                 Text("In a call")
                             } icon: {
                                 Image(systemName: "video.fill").foregroundStyle(colors.presenceActive)
-                            }.font(m.font(.reading))
+                            }.font(m.font(.reading)).foregroundStyle(colors.textSecondary)
                         }
-                        ProfileActions(
-                            matrix: matrix, userID: userID, own: own, onOpen: onOpenConversation, onEdit: onEditProfile
-                        )
-                        // A failed Message belongs to the person it was for, not the next profile opened in the pane.
-                        .id(userID)
-                    }.padding(m.sp20)
-                    Divider().overlay(colors.border)
-                    VStack(alignment: .leading, spacing: m.sp16) {
-                        Text("Contact information").font(m.font(.reading, .bold)).foregroundStyle(colors.textPrimary)
-                        HStack(spacing: m.sp12) {
-                            Image(systemName: "at").font(m.font(.reading)).foregroundStyle(colors.textSecondary)
-                                .frame(width: m.iconTile, height: m.iconTile)
-                                .background(colors.sunken, in: RoundedRectangle(cornerRadius: m.radiusLarge))
-                                .accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: m.sp2) {
-                                Text("Matrix ID").font(m.font(.body, .semibold))
-                                    .foregroundStyle(colors.textSecondary)
-                                Text(userID).font(m.font(.reading)).foregroundStyle(colors.accent).lineLimit(1)
-                                    .truncationMode(.middle).textSelection(.enabled)
-                            }
-                        }
-                    }.padding(m.sp20).frame(maxWidth: .infinity, alignment: .leading)
-                }
+                    }.multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    ProfileActions(
+                        matrix: matrix, userID: userID, own: own, onOpen: onOpenConversation, onEdit: onEditProfile
+                    )
+                    // A failed Message belongs to the person it was for, not the next profile opened in the pane.
+                    .id(userID)
+                    VStack(alignment: .leading, spacing: m.sp2) {
+                        Text("Matrix ID").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                        Text(userID).font(m.font(.reading)).foregroundStyle(colors.textPrimary).lineLimit(1)
+                            .truncationMode(.middle).textSelection(.enabled)
+                    }
+                    .padding(.horizontal, m.sp12).padding(.vertical, m(10))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(colors.sunken, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+                }.padding(.horizontal, m.sp20).padding(.vertical, m.sp24)
             }
         }
         .foregroundStyle(colors.textBody).background(colors.canvas)
@@ -121,7 +110,7 @@ private struct ProfileActions: View {
     @EnvironmentObject private var appearance: AppearanceStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: m.sp8) {
+        VStack(spacing: m.sp8) {
             HStack(spacing: m.sp8) {
                 if own {
                     Button("Edit profile", action: onEdit).buttonStyle(.secondary)
@@ -136,7 +125,7 @@ private struct ProfileActions: View {
                             Text("Message")
                         }
                     }
-                    .buttonStyle(.secondary)
+                    .buttonStyle(.primary)
                     .disabled(request != nil || matrix.isPreview || (try? PeopleMapping.validatedID(userID)) == nil)
                 }
                 Button(action: showMenu) {

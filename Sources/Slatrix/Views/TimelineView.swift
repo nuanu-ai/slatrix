@@ -490,7 +490,7 @@ struct MessageRow: View {
                         actions.openProfile?()
                     } label: {
                         avatar ?? AvatarView(name: message.senderName, size: m.avatar)
-                    }.buttonStyle(.row).disabled(actions.openProfile == nil).help(
+                    }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help(
                         "View \(message.senderName)’s profile")
                 }
             }
@@ -510,7 +510,7 @@ struct MessageRow: View {
                         } label: {
                             Text(message.senderName).font(m.font(.reading, .semibold))
                                 .foregroundStyle(colors.textPrimary)
-                        }.buttonStyle(.row).disabled(actions.openProfile == nil).help("View profile")
+                        }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
                         if !compact {
                             Text(time).font(m.font(.subheadline))
                                 .foregroundStyle(colors.textSecondary)

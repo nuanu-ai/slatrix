@@ -92,6 +92,8 @@ struct Metrics: Equatable {
     var avatarLarge: CGFloat { 72 * zoom }
     /// The photo at the top of a profile.
     var profilePhoto: CGFloat { 240 * zoom }
+    /// The photo on a person's profile card.
+    var contactPhoto: CGFloat { 96 * zoom }
     /// The rounded square behind the icon that labels a detail, such as a profile's contact rows.
     var iconTile: CGFloat { 32 * zoom }
     /// Sidebar rows, list rows, menu-like buttons.

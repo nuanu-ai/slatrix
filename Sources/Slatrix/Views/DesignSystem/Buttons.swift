@@ -199,6 +199,20 @@ extension ButtonStyle where Self == RowButtonStyle {
     static var row: RowButtonStyle { RowButtonStyle() }
 }
 
+extension View {
+    /// The pointing hand over something that opens on a click without looking like a button, such as a sender's
+    /// photo or name.
+    @ViewBuilder func linkCursor() -> some View {
+        if #available(macOS 15, *) {
+            pointerStyle(.link)
+        } else {
+            onContinuousHover { phase in
+                if case .active = phase { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
+            }
+        }
+    }
+}
+
 /// Whether a button has keyboard focus, given `isFocused` read inside it. Without the Mac's keyboard navigation
 /// buttons can't take focus, and `isFocused` then reports a focused container around them instead.
 @MainActor func keyboardFocused(_ focusedWithin: Bool) -> Bool {
