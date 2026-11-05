@@ -4,6 +4,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.layout.BoxWithConstraints
 import ai.nuanu.slatrix.core.AvatarPlaceholder
+import ai.nuanu.slatrix.core.DisplayNames
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SpaceSummary
@@ -385,7 +386,7 @@ private fun HomeHeader(tab: HomeTab, userId: String, userAvatarUrl: String?, sta
         }
         Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
             .clickable(role = Role.Button, onClick = onYou).semantics { contentDescription = "You" }, contentAlignment = Alignment.Center) {
-            LiveAvatar(AvatarPlaceholder.initials(userId.removePrefix("@").substringBefore(':')), AvatarPlaceholder.colorIndex(userId),
+            LiveAvatar(AvatarPlaceholder.initials(DisplayNames.localpart(userId)), AvatarPlaceholder.colorIndex(userId),
                 UiMetrics.HeaderAvatar, userAvatarUrl)
         }
     }

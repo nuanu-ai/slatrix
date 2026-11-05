@@ -62,7 +62,7 @@ private class TypingRoom : Room(NoHandle) {
     override fun id(): String = "!design:example.org"
     override fun ownUserId(): String = "@me:example.org"
     override suspend fun typingNotice(isTyping: Boolean) { notices += isTyping }
-    override suspend fun memberDisplayName(userId: String): String? = if (userId == "@sam:example.org") "Sam Okafor" else null
+    override suspend fun member(userId: String) = member(userId, if (userId == "@sam:example.org") "Sam Okafor" else null)
     override fun subscribeToTypingNotifications(listener: TypingNotificationsListener): TaskHandle {
         this.listener.value = listener
         return object : TaskHandle(NoHandle) { override fun cancel() = Unit }

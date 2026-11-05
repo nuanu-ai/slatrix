@@ -20,6 +20,21 @@ import uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode
 
 class MatrixConversationTest {
     // capability: conversation.history
+    // capability: people.names
+    @Test fun everyoneInTheRoomIsNamedAsTheDeviceKnowsThemThenAsTheServersMemberListHasThem() = runTest {
+        val timeline = ConversationTimeline(emptyList()).apply { memberFetch = CompletableDeferred() }
+        val room = ConversationRoom(timeline).apply { members = listOf(member("@sam:example.org", "Sam Okafor")) }
+        val conversation = MatrixConversation(backgroundScope, room)
+        conversation.state.first { it.names == mapOf("@sam:example.org" to "Sam Okafor") }
+
+        room.members = room.members + member("@mira.chen:example.org", null) + member("@lena:example.org", "Lena")
+        timeline.memberFetch.complete(Unit)
+        conversation.state.first {
+            it.names == mapOf("@sam:example.org" to "Sam Okafor", "@mira.chen:example.org" to "mira.chen", "@lena:example.org" to "Lena")
+        }
+        conversation.close()
+    }
+
     @Test fun cachedMessagesAppearWhileOlderHistoryIsStillLoading() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
@@ -933,6 +948,13 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
     override fun ownUserId(): String = "@me:example.org"
     override suspend fun setUnreadFlag(newValue: Boolean) { markedUnread = newValue }
     override suspend fun timeline(): Timeline = value
+    /** The members the device knows; the conversation reads them again once the server's list is in. */
+    var members = emptyList<RoomMember>()
+    override suspend fun membersNoSync(): RoomMembersIterator = object : RoomMembersIterator(NoHandle) {
+        private var chunk: List<RoomMember>? = members
+        override fun nextChunk(chunkSize: UInt) = chunk.also { chunk = null }
+        override fun close() {}
+    }
     override suspend fun matrixToEventPermalink(eventId: String): String = "https://matrix.to/#/!design:example.org/$eventId"
     /** Events sent straight to the room, past its send queue, as their type and JSON content. */
     val raw = Channel<Pair<String, String>>(Channel.UNLIMITED)
@@ -987,6 +1009,9 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     override suspend fun getEventTimelineItemByEventId(eventId: String): EventTimelineItem =
         checkNotNull(cached.firstNotNullOfOrNull { item -> item.asEvent()?.takeIf {
             (it.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId == eventId } })
+    /** Completes when the server's member list is in. */
+    var memberFetch = CompletableDeferred(Unit)
+    override suspend fun fetchMembers() = memberFetch.await()
     val fetched = Channel<String>(Channel.UNLIMITED)
     override suspend fun fetchDetailsForEvent(eventId: String) { fetched.send(eventId) }
     override suspend fun addListener(listener: TimelineListener): TaskHandle {
@@ -1097,3 +1122,6 @@ private fun dateDivider(stableId: String, timestamp: ULong) = object : TimelineI
 }
 
 private val List<ConversationRow>.messages get() = filterIsInstance<ConversationMessage>()
+
+internal fun member(id: String, name: String?) = RoomMember(id, name, null, null, null, MembershipState.Join, false, PowerLevel.Value(0), false,
+    uniffi.matrix_sdk.RoomMemberRole.USER, null, false)

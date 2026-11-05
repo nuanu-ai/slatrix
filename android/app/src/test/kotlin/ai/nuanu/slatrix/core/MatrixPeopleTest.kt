@@ -150,7 +150,7 @@ class MatrixPeopleTest {
         people.search(" $Alice ")
         assertEquals(listOf(Person(Alice, "Alice Moss", "mxc://example.org/alice")), people.results.first { !it.loading && it.people.isNotEmpty() }.people)
         people.search("@gone:example.org")
-        assertEquals("A Matrix ID without a public profile can still be messaged", listOf(Person("@gone:example.org", "@gone:example.org")),
+        assertEquals("A Matrix ID without a public profile can still be messaged", listOf(Person("@gone:example.org", "gone")),
             people.results.first { state -> !state.loading && state.people.any { it.id == "@gone:example.org" } }.people)
     }
 
@@ -164,11 +164,11 @@ class MatrixPeopleTest {
     }
 
     // capability: people.profile
-    @Test fun aProfileShowsItsNameOrElseItsMatrixId() = runTest {
+    @Test fun aProfileShowsItsNameOrElseItsLocalpart() = runTest {
         val client = PeopleClient()
         val people = MatrixPeople(backgroundScope, client)
         assertEquals(Person(Alice, "Alice Moss", "mxc://example.org/alice"), people.profile(Alice))
-        assertEquals(Person("@quiet:example.org", "@quiet:example.org"), people.profile("@quiet:example.org"))
+        assertEquals(Person("@quiet:example.org", "quiet"), people.profile("@quiet:example.org"))
         assertNull("A profile that can't load is null", people.profile("@gone:example.org"))
     }
 }

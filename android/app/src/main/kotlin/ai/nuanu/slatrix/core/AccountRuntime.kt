@@ -69,7 +69,8 @@ class AccountRuntime private constructor(application: Application) {
                     mutableRooms.value = next?.let { MatrixRooms(scope, it, foreground) }
                     mutableIdentity.value = next?.let { IdentityVerification(scope, it) }
                     mutableActivity.value = next?.let { client ->
-                        MatrixActivity((state as AccountState.Connected).userId, scope, { roomId, eventId -> messageText(client, roomId, eventId) }).also {
+                        MatrixActivity((state as AccountState.Connected).userId, scope, { roomId, ids -> client.memberNames(roomId, ids) },
+                            { roomId, eventId -> messageText(client, roomId, eventId) }).also {
                             scope.launch {
                                 try {
                                     client.registerNotificationHandler(it.listener)

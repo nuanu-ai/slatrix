@@ -58,6 +58,8 @@ fun List<ActivityItem>.inWorkspace(rooms: List<RoomSummary>, spaceId: String?): 
  * Reactions show when a push rule lets them notify.
  */
 class MatrixActivity(private val userId: String, scope: CoroutineScope,
+    /** The names a room knows the given members by, for the people a message mentions by ID. */
+    private val memberNames: suspend (roomId: String, ids: Set<String>) -> Map<String, String> = { _, _ -> emptyMap() },
     /** The text of a room's message, for the one a reaction reacted to; null when it can't be read. */
     private val messageText: suspend (roomId: String, eventId: String) -> String?) {
     /** Its lookups end with the account it belongs to. */
@@ -90,7 +92,7 @@ class MatrixActivity(private val userId: String, scope: CoroutineScope,
                 is MessageLikeEventContent.RoomEncrypted -> "Waiting for this message"
                 else -> return
             }
-            val senderName = notification.senderInfo.displayName?.takeIf { it.isNotBlank() } ?: sender
+            val senderName = DisplayNames.name(sender, notification.senderInfo.displayName, ambiguous = notification.senderInfo.isNameAmbiguous)
             ActivityItem(
                 id = "$roomId ${event.eventId()}", roomId = roomId, eventId = event.eventId(),
                 roomName = notification.roomInfo.displayName, direct = notification.roomInfo.isDirect,
@@ -107,10 +109,15 @@ class MatrixActivity(private val userId: String, scope: CoroutineScope,
                 avatarUrl = notification.senderInfo.avatarUrl,
             )
         }.getOrNull() ?: return
-        val message = reactedTo ?: return add(item)
-        // A reaction lands with the message it reacted to, so its row doesn't grow later; one the server is slow to give
-        // lands without it.
-        lookups.launch { add(item.copy(reactedTo = withTimeoutOrNull(LOOKUP_MILLIS) { messageText(roomId, message) })) }
+        val message = reactedTo
+        val mentioned = if (message == null) DisplayNames.mentioned(item.body) else emptySet()
+        if (message == null && mentioned.isEmpty()) return add(item)
+        // A reaction lands with the message it reacted to, and a mention with the names of who it mentions, so its row
+        // doesn't change later; what the server is slow to give lands without it.
+        lookups.launch {
+            add(if (message != null) item.copy(reactedTo = withTimeoutOrNull(LOOKUP_MILLIS) { messageText(roomId, message) })
+                else item.copy(body = DisplayNames.mentions(item.body, withTimeoutOrNull(LOOKUP_MILLIS) { memberNames(roomId, mentioned) }.orEmpty())))
+        }
     }
 
     fun close() = lookups.cancel()

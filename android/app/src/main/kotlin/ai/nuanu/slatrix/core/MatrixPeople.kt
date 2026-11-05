@@ -89,7 +89,7 @@ class MatrixPeople(scope: CoroutineScope, private val client: Client) {
                 .map { person(it.userId, it.displayName, it.avatarUrl) }.toMutableList()
             if (ComposerFormat.userID.matches(term) && found.none { it.id == term }) {
                 // Someone without a public profile can still be messaged by their ID.
-                found.add(0, profile(term)?.takeIf { it.id == term } ?: Person(term, term))
+                found.add(0, profile(term)?.takeIf { it.id == term } ?: Person(term, DisplayNames.name(term, null)))
             }
             val people = found.distinctBy { it.id }
             mutableResults.update {
@@ -173,7 +173,7 @@ class MatrixPeople(scope: CoroutineScope, private val client: Client) {
     /** Stops any Message still at work; the account is going. */
     fun close() = work.cancel()
 
-    private fun person(id: String, name: String?, avatarUrl: String?) = Person(id, name?.takeIf(String::isNotBlank) ?: id, avatarUrl)
+    private fun person(id: String, name: String?, avatarUrl: String?) = Person(id, DisplayNames.name(id, null, name), avatarUrl)
 
     private suspend fun <T> quietly(block: suspend () -> T): T? = withContext(Dispatchers.Default) {
         try { block() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
