@@ -271,11 +271,11 @@ private struct InlineMedia: View {
 
     private func load() async {
         // A picture on screen stays when the server confirms a sent file: its copy is the same picture.
+        let started = ContinuousClock.now
         if still == nil, matrix.cachedMediaImage(message) == nil, let image = await matrix.loadMediaImage(message),
             !Task.isCancelled
         {
-            // Only a picture that wasn't in memory fades in; a cached one is on the first frame.
-            withAnimation(Motion.content) { still = image }
+            withAnimation(Motion.arrival(since: started)) { still = image }
         }
         // A large GIF plays when asked, not on its own.
         guard animates, animation == nil,

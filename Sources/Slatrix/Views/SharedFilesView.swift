@@ -212,7 +212,9 @@ private struct SharedFileRow: View {
             still = nil
             stillFailed = false
             guard message.isViewerMedia, matrix.cachedMediaImage(message) == nil else { return }
-            still = await matrix.loadMediaImage(message)
+            let started = ContinuousClock.now
+            let image = await matrix.loadMediaImage(message)
+            withAnimation(Motion.arrival(since: started)) { still = image }
             stillFailed = still == nil && !Task.isCancelled
         }
     }

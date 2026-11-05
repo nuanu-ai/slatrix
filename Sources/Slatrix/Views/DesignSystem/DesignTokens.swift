@@ -155,6 +155,10 @@ enum Motion {
     static var overlayDuration: TimeInterval { reduced ? 0 : 0.12 }
     /// Photos fading in over initials, scroll-to.
     static var content: Animation? { reduced ? nil : .easeOut(duration: 0.12) }
+    /// A picture that was waited on since `start`: a late one fades in, a quick one is simply there.
+    static func arrival(since start: ContinuousClock.Instant) -> Animation? {
+        LoadingPresentation.fadesIn(waited: .now - start) ? content : nil
+    }
     /// A message jumped to losing its highlight, slowly enough to follow.
     static var highlight: Animation? { reduced ? nil : .easeOut(duration: 1) }
     /// Side panes easing in beside the conversation.

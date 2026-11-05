@@ -72,6 +72,7 @@ struct AvatarView: View {
         }.frame(width: size, height: size).accessibilityLabel(name)
             .task(id: requestID) {
                 let request = requestID
+                let started = ContinuousClock.now
                 guard let matrix, let source, !matrix.isPreview else { return }
                 let images = matrix.avatarImages
                 let key = large ? largeKey ?? source : source
@@ -81,8 +82,7 @@ struct AvatarView: View {
                     try await matrix.avatarThumbnail(source, side: UInt64(side))
                 }
                 guard !Task.isCancelled, let image else { return }
-                // Only a photo that was not cached fades in over its initials; a cached one is on the first frame.
-                withAnimation(Motion.content) { loaded = Loaded(request: request, image: image) }
+                withAnimation(Motion.arrival(since: started)) { loaded = Loaded(request: request, image: image) }
             }
     }
 }

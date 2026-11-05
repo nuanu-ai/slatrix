@@ -1,6 +1,8 @@
 /// When waiting shows. A quick load just appears; an indicator would only flash.
 enum LoadingPresentation {
     static let indicatorDelay = Duration.milliseconds(400)
+    /// A picture that lands before an indicator would have shown reads as already there; fading it in would blink.
+    static func fadesIn(waited: Duration) -> Bool { waited >= indicatorDelay }
     /// How long the previous conversation may stay up while the next one reads its cached rows. Past this the
     /// header changes and the rows follow.
     static let handoff = Duration.milliseconds(100)

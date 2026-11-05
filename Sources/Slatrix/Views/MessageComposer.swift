@@ -1456,11 +1456,12 @@ private struct StagedAttachmentTile: View {
         guard attachment.fileKind == .image, thumbnail == nil else { return }
         let url = url
         let pixels = Int((m(Self.side) * displayScale).rounded(.up))
+        let started = ContinuousClock.now
         let image = await Task.detached(priority: .userInitiated) {
             ComposerAttachmentImporter.thumbnail(of: url, pixels: pixels)
         }.value
         guard !Task.isCancelled else { return }
-        withAnimation(Motion.content) {
+        withAnimation(Motion.arrival(since: started)) {
             thumbnail = image
             undecodable = image == nil
         }

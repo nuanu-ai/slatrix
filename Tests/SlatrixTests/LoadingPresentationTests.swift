@@ -33,4 +33,11 @@ struct LoadingPresentationTests {
     func slowSendClock(sendingFor: Duration, shows: Bool) {
         #expect(LoadingPresentation.showsSendingClock(sendingFor: sendingFor) == shows)
     }
+
+    @Test(
+        "A picture that lands before a wait would show appears at once; only a late one fades in",
+        arguments: [(Duration.milliseconds(0), false), (.milliseconds(80), false), (.seconds(1), true)])
+    func lateFade(waited: Duration, fades: Bool) {
+        #expect(LoadingPresentation.fadesIn(waited: waited) == fades)
+    }
 }
