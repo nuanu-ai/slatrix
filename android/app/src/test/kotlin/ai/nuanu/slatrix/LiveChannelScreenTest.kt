@@ -32,6 +32,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import android.graphics.Bitmap
 import ai.nuanu.slatrix.ui.account.AvatarLoader
@@ -106,6 +107,45 @@ class LiveChannelScreenTest {
     }
 
     // capability: conversation.history
+    // Opened cold, sync holds only the newest message or two, and the page under them filled the screen in view.
+    @Test fun aConversationOpenedColdShowsOnceItsFirstPageFillsTheScreen() {
+        val state = mutableStateOf(ConversationState(listOf(message("Message 39", 39), message("Message 40", 40)), loading = false))
+        compose.setContent {
+            screen = LocalView.current
+            SlatrixTheme { bubble = SlatrixTheme.colors.bubbleIn.toArgb(); LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
+        }
+        assertFalse("The newest messages wait for the page under them", drawn("Message 40"))
+        compose.runOnIdle { state.value = state.value.copy(rows = (1..40).map { message("Message $it", minutes = it) }) }
+        compose.waitUntil { drawn("Message 40") }
+    }
+
+    @Test fun aConversationWithLittleHistoryShowsOnceItHasNoMore() {
+        val state = mutableStateOf(ConversationState(listOf(message("Hello", 0)), loading = false))
+        compose.setContent {
+            screen = LocalView.current
+            SlatrixTheme { bubble = SlatrixTheme.colors.bubbleIn.toArgb(); LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
+        }
+        assertFalse(drawn("Hello"))
+        compose.runOnIdle { state.value = state.value.copy(hasMore = false) }
+        compose.waitUntil { drawn("Hello") }
+    }
+
+    private var screen: android.view.View? = null
+    private var bubble = 0
+
+    /** Whether the message's bubble reaches the screen: its fill is the color drawn most inside its bounds. */
+    private fun drawn(text: String): Boolean {
+        val bounds = compose.onNodeWithText(text).fetchSemanticsNode().boundsInRoot
+        val image = compose.runOnIdle {
+            val view = checkNotNull(screen).rootView
+            Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(android.graphics.Canvas(it)) }
+        }
+        val colors = mutableListOf<Int>()
+        for (x in bounds.left.toInt() until bounds.right.toInt().coerceAtMost(image.width))
+            for (y in bounds.top.toInt() until bounds.bottom.toInt().coerceAtMost(image.height)) colors += image.getPixel(x, y)
+        return colors.groupingBy { it }.eachCount().maxBy { it.value }.key == bubble
+    }
+
     @Test fun aPageThatLandsWithinAFrameAsksAgainWhileTheTopIsNear() {
         val state = mutableStateOf(ConversationState(listOf(message("Message 100", minutes = 100)), loading = false))
         var requests = 0

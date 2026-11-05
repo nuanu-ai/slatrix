@@ -161,11 +161,18 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val opensAt = state.highlight ?: newLine.start ?: newLine.back?.first
     fun opens(row: ConversationRow) = row.id == opensAt || (row as? ConversationMessage)?.eventId == opensAt
     var jumped by remember(opensAt) { mutableStateOf(opensAt == null) }
+    // Opened cold, sync holds only the newest message or two, so the messages wait until a page fills the screen under
+    // them or there's no more to load, and the screen never fills in view.
+    val filled by remember { derivedStateOf { list.canScrollForward } }
+    val open = remember { object { var settled = false; var paging = false } }
+    if (state.loadingHistory) open.paging = true
+    if (filled || !state.hasMore || state.error != null || open.paging && !state.loadingHistory) open.settled = true
+    val settled = open.settled
     val latest = state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?
     val read by rememberUpdatedState(onRead)
-    LaunchedEffect(latest?.id, latest?.eventId, resumed, jumped) {
+    LaunchedEffect(latest?.id, latest?.eventId, resumed, jumped, settled) {
         val event = latest?.eventId ?: return@LaunchedEffect
-        if (!resumed || !jumped) return@LaunchedEffect
+        if (!resumed || !jumped || !settled) return@LaunchedEffect
         snapshotFlow {
             list.layoutInfo.visibleItemsInfo.any { item ->
                 item.key == latest.id && ReadState.seen(item.offset.toFloat(), (item.offset + item.size).toFloat(),
@@ -308,7 +315,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
                 contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = jumpRoom)) {
-                itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row ->
+                itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row -> Box(Modifier.alpha(if (settled) 1f else 0f)) {
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Column(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
@@ -330,7 +337,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             if (root) RepliesBar(replies)
                         }
                     }
-                }
+                } }
                 // The top of the conversation, which also lets an empty one ask for history; a thread tops out at its root.
                 item(key = "top") {
                     when {
