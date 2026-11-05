@@ -8,15 +8,34 @@ import Testing
 @Suite("Themes")
 struct ThemeTests {
     // capability: app.appearance
-    @Test("Text stays readable on the window and the sidebar in both themes", arguments: [false, true])
-    func readable(dark: Bool) {
-        let colors = AppColors(dark: dark, accent: AppColors.resolve(.systemBlue, dark: dark))
+    // capability: app.themes
+    @Test(
+        "Text stays readable wherever it sits, in every theme, light and dark",
+        arguments: ColorTheme.allCases, [false, true])
+    func readable(theme: ColorTheme, dark: Bool) {
+        let colors = AppColors(dark: dark, accent: AppColors.resolve(.systemBlue, dark: dark), theme: theme)
         // WCAG AA for text.
-        for surface in [colors.canvas, colors.sidebar] {
+        let surfaces = [
+            colors.canvas, colors.sidebar, colors.overlay, colors.control,
+            over(colors.selection, colors.sidebar), over(colors.code, colors.canvas),
+        ]
+        for surface in surfaces {
             #expect(contrast(colors.textPrimary, surface) >= 4.5)
             #expect(contrast(colors.textSecondary, surface) >= 4.5)
         }
         #expect(contrast(colors.accent, colors.canvas) >= 4.5)
+        #expect(contrast(colors.mentionYouText, over(colors.mentionYouFill, colors.canvas)) >= 4.5)
+    }
+
+    /// A translucent fill as it draws on an opaque surface.
+    private func over(_ top: Color, _ bottom: Color) -> Color {
+        let (top, bottom) = (NSColor(top).usingColorSpace(.sRGB)!, NSColor(bottom).usingColorSpace(.sRGB)!)
+        let alpha = top.alphaComponent
+        func mix(_ a: CGFloat, _ b: CGFloat) -> Double { Double(a * alpha + b * (1 - alpha)) }
+        return Color(
+            .sRGB, red: mix(top.redComponent, bottom.redComponent),
+            green: mix(top.greenComponent, bottom.greenComponent),
+            blue: mix(top.blueComponent, bottom.blueComponent))
     }
 
     private func contrast(_ first: Color, _ second: Color) -> Double {

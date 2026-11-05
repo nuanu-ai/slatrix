@@ -10,6 +10,8 @@ struct DesignTokenTests {
     private struct Tokens: Decodable {
         struct Mac: Decodable {
             var colors: [String: ColorToken]
+            /// Each theme's roles that differ from `colors`.
+            var themes: [String: [String: ColorToken]]
             var radius: [String: Double]
         }
         var mac: Mac
@@ -43,8 +45,10 @@ struct DesignTokenTests {
         tokens = try SharedSpec.decode("design/tokens.json")
     }
 
-    @Test("Every color role matches the shared tokens in both themes, with the accent the tokens name")
-    func colors() throws {
+    @Test(
+        "Every color role matches the shared tokens in light and dark, with the accent the tokens name",
+        arguments: ColorTheme.allCases)
+    func colors(theme: ColorTheme) throws {
         let roles: [String: KeyPath<AppColors, Color>] = [
             "textPrimary": \.textPrimary, "textBody": \.textBody, "textSecondary": \.textSecondary,
             "textTertiary": \.textTertiary, "canvas": \.canvas, "raised": \.raised, "sunken": \.sunken,
@@ -59,15 +63,18 @@ struct DesignTokenTests {
             "mediaShade": \.mediaShade, "onMedia": \.onMedia, "onMediaEdge": \.onMediaEdge,
         ]
         #expect(Set(tokens.mac.colors.keys) == Set(roles.keys))
+        #expect(Set(tokens.mac.themes.keys) == Set(ColorTheme.allCases.dropFirst().map(\.rawValue)))
+        let own = tokens.mac.themes[theme.rawValue] ?? [:]
+        #expect(Set(own.keys).isSubset(of: roles.keys))
         for (role, keyPath) in roles {
-            let token = try #require(tokens.mac.colors[role], "\(role)")
+            let token = try #require(own[role] ?? tokens.mac.colors[role], "\(role)")
             for dark in [false, true] {
-                let colors = AppColors(dark: dark, accent: Self.blue(dark: dark))
+                let colors = AppColors(dark: dark, accent: Self.blue(dark: dark), theme: theme)
                 let drawn = colors[keyPath: keyPath]
                 let expected = token.color(dark: dark)
                 #expect(
                     Self.matches(drawn, expected),
-                    "\(role), \(dark ? "dark" : "light"): \(drawn.resolve(in: .init())) ≠ \(expected)")
+                    "\(theme) \(role), \(dark ? "dark" : "light"): \(drawn.resolve(in: .init())) ≠ \(expected)")
             }
         }
     }

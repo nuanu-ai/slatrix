@@ -125,8 +125,21 @@ struct PreferencesView: View {
                         } preview: {
                             AppMiniature(
                                 colors: AppColors(
-                                    dark: mode == .dark || (mode == .system && appearance.systemIsDark)),
+                                    dark: mode == .dark || (mode == .system && appearance.systemIsDark),
+                                    theme: appearance.theme),
                                 split: mode == .system)
+                        }
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: m.sp12) {
+                sectionTitle("Theme")
+                HStack(spacing: m.sp12) {
+                    ForEach(ColorTheme.allCases) { theme in
+                        choiceTile(label: theme.name, selected: appearance.theme == theme) {
+                            appearance.theme = theme
+                        } preview: {
+                            AppMiniature(colors: AppColors(dark: appearance.isDark, theme: theme))
                         }
                     }
                 }
@@ -387,7 +400,7 @@ private struct AppMiniature: View {
                     }
                     Spacer(minLength: 0)
                 }.padding(m.sp8).frame(maxWidth: .infinity).background(
-                    split ? AppColors(dark: false).canvas : colors.canvas)
+                    split ? AppColors(dark: false, theme: colors.theme).canvas : colors.canvas)
             }
         }.accessibilityHidden(true)
     }
