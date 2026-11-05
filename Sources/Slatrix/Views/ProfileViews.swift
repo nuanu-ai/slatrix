@@ -20,11 +20,7 @@ struct ProfilePane: View {
         let own = userID == matrix.user?.id
         let colors = appearance.colors
         VStack(spacing: 0) {
-            HStack {
-                Text("Profile").font(m.font(.title3, .bold))
-                Spacer()
-                IconButton(symbol: "xmark", label: "Close profile", role: .reading, action: onClose)
-            }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
+            PaneHeader(title: "Profile", closeLabel: "Close profile", onClose: onClose)
             ScrollView {
                 // A contact card, as Contacts lays one out: the photo, name and status centered over the actions,
                 // then the details in a grouped box.
