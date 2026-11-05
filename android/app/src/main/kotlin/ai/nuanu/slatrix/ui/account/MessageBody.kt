@@ -1,5 +1,13 @@
 package ai.nuanu.slatrix.ui.account
 
+import kotlin.math.roundToInt
+
+import androidx.compose.ui.text.TextLayoutResult
+
+import androidx.compose.ui.layout.layout
+
+import androidx.compose.ui.layout.VerticalAlignmentLine
+
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.MessageBlock
 import ai.nuanu.slatrix.core.MessageKind
@@ -184,7 +192,8 @@ fun MessageBody(message: ConversationMessage, color: Color, me: String?, onMenti
         groups.forEachIndexed { index, (block, pieces) ->
             val content = @Composable {
                 MessagePieces(pieces, colors, color, textStyle, indent, me, message.kind == MessageKind.Emote,
-                    message.edited && !editedBelow && index == groups.lastIndex, onMention)
+                    message.edited && !editedBelow && index == groups.lastIndex, onMention,
+                    endsMessage = index == groups.lastIndex && !block.code && !editedBelow)
             }
             val text = @Composable {
                 if (block.code) Surface(Modifier.padding(start = indent * block.list).fillMaxWidth(), shape = MaterialTheme.shapes.small,
@@ -201,24 +210,38 @@ fun MessageBody(message: ConversationMessage, color: Color, me: String?, onMenti
     }
 }
 
+/** Where a message's last line of text ends, so its time can follow it on that line. */
+internal val LastLineEnd = VerticalAlignmentLine { _, last -> last }
+
+/** Gives [LastLineEnd] as where the laid out text's last line ends. */
+private fun Modifier.endsLastLine(text: () -> TextLayoutResult?) = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val end = text()?.let { it.getLineRight(it.lineCount - 1).roundToInt() } ?: placeable.width
+    layout(placeable.width, placeable.height, mapOf(LastLineEnd to end)) { placeable.place(0, 0) }
+}
+
 @Composable
 private fun MessagePieces(pieces: List<Piece>, colors: AppColors, color: Color, style: TextStyle, indent: Dp, me: String?,
-    emote: Boolean, edited: Boolean, onMention: ((String) -> Unit)?) {
+    emote: Boolean, edited: Boolean, onMention: ((String) -> Unit)?, endsMessage: Boolean) {
     val caption = MaterialTheme.typography.bodySmall
     fun text(lines: List<Line>, last: Boolean) = buildAnnotatedString {
         val codeSize = style.fontSize * UiMetrics.CodeTextScale
         if (emote) withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(lines, colors, codeSize, me, onMention) } else append(lines, colors, codeSize, me, onMention)
         if (edited && last) withStyle(SpanStyle(color = colors.textSecondary, fontSize = caption.fontSize)) { append(" (edited)") }
     }
+    // Kept without state: read only while laying out, just after the text it holds was measured.
+    val laidOut = remember { arrayOfNulls<TextLayoutResult>(1) }
     Column {
         pieces.forEachIndexed { index, piece ->
             val last = index == pieces.lastIndex
             val top = if (piece.gap) Modifier.padding(top = UiMetrics.GapSmall) else Modifier
+            val ends = if (last && endsMessage) Modifier.endsLastLine { laidOut[0] } else Modifier
+            val onLayout: (TextLayoutResult) -> Unit = { if (last) laidOut[0] = it }
             when (piece) {
-                is Piece.Text -> Text(text(piece.lines, last), top, style = style, color = color)
+                is Piece.Text -> Text(text(piece.lines, last), top.then(ends), style = style, color = color, onTextLayout = onLayout)
                 is Piece.Item -> Row(top.padding(start = indent * (piece.depth - 1))) {
                     Text(piece.marker, Modifier.widthIn(min = indent), style = style, color = color)
-                    Text(text(piece.lines, last), style = style, color = color)
+                    Text(text(piece.lines, last), ends, style = style, color = color, onTextLayout = onLayout)
                 }
             }
         }

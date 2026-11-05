@@ -123,12 +123,14 @@ private const val WashTurn = 15.0
 private const val WashMiddle = 0.55f
 
 /**
- * A chat bubble: rounded all round except the corner toward its author, at the bottom, and the top one too when it
- * follows the same author's bubble, so a run of them reads as one.
+ * A chat bubble, rounded all round except toward its author: a corner that meets the same author's bubble above or
+ * below is tighter, and the last of a run ends in the tail, tighter still, so a run reads as one and ends once.
  */
-fun bubbleShape(own: Boolean, grouped: Boolean): Shape {
+fun bubbleShape(own: Boolean, grouped: Boolean, last: Boolean): Shape {
     val round = DesignTokens.radii.getValue("bubble").dp
+    val joined = DesignTokens.radii.getValue("small").dp
     val tail = DesignTokens.radii.getValue("extraSmall").dp
-    val top = if (grouped) tail else round
-    return if (own) RoundedCornerShape(round, top, tail, round) else RoundedCornerShape(top, round, round, tail)
+    val top = if (grouped) joined else round
+    val bottom = if (last) tail else joined
+    return if (own) RoundedCornerShape(round, top, bottom, round) else RoundedCornerShape(top, round, round, bottom)
 }

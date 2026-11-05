@@ -46,6 +46,9 @@ object UiMetrics {
     /** The faces on a thread's replies bar. */
     val Facepile = 20.dp
     val ThreadBar = 40.dp
+    /** A bubble's inset around its text, a little tighter than a card's, as a messenger's is. */
+    val BubbleInset = 10.dp
+    val BubbleInsetVertical = 6.dp
     /** The share of the width your bubble leaves on its far side, so a long one reaches about 85%, as in Telegram. */
     const val BubbleGutter = 0.12f
     /** Theirs leave a gutter that grows with the phone, from narrow at 320 dp to wide at 412 dp, past their picture's room. */

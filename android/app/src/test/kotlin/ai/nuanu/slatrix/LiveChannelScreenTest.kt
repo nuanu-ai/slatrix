@@ -66,6 +66,10 @@ import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNotEquals
+import ai.nuanu.slatrix.ui.account.timeLabel
+import ai.nuanu.slatrix.ui.designsystem.bubbleShape
+import androidx.compose.ui.unit.dp
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -678,6 +682,24 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Home").assertIsDisplayed()
         compose.runOnIdle { page.value = "design" }
         compose.onNodeWithText("Message 200").assertIsDisplayed()
+    }
+
+    @Test fun theTimeEndsAMessagesLastLineWhereItFits() {
+        val note = "The empty states are ready for a look\nThanks"
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message(note, 0)), loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        val text = compose.onNodeWithText(note, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val time = compose.onNodeWithText(timeLabel(1_700_000_000_000L), useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("time ends at ${time.bottom}, text at ${text.bottom}", time.bottom <= text.bottom + 1.dp)
+    }
+
+    @Test fun onlyTheLastBubbleOfARunHasTheTail() {
+        assertNotEquals(bubbleShape(own = false, grouped = false, last = true), bubbleShape(own = false, grouped = false, last = false))
+        assertNotEquals(bubbleShape(own = true, grouped = true, last = true), bubbleShape(own = true, grouped = true, last = false))
     }
 
     @Test fun aLongMessagesBubbleTakesMostOfANarrowPhonesWidth() {

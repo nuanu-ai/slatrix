@@ -23,6 +23,7 @@ import ai.nuanu.slatrix.ui.designsystem.rememberGlass
 import ai.nuanu.slatrix.ui.designsystem.wallpaper
 import dev.chrisbanes.haze.HazeState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
@@ -606,14 +607,14 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
                 LiveAvatar(message.initials, message.colorIndex, UiMetrics.FeedAvatar, message.avatarUrl)
             }
         }
-        val shape = remember(own, message.grouped) { bubbleShape(own, message.grouped) }
+        val shape = remember(own, message.grouped, lastOfRun) { bubbleShape(own, message.grouped, lastOfRun) }
         val bubble = @Composable {
             val fill = SlatrixTheme.colors
             Box(Modifier.weight(1f, fill = false).bubble(shape, fill.bubbleIn, if (own) fill.bubbleIn.copy(alpha = 0f) else fill.bubbleEdge)) {
             val attachment = message.attachment
             // A picture or video runs to the bubble's edge with its time on it, as in a messenger; the rest keeps the text's inset.
             val media = attachment?.kind == MessageAttachment.Kind.Image || attachment?.kind == MessageAttachment.Kind.Video
-            val inset = if (media) Modifier.padding(horizontal = UiMetrics.GapMedium - UiMetrics.GapTiny) else Modifier
+            val inset = if (media) Modifier.padding(horizontal = UiMetrics.BubbleInset - UiMetrics.GapTiny) else Modifier
             // An attachment's text is its caption; without one it is the file's name, which the attachment shows.
             val body: (@Composable () -> Unit)? = if (attachment == null || message.caption != null) {
                 { MessageBody(message, if (message.sendState == MessageSendState.Sending) fill.textSecondary else fill.textBody, me, onPerson) }
@@ -627,7 +628,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             }
             val timeColor = if (failed && !own) fill.destructive else fill.textSecondary
             Column(Modifier.padding(if (media) PaddingValues(UiMetrics.GapTiny)
-                else PaddingValues(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall))) {
+                else PaddingValues(horizontal = UiMetrics.BubbleInset, vertical = UiMetrics.BubbleInsetVertical))) {
                 if (!own && !message.grouped) Text(message.senderName, inset.clickable(role = Role.Button) { onPerson(message.senderId) },
                     style = MaterialTheme.typography.labelLarge, color = fill.person(message.colorIndex), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 message.replyTo?.let { reply -> Box(inset) {
@@ -668,7 +669,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             }
             // In the bubble's bottom padding, so the bar comes and goes without moving anything.
             message.uploadProgress?.let {
-                Box(Modifier.matchParentSize().padding(start = UiMetrics.GapMedium, end = UiMetrics.GapMedium, bottom = UiMetrics.GapTiny),
+                Box(Modifier.matchParentSize().padding(start = UiMetrics.BubbleInset, end = UiMetrics.BubbleInset, bottom = UiMetrics.GapTiny),
                     contentAlignment = Alignment.BottomStart) {
                     LinearProgressIndicator({ it }, Modifier.fillMaxWidth().height(UiMetrics.GapTiny))
                 }
@@ -681,8 +682,8 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
 }
 
 /**
- * A bubble's text with its time: beside a single line when there's room, as a messenger sets it, or else on a line of
- * its own at the end.
+ * A bubble's text with its time: after the end of its last line when there's room, as a messenger sets it, or else on
+ * a line of its own at the end.
  */
 @Composable
 private fun TimedBody(body: (@Composable () -> Unit)?, modifier: Modifier = Modifier, time: @Composable () -> Unit) {
@@ -691,8 +692,9 @@ private fun TimedBody(body: (@Composable () -> Unit)?, modifier: Modifier = Modi
         val loose = constraints.copy(minWidth = 0, minHeight = 0)
         val t = text.measure(loose)
         val m = stamp.measure(loose)
-        val beside = t.width + gap + m.width <= constraints.maxWidth && t.height > 0
-        val width = (if (beside) t.width + gap + m.width else maxOf(t.width, m.width)).coerceIn(constraints.minWidth, constraints.maxWidth)
+        val end = t[LastLineEnd].takeIf { it != AlignmentLine.Unspecified } ?: t.width
+        val beside = end + gap + m.width <= constraints.maxWidth && t.height > 0
+        val width = (if (beside) maxOf(t.width, end + gap + m.width) else maxOf(t.width, m.width)).coerceIn(constraints.minWidth, constraints.maxWidth)
         val height = if (beside) t.height else t.height + m.height
         layout(width, height) {
             t.placeRelative(0, 0)

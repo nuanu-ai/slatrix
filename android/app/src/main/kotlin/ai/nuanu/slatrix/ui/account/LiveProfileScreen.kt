@@ -188,7 +188,7 @@ internal const val MessagePreview = "Morning! The new onboarding copy is in the 
 private fun MessageTextSize(scale: Float, onScale: (Float) -> Unit) {
     val colors = SlatrixTheme.colors
     val scales = AppearancePreferences.MessageScales
-    val shape = remember { bubbleShape(own = false, grouped = false) }
+    val shape = remember { bubbleShape(own = false, grouped = false, last = true) }
     // Laid out as an incoming message is, keeping its gutter on the far side.
     Text(MessagePreview, Modifier.padding(start = PreferenceInset, end = UiMetrics.GapLarge + UiMetrics.IncomingGutterNarrow)
         .wrapContentWidth(Alignment.Start).bubble(shape, colors.bubbleIn, colors.bubbleEdge).padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall),
