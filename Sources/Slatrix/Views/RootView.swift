@@ -1125,9 +1125,9 @@ struct RootView: View {
                                     && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
                             },
                             drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil)
+                        TypingLine(matrix: matrix)
                     }.padding(.horizontal, m.sp16).alignmentGuide(.top) { $0[.bottom] }
                 }
-                TypingLine(matrix: matrix)
             }
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
             .dropToUpload("Upload to \(room.writtenName)")
@@ -2968,11 +2968,12 @@ private struct TypingLine: View {
         return "Several people are typing…"
     }
     var body: some View {
-        HStack {
-            if !matrix.typingUsers.isEmpty { Text(label) }
-            Spacer()
-        }.font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary).padding(.horizontal, m.sp24)
-            .layoutIsolated().frame(height: m.sp24)
+        // Over the newest message's bottom margin, so it takes no height of its own.
+        if !matrix.typingUsers.isEmpty {
+            Text(label).font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary)
+                .padding(.horizontal, m.sp8).background(appearance.colors.canvas)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 

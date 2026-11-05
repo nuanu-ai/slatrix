@@ -482,6 +482,34 @@ struct WindowHostedTests {
     }
 
     // capability: channel.read-only
+    @Test("The composer sits at the window's bottom inset, and someone typing changes nothing on screen")
+    func typingOverComposer() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let editor = try #require(harness.shown().first { ($0 as? NSTextView)?.isEditable == true })
+        let canvas = try #require(NSColor(harness.appearance.colors.canvas).usingColorSpace(.sRGB))
+        // The composer's lowest edge: the first row up from the window's bottom that isn't the canvas.
+        func composerBottom() -> CGFloat? {
+            let x = editor.convert(editor.bounds, to: nil).midX
+            // One pixel wide at 2x, top row first.
+            let column = harness.pixels(in: CGRect(x: x, y: 0, width: 0.5, height: 80))
+            let rows = column.count / 3
+            return (0..<rows).reversed().first { row in
+                abs(column[row * 3] - canvas.redComponent) + abs(column[row * 3 + 1] - canvas.greenComponent)
+                    + abs(column[row * 3 + 2] - canvas.blueComponent) > 0.06
+            }.map { CGFloat(rows - 1 - $0) * 80 / CGFloat(rows) }
+        }
+        let bottom = try #require(composerBottom())
+        #expect(abs(bottom - Metrics().sp16) <= 2, "\(bottom)")
+
+        let timeline = try harness.timeline()
+        harness.matrix.typingUsers = ["Alex"]
+        await drainMainActor()
+        #expect(try harness.timeline() == timeline)
+        #expect(composerBottom() == bottom)
+    }
+
     @Test("A channel you may not post in shows a line in place of both composers, with the timeline still")
     func cannotPost() async throws {
         let harness = Harness()
