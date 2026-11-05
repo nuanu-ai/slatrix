@@ -10,6 +10,7 @@ import androidx.compose.ui.layout.VerticalAlignmentLine
 
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.MessageBlock
+import ai.nuanu.slatrix.core.MessageBodyRenderer
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageRun
 import ai.nuanu.slatrix.core.MessageTextStyle
@@ -167,7 +168,7 @@ private fun AnnotatedString.Builder.append(lines: List<Line>, colors: AppColors,
 
 /** A message's text as Slack shows it: formatting, links, mention pills, quotes, lists and code blocks. */
 @Composable
-fun MessageBody(message: ConversationMessage, color: Color, me: String?, onMention: ((String) -> Unit)? = null) {
+fun MessageBody(message: ConversationMessage, color: Color, me: String?, names: Map<String, String>, onMention: ((String) -> Unit)? = null) {
     val colors = SlatrixTheme.colors
     val textStyle = MaterialTheme.typography.message
     when (message.kind) {
@@ -183,7 +184,7 @@ fun MessageBody(message: ConversationMessage, color: Color, me: String?, onMenti
         }
         else -> {}
     }
-    val groups = remember(message.runs) { groups(message.runs) }
+    val groups = remember(message.runs, names) { groups(MessageBodyRenderer.named(message.runs, names)) }
     // The marker fills the list indent, so a wrapped line starts under the item's first word, as on the Mac.
     val indent = with(LocalDensity.current) { (textStyle.fontSize * UiMetrics.ListIndentScale).toDp() }
     // Slack ends an edited message's last line with a quiet "(edited)", or puts it under a code block.

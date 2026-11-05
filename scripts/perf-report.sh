@@ -15,7 +15,7 @@ lines=$(/usr/bin/log show --last "$duration" --style compact \
             name = field("interval")
             print (name ~ /\.loading$/ ? "loading" : "interval"), name, field("ms")
         }
-        / event=/ { print "event", field("event"), field("px"), field("misfit"), field("bottom"), field("opening") }
+        / event=/ { print "event", field("event"), field("px"), field("misfit"), field("bottom"), field("opening"), field("under") }
         / hang ms=/ { print "hang", field("during"), field("ms"), field("seen") }
     ')
 
@@ -51,9 +51,11 @@ only "event timeline.jump" | awk '
 only "event timeline.fit" | awk '
     { n++; if ($4 > 0) { rows++; px = $3 < 0 ? -$3 : $3; if (px > max) max = px } }
     $5 > 2 && $6 == 0 { away++ }
+    # The newest row normally ends a few points under its text.
+    $7 > 12 { space++ }
     END {
-        if (n) printf "Conversations opened: %d, %d with rows that do not fit their content%s, %d opened at the newest message and left it\n",
-            n, rows, rows ? sprintf(" (largest %d px)", max) : "", away
+        if (n) printf "Conversations opened: %d, %d with rows that do not fit their content%s, %d opened at the newest message and left it, %d with space under the newest message\n",
+            n, rows, rows ? sprintf(" (largest %d px)", max) : "", away, space
     }'
 echo
 # Builds from before seen= was logged leave it blank, so they count as behind another app.

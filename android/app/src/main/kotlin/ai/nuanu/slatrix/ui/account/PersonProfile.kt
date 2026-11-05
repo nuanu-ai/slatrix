@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.AvatarPlaceholder
+import ai.nuanu.slatrix.core.DisplayNames
 import ai.nuanu.slatrix.core.MatrixPeople
 import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.core.RoomListState
@@ -114,7 +115,7 @@ fun PersonProfileScreen(person: Person, own: Boolean, opening: Boolean, error: S
 @Composable
 fun LivePersonProfile(userId: String, known: String?, me: String, people: MatrixPeople?, rooms: Flow<RoomListState>?,
     onOpen: (RoomSummary) -> Unit, onEdit: (() -> Unit)? = null, knownAvatarUrl: String? = null, onBack: () -> Unit) {
-    val person by produceState(people?.known(userId) ?: Person(userId, known ?: userId, knownAvatarUrl), userId, people) {
+    val person by produceState(people?.known(userId) ?: Person(userId, known ?: DisplayNames.localpart(userId), knownAvatarUrl), userId, people) {
         people?.profile(userId)?.let { value = it }
     }
     val scope = rememberCoroutineScope()

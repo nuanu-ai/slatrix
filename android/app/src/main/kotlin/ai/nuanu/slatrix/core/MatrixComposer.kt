@@ -116,8 +116,7 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
                     while (true) {
                         val chunk = iterator.nextChunk(500u) ?: break
                         chunk.mapTo(members) { member ->
-                            MentionPerson(member.userId, member.displayName?.takeIf { it.isNotBlank() }
-                                ?: member.userId.removePrefix("@").substringBefore(':'), when (member.membership) {
+                            MentionPerson(member.userId, member.nameOf(), when (member.membership) {
                                 MembershipState.Join -> "join"
                                 MembershipState.Invite -> "invite"
                                 else -> "other"

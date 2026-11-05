@@ -83,7 +83,8 @@ class MessageContentTest {
     private fun show(vararg messages: ConversationMessage, set: (@Composable () -> Unit) -> Unit = { compose.setContent(it) }) {
         set {
             SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(messages.toList(), loading = false, hasMore = false, ownUserId = "@me:example.org"),
+                LiveChannelScreen(room, ConversationState(messages.toList(), loading = false, hasMore = false, ownUserId = "@me:example.org",
+                    names = mapOf("@mira:example.org" to "Mira")),
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
                     onOpenThread = { thread = it }, actions = MessageActions(onReact = { message, key -> toggled = message to key }),
                     onOpenMessage = { jumped = it }, loadPicture = { _, _, _, _ -> picture.await() },

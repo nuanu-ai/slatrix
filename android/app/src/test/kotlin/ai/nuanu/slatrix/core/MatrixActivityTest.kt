@@ -53,6 +53,19 @@ class MatrixActivityTest {
         activity.markRead(liked.id)
         assertFalse(activity.items.value.single().unread)
     }
+
+    // capability: people.names
+    @Test fun aMentionReadsAsThePeopleItNamesAndASenderWithoutANameByTheirLocalpart() = runTest {
+        val activity = MatrixActivity("@alex:example.org", backgroundScope, memberNames = { room, ids ->
+            if (room == "!team:example.org") mapOf("@mira:example.org" to "Mira Chen").filterKeys { it in ids } else emptyMap()
+        }) { _, _ -> null }
+        activity.listener.onNotification(notification("\$ask", "@mira:example.org and @kai:example.org, can you look?",
+            at = 1_000u, sender = "@sam:example.org", senderName = null), "!team:example.org")
+
+        val ask = activity.items.first { it.isNotEmpty() }.single()
+        assertEquals("@Mira Chen and @kai, can you look?", ask.body)
+        assertEquals("sam", ask.senderName)
+    }
 }
 
 class ActivityWorkspaceTest {
@@ -70,9 +83,9 @@ class ActivityWorkspaceTest {
 }
 
 private fun notification(eventId: String, body: String, at: ULong, mention: Boolean = false, thread: String? = null,
-    direct: Boolean = false, sender: String = "@sam:example.org") =
+    direct: Boolean = false, sender: String = "@sam:example.org", senderName: String? = "Sam") =
     item(eventId, at, sender, TimelineEventContent.MessageLike(MessageLikeEventContent.RoomMessage(
-        MessageType.Text(TextMessageContent(body, null)), null)), "{}", mention, thread, direct)
+        MessageType.Text(TextMessageContent(body, null)), null)), "{}", mention, thread, direct, senderName)
 
 private fun reaction(eventId: String, key: String, at: ULong) = item(eventId, at, "@sam:example.org",
     TimelineEventContent.MessageLike(MessageLikeEventContent.ReactionContent("\$mine")),
@@ -80,7 +93,7 @@ private fun reaction(eventId: String, key: String, at: ULong) = item(eventId, at
     mention = false, thread = null, direct = false)
 
 private fun item(eventId: String, at: ULong, sender: String, content: TimelineEventContent, raw: String, mention: Boolean,
-    thread: String?, direct: Boolean) = NotificationItem(
+    thread: String?, direct: Boolean, senderName: String? = "Sam") = NotificationItem(
     event = NotificationEvent.Timeline(object : TimelineEvent(NoHandle) {
         override fun content(): TimelineEventContent = content
         override fun eventId(): String = eventId
@@ -88,7 +101,7 @@ private fun item(eventId: String, at: ULong, sender: String, content: TimelineEv
         override fun timestamp(): ULong = at
         override fun threadRootEventId(): String? = thread
     }),
-    rawEvent = raw, senderInfo = NotificationSenderInfo("Sam", "mxc://example.org/sam", false),
+    rawEvent = raw, senderInfo = NotificationSenderInfo(senderName, "mxc://example.org/sam", false),
     roomInfo = NotificationRoomInfo(if (direct) "Sam" else "Team", null, null, null, null, 2u, 0u, emptyList(), true, direct, false, direct),
     isNoisy = true, hasMention = mention, threadId = thread, actions = null,
 )

@@ -1,5 +1,7 @@
 package ai.nuanu.slatrix.push
 
+import ai.nuanu.slatrix.core.DisplayNames
+import ai.nuanu.slatrix.core.memberNames
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
@@ -25,6 +27,7 @@ import org.matrix.rustcomponents.sdk.Membership
 import org.matrix.rustcomponents.sdk.MessageLikeEventContent
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.NotificationEvent
+import org.matrix.rustcomponents.sdk.NotificationItem
 import org.matrix.rustcomponents.sdk.NotificationStatus
 import org.matrix.rustcomponents.sdk.TimelineEventContent
 
@@ -34,11 +37,12 @@ class PushNotifications(private val context: Context) {
     val enabled: Boolean get() = manager.areNotificationsEnabled() &&
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    fun deliver(client: Client, userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState?) {
+    suspend fun deliver(client: Client, userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState?) {
         // Anyone holding the push token can name any event; only a joined room earns an alert we can't resolve.
         if (status !is NotificationStatus.Event &&
             runCatching { client.getRoom(roomId)?.membership() }.getOrNull() != Membership.JOINED) return
-        show(userId, roomId, eventId, status, identity)
+        val body = (status as? NotificationStatus.Event)?.item?.messageBody()
+        show(userId, roomId, eventId, status, identity, client.memberNames(roomId, body?.let(DisplayNames::mentioned).orEmpty()))
     }
 
     fun delivered(userId: String, roomId: String, eventId: String): Boolean = synchronized(deliveryLock) {
@@ -48,7 +52,8 @@ class PushNotifications(private val context: Context) {
     fun clear(roomId: String) = manager.activeNotifications.filter { it.tag == roomId }.forEach { manager.cancel(it.tag, it.id) }
 
     @SuppressLint("UseKtx") // KTX edit discards the commit result.
-    fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState? = null) = synchronized(deliveryLock) {
+    fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState? = null,
+        mentioned: Map<String, String> = emptyMap()) = synchronized(deliveryLock) {
         val settings = NotificationPreferences(context, userId)
         if (!enabled || settings.paused || status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted || roomId == openRoom) return@synchronized
         val key = pushKey(userId, roomId, eventId)
@@ -60,14 +65,9 @@ class PushNotifications(private val context: Context) {
         val event = (item?.event as? NotificationEvent.Timeline)?.event
         val content = (event?.content() as? TimelineEventContent.MessageLike)?.content
         if (content is MessageLikeEventContent.RoomRedaction) return@synchronized
-        val body = when (val message = (content as? MessageLikeEventContent.RoomMessage)?.messageType) {
-            is MessageType.Text -> message.content.body
-            is MessageType.Notice -> message.content.body
-            is MessageType.Emote -> message.content.body
-            else -> null
-        }?.takeIf { settings.previews && it.isNotBlank() }?.take(512)
+        val body = item?.messageBody()?.takeIf { settings.previews && it.isNotBlank() }?.take(512)?.let { DisplayNames.mentions(it, mentioned) }
         val room = item?.roomInfo?.displayName?.takeIf { it.isNotBlank() } ?: "Slatrix"
-        val sender = item?.senderInfo?.displayName?.takeIf { it.isNotBlank() } ?: event?.senderId()
+        val sender = event?.senderId()?.let { DisplayNames.name(it, item?.senderInfo?.displayName, ambiguous = item?.senderInfo?.isNameAmbiguous == true) }
         val (title, text) = when {
             body == null -> "Slatrix" to "New message"
             sender == null -> room to NotificationText.plain(body)
@@ -133,3 +133,14 @@ internal object NotificationText {
 
 internal fun pushKey(userId: String, roomId: String, eventId: String): String = MessageDigest.getInstance("SHA-256")
     .digest("$userId\u0000$roomId\u0000$eventId".toByteArray()).joinToString("") { "%02x".format(it) }
+
+/** The text of the message a notification is about, when it is one with text. */
+private fun NotificationItem.messageBody(): String? {
+    val content = ((event as? NotificationEvent.Timeline)?.event?.content() as? TimelineEventContent.MessageLike)?.content
+    return when (val message = (content as? MessageLikeEventContent.RoomMessage)?.messageType) {
+        is MessageType.Text -> message.content.body
+        is MessageType.Notice -> message.content.body
+        is MessageType.Emote -> message.content.body
+        else -> null
+    }
+}

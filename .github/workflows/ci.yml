@@ -121,9 +121,28 @@ jobs:
         if: matrix.task == 'test'
         run: scripts/lint.sh
 
+      # A hung test prints nothing under --quiet and used to hold the runner for the whole job. Before the step
+      # times out, the test processes' stacks go where crash reports are uploaded, and the tests in them are printed.
       - name: Test
         if: matrix.task == 'test'
-        run: scripts/test.sh --quiet
+        timeout-minutes: 30
+        run: |
+          (
+            sleep 1200
+            for pid in $(pgrep -f swiftpm-testing-helper) $(pgrep -x xctest); do
+              file=~/Library/Logs/DiagnosticReports/hang-$pid.txt
+              sample "$pid" 3 -file "$file" > /dev/null 2>&1 || continue
+              echo "Still running after 20 minutes, in:"
+              grep '(in SlatrixTests)' "$file" | sed -E 's/^[^A-Za-z_]*//; s/ \(in SlatrixTests\).*//' | sort -u | head -40
+            done
+          ) &
+          watchdog=$!
+          status=0
+          scripts/test.sh --quiet || status=$?
+          # The watchdog acts on its signal once its sleep ends.
+          kill "$watchdog" 2> /dev/null || true
+          pkill -P "$watchdog" 2> /dev/null || true
+          exit "$status"
 
       # Alone and one at a time, so other tests do not skew the clock.
       - name: Speed budgets

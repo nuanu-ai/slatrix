@@ -1,0 +1,261 @@
+{
+  "about": "How a person is named wherever they appear: as a sender, in a mention, in a notification, a list or a header. Their display name in the room comes first, then the name on their own profile, then the localpart of their ID (between the @ and the colon), only when nothing else is known. A name is trimmed; an empty name, or one that is the person's own ID, counts as none. A name the SDK marks ambiguous (another member of the room has it) is followed by the ID in parentheses, as Element shows it, and so is a name that looks like an ID (an @ later followed by a colon or a dot) or hides characters (U+2000 to U+200D, U+0300 to U+036F, U+2062, U+2063, U+2800, U+061C, U+FEFF). A mention reads @ and the name. memberName and globalName are null when unknown, as before the member list or profile arrives.",
+  "cases": [
+    {
+      "case": "The room's name for them",
+      "userId": "@sam:example.org",
+      "memberName": "Sam Okafor",
+      "globalName": null,
+      "ambiguous": false,
+      "name": "Sam Okafor",
+      "mention": "@Sam Okafor"
+    },
+    {
+      "case": "The room's name before their profile's",
+      "userId": "@sam:example.org",
+      "memberName": "Sam (design)",
+      "globalName": "Sam Okafor",
+      "ambiguous": false,
+      "name": "Sam (design)",
+      "mention": "@Sam (design)"
+    },
+    {
+      "case": "Their profile's name when the room has none",
+      "userId": "@sam:example.org",
+      "memberName": null,
+      "globalName": "Sam Okafor",
+      "ambiguous": false,
+      "name": "Sam Okafor",
+      "mention": "@Sam Okafor"
+    },
+    {
+      "case": "The localpart only when nothing else is known",
+      "userId": "@sam:example.org",
+      "memberName": null,
+      "globalName": null,
+      "ambiguous": false,
+      "name": "sam",
+      "mention": "@sam"
+    },
+    {
+      "case": "Before the member list arrives",
+      "userId": "@mira.chen:example.org",
+      "memberName": null,
+      "globalName": null,
+      "ambiguous": false,
+      "name": "mira.chen",
+      "mention": "@mira.chen"
+    },
+    {
+      "case": "Once the member list arrives",
+      "userId": "@mira.chen:example.org",
+      "memberName": "Mira Chen",
+      "globalName": null,
+      "ambiguous": false,
+      "name": "Mira Chen",
+      "mention": "@Mira Chen"
+    },
+    {
+      "case": "An empty name counts as none",
+      "userId": "@sam:example.org",
+      "memberName": "",
+      "globalName": "Sam Okafor",
+      "ambiguous": false,
+      "name": "Sam Okafor",
+      "mention": "@Sam Okafor"
+    },
+    {
+      "case": "A blank name counts as none",
+      "userId": "@sam:example.org",
+      "memberName": "   ",
+      "globalName": "  ",
+      "ambiguous": false,
+      "name": "sam",
+      "mention": "@sam"
+    },
+    {
+      "case": "A name is trimmed",
+      "userId": "@sam:example.org",
+      "memberName": "  Sam Okafor ",
+      "globalName": null,
+      "ambiguous": false,
+      "name": "Sam Okafor",
+      "mention": "@Sam Okafor"
+    },
+    {
+      "case": "Their own ID as a name counts as none",
+      "userId": "@sam:example.org",
+      "memberName": "@sam:example.org",
+      "globalName": null,
+      "ambiguous": false,
+      "name": "sam",
+      "mention": "@sam"
+    },
+    {
+      "case": "A name another member shares gets the ID",
+      "userId": "@sam:example.org",
+      "memberName": "Sam",
+      "globalName": null,
+      "ambiguous": true,
+      "name": "Sam (@sam:example.org)",
+      "mention": "@Sam (@sam:example.org)"
+    },
+    {
+      "case": "A name that looks like someone else's ID gets the ID",
+      "userId": "@mallory:example.org",
+      "memberName": "@sam:example.org",
+      "globalName": null,
+      "ambiguous": false,
+      "name": "@sam:example.org (@mallory:example.org)",
+      "mention": "@@sam:example.org (@mallory:example.org)"
+    },
+    {
+      "case": "A profile name that looks like an ID gets the ID",
+      "userId": "@eve:example.org",
+      "memberName": null,
+      "globalName": "@bob.example.org",
+      "ambiguous": false,
+      "name": "@bob.example.org (@eve:example.org)",
+      "mention": "@@bob.example.org (@eve:example.org)"
+    },
+    {
+      "case": "A name hiding characters gets the ID",
+      "userId": "@sam2:example.org",
+      "memberName": "Sam​Okafor",
+      "globalName": null,
+      "ambiguous": false,
+      "name": "Sam​Okafor (@sam2:example.org)",
+      "mention": "@Sam​Okafor (@sam2:example.org)"
+    },
+    {
+      "case": "A name in another script",
+      "userId": "@lena:example.org",
+      "memberName": "Лена Иванова",
+      "globalName": null,
+      "ambiguous": false,
+      "name": "Лена Иванова",
+      "mention": "@Лена Иванова"
+    },
+    {
+      "case": "An ID on a server with a port",
+      "userId": "@ops:matrix.example.org:8448",
+      "memberName": null,
+      "globalName": null,
+      "ambiguous": false,
+      "name": "ops",
+      "mention": "@ops"
+    }
+  ],
+  "textAbout": "A user ID written in plain text, as in a notification or an Activity line, reads as a mention of that person: @ and their name from the room's members, already worked out by the rules above, or @ and the localpart when the room doesn't know them. @room stays as it is, and so does an ID inside a word.",
+  "text": [
+    {
+      "case": "A member's ID reads as their name",
+      "text": "Can you look, @sam:example.org?",
+      "members": {
+        "@sam:example.org": "Sam Okafor"
+      },
+      "result": "Can you look, @Sam Okafor?"
+    },
+    {
+      "case": "An unknown ID reads as its localpart",
+      "text": "Ask @ops:example.org",
+      "members": {},
+      "result": "Ask @ops"
+    },
+    {
+      "case": "Every ID in the text",
+      "text": "@sam:example.org and @mira.chen:example.org",
+      "members": {
+        "@sam:example.org": "Sam Okafor",
+        "@mira.chen:example.org": "Mira Chen"
+      },
+      "result": "@Sam Okafor and @Mira Chen"
+    },
+    {
+      "case": "@room stays",
+      "text": "@room the build is green",
+      "members": {},
+      "result": "@room the build is green"
+    },
+    {
+      "case": "An ID inside a word stays",
+      "text": "mail me at me@sam:example.org",
+      "members": {
+        "@sam:example.org": "Sam Okafor"
+      },
+      "result": "mail me at me@sam:example.org"
+    },
+    {
+      "case": "Text without an ID is unchanged",
+      "text": "Ship it",
+      "members": {},
+      "result": "Ship it"
+    }
+  ],
+  "pillsAbout": "A mention in a message, as a pill or as an ID typed in its text, reads as @ and the name the room knows that person by now, whatever label the sender's app gave it. Someone the room doesn't know keeps the pill's label, or @ and the localpart. A pill is one mention even when an older app split it in two links. Each case gives the message's body, its HTML or null, and the room's members; the result is the message's text as shown.",
+  "pills": [
+    {
+      "case": "A pill labelled with the ID reads as the name",
+      "body": "@mira:example.org look",
+      "html": "<a href=\"https://matrix.to/#/@mira:example.org\">@mira:example.org</a> look",
+      "members": {
+        "@mira:example.org": "Mira Chen"
+      },
+      "result": "@Mira Chen look"
+    },
+    {
+      "case": "A pill with an old label reads as the current name",
+      "body": "Mira look",
+      "html": "<a href=\"https://matrix.to/#/@mira:example.org\">Mira</a> look",
+      "members": {
+        "@mira:example.org": "Mira Chen"
+      },
+      "result": "@Mira Chen look"
+    },
+    {
+      "case": "A pill for someone the room doesn't know keeps its label",
+      "body": "Kai look",
+      "html": "<a href=\"https://matrix.to/#/@kai:example.org\">Kai</a> look",
+      "members": {
+        "@mira:example.org": "Mira Chen"
+      },
+      "result": "@Kai look"
+    },
+    {
+      "case": "An ID typed as text reads as the name",
+      "body": "@mira:example.org look",
+      "html": null,
+      "members": {
+        "@mira:example.org": "Mira Chen"
+      },
+      "result": "@Mira Chen look"
+    },
+    {
+      "case": "An unknown ID typed as text reads as its localpart",
+      "body": "@kai:example.org look",
+      "html": null,
+      "members": {
+        "@mira:example.org": "Mira Chen"
+      },
+      "result": "@kai look"
+    },
+    {
+      "case": "A pill split in two links is one name",
+      "body": "Mira",
+      "html": "<a href=\"https://matrix.to/#/@mira:example.org\">@Mir</a><a href=\"https://matrix.to/#/@mira:example.org\">a</a>",
+      "members": {
+        "@mira:example.org": "Mira Chen"
+      },
+      "result": "@Mira Chen"
+    },
+    {
+      "case": "@room stays",
+      "body": "@room look",
+      "html": null,
+      "members": {
+        "@mira:example.org": "Mira Chen"
+      },
+      "result": "@room look"
+    }
+  ]
+}

@@ -6,9 +6,7 @@ import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import ai.nuanu.slatrix.core.AvatarPlaceholder
-import ai.nuanu.slatrix.core.ComposerFormat
-import ai.nuanu.slatrix.core.ConversationMessage
-import ai.nuanu.slatrix.core.ConversationRow
+import ai.nuanu.slatrix.core.DisplayNames
 import ai.nuanu.slatrix.core.MessageReaction
 import ai.nuanu.slatrix.core.MessageThread
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
@@ -93,15 +91,14 @@ private fun lastReply(at: Long, now: Long): String =
     if (now - at < DateUtils.MINUTE_IN_MILLIS) "Last reply just now"
     else "Last reply " + DateUtils.getRelativeTimeSpanString(at, now, DateUtils.MINUTE_IN_MILLIS)
 
-/** Who reacted with each emoji, named as they appear in the conversation, with you as "You". */
+/** Who reacted with each emoji, by the [names] the room knows them by, with you as "You". */
 @Composable
-internal fun ReactionsSheet(reactions: List<MessageReaction>, rows: List<ConversationRow>, me: String?, onDismiss: () -> Unit) {
+internal fun ReactionsSheet(reactions: List<MessageReaction>, names: Map<String, String>, me: String?, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
-    val names = remember(rows) { rows.filterIsInstance<ConversationMessage>().associate { it.senderId to it.senderName } }
     BottomSheet(onDismissRequest = onDismiss, containerColor = colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             for (reaction in reactions) {
-                val who = reaction.senders.map { if (it == me) "You" else names[it] ?: ComposerFormat.localpart(it) }
+                val who = reaction.senders.map { if (it == me) "You" else names[it] ?: DisplayNames.localpart(it) }
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge),
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
                     Text(reaction.key, style = MaterialTheme.typography.headlineSmall)

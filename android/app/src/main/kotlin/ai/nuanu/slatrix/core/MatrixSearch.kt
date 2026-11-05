@@ -137,7 +137,7 @@ class MatrixSearch(private val scope: CoroutineScope, private val client: Client
         val result = message.result
         val body = previewText(result.content)?.takeIf { it.isNotBlank() } ?: return null
         val profile = result.senderProfile as? ProfileDetails.Ready
-        val name = profile?.displayName?.takeIf { it.isNotBlank() } ?: result.sender
+        val name = result.senderProfile.nameOf(result.sender)
         return SearchHit(message.roomId, result.eventId, result.sender, name, body, result.timestamp.toLong(), profile?.avatarUrl)
     }
 }

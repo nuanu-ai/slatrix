@@ -50,6 +50,25 @@ class PushNotificationsTest {
         assertEquals("Sam: Review budget?", manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
 
+    // capability: people.names
+    @Test fun aNotificationNamesItsSenderAndWhoItMentionsNeverByTheirIDs() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val room = object : Room(NoHandle) {
+            override suspend fun member(userId: String) = RoomMember(userId, "Mira Chen", null, null, null, MembershipState.Join, false,
+                PowerLevel.Value(0), false, uniffi.matrix_sdk.RoomMemberRole.USER, null, false)
+            override fun close() {}
+        }
+        val client = object : Client(NoHandle) { override fun getRoom(roomId: String) = room }
+
+        PushNotifications(context).deliver(client, "@alex:example.org", "!team:example.org", "\$names",
+            notificationMessage("Can you look, @mira:example.org?", senderName = null), IdentityState(status = IdentityStatus.Unverified, hasIdentity = false))
+
+        assertEquals("sam: Can you look, @Mira Chen?",
+            manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    }
+
     @Test fun sdkPrivacyDecisionsAndDismissedDuplicatesSurviveNotificationDelivery() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
@@ -84,7 +103,7 @@ class PushNotificationsTest {
     }
 
     // capability: notifications.alert
-    @Test fun aPushForAnEventNobodyCanFindAlertsOnlyInAJoinedRoom() {
+    @Test fun aPushForAnEventNobodyCanFindAlertsOnlyInAJoinedRoom() = runTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -174,14 +193,14 @@ class PushNotificationsTest {
     }
 }
 
-private fun notificationMessage(noisy: Boolean = true) = NotificationStatus.Event(NotificationItem(
+private fun notificationMessage(body: String = "Review budget?", noisy: Boolean = true, senderName: String? = "Sam") = NotificationStatus.Event(NotificationItem(
     event = NotificationEvent.Timeline(object : TimelineEvent(NoHandle) {
         override fun content(): TimelineEventContent = TimelineEventContent.MessageLike(
-            MessageLikeEventContent.RoomMessage(MessageType.Text(TextMessageContent("Review budget?", null)), null))
+            MessageLikeEventContent.RoomMessage(MessageType.Text(TextMessageContent(body, null)), null))
         override fun senderId(): String = "@sam:example.org"
     }),
     rawEvent = """{"type":"m.room.message","content":{"msgtype":"m.text","body":"Review budget?"}}""",
-    senderInfo = NotificationSenderInfo("Sam", null, false),
+    senderInfo = NotificationSenderInfo(senderName, null, false),
     roomInfo = NotificationRoomInfo("Team", null, null, null, null, 2u, 0u, emptyList(), true, false, false, false),
     isNoisy = noisy, hasMention = false, threadId = null, actions = null,
 ))
