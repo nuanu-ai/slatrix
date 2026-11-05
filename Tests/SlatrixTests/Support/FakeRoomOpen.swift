@@ -68,6 +68,8 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     let eventGate = Gate()
     /// What a timeline opened at an older message loads; the cache when nil.
     var focusedItems: [TimelineItem]?
+    /// What a thread's timeline loads; the cache when nil.
+    var threadItems: [TimelineItem]?
     /// Thread replies the room can load, by event ID, with their thread's root.
     var threadRoots: [String: String] = [:]
     let membersGate = Gate()
@@ -88,6 +90,7 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
         if case .event = configuration.focus { await eventGate.wait() }
         var items = cached
         if case .event = configuration.focus, let focusedItems { items = focusedItems }
+        if case .thread = configuration.focus, let threadItems { items = threadItems }
         let timeline = FakeLiveTimeline(items, pageGate: pageGate)
         timelines.append(timeline)
         return timeline

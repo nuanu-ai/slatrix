@@ -553,6 +553,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             let locked = messages.contains { $0.kind == "m.room.encrypted" }
             if locked != hasLockedMessages { hasLockedMessages = locked }
             if messages.first?.id != oldValue.first?.id { blankPages = 0 }
+            if loadedThreadRootID != nil { showEditedThreadRoot() }
         }
     }
     /// Whether the open conversation shows messages this device can't decrypt yet; apart from `messages`, so its
@@ -1984,9 +1985,24 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     messages[index].id = root.eventID
                 }
                 self.threadMessages = messages
+                self.showEditedThreadRoot()
             }
         }
     }
+    /// The SDK's thread timeline keeps its root as first sent: an edit to the root arrives in the main timeline.
+    private func showEditedThreadRoot() {
+        guard let rootID = loadedThreadRootID,
+            let current = messages.first(where: { $0.eventID == rootID }), current.isEdited,
+            let index = threadMessages.firstIndex(where: { $0.eventID == rootID })
+        else { return }
+        var root = threadMessages[index]
+        root.body = current.body
+        root.formattedBody = current.formattedBody
+        root.mediaCaption = current.mediaCaption
+        root.isEdited = true
+        if root != threadMessages[index] { threadMessages[index] = root }
+    }
+
     func loadMoreThread(rootID: String) async throws -> Bool {
         guard loadedThreadRootID == rootID, let threadTimeline else { throw MatrixServiceError.noRoom }
         let token = threadSelection
@@ -2046,6 +2062,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 messages[index].id = root.eventID
             }
             if !messages.isEmpty { threadMessages = messages }
+            showEditedThreadRoot()
             return
         }
         let next = try await requireRoom(root.roomID).timelineWithConfiguration(
