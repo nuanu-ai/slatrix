@@ -86,6 +86,12 @@ struct WindowHostedTests {
             return scroll.convert(scroll.bounds, to: nil)
         }
 
+        /// The composer floats over the timeline's bottom, which keeps its rows clear of it: where its glass starts.
+        func composerTop() throws -> CGFloat {
+            let scroll = try #require(try newest().enclosingScrollView)
+            return try timeline().minY + scroll.contentInsets.bottom
+        }
+
         /// The longest row of pixels in `band`, a frame in the window, that pass `test`, in points.
         func longestRun(in band: CGRect, _ test: (NSColor) -> Bool) -> CGFloat {
             hosting.layoutSubtreeIfNeeded()
@@ -338,7 +344,7 @@ struct WindowHostedTests {
 
         // The toast is a solid bar of the tooltip color, wider than any glyph.
         let timeline = try harness.timeline()
-        let bottom = CGRect(x: timeline.minX, y: timeline.minY, width: timeline.width, height: 120)
+        let bottom = CGRect(x: timeline.minX, y: try harness.composerTop(), width: timeline.width, height: 120)
         let ink = try #require(NSColor(harness.appearance.colors.tooltip).usingColorSpace(.sRGB))
         func toastShown() -> Bool {
             harness.longestRun(in: bottom) {
@@ -447,7 +453,9 @@ struct WindowHostedTests {
         let newest = try harness.newest()
         let before = newest.convert(newest.bounds, to: nil)
         let timeline = try harness.timeline()
-        let top = CGRect(x: timeline.minX, y: timeline.maxY - 60, width: timeline.width, height: 60)
+        // Under the header, which floats over the timeline's top.
+        let top = CGRect(
+            x: timeline.minX, y: timeline.maxY - Metrics().paneHeader - 60, width: timeline.width, height: 60)
         // The banner's warning tint: warm, across most of the pane.
         func bannerShown() -> Bool {
             harness.longestRun(in: top) { $0.redComponent - $0.blueComponent > 0.05 } > timeline.width / 2
@@ -477,11 +485,36 @@ struct WindowHostedTests {
         let views = Harness.views(in: harness.hosting).filter { $0.window != nil }
         let field = try #require(views.first { ($0 as? NSTextView)?.isEditable == true })
         let composer = field.convert(field.bounds, to: nil)
-        let scroll = try #require(views.first { $0 is TimelineScrollView })
-        let timeline = scroll.convert(scroll.bounds, to: nil)
         // The space under the composer's text is what is above it in its card, plus the card's margin.
-        let above = timeline.minY - composer.maxY
+        let above = try harness.composerTop() - composer.maxY
         #expect(composer.minY - above <= Metrics(zoom: 1).sp16)
+    }
+
+    @Test("Messages scroll under the header and the composer, and the newest sits right above the composer as it grows")
+    func timelineUnderGlass() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let timeline = try harness.timeline()
+        // The timeline runs under the header to the window's top and under the composer to its bottom.
+        #expect(timeline.maxY == harness.hosting.bounds.maxY && timeline.minY == harness.hosting.bounds.minY)
+        let editor = try #require(harness.shown().first { ($0 as? NSTextView)?.isEditable == true } as? NSTextView)
+        let newest = try harness.newest()
+        func gap() -> CGFloat {
+            newest.convert(newest.bounds, to: nil).minY - editor.convert(editor.bounds, to: nil).maxY
+        }
+        let before = gap()
+        #expect(before > 0)
+        let height = editor.frame.height
+        editor.insertText("A draft\nthat runs\nover three lines", replacementRange: editor.selectedRange())
+        #expect(
+            await eventually {
+                harness.hosting.layoutSubtreeIfNeeded()
+                return editor.frame.height > height
+            })
+        await drainMainActor()
+        harness.hosting.layoutSubtreeIfNeeded()
+        #expect(abs(gap() - before) < 1, "\(gap()) from \(before)")
     }
 
     @Test("A conversation opened at an older message keeps its composer")
@@ -514,7 +547,7 @@ struct WindowHostedTests {
                     + abs($0.blueComponent - canvas.blueComponent) > 0.3
             } > 0
         }
-        #expect(await eventually { editors() == 0 && lineShown(before, from: before.minY - 120) })
+        #expect(await eventually { editors() == 0 && lineShown(before, from: before.minY) })
         #expect(try harness.timeline() == before)
 
         try harness.openThread()

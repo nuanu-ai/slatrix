@@ -21,6 +21,19 @@ struct TimelineScrollPolicyTests {
         #expect(Policy.position(of: viewport, live: live, firstVisibleRow: row) == expected)
     }
 
+    @Test(
+        "Under a header and a composer of glass, the reader sees only the clip between them",
+        arguments: [(60.0, 110.0, false), (160, 210, true)])
+    func glassCoversEnds(clipTop: CGFloat, top: CGFloat, atBottom: Bool) {
+        // A 600-point clip over 660 points of rows, a 50-point header over its top and a 100-point composer over its
+        // bottom: the newest row is at the bottom only once it sits above the composer.
+        let viewport = Viewport(
+            clip: CGRect(x: 0, y: clipTop, width: 400, height: 600), covered: (top: 50, bottom: 100),
+            contentHeight: 660)
+        #expect(viewport.top == top && viewport.height == 450)
+        #expect(viewport.isAtBottom == atBottom)
+    }
+
     @Test("Older messages arriving above keep the anchored row at the same point on screen")
     func prependIsPixelStable() {
         let before = Viewport(top: 300, height: 600, contentHeight: 1_000)

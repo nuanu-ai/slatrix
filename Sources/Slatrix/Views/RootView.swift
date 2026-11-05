@@ -1038,96 +1038,104 @@ struct RootView: View {
 
     private func channelContent(_ room: ChatRoom) -> some View {
         VStack(spacing: 0) {
-            channelHeader(room)
             if room.membership == "invite" {
+                channelHeader(room)
                 inviteView(room)
             } else {
-                TimelineView(
-                    matrix: matrix, room: room, savedIDs: savedIDs,
-                    onThread: openThreadAction,
-                    onReply: { [session = matrix.notificationSessionID, timeline = matrix.timelineSelectionID] in
-                        startReply($0, surface: .conversation, session: session, timeline: timeline)
-                    }, onEdit: startEdit, onSave: toggleSave,
-                    onShowReply: { selectRoom(room.id, record: true, eventID: $0) }, onOpenProfile: openProfile,
-                    canPinMessages: canPin(room), onTogglePin: togglePin,
-                    onBottomVisibilityChange: { visible in
-                        if visible {
-                            visibleBottomRoomID = room.id
-                        } else if visibleBottomRoomID == room.id {
-                            visibleBottomRoomID = nil
-                        }
-                    }, onJumpToLatest: { selectRoom(room.id) }, startsAtUnread: isResumingUnread,
-                    editing: editTarget?.surface == .conversation, onForward: startForward, onEditCaption: startCaption,
-                    onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
-                    inlineVideo: viewer.inlineVideo, contentAbove: $conversationContentAbove
-                ).id("\(room.id):\(matrix.timelineSelectionID)")
-                VStack(spacing: 0) {
-                    if room.canPostMessages == false {
-                        ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp20).padding(.top, m.sp4)
-                            .padding(.bottom, m.sp16)
-                    } else if let target = editTarget, target.surface == .conversation,
-                        target.message.roomID == room.id
-                    {
-                        editComposer(target, room: room).padding(.horizontal, m.sp20).padding(.top, m.sp4)
-                            .padding(.bottom, m.sp16)
-                    } else {
-                        BindingScope({ draftBinding(room.id) }) { text in
-                            MessageComposer(
-                                text: text,
-                                placeholder: "Message \(room.writtenName)",
-                                members: matrix.members,
-                                recentSenders: { [matrix] in matrix.messages.reversed().map(\.senderID) },
-                                canMentionRoom: matrix.canMentionRoom,
-                                onSend: {
-                                    [context = composerContext, reply = scopedReply(roomID: room.id)] body, files in
-                                    try await send(body, files: files, room: room, context: context, reply: reply)
-                                },
-                                onTyping: { [context = composerContext] typing in
-                                    guard isCurrentComposer(context), !context.identity.isPreview else { return }
-                                    Task {
+                TimelineUnderBars { insets in
+                    TimelineView(
+                        matrix: matrix, room: room, savedIDs: savedIDs,
+                        onThread: openThreadAction,
+                        onReply: { [session = matrix.notificationSessionID, timeline = matrix.timelineSelectionID] in
+                            startReply($0, surface: .conversation, session: session, timeline: timeline)
+                        }, onEdit: startEdit, onSave: toggleSave,
+                        onShowReply: { selectRoom(room.id, record: true, eventID: $0) }, onOpenProfile: openProfile,
+                        canPinMessages: canPin(room), onTogglePin: togglePin,
+                        onBottomVisibilityChange: { visible in
+                            if visible {
+                                visibleBottomRoomID = room.id
+                            } else if visibleBottomRoomID == room.id {
+                                visibleBottomRoomID = nil
+                            }
+                        }, onJumpToLatest: { selectRoom(room.id) }, startsAtUnread: isResumingUnread,
+                        editing: editTarget?.surface == .conversation, onForward: startForward,
+                        onEditCaption: startCaption,
+                        onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
+                        inlineVideo: viewer.inlineVideo, contentAbove: $conversationContentAbove, insets: insets
+                    ).id("\(room.id):\(matrix.timelineSelectionID)")
+                } header: {
+                    channelHeader(room).scrollEdge(.top, colors.canvas)
+                } footer: {
+                    VStack(spacing: 0) {
+                        if room.canPostMessages == false {
+                            ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp20).padding(.top, m.sp4)
+                                .padding(.bottom, m.sp16)
+                        } else if let target = editTarget, target.surface == .conversation,
+                            target.message.roomID == room.id
+                        {
+                            editComposer(target, room: room).padding(.horizontal, m.sp20).padding(.top, m.sp4)
+                                .padding(.bottom, m.sp16)
+                        } else {
+                            BindingScope({ draftBinding(room.id) }) { text in
+                                MessageComposer(
+                                    text: text,
+                                    placeholder: "Message \(room.writtenName)",
+                                    members: matrix.members,
+                                    recentSenders: { [matrix] in matrix.messages.reversed().map(\.senderID) },
+                                    canMentionRoom: matrix.canMentionRoom,
+                                    onSend: {
+                                        [context = composerContext, reply = scopedReply(roomID: room.id)] body, files in
+                                        try await send(body, files: files, room: room, context: context, reply: reply)
+                                    },
+                                    onTyping: { [context = composerContext] typing in
+                                        guard isCurrentComposer(context), !context.identity.isPreview else { return }
+                                        Task {
+                                            guard isCurrentComposer(context) else { return }
+                                            await matrix.setTyping(
+                                                typing, roomID: room.id, sessionID: context.identity.sessionID)
+                                        }
+                                    },
+                                    onSendText: {
+                                        [context = composerContext, reply = scopedReply(roomID: room.id)] body in
+                                        try await sendText(body, room: room, context: context, reply: reply)
+                                    },
+                                    onSendFile: { [context = composerContext] file in
+                                        try await sendFile(file, room: room, context: context)
+                                    },
+                                    queuedFiles: attachmentBinding(AttachmentDraftAddress(roomID: room.id)),
+                                    sendingState: sendingBinding(room.id),
+                                    onError: { [context = composerContext] error in
                                         guard isCurrentComposer(context) else { return }
-                                        await matrix.setTyping(
-                                            typing, roomID: room.id, sessionID: context.identity.sessionID)
-                                    }
-                                },
-                                onSendText: { [context = composerContext, reply = scopedReply(roomID: room.id)] body in
-                                    try await sendText(body, room: room, context: context, reply: reply)
-                                },
-                                onSendFile: { [context = composerContext] file in
-                                    try await sendFile(file, room: room, context: context)
-                                },
-                                queuedFiles: attachmentBinding(AttachmentDraftAddress(roomID: room.id)),
-                                sendingState: sendingBinding(room.id),
-                                onError: { [context = composerContext] error in
-                                    guard isCurrentComposer(context) else { return }
-                                    matrix.errorMessage = error
-                                },
-                                allowsSend: attachmentDrafts.canSend(AttachmentDraftAddress(roomID: room.id))
-                                    && replyAllowsSend(roomID: room.id),
-                                onDiscardAttachments: attachmentDrafts.discard,
-                                requiresTextForSend: scopedReply(roomID: room.id) != nil,
-                                onConversationKey: { conversationKey($0, room: room, threadRootID: nil) },
-                                isPrimary: true
+                                        matrix.errorMessage = error
+                                    },
+                                    allowsSend: attachmentDrafts.canSend(AttachmentDraftAddress(roomID: room.id))
+                                        && replyAllowsSend(roomID: room.id),
+                                    onDiscardAttachments: attachmentDrafts.discard,
+                                    requiresTextForSend: scopedReply(roomID: room.id) != nil,
+                                    onConversationKey: { conversationKey($0, room: room, threadRootID: nil) },
+                                    isPrimary: true
+                                )
+                            }
+                            .disabled(!localReady || !attachmentDrafts.ready).id(
+                                "composer-\(composerGeneration)-\(room.id)"
                             )
+                            .padding(.horizontal, m.sp20).padding(.top, m.sp4).padding(.bottom, m.sp16)
                         }
-                        .disabled(!localReady || !attachmentDrafts.ready).id(
-                            "composer-\(composerGeneration)-\(room.id)"
-                        )
-                        .padding(.horizontal, m.sp20).padding(.top, m.sp4).padding(.bottom, m.sp16)
                     }
-                }
-                // Floats above the composer, so a toast, reply or attachment notice never resizes it or moves the
-                // timeline.
-                .overlay(alignment: .top) {
-                    VStack(spacing: m.sp8) {
-                        ToastHost(toasts: toasts)
-                        composerAccessories(
-                            reply: replyTarget.flatMap {
-                                $0.message.roomID == room.id
-                                    && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
-                            },
-                            drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil)
-                    }.padding(.horizontal, m.sp20).alignmentGuide(.top) { $0[.bottom] }
+                    // Floats above the composer, so a toast, reply or attachment notice never resizes it or moves the
+                    // timeline.
+                    .overlay(alignment: .top) {
+                        VStack(spacing: m.sp8) {
+                            ToastHost(toasts: toasts)
+                            composerAccessories(
+                                reply: replyTarget.flatMap {
+                                    $0.message.roomID == room.id
+                                        && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
+                                },
+                                drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil)
+                        }.padding(.horizontal, m.sp20).alignmentGuide(.top) { $0[.bottom] }
+                    }
+                    .scrollEdge(.bottom, colors.canvas)
                 }
             }
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
@@ -1197,13 +1205,7 @@ struct RootView: View {
         }.background(colors.canvas)
     }
     private func threadPanel(root: ChatMessage, room: ChatRoom) -> some View {
-        VStack(spacing: 0) {
-            PaneHeader(title: "Thread", subtitle: room.writtenName, closeLabel: "Close thread", onClose: closeThread)
-            if let threadLoadError {
-                Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
-                    Button("Retry") { [open = openThreadAction] in open(root) }
-                }
-            }
+        TimelineUnderBars { insets in
             TimelineView(
                 matrix: matrix, room: room, thread: true, threadRootID: root.eventID,
                 savedIDs: savedIDs, onThread: { _ in },
@@ -1216,8 +1218,19 @@ struct RootView: View {
                     threadReadViewport.record(visible, from: identity, current: matrix.threadReadIdentity)
                 }, onForward: startForward, onEditCaption: startCaption,
                 onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) },
-                inlineVideo: viewer.inlineVideo, contentAbove: $threadContentAbove
+                inlineVideo: viewer.inlineVideo, contentAbove: $threadContentAbove, insets: insets
             ).id(root.eventID)
+        } header: {
+            VStack(spacing: 0) {
+                PaneHeader(
+                    title: "Thread", subtitle: room.writtenName, closeLabel: "Close thread", onClose: closeThread)
+                if let threadLoadError {
+                    Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
+                        Button("Retry") { [open = openThreadAction] in open(root) }
+                    }
+                }
+            }.scrollEdge(.top, colors.canvas)
+        } footer: {
             VStack(spacing: 0) {
                 if room.canPostMessages == false {
                     ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp16).padding(.top, m.sp4)
@@ -1308,6 +1321,7 @@ struct RootView: View {
                         ? AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID) : nil
                 ).padding(.horizontal, m.sp12).alignmentGuide(.top) { $0[.bottom] }
             }
+            .scrollEdge(.bottom, colors.canvas)
         }.background(colors.canvas).dropToUpload("Upload to thread")
     }
     private var browsedWorkspace: Workspace? { matrix.workspaces.first { $0.id == workspaceID } }

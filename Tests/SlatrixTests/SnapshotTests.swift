@@ -88,6 +88,15 @@ struct Snapshots {
             editor.insertText("Drafting a reply with **bold** text", replacementRange: editor.selectedRange())
         }
         try write(await settledImage(hosting), "channel-\(name)")
+        // Scrolled up a little, so messages pass under the composer's glass, then back to the newest.
+        let timeline = try #require(Self.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
+        func scrollTimeline(by delta: CGFloat) {
+            timeline.contentView.setBoundsOrigin(NSPoint(x: 0, y: timeline.contentView.bounds.minY + delta))
+            timeline.reflectScrolledClipView(timeline.contentView)
+        }
+        scrollTimeline(by: -160)
+        try write(await settledImage(hosting), "channel-scrolled-\(name)")
+        scrollTimeline(by: 160)
 
         // A file dragged over the conversation, then over the thread once it opens: the rightmost pane takes it.
         let drag = FakeDrag(files: [URL(fileURLWithPath: #filePath)], over: window)

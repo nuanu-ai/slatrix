@@ -47,7 +47,7 @@ struct DropToUploadHostedTests {
         let messages = try #require(
             Self.views(in: hosting).first { $0 is TimelineTableView }?.enclosingScrollView)
         let header = NSPoint(
-            x: center(of: messages).x, y: messages.convert(messages.bounds, to: nil).maxY + Metrics().paneHeader / 2)
+            x: center(of: messages).x, y: messages.convert(messages.bounds, to: nil).maxY - Metrics().paneHeader / 2)
 
         let points = [center(of: composer), center(of: messages), header]
         let files = FakeDrag(files: [URL(fileURLWithPath: #filePath)])

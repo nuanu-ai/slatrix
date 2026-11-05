@@ -34,6 +34,8 @@ private final class HistoryTimeline: Timeline, @unchecked Sendable {
 struct TimelineHostedTests {
     private static let room = ChatRoom(id: "!timeline:example.org", name: "Timeline")
     private static let user = "@reader:example.org"
+    /// A header and a composer over the timeline's ends, as the app floats them.
+    private static let insets = EdgeInsets(top: 52, leading: 0, bottom: 100, trailing: 0)
 
     private struct Fixture: View {
         let service: MatrixService
@@ -47,7 +49,8 @@ struct TimelineHostedTests {
         var body: some View {
             TimelineView(
                 matrix: service, room: room, savedIDs: [], onThread: { _ in },
-                onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onBottomVisibilityChange: atBottom
+                onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onBottomVisibilityChange: atBottom,
+                insets: TimelineHostedTests.insets
             )
             .id("\(room.id):\(timeline)")
             .environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom)).environment(popovers)
@@ -109,9 +112,17 @@ struct TimelineHostedTests {
         }
         private var found: TimelineScrollView?
         var clip: NSClipView { scrollView!.contentView }
+        /// From the rows' end to the composer's top. Negative when the rows end under the composer.
         var distanceFromBottom: CGFloat {
             let document = scrollView!.documentView!
-            return document.frame.height - clip.bounds.maxY
+            return document.frame.height - (clip.bounds.maxY - TimelineHostedTests.insets.bottom)
+        }
+        /// The composer's top and the header's bottom, in the window.
+        var composerTop: CGFloat {
+            scrollView!.convert(scrollView!.bounds, to: nil).minY + TimelineHostedTests.insets.bottom
+        }
+        var headerBottom: CGFloat {
+            scrollView!.convert(scrollView!.bounds, to: nil).maxY - TimelineHostedTests.insets.top
         }
 
         /// A message's top edge in window coordinates, while its row is on screen.
@@ -200,10 +211,75 @@ struct TimelineHostedTests {
         defer { harness.close() }
         harness.layout()
         #expect(harness.scrollView != nil)
-        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
         #expect(harness.top(of: "Message 39") != nil)
         await settle(harness) { !harness.bottomReports.isEmpty }
         #expect(harness.bottomReports == [true])
+    }
+
+    @Test("At its newest message the last row sits on the composer, and once it slips under the composer it is unread")
+    func bottomSitsOnComposer() async throws {
+        let harness = Harness(messages: Self.messages(0..<40))
+        defer { harness.close() }
+        await settle(harness) { harness.bottomReports.last == true }
+        let row = try #require(harness.cell(showing: "Message-39"))
+        let frame = row.convert(row.bounds, to: nil)
+        #expect(frame.minY >= harness.composerTop && frame.minY - harness.composerTop < frame.height)
+        // Down past the composer's top, though still in the scroll view.
+        harness.scroll(toTop: harness.clip.bounds.minY - (frame.maxY - harness.composerTop) - 1)
+        await settle(harness) { harness.bottomReports.last == false }
+        #expect(harness.bottomReports.last == false)
+    }
+
+    @Test("A short channel's messages sit on the composer, under the header and clear of both")
+    func shortChannelSitsOnComposer() async throws {
+        let harness = Harness(messages: Self.messages(0..<3), height: 800)
+        defer { harness.close() }
+        await settle(harness) { harness.cell(showing: "Message-2") != nil }
+        let newest = try #require(harness.cell(showing: "Message-2"))
+        let frame = newest.convert(newest.bounds, to: nil)
+        #expect(frame.minY >= harness.composerTop && frame.minY - harness.composerTop < frame.height)
+        let first = try #require(harness.cell(showing: "Message-0"))
+        #expect(first.convert(first.bounds, to: nil).maxY <= harness.headerBottom)
+        // Nothing to scroll: the rows fill exactly the space between the header and the composer.
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        let between = harness.headerBottom - harness.composerTop
+        #expect(table.rect(ofRow: table.numberOfRows - 1).maxY == between)
+    }
+
+    @Test("The row kept still through a resize is the first below the header, not one passing under it")
+    func anchorBelowHeader() async throws {
+        let harness = Harness(
+            messages: Self.messages(0..<40).map { message in
+                var message = message
+                message.body += String(repeating: " — long enough to wrap more as the conversation narrows", count: 3)
+                return message
+            })
+        defer { harness.close() }
+        await settle(harness)
+        harness.scroll(toTop: harness.clip.bounds.minY - 600)
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        func isMessage(_ row: Int) -> Bool {
+            guard
+                case .message = (table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell)?.entry?
+                    .kind
+            else { return false }
+            return true
+        }
+        // A message's top flush with the header's edge, and the message before it wholly under the header.
+        let shown = table.rows(in: harness.clip.bounds)
+        let row = try #require(
+            (shown.location + 1..<NSMaxRange(shown)).first {
+                isMessage($0) && isMessage($0 - 1) && table.rect(ofRow: $0 - 1).minY >= harness.clip.bounds.minY
+            })
+        harness.scroll(toTop: table.rect(ofRow: row).minY - Self.insets.top)
+        func offset() -> CGFloat { table.rect(ofRow: row).minY - harness.clip.bounds.minY }
+        let before = offset()
+        // Every message wraps more and grows, the one under the header too.
+        harness.window.setContentSize(NSSize(width: 380, height: 400))
+        harness.layout()
+        await settle(harness)
+        #expect(offset() == before)
     }
 
     @Test("A new message keeps a conversation at its newest message")
@@ -213,7 +289,7 @@ struct TimelineHostedTests {
         await settle(harness)
         harness.service.messages += Self.messages(40..<41)
         await settle(harness) { harness.top(of: "Message 40") != nil }
-        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
     }
 
     @Test("Opening a side pane narrows the conversation without losing its newest message")
@@ -228,9 +304,9 @@ struct TimelineHostedTests {
         await settle(harness)
         harness.window.setContentSize(NSSize(width: 380, height: 400))
         harness.layout()
-        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
         await settle(harness)
-        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
     }
 
     @Test("A conversation at its newest message stays there when the space above or below it changes")
@@ -241,10 +317,10 @@ struct TimelineHostedTests {
         // The composer grows with a draft or queued files, or the header with a banner.
         harness.window.setContentSize(NSSize(width: 620, height: 505))
         harness.layout()
-        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
         harness.window.setContentSize(NSSize(width: 620, height: 700))
         harness.layout()
-        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
     }
 
     @Test("Narrowing the window keeps the message you are reading where it was, even one scrolled mostly past")
@@ -303,10 +379,10 @@ struct TimelineHostedTests {
         }
         harness.service.messages = earlier + sent
         await settle(harness) { harness.cell(showing: "transaction-5") != nil }
-        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
         await drainMainActor()
         await settle(harness)
-        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
     }
 
     @Test("New messages do not move what you are reading further up")
@@ -499,7 +575,7 @@ struct TimelineHostedTests {
         harness.hosting.rootView = zoomed
         await settle(harness) { (lineHeight() ?? 0) > before * 1.3 }
         #expect(try #require(lineHeight()) > before * 1.3)
-        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
     }
 
     // capability: conversation.keep-position
@@ -535,7 +611,7 @@ struct TimelineHostedTests {
         harness.service.focusedEventID = nil
         harness.hosting.rootView = fixture
         await settle(harness) { harness.top(of: "Message 39") != nil }
-        #expect(harness.distanceFromBottom <= TimelineScrollPolicy.bottomTolerance)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
     }
 
     @Test(
@@ -694,7 +770,8 @@ extension TimelineHostedTests {
         messages[27].reactions = [MessageReaction(key: "👍", count: 2, mine: true, senders: [Self.user, "@b:x"])]
         messages[27].replyCount = 3
         messages[28].isEdited = true
-        let harness = Harness(messages: messages)
+        // Tall enough that the newest rows are all on screen above the composer, and so measured.
+        let harness = Harness(messages: messages, height: 560)
         defer { harness.close() }
         await settle(harness) { harness.top(of: "Message 29") != nil }
         let table = try #require(harness.scrollView?.documentView as? NSTableView)
@@ -726,6 +803,23 @@ extension TimelineHostedTests {
         #expect(pixels(bodies.map(harness.top)) == pixels(tops))
         // Leaving the timeline takes the toolbar with it.
         harness.scrollView?.onPointer?(nil)
+        #expect(toolbar(harness) == nil)
+    }
+
+    @Test("A message passing under the header shows its toolbar below the header, and the header itself hovers none")
+    func toolbarBelowHeader() async throws {
+        let harness = Harness(messages: Self.actionable(0..<30), height: 560)
+        defer { harness.close() }
+        await settle(harness) { harness.top(of: "Message 29") != nil }
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        let row = table.rect(ofRow: table.row(for: try #require(harness.cell(showing: "$Message-22"))))
+        // Its top a few points under the header, its text below it.
+        harness.scroll(toTop: row.minY - Self.insets.top + 6)
+        let text = try hover(harness, "Message 22")
+        let shown = try #require(toolbar(harness))
+        #expect(shown.convert(shown.bounds, to: nil).maxY <= harness.headerBottom)
+        let frame = text.convert(text.bounds, to: nil)
+        harness.scrollView?.onPointer?(NSPoint(x: frame.midX, y: harness.headerBottom + 4))
         #expect(toolbar(harness) == nil)
     }
 
@@ -1033,7 +1127,8 @@ extension TimelineHostedTests {
     @Test("Scrolling up through history at a reading pace never reaches the loading row")
     func historyArrivesAhead() async throws {
         let all = busyConversation(400, roomID: Self.room.id, tag: UUID().uuidString)
-        let harness = Harness(messages: Array(all.suffix(100)))
+        // History loads screens ahead, and a screen is what shows between the header and composer: a real window's.
+        let harness = Harness(messages: Array(all.suffix(100)), height: 600)
         defer { harness.close() }
         harness.timeline.gate.arm()
         harness.timeline.onPage = {
@@ -1056,7 +1151,8 @@ extension TimelineHostedTests {
                     harness.timeline.gate.arm()
                 }
             }
-            if harness.service.hasMoreHistory && harness.clip.bounds.minY < table.rect(ofRow: 1).maxY { stalls += 1 }
+            let top = harness.clip.bounds.minY + Self.insets.top
+            if harness.service.hasMoreHistory && top < table.rect(ofRow: 1).maxY { stalls += 1 }
         }
         #expect(harness.service.messages.count == all.count)
         #expect(stalls == 0)

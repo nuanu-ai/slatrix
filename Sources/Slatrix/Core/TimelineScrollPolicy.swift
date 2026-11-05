@@ -22,6 +22,20 @@ enum TimelineScrollPolicy {
         var contentHeight: CGFloat
         var distanceFromBottom: CGFloat { max(0, contentHeight - top - height) }
         var isAtBottom: Bool { distanceFromBottom <= TimelineScrollPolicy.bottomTolerance }
+
+        init(top: CGFloat, height: CGFloat, contentHeight: CGFloat) {
+            self.top = top
+            self.height = height
+            self.contentHeight = contentHeight
+        }
+
+        /// What the reader sees of `clip`, the scroll view's bounds in content coordinates: rows passing under the
+        /// header's and the composer's glass, `covered` deep at each end, can't be read.
+        init(clip: CGRect, covered: (top: CGFloat, bottom: CGFloat), contentHeight: CGFloat) {
+            self.init(
+                top: clip.minY + covered.top, height: max(0, clip.height - covered.top - covered.bottom),
+                contentHeight: contentHeight)
+        }
     }
 
     struct RowFrame: Equatable {

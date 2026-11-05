@@ -122,6 +122,8 @@ struct TimelineTable: NSViewRepresentable {
     /// top edge (nil until the table shows its rows), and whether any part of the newest message shows, which reads
     /// it.
     var onScroll: (Bool, Bool, Bool?, Bool) -> Void
+    /// The header's and the composer's heights: rows scroll under both, and the reader sees only what is between.
+    var insets = EdgeInsets()
 
     func makeCoordinator() -> TimelineTableCoordinator { TimelineTableCoordinator() }
 
@@ -184,6 +186,7 @@ struct TimelineTable: NSViewRepresentable {
     private var viewportHeight: CGFloat = 0
     private var settings: Settings?
     private var spacerHeight: CGFloat = 0
+    private var insets = NSEdgeInsets()
     /// Rows whose height in the table is an estimate. Only rows on screen are measured at once, and those near it
     /// between frames, so opening a room or loading a page lays out a screenful, not the whole history.
     private var estimated = Set<String>()
@@ -261,6 +264,7 @@ struct TimelineTable: NSViewRepresentable {
         if previous?.focusedEventID != configuration.focusedEventID || previous?.jumpID != configuration.jumpID {
             pendingFocus = configuration.focusedEventID
         }
+        inset(configuration.insets)
         apply(configuration.entries)
         // A jump within rows already shown changes none of them.
         if opened, pendingFocus != nil { afterScroll() }
@@ -580,18 +584,23 @@ struct TimelineTable: NSViewRepresentable {
     // MARK: Position
 
     private var viewport: Policy.Viewport {
-        let bounds = scrollView.contentView.bounds
-        return Policy.Viewport(
-            top: bounds.minY, height: bounds.height,
+        Policy.Viewport(
+            clip: scrollView.contentView.bounds, covered: (insets.top, insets.bottom),
             contentHeight: rows.isEmpty ? 0 : table.rect(ofRow: rows.count - 1).maxY)
+    }
+
+    /// The viewport in the table's coordinates.
+    private var visible: NSRect {
+        let viewport = viewport
+        return NSRect(x: 0, y: viewport.top, width: scrollView.contentView.bounds.width, height: viewport.height)
     }
 
     private var newestSeen: Bool {
         guard let row = rows.lastIndex(where: { $0.messageEventID != nil }) else { return false }
         let rect = table.rect(ofRow: row)
-        let bounds = scrollView.contentView.bounds
+        let visible = visible
         return ReadStatePolicy.isSeen(
-            top: rect.minY, bottom: rect.maxY, screenTop: bounds.minY, screenBottom: bounds.maxY)
+            top: rect.minY, bottom: rect.maxY, screenTop: visible.minY, screenBottom: visible.maxY)
     }
 
     private func frame(_ id: String) -> Policy.RowFrame? {
@@ -603,8 +612,7 @@ struct TimelineTable: NSViewRepresentable {
     /// The first message on screen anchors the view: unlike a day divider it never moves among its neighbours.
     /// Rows about to be measured anchor it only when nothing else is on screen.
     private func firstVisibleRow(excluding excluded: IndexSet) -> Policy.RowFrame? {
-        let visible = table.rows(in: scrollView.contentView.bounds)
-        guard let range = Range(visible) else { return nil }
+        guard let range = Range(table.rows(in: visible)) else { return nil }
         let shown = range.filter { rows[$0].kind != .spacer && rows[$0].kind != .end }
         // After a jump into rows never measured, the first of them holds its place while they are.
         let measured = shown.filter { !excluded.contains($0) }
@@ -760,14 +768,15 @@ struct TimelineTable: NSViewRepresentable {
                 for: position, contentHeight: viewport.contentHeight, viewportHeight: viewport.height, frame: frame)
         else { return }
         let clip = scrollView.contentView
-        guard abs(clip.bounds.minY - top) > 0.01 else { return }
-        clip.setBoundsOrigin(NSPoint(x: clip.bounds.minX, y: top))
+        let origin = top - insets.top
+        guard abs(clip.bounds.minY - origin) > 0.01 else { return }
+        clip.setBoundsOrigin(NSPoint(x: clip.bounds.minX, y: origin))
         scrollView.reflectScrolledClipView(clip)
     }
 
     private func scrollToBottom(animated: Bool) {
         let viewport = viewport
-        let top = max(0, viewport.contentHeight - viewport.height)
+        let top = max(0, viewport.contentHeight - viewport.height) - insets.top
         NSAnimationContext.runAnimationGroup { context in
             context.duration = animated ? 0.15 : 0
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -789,8 +798,23 @@ struct TimelineTable: NSViewRepresentable {
         noteHeights([0])
     }
 
+    /// The header or the composer changed height: rows scroll under the new one, the reader's place kept.
+    private func inset(_ new: EdgeInsets) {
+        guard new.top != insets.top || new.bottom != insets.bottom else { return }
+        let kept = opened ? position() : nil
+        insets = NSEdgeInsets(top: new.top, left: 0, bottom: new.bottom, right: 0)
+        // Before the scroll view tiles for them, so that tile finds the viewport already this size.
+        if width > 0 { viewportHeight = visible.height }
+        applying = true
+        scrollView.contentInsets = insets
+        scrollView.scrollerInsets = insets
+        applying = false
+        guard width > 0 else { return }
+        preservingPosition(keeping: kept) {}
+    }
+
     private func viewportResized() {
-        let size = scrollView.contentView.bounds.size
+        let size = visible.size
         guard size.width > 0, size != NSSize(width: width, height: viewportHeight) else { return }
         let widthChanged = size.width != width
         let first = width == 0
@@ -806,9 +830,7 @@ struct TimelineTable: NSViewRepresentable {
     }
 
     @objc private func boundsChanged() {
-        guard !applying, scrollView.contentView.bounds.size == NSSize(width: width, height: viewportHeight) else {
-            return
-        }
+        guard !applying, visible.size == NSSize(width: width, height: viewportHeight) else { return }
         // The reader moved: a linked message that has not loaded yet no longer takes over the view.
         pendingFocus = nil
         scrolledByReader = true
@@ -841,7 +863,7 @@ struct TimelineTable: NSViewRepresentable {
             viewport.isAtBottom,
             opened
                 && Policy.showsJumpToLatest(viewport, live: configuration.live, scrolledByReader: scrolledByReader),
-            opened ? scrollView.contentView.bounds.minY > 0.5 : nil,
+            opened ? viewport.top > 0.5 : nil,
             newestSeen
         )
         if reported.map({ $0 != state }) ?? true {
@@ -889,6 +911,8 @@ struct TimelineTable: NSViewRepresentable {
     // MARK: Hover
 
     private func pointerMoved(_ point: NSPoint?) {
+        // Over the header's or the composer's glass the pointer is on them, not on the rows passing under.
+        let point = point.flatMap { visible.contains(table.convert($0, from: nil)) ? $0 : nil }
         pointer = point
         defer { placeTooltip() }
         // The toolbar hangs over the row above its own; the pointer on it still means its row.
@@ -935,8 +959,11 @@ struct TimelineTable: NSViewRepresentable {
         let size = toolbar.frame.size
         let rect = table.rect(ofRow: row)
         let top = scrollView.convert(NSPoint(x: rect.maxX, y: rect.minY), from: table)
-        // In the scroll view's flipped coordinates, from the viewport's top down.
-        let visible = scrollView.contentView.frame
+        // In the scroll view's flipped coordinates, from the viewport's top down, between the header and composer.
+        let clip = scrollView.contentView.frame
+        let visible = NSRect(
+            x: clip.minX, y: clip.minY + insets.top, width: clip.width,
+            height: clip.height - insets.top - insets.bottom)
         // A row too short for the gap above it centers the toolbar instead.
         let inset = max(0, min(m.sp4, (rect.height - size.height) / 2))
         let y = min(max(top.y + inset, visible.minY + m.sp4), visible.maxY - size.height)

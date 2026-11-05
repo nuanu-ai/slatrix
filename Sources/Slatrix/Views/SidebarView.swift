@@ -162,7 +162,7 @@ struct SidebarView: View {
                 content.glass(
                     appearance.colors.sidebar, in: RoundedRectangle(cornerRadius: m.radiusLarge),
                     cornerRadius: m.radiusLarge
-                ).padding(m.sp8)
+                ).padding(m.sp8).scrollEdge(.bottom, appearance.colors.sidebar)
             } else {
                 content.background(.bar).overlay(alignment: .top) {
                     VStack(spacing: 0) { Divider().overlay(appearance.colors.border) }
