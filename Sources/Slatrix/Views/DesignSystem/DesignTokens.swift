@@ -89,6 +89,8 @@ struct Metrics: Equatable {
     var avatarSmall: CGFloat { 20 * zoom }
     var avatarMedium: CGFloat { 24 * zoom }
     var avatar: CGFloat { 32 * zoom }
+    /// A sender beside their messages, at Mail's size.
+    var messageAvatar: CGFloat { 36 * zoom }
     var avatarLarge: CGFloat { 72 * zoom }
     /// The photo at the top of a profile.
     var profilePhoto: CGFloat { 240 * zoom }

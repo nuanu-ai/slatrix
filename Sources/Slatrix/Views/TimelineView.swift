@@ -474,7 +474,11 @@ struct MessageRow: View {
     private var time: String { timeLabel ?? message.timestamp.formatted(.dateTime.hour().minute()) }
     var body: some View {
         layout
-            .background(hovered ? colors.hover : .clear)
+            // Inset and rounded, as Mail marks the row under the pointer.
+            .background {
+                RoundedRectangle(cornerRadius: m.radius).fill(hovered ? colors.hover : .clear)
+                    .padding(.horizontal, m.sp8)
+            }
             .background {
                 // A cell shows another message after a scroll; that one's highlight starts afresh, never fading in.
                 colors.highlight.opacity(highlighted ? 1 : 0)
@@ -488,14 +492,14 @@ struct MessageRow: View {
                 if grouped || !appearance.showAvatars {
                     // One line: "12:00 AM" is wider than the gutter, and a wrap would grow the row on hover.
                     Text(hovered ? time : "").font(m.font(.subheadline)).lineLimit(1).fixedSize()
-                        .foregroundStyle(colors.textSecondary).frame(width: m.avatar, alignment: .trailing)
+                        .foregroundStyle(colors.textSecondary).frame(width: m.messageAvatar, alignment: .trailing)
                         .overlay(alignment: .trailing) { if grouped && sending && !hovered { clock } }
                         .padding(.top, m.sp4)
                 } else {
                     Button {
                         actions.openProfile?()
                     } label: {
-                        avatar ?? AvatarView(name: message.senderName, size: m.avatar)
+                        avatar ?? AvatarView(name: message.senderName, size: m.messageAvatar)
                     }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help(
                         "View \(message.senderName)’s profile")
                 }

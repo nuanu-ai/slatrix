@@ -1125,7 +1125,7 @@ struct TimelineRow: View, Equatable {
                     isPinned: row.pinned, sendFailure: row.sendFailure, sendBusy: row.sendBusy, hovered: hovered,
                     timeLabel: row.time,
                     avatar: AvatarView(
-                        name: message.senderName, size: metrics.avatar, matrix: matrix,
+                        name: message.senderName, size: metrics.messageAvatar, matrix: matrix,
                         source: message.avatarURL),
                     replierAvatar: message.lastReply.map {
                         AvatarView(
@@ -1205,6 +1205,8 @@ private struct TimelineDayDivider: View {
     var body: some View {
         let colors = appearance.colors
         Text(label).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
+            .padding(.horizontal, m.sp8 + m.sp2).padding(.vertical, m(3))
+            .overlay(Capsule().strokeBorder(colors.border))
             .frame(maxWidth: .infinity).padding(.top, m.sp16).padding(.bottom, m.sp8)
             .accessibilityAddTraits(.isHeader)
     }
