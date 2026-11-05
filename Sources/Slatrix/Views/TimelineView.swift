@@ -31,6 +31,9 @@ struct TimelineView: View {
     var onOpenMedia: ((ChatMessage) -> Void)? = nil
     /// The window's one inline video player.
     var inlineVideo: InlineVideo? = nil
+    /// Messages scrolled up under the header, which then gets its line. Held by the pane, so a conversation switched
+    /// to keeps the line until its own messages say otherwise.
+    var contentAbove: Binding<Bool> = .constant(false)
     @State private var loadingHistory = false
     @State private var deleting: MessageActionTarget?
     @State private var cancelling: ChatMessage?
@@ -38,8 +41,6 @@ struct TimelineView: View {
     @State private var sendActions = Set<String>()
     @State private var linkCopy: LinkCopy?
     @State private var jumpVisible = false
-    /// Messages scrolled up under the header, which then gets its line.
-    @State private var contentAbove = false
     @State private var atBottom = false
     /// The message jumped to, while its highlight lasts.
     @State private var highlighted: String?
@@ -76,12 +77,12 @@ struct TimelineView: View {
             onScroll: { atBottom, showsJump, scrolled, newestSeen in
                 self.atBottom = atBottom
                 jumpVisible = showsJump
-                contentAbove = scrolled
+                if let scrolled, scrolled != contentAbove.wrappedValue { contentAbove.wrappedValue = scrolled }
                 onBottomVisibilityChange?(newestSeen)
             }
         )
         .overlay(alignment: .top) {
-            if contentAbove { Divider().overlay(colors.border) }
+            if contentAbove.wrappedValue { Divider().overlay(colors.border) }
         }
         .overlay(alignment: .bottomTrailing) {
             if jumpVisible && !messages.isEmpty {
@@ -493,7 +494,7 @@ struct MessageRow: View {
                         actions.openProfile?()
                     } label: {
                         avatar ?? AvatarView(name: message.senderName, size: m.avatar)
-                    }.buttonStyle(.row).disabled(actions.openProfile == nil).help(
+                    }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help(
                         "View \(message.senderName)’s profile")
                 }
             }
@@ -513,7 +514,7 @@ struct MessageRow: View {
                         } label: {
                             Text(message.senderName).font(m.font(.reading, .semibold))
                                 .foregroundStyle(colors.textPrimary)
-                        }.buttonStyle(.row).disabled(actions.openProfile == nil).help("View profile")
+                        }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
                         if !compact {
                             Text(time).font(m.font(.subheadline))
                                 .foregroundStyle(colors.textSecondary)
@@ -658,7 +659,9 @@ private struct ReactionChip<Content: View>: View {
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
         let colors = appearance.colors
-        HStack(spacing: m.sp4) { content }.padding(.horizontal, m.sp8).frame(height: m.sp24)
+        // The emoji and its count on one baseline: centered frames put the count low, as an emoji's line is taller.
+        HStack(alignment: .firstTextBaseline, spacing: m.sp4) { content }.padding(.horizontal, m.sp8)
+            .frame(height: m.sp24)
             .background(mine ? colors.accentTint : colors.sunken, in: Capsule())
             .overlay(Capsule().strokeBorder(mine ? colors.accentLine : .clear))
     }
@@ -709,7 +712,7 @@ private struct ThreadRepliesBar: View {
 /// Slack's hover toolbar: three one-click reactions, then add reaction, reply in thread, forward, save and more.
 /// The timeline floats one over the hovered row's top edge, so no row draws it or changes height for it.
 struct MessageToolbar: View {
-    static let button: CGFloat = 28
+    static let button: CGFloat = 24
     let quick: [String]
     let isThread: Bool
     let isSaved: Bool
@@ -730,7 +733,7 @@ struct MessageToolbar: View {
                         Button {
                             react(emoji)
                         } label: {
-                            Text(emoji).font(m.font(.reading)).frame(width: m(Self.button), height: m(Self.button))
+                            Text(emoji).font(m.font(.body)).frame(width: m(Self.button), height: m(Self.button))
                         }.buttonStyle(.icon).help("React with \(EmojiCatalog.shortcode(for: emoji))")
                     }
                 }
@@ -738,9 +741,6 @@ struct MessageToolbar: View {
                     button("face.smiling", "Find another reaction", action: openReactions)
                 }
                 if !isThread { button("text.bubble", "Reply in thread", action: actions.thread) }
-                if let forward = actions.forward {
-                    button("arrowshape.turn.up.right", "Forward message", action: forward)
-                }
                 button(
                     isSaved ? "bookmark.fill" : "bookmark", isSaved ? "Remove from Later" : "Save for later",
                     action: actions.save)
@@ -748,17 +748,17 @@ struct MessageToolbar: View {
             Menu {
                 NativeMessageMenuCommands(commands: actions.menu())
             } label: {
-                Image(systemName: "ellipsis").font(m.font(.reading))
+                Image(systemName: "ellipsis").font(m.font(.body))
                     .frame(width: m(Self.button), height: m(Self.button))
             }.menuStyle(.button).buttonStyle(.icon).menuIndicator(.hidden).help("More actions")
                 .accessibilityLabel("More actions")
         }
         .foregroundStyle(colors.textSecondary).padding(m.sp2)
-        .background(colors.overlay, in: shape).elevation(.e2, cornerRadius: m.radiusLarge)
+        .background(colors.overlay, in: shape).elevation(.e1, cornerRadius: m.radiusLarge)
     }
 
     private func button(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
-        IconButton(symbol: symbol, label: label, role: .reading, side: Self.button, action: action)
+        IconButton(symbol: symbol, label: label, role: .body, side: Self.button, action: action)
     }
 }
 

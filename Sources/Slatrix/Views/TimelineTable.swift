@@ -119,8 +119,9 @@ struct TimelineTable: NSViewRepresentable {
     var onLoadOlder: () -> Void
     var onLoadNewer: () -> Void
     /// Whether the newest message is on screen, whether to offer "Jump to recent", whether messages sit above the
-    /// top edge, and whether any part of the newest message shows, which reads it.
-    var onScroll: (Bool, Bool, Bool, Bool) -> Void
+    /// top edge (nil until the table shows its rows), and whether any part of the newest message shows, which reads
+    /// it.
+    var onScroll: (Bool, Bool, Bool?, Bool) -> Void
 
     func makeCoordinator() -> TimelineTableCoordinator { TimelineTableCoordinator() }
 
@@ -204,7 +205,7 @@ struct TimelineTable: NSViewRepresentable {
     /// Whether the reader moved the view since the table last put it somewhere.
     private var scrolledByReader = false
     private var atOlderMessage = false
-    private var reported: (Bool, Bool, Bool, Bool)?
+    private var reported: (Bool, Bool, Bool?, Bool)?
     /// Where the reader was before the scroll view laid out its clip, which a new size has already moved.
     private var tiling: Policy.Position?
     /// While the table waits for its first rows.
@@ -815,7 +816,7 @@ struct TimelineTable: NSViewRepresentable {
             viewport.isAtBottom,
             opened
                 && Policy.showsJumpToLatest(viewport, live: configuration.live, scrolledByReader: scrolledByReader),
-            scrollView.contentView.bounds.minY > 0.5,
+            opened ? scrollView.contentView.bounds.minY > 0.5 : nil,
             newestSeen
         )
         if reported.map({ $0 != state }) ?? true {
@@ -890,7 +891,8 @@ struct TimelineTable: NSViewRepresentable {
         placeToolbar()
     }
 
-    /// The one hover toolbar, centered on the hovered row's top edge as Slack's is, and kept inside the viewport.
+    /// The one hover toolbar, at the hovered row's top right and inside the row, so it covers no other message, and
+    /// kept inside the viewport.
     private func placeToolbar() {
         guard let id = hoveredID, let row = index[id], case .message(let entry) = rows[row].kind,
             !entry.message.isRedacted, let context = configuration?.context
@@ -910,7 +912,9 @@ struct TimelineTable: NSViewRepresentable {
         let top = scrollView.convert(NSPoint(x: rect.maxX, y: rect.minY), from: table)
         // In the scroll view's flipped coordinates, from the viewport's top down.
         let visible = scrollView.contentView.frame
-        let y = min(max(top.y - size.height / 2, visible.minY + m.sp4), visible.maxY - size.height)
+        // A row too short for the gap above it centers the toolbar instead.
+        let inset = max(0, min(m.sp4, (rect.height - size.height) / 2))
+        let y = min(max(top.y + inset, visible.minY + m.sp4), visible.maxY - size.height)
         toolbar.frame.origin = NSPoint(x: top.x - m.sp16 - size.width, y: y)
         toolbar.isHidden = false
     }

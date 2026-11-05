@@ -34,8 +34,8 @@ enum ConversationNavigation {
     }
 }
 
-/// The tabs under a channel's header, as in Slack.
-enum ChannelTab: Hashable { case messages, pins, files }
+/// The lists a channel opens beside its messages, as Slack's side panel.
+enum ChannelPanel: Hashable { case pins, files }
 
 extension ConversationNavigation {
     /// The screen to draw while a conversation picked on screen `from` opens. Its cached rows take a moment to read,

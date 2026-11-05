@@ -24,14 +24,19 @@ struct ResizeHandle: View {
                 dragging || hovering
                     ? appearance.colors.accentFill : pane == .trailing ? appearance.colors.border : .clear
             ).frame(width: dragging || hovering ? m.sp2 : 1)
+        }
+        .frame(width: m(SidebarLayout.handleWidth)).frame(maxHeight: .infinity)
+        // Easier to hit than the line is wide: the pointer takes it over the panes' edges on either side too.
+        .overlay {
             ResizePointerSurface(
                 direction: direction, currentWidth: currentWidth,
                 onDragging: { dragging = $0 }, onArrow: { adjust(by: m.sp16 * direction * $0) },
-                onChange: onChange, onCommit: onCommit, onReset: onReset)
+                onChange: onChange, onCommit: onCommit, onReset: onReset
+            )
+            .frame(width: m(SidebarLayout.handleHitWidth)).contentShape(Rectangle())
+            .onHover { hovering = $0 }
         }
-        .frame(width: m(SidebarLayout.handleWidth)).frame(maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
+        .zIndex(1)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
         .accessibilityValue("\(Int(currentWidth)) points")

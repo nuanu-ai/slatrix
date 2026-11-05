@@ -24,6 +24,8 @@ enum SidebarLayout {
     /// about 60 characters of message, near where Slack moves a thread over the conversation.
     static let readableWidth: CGFloat = 480
     static let handleWidth: CGFloat = 6
+    /// Where a divider takes the pointer, centered on it.
+    static let handleHitWidth: CGFloat = 14
     static let minimumPaneWidth: CGFloat = 280
     static let maximumPaneWidth: CGFloat = 720
     /// The margin the sidebar floats in, left of it.
@@ -57,6 +59,25 @@ enum SidebarLayout {
         let wanted =
             preferred.isFinite && preferred > 0 ? min(max(preferred, minimumPaneWidth), maximumPaneWidth) : ideal
         return min(wanted, space)
+    }
+
+    /// Where the sidebar and a pane go at a window width. Only crossing a threshold changes it, so a resize builds
+    /// the window again only there.
+    struct Arrangement: Equatable {
+        var sidebarFits: Bool
+        var sidebarFitsBesidePane: Bool
+        var paneFitsBesideSidebar: Bool
+        var paneFitsAlone: Bool
+    }
+
+    static func arrangement(availableWidth: CGFloat) -> Arrangement {
+        Arrangement(
+            sidebarFits: !collapses(availableWidth: availableWidth),
+            sidebarFitsBesidePane: !collapses(availableWidth: availableWidth, paneOpen: true),
+            paneFitsBesideSidebar: paneWidth(preferred: 0, ideal: minimumPaneWidth, availableWidth: availableWidth)
+                != nil,
+            paneFitsAlone: paneWidth(
+                preferred: 0, ideal: minimumPaneWidth, availableWidth: availableWidth, sidebarShown: false) != nil)
     }
 
     /// The conversations a section lists. A collapsed one still lists the open conversation and every unread one,

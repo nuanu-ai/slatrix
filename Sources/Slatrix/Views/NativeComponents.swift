@@ -74,7 +74,7 @@ struct WindowDragArea: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
-/// Centers the window's close, minimize and zoom buttons in this view, the title bar along the window's top edge, as
+/// Centers the window's close, minimize and zoom buttons in this view, inset from the corner, the title bar along the window's top edge, as
 /// Slack's title bar does at every zoom. AppKit's own title bar is shorter and fixed, and AppKit lays it out again on a
 /// resize, a full screen change and whenever else it likes, so each time it does, this lays the buttons back out.
 struct WindowButtonsCentering: NSViewRepresentable {
@@ -120,10 +120,14 @@ struct WindowButtonsCentering: NSViewRepresentable {
             let bar = NSRect(
                 x: 0, y: frame.bounds.height - bounds.height, width: frame.bounds.width, height: bounds.height)
             if container.frame != bar { container.frame = bar }
-            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            // As far in from the window's left edge as from its top, as Mail's are, at the spacing AppKit gave them.
+            guard let mini = window.standardWindowButton(.miniaturizeButton) else { return }
+            let spacing = mini.frame.minX - close.frame.minX
+            for (index, type) in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].enumerated() {
                 guard let button = window.standardWindowButton(type) else { continue }
                 let y = ((bar.height - button.frame.height) / 2).rounded()
-                if button.frame.minY != y { button.setFrameOrigin(NSPoint(x: button.frame.minX, y: y)) }
+                let origin = NSPoint(x: y + CGFloat(index) * spacing, y: y)
+                if button.frame.origin != origin { button.setFrameOrigin(origin) }
             }
         }
     }

@@ -19,6 +19,8 @@ struct WindowHostedTests {
 
         init(zoom: Double = 1) {
             _ = NSApplication.shared
+            // A pane dragged in an earlier test keeps its width; every window here opens panes at their own.
+            UserDefaults.standard.removeObject(forKey: "layout.paneWidth")
             matrix.enterPreview()
             messages = busyConversation(1_000, roomID: matrix.selectedRoomID!, tag: UUID().uuidString)
             matrix.messages = messages
@@ -229,6 +231,60 @@ struct WindowHostedTests {
         #expect(time < .milliseconds(1_700), "\(time)")
     }
 
+    @Test(
+        "Dragging the thread's divider through 60 widths beside a 1,000-message conversation stays within budget",
+        .tags(.budget), .enabled(if: budgetsEnabled))
+    func paneResizeBudget() async throws {
+        let time = try await fastest {
+            let harness = Harness()
+            defer { harness.close() }
+            #expect(await harness.settle())
+            try harness.openThread()
+            #expect(await eventually { harness.dividers == 2 })
+            let divider = try #require(
+                harness.shown().filter { String(describing: type(of: $0)) == "ResizePointerView" }
+                    .max { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX })
+            let line = divider.convert(divider.bounds, to: nil).midX
+            func send(_ type: NSEvent.EventType, _ x: CGFloat) throws {
+                harness.window.sendEvent(
+                    try #require(
+                        NSEvent.mouseEvent(
+                            with: type, location: NSPoint(x: x, y: 450), modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: harness.window.windowNumber,
+                            context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+            }
+            try send(.leftMouseDown, line)
+            defer { try? send(.leftMouseUp, line) }
+            // Narrower and back, as a reader settles on a width.
+            var farthest: CGFloat = 0
+            let time = harness.mainThreadTime(60) { step in
+                try? send(.leftMouseDragged, line + CGFloat(step < 30 ? step : 60 - step) * 4)
+                farthest = max(farthest, divider.convert(divider.bounds, to: nil).midX - line)
+            }
+            // The drag reached the pane: it narrowed as far as the pointer went.
+            #expect(farthest >= 100, "\(farthest)")
+            return time
+        }
+        #expect(time < .seconds(2), "\(time)")
+    }
+
+    @Test(
+        "Resizing the window through 60 widths, a 1,000-message conversation and a thread open, stays within budget",
+        .tags(.budget), .enabled(if: budgetsEnabled))
+    func windowResizeBudget() async throws {
+        let time = try await fastest {
+            let harness = Harness()
+            defer { harness.close() }
+            #expect(await harness.settle())
+            try harness.openThread()
+            #expect(await eventually { harness.dividers == 2 })
+            return harness.mainThreadTime(60) { step in
+                harness.resize(1_440 - CGFloat(step < 30 ? step : 60 - step) * 4)
+            }
+        }
+        #expect(time < .seconds(2), "\(time)")
+    }
+
     // capability: conversation.members
     @Test("A click on the member facepile opens channel details on Members")
     func facepileOpensMembers() async throws {
@@ -247,7 +303,7 @@ struct WindowHostedTests {
     }
 
     // capability: conversation.files
-    @Test("Files and links in the toolbar shows the channel's files in place of its messages, and brings them back")
+    @Test("Files and links in the toolbar opens the channel's files beside its messages, closing like a thread")
     func filesTab() async throws {
         let harness = Harness()
         defer { harness.close() }
@@ -259,9 +315,11 @@ struct WindowHostedTests {
         // Files sits just left of the capsule's ⋯.
         let files = harness.toolbarCapsule(inset: 1.5 * Metrics().control)
         try await harness.click(files)
-        #expect(await eventually { filesShown() })
-        try await harness.click(files)
-        #expect(await eventually { !filesShown() && (try? harness.newest().window) != nil })
+        #expect(await eventually { filesShown() && harness.dividers == 2 })
+        // Beside the conversation, which keeps its messages.
+        #expect((try? harness.newest().window) != nil)
+        harness.menu("toggle-pane")
+        #expect(await eventually { !filesShown() && harness.dividers == 1 })
     }
 
     // capability: message.save
@@ -466,6 +524,66 @@ struct WindowHostedTests {
                 .max { $0.minX < $1.minX })
         #expect(editors() == 0)
         #expect(lineShown(pane, from: pane.minY))
+    }
+
+    @Test("Each divider takes the pointer a few points to either side of its line")
+    func dividerHitArea() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        try harness.openThread()
+        #expect(await eventually { harness.dividers == 2 })
+        let content = try #require(harness.window.contentView)
+        for divider in harness.shown().filter({ String(describing: type(of: $0)) == "ResizePointerView" }) {
+            let line = divider.convert(divider.bounds, to: nil).midX
+            for x in [line - 5, line + 5] {
+                let hit = content.hitTest(content.convert(NSPoint(x: x, y: 450), from: nil))
+                #expect(hit === divider, "\(x) of \(line): \(hit.map { String(describing: type(of: $0)) } ?? "nil")")
+            }
+        }
+    }
+
+    @Test("Opening a thread in the open channel leaves the conversation as it is")
+    func threadKeepsConversation() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let newest = try harness.newest()
+        let before = newest.convert(newest.bounds, to: nil)
+        try harness.openThread()
+        #expect(await eventually { harness.dividers == 2 })
+        // The same row, not the conversation loaded again: it keeps its place against the composer.
+        #expect(newest.window != nil)
+        #expect(abs(newest.convert(newest.bounds, to: nil).minY - before.minY) < 1)
+    }
+
+    @Test("A thread left open in a channel is open again on coming back to the channel")
+    func threadSurvivesLeaving() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        try harness.openThread()
+        #expect(await eventually { harness.dividers == 2 })
+        // The thread's first message, in the pane right of the conversation's divider.
+        let root = try #require(harness.messages.last?.body)
+        func threadShown() -> Bool {
+            let shown = harness.shown()
+            guard
+                let edge = shown.filter({ String(describing: type(of: $0)) == "ResizePointerView" })
+                    .map({ $0.convert($0.bounds, to: nil).maxX }).max()
+            else { return false }
+            return shown.contains {
+                ($0 as? MessageTextView)?.string == root && $0.convert($0.bounds, to: nil).minX > edge
+            }
+        }
+        #expect(await eventually { threadShown() })
+
+        let channel = harness.matrix.selectedRoomID
+        harness.menu("next-conversation")
+        #expect(await eventually { harness.dividers == 1 })
+        harness.menu("previous-conversation")
+        #expect(await eventually { harness.matrix.selectedRoomID == channel })
+        #expect(await eventually { harness.dividers == 2 && threadShown() })
     }
 
     @Test("At 150% zoom an open thread stays inside the panel")

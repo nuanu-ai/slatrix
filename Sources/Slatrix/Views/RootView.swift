@@ -60,10 +60,8 @@ struct RootView: View {
     @State private var collapsedSections: Set<String> = []
     /// The dragged thread and details pane width at 100% zoom; 0 until dragged, for each pane's own width.
     @AppStorage("layout.paneWidth") private var preferredPaneWidth = 0.0
-    @State private var resizingPaneWidth: CGFloat?
-    /// Unscaled, like the stored preference: SidebarLayout works at 100% zoom.
-    @State private var resizingSidebarWidth: CGFloat?
-    @State private var availableContentWidth: CGFloat = 1_440
+    @State private var widths = PaneWidths()
+    @State private var arrangement = SidebarLayout.arrangement(availableWidth: 1_440)
     /// Preferences, ⌘K and the shortcuts list, shown in the window like Slack's. Not read by this body, so opening
     /// one re-renders only the modal host, not the whole window.
     @State private var modals = InWindowModal()
@@ -89,12 +87,17 @@ struct RootView: View {
     @State private var channelDetails: ChannelDetailsSelection?
     @State private var leaving: ChatRoom?
     @State private var toasts = Toasts()
-    @State private var channelTab = ChannelTab.messages
+    @State private var channelPanel: ChannelPanel?
     /// The screen a conversation was picked on, which stays up until that conversation can replace it.
     @State private var pickedFrom: Screen?
     @State private var pinPermissionRoomID: String?
     @State private var pinPermission = false
     @State private var threadRoot: ChatMessage?
+    /// Whether messages sit under the conversation's and the thread's headers, which then draw their lines.
+    @State private var conversationContentAbove = false
+    @State private var threadContentAbove = false
+    /// Threads left open in a conversation, by room, for this session: coming back opens them again, as in Slack.
+    @State private var leftThreads: [String: ChatMessage] = [:]
     /// The thread whose "Also send to #channel" is checked; another thread starts unchecked, as in Slack.
     @State private var channelCopyRootID: String?
     @State private var navigationGeneration = UUID()
@@ -139,56 +142,64 @@ struct RootView: View {
     private var colors: AppColors { appearance.colors }
     /// Threads and profiles share one pane width, as in Slack.
     private static let paneWidth: CGFloat = 380
-    /// Where the window buttons end, in window points; they do not zoom.
-    private static let windowButtonsWidth: CGFloat = 72
+    /// Where the window buttons end, in window points: inset as far as they sit from the top, then AppKit's three
+    /// 14-point buttons 20 points apart.
+    private var windowButtonsWidth: CGFloat { (m.paneHeader - 14) / 2 + 54 }
     static let searchWidth: CGFloat = 180
-    private var paneOpen: Bool { profilePane != nil || (room != nil && threadRoot != nil) }
-    /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
-    private var inspectorWidth: CGFloat? {
-        guard paneOpen else { return nil }
-        return SidebarLayout.paneWidth(
-            preferred: resizingPaneWidth ?? CGFloat(preferredPaneWidth),
-            ideal: Self.paneWidth,
-            availableWidth: availableContentWidth / m.zoom, sidebarShown: !sidebarCollapsed)
-    }
+    private var paneOpen: Bool { profilePane != nil || (room != nil && (threadRoot != nil || channelPanel != nil)) }
+    /// Whether an open pane sits beside the conversation; otherwise it lies over it.
+    private var paneBeside: Bool { sidebarCollapsed ? arrangement.paneFitsAlone : arrangement.paneFitsBesideSidebar }
     /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
     /// open pane.
     private var sidebarCollapsed: Bool {
-        sidebarHidden || SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom, paneOpen: paneOpen)
+        sidebarHidden || !(paneOpen ? arrangement.sidebarFitsBesidePane : arrangement.sidebarFits)
     }
-    private var searchFits: Bool {
-        let available = availableContentWidth / m.zoom
+    // The widths below read `widths`, which changes with every step of a resize, so only the frames and controls
+    // that need a width call them; the window's body reads `arrangement`, which changes only at a threshold.
+    /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
+    private func paneWidth(_ widths: PaneWidths) -> CGFloat? {
+        guard paneOpen else { return nil }
+        return SidebarLayout.paneWidth(
+            preferred: widths.pane ?? CGFloat(preferredPaneWidth), ideal: Self.paneWidth,
+            availableWidth: widths.available / m.zoom, sidebarShown: !sidebarCollapsed)
+    }
+    /// Pane width plus its divider, at 100% zoom.
+    private func occupiedPaneWidth(_ widths: PaneWidths) -> CGFloat {
+        paneWidth(widths).map { $0 + SidebarLayout.handleWidth } ?? 0
+    }
+    private func sidebarWidth(_ widths: PaneWidths) -> CGFloat {
+        m(
+            SidebarLayout.effective(
+                preferred: widths.sidebar ?? SidebarLayout.validatedPreferred(preferredSidebarWidth),
+                availableWidth: widths.available / m.zoom, inspectorWidth: occupiedPaneWidth(widths)))
+    }
+    private func searchFits(_ widths: PaneWidths) -> Bool {
+        let available = widths.available / m.zoom
         // Beside the sidebar, or after the window buttons and the button that brings it back.
         let leading =
             sidebarCollapsed
-            ? (Self.windowButtonsWidth + m.control + m.sp12) / m.zoom
-            : (sidebarListWidth + m.sidebarInset) / m.zoom + SidebarLayout.handleWidth
+            ? (windowButtonsWidth + m.control + m.sp12) / m.zoom
+            : (sidebarWidth(widths) + m.sidebarInset) / m.zoom + SidebarLayout.handleWidth
         return SidebarLayout.searchFits(
-            availableWidth: available, toolbarWidth: available - leading - occupiedInspectorWidth)
-    }
-    /// Pane width plus its divider, at 100% zoom.
-    private var occupiedInspectorWidth: CGFloat { inspectorWidth.map { $0 + SidebarLayout.handleWidth } ?? 0 }
-    private var sidebarListWidth: CGFloat {
-        m(
-            SidebarLayout.effective(
-                preferred: resizingSidebarWidth ?? SidebarLayout.validatedPreferred(preferredSidebarWidth),
-                availableWidth: availableContentWidth / m.zoom, inspectorWidth: occupiedInspectorWidth))
+            availableWidth: available, toolbarWidth: available - leading - occupiedPaneWidth(widths))
     }
     private var layoutMeasurement: some View {
         GeometryReader { geometry in
-            Color.clear.onAppear { availableContentWidth = geometry.size.width }
-                .onChange(of: geometry.size.width) { _, width in availableContentWidth = width }
+            Color.clear.onChange(of: geometry.size.width / m.zoom, initial: true) { _, width in
+                widths.available = geometry.size.width
+                let next = SidebarLayout.arrangement(availableWidth: width)
+                if next != arrangement { arrangement = next }
+            }
         }
     }
 
     private var room: ChatRoom? { shownRoom(matrix, workspaceID: workspaceID) }
     private struct Screen {
         var route: AppRoute
-        var tab: ChannelTab
     }
     private var screen: Screen {
         ConversationNavigation.shown(
-            Screen(route: route, tab: channelTab), from: pickedFrom, showing: room?.id, opening: pendingRoomID)
+            Screen(route: route), from: pickedFrom, showing: room?.id, opening: pendingRoomID)
     }
     /// Opened at its unread line, from the cache or at the line from the server.
     private var isResumingUnread: Bool {
@@ -219,7 +230,6 @@ struct RootView: View {
         let workspace: String?
         let sourceRoute: AppRoute
         let selectedRoomID: String?
-        let tab: ChannelTab
     }
     private struct ProfileSelection: Identifiable {
         var id: String
@@ -471,7 +481,7 @@ struct RootView: View {
                     directMessagesColumn = false
                     cancelCurrentEdit()
                     cancelReply()
-                    channelTab = .messages
+                    channelPanel = nil
                     navigationGeneration = UUID()
                     pendingRoomID = nil
                     matrix.setMessageActionThread(rootID: nil)
@@ -482,7 +492,10 @@ struct RootView: View {
             }
             .onChange(of: threadRoot?.eventID) { _, id in
                 updateActionThreadVisibility()
-                if id != nil { profilePane = nil }
+                if id != nil {
+                    profilePane = nil
+                    channelPanel = nil
+                }
             }
             .onChange(of: threadReadyID) { _, _ in updateActionThreadVisibility() }
             .onChange(of: navigationGeneration) { _, _ in
@@ -503,15 +516,6 @@ struct RootView: View {
                     target.threadID != threadRoot?.eventID
                 {
                     cancelReply()
-                }
-            }
-            .onChange(of: channelTab) { _, tab in
-                cancelStaleThreadOpen()
-                if tab != .messages {
-                    cancelCurrentEdit()
-                    cancelReply()
-                    cancelStaleForward()
-                    cancelStaleCaption()
                 }
             }
     }
@@ -639,7 +643,7 @@ struct RootView: View {
                     Task {
                         guard appearance.notifications, composerIdentity == identity,
                             matrix.notificationSessionID == session,
-                            !(platform.conversationWindowIsVisible && route == .home && channelTab == .messages
+                            !(platform.conversationWindowIsVisible && route == .home
                                 && matrix.focusedEventID == nil && matrix.selectedRoomID == notification.target.roomID
                                 && !hasModal && !hasNativeModal && !matrix.verification.isPresented)
                         else { return }
@@ -679,12 +683,15 @@ struct RootView: View {
                     HStack(spacing: 0) {
                         if !sidebarCollapsed {
                             sidebar.padding([.leading, .vertical], m.sidebarInset).transition(.move(edge: .leading))
-                            ResizeHandle(
-                                currentWidth: sidebarListWidth, onChange: resizeSidebar, onCommit: commitSidebarWidth,
-                                onReset: {
-                                    resizingSidebarWidth = nil
-                                    preferredSidebarWidth = Double(SidebarLayout.defaultWidth)
-                                })
+                            WithWidths(widths) { widths in
+                                ResizeHandle(
+                                    currentWidth: sidebarWidth(widths), onChange: resizeSidebar,
+                                    onCommit: commitSidebarWidth,
+                                    onReset: {
+                                        widths.sidebar = nil
+                                        preferredSidebarWidth = Double(SidebarLayout.defaultWidth)
+                                    })
+                            }
                         }
                         HStack(spacing: 0) {
                             VStack(spacing: 0) {
@@ -708,22 +715,27 @@ struct RootView: View {
                             .overlay(alignment: .top) { banners.padding(.top, m.paneHeader) }
                             // Too narrow to sit beside: the pane lies over the conversation's right side.
                             .overlay(alignment: .trailing) {
-                                if paneOpen && inspectorWidth == nil {
+                                if paneOpen && !paneBeside {
                                     inspector(room).frame(maxWidth: m(Self.paneWidth))
                                         .elevation(.e3, cornerRadius: 0)
                                 }
                             }
-                            if let width = inspectorWidth {
-                                ResizeHandle(
-                                    pane: .trailing,
-                                    label: profilePane != nil
-                                        ? "Profile width" : threadRoot != nil ? "Thread width" : "Details width",
-                                    currentWidth: m(width), onChange: resizePane, onCommit: commitPaneWidth,
-                                    onReset: {
-                                        resizingPaneWidth = nil
-                                        preferredPaneWidth = 0
-                                    })
-                                inspector(room).layoutIsolated().frame(width: m(width))
+                            if paneOpen && paneBeside {
+                                WithWidths(widths) { widths in
+                                    ResizeHandle(
+                                        pane: .trailing,
+                                        label: profilePane != nil
+                                            ? "Profile width" : threadRoot != nil ? "Thread width" : "Details width",
+                                        currentWidth: m(paneWidth(widths) ?? Self.paneWidth), onChange: resizePane,
+                                        onCommit: commitPaneWidth,
+                                        onReset: {
+                                            widths.pane = nil
+                                            preferredPaneWidth = 0
+                                        })
+                                }
+                                Sized(widths, width: { m(paneWidth($0) ?? Self.paneWidth) }) {
+                                    inspector(room).layoutIsolated()
+                                }
                             }
                         }
                     }
@@ -810,30 +822,32 @@ struct RootView: View {
                 onEditProfile: { editingProfile = true }, onClose: { self.profilePane = nil })
         } else if let room, let root = threadRoot {
             threadPanel(root: root, room: room)
+        } else if let room, let channelPanel {
+            listPanel(channelPanel, room: room)
         }
     }
 
     private func resizeSidebar(_ width: CGFloat) {
         guard width.isFinite else { return }
         let limit = SidebarLayout.effective(
-            preferred: SidebarLayout.maximumWidth, availableWidth: availableContentWidth / m.zoom,
-            inspectorWidth: occupiedInspectorWidth)
-        resizingSidebarWidth = min(limit, max(SidebarLayout.minimumWidth, width / m.zoom))
+            preferred: SidebarLayout.maximumWidth, availableWidth: widths.available / m.zoom,
+            inspectorWidth: occupiedPaneWidth(widths))
+        widths.sidebar = min(limit, max(SidebarLayout.minimumWidth, width / m.zoom))
     }
     private func resizePane(_ width: CGFloat) {
         guard width.isFinite else { return }
-        resizingPaneWidth = min(SidebarLayout.maximumPaneWidth, max(SidebarLayout.minimumPaneWidth, width / m.zoom))
+        widths.pane = min(SidebarLayout.maximumPaneWidth, max(SidebarLayout.minimumPaneWidth, width / m.zoom))
     }
     private func commitPaneWidth() {
-        guard resizingPaneWidth != nil else { return }
+        guard widths.pane != nil else { return }
         // Keep what is on screen, not a drag past the limit, so a wider window later does not jump.
-        if let shown = inspectorWidth { preferredPaneWidth = Double(shown) }
-        resizingPaneWidth = nil
+        if let shown = paneWidth(widths) { preferredPaneWidth = Double(shown) }
+        widths.pane = nil
     }
     private func commitSidebarWidth() {
-        guard let width = resizingSidebarWidth else { return }
+        guard let width = widths.sidebar else { return }
         preferredSidebarWidth = Double(width)
-        resizingSidebarWidth = nil
+        widths.sidebar = nil
     }
 
     private func acknowledgeVisibleTimeline() async {
@@ -889,7 +903,7 @@ struct RootView: View {
     }
     private var readInputs: ReadInputs {
         ReadInputs(
-            route: screen.route, tab: screen.tab, workspaceID: workspaceID, visibleBottomRoomID: visibleBottomRoomID,
+            route: screen.route, workspaceID: workspaceID, visibleBottomRoomID: visibleBottomRoomID,
             windowCanRead: windowCanRead, hasPresentedSheet: hasPresentedSheet, threadRootID: threadRoot?.eventID,
             threadReadyID: threadReadyID, openingThreadID: openingThreadID, threadLoadFailed: threadLoadError != nil,
             localReady: localReady, threadReadViewport: threadReadViewport, readHold: readHold)
@@ -927,6 +941,9 @@ struct RootView: View {
 
     /// The conversation list, beside the conversation or in the drawer.
     private var sidebar: some View {
+        Sized(widths, width: sidebarWidth) { sidebarContent }
+    }
+    private var sidebarContent: some View {
         SidebarView(
             matrix: matrix,
             route: Binding(
@@ -960,8 +977,8 @@ struct RootView: View {
             }, onEditWorkspace: { roomDetails = DetailsSelection(id: $0) },
             onNotifications: { roomNotifications = DetailsSelection(id: $0) },
             onHide: { handleMenu("toggle-sidebar") }, accessory: sidebarAccessory,
-            listWidth: sidebarListWidth, onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections
-        ).layoutIsolated().frame(width: sidebarListWidth)
+            onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections
+        ).layoutIsolated()
     }
 
     /// The collapsed sidebar, slid over the conversation from the title bar's button, with a scrim that closes it.
@@ -1004,7 +1021,7 @@ struct RootView: View {
             }
             title().frame(maxWidth: .infinity, alignment: .leading).padding(.leading, m.sp4)
             trailing()
-            TitleSearch(bar: searchBar, fits: searchFits) {
+            TitleSearch(bar: searchBar, widths: widths, fits: searchFits) {
                 SearchBarField(
                     bar: searchBar,
                     prompt: WorkspaceRail.searchPrompt(workspaceID: workspaceID, workspaces: matrix.workspaces),
@@ -1013,7 +1030,7 @@ struct RootView: View {
             }.disabled(matrix.user == nil)
         }
         // The window buttons are AppKit chrome and do not zoom.
-        .padding(.leading, sidebarCollapsed ? Self.windowButtonsWidth + m.sp16 : m.sp20).padding(.trailing, m.sp16)
+        .padding(.leading, sidebarCollapsed ? windowButtonsWidth + m.sp16 : m.sp20).padding(.trailing, m.sp16)
         .frame(height: m.paneHeader).background(WindowDragArea())
         .foregroundStyle(colors.textSecondary)
     }
@@ -1023,16 +1040,6 @@ struct RootView: View {
             channelHeader(room)
             if room.membership == "invite" {
                 inviteView(room)
-            } else if screen.tab == .pins {
-                PinnedMessagesView(
-                    matrix: matrix, service: matrix.pinnedMessages, room: room,
-                    onOpen: { message in selectRoom(message.roomID, record: true, eventID: message.eventID) },
-                    onOpenProfile: openProfile)
-            } else if screen.tab == .files {
-                SharedFilesView(
-                    matrix: matrix, service: matrix.sharedFiles, workspaceID: workspaceID, channelID: room.id,
-                    onOpen: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
-                    onOpenMedia: { [viewer] in viewer.open($0, files: $1) })
             } else {
                 TimelineView(
                     matrix: matrix, room: room, savedIDs: savedIDs,
@@ -1051,7 +1058,7 @@ struct RootView: View {
                     }, onJumpToLatest: { selectRoom(room.id) }, startsAtUnread: isResumingUnread,
                     editing: editTarget?.surface == .conversation, onForward: startForward, onEditCaption: startCaption,
                     onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
-                    inlineVideo: viewer.inlineVideo
+                    inlineVideo: viewer.inlineVideo, contentAbove: $conversationContentAbove
                 ).id("\(room.id):\(matrix.timelineSelectionID)")
                 VStack(spacing: 0) {
                     if room.canPostMessages == false {
@@ -1126,12 +1133,12 @@ struct RootView: View {
             .dropToUpload("Upload to \(room.writtenName)")
     }
     private static let cannotPost = "You don’t have permission to post in this channel."
-    private func openChannelTab(_ tab: ChannelTab) {
-        if tab != .messages {
-            matrix.setMessageActionThread(rootID: nil)
-            threadRoot = nil
+    private func openChannelPanel(_ panel: ChannelPanel?) {
+        if panel != nil {
+            if threadRoot != nil { closeThread() }
+            profilePane = nil
         }
-        channelTab = tab
+        channelPanel = panel
     }
     private func channelHeader(_ room: ChatRoom) -> some View {
         toolbar {
@@ -1143,7 +1150,7 @@ struct RootView: View {
                     .disabled(matrix.isPreview)
             }
             ChannelHeader(
-                matrix: matrix, room: room, tab: Binding(get: { screen.tab }, set: openChannelTab)
+                matrix: matrix, room: room, panel: Binding(get: { channelPanel }, set: openChannelPanel)
             ) { headerAction($0, room: room) }
         }
     }
@@ -1166,6 +1173,36 @@ struct RootView: View {
         case .search: handleMenu("search-conversation")
         case .leave: leaving = room
         }
+    }
+    /// Pinned messages or files, beside the conversation as a thread is, so the conversation stays put.
+    private func listPanel(_ panel: ChannelPanel, room: ChatRoom) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: m.sp8) {
+                VStack(alignment: .leading, spacing: m(1)) {
+                    Text(panel == .pins ? "Pinned" : "Files").font(m.font(.title3, .semibold))
+                        .foregroundStyle(colors.textPrimary)
+                    Text(room.writtenName).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                }.lineLimit(1)
+                Spacer()
+                IconButton(
+                    symbol: "xmark", label: panel == .pins ? "Close pinned" : "Close files", role: .subheadline,
+                    round: true
+                ) { channelPanel = nil }.fontWeight(.semibold).foregroundStyle(colors.textSecondary)
+            }.padding(.leading, m.sp20).padding(.trailing, m.sp12).frame(height: m.paneHeader)
+                .background(WindowDragArea())
+            switch panel {
+            case .pins:
+                PinnedMessagesView(
+                    matrix: matrix, service: matrix.pinnedMessages, room: room,
+                    onOpen: { message in selectRoom(message.roomID, record: true, eventID: message.eventID) },
+                    onOpenProfile: openProfile)
+            case .files:
+                SharedFilesView(
+                    matrix: matrix, service: matrix.sharedFiles, workspaceID: workspaceID, channelID: room.id,
+                    onOpen: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
+                    onOpenMedia: { [viewer] in viewer.open($0, files: $1) })
+            }
+        }.background(colors.canvas)
     }
     private func threadPanel(root: ChatMessage, room: ChatRoom) -> some View {
         VStack(spacing: 0) {
@@ -1197,7 +1234,7 @@ struct RootView: View {
                     threadReadViewport.record(visible, from: identity, current: matrix.threadReadIdentity)
                 }, onForward: startForward, onEditCaption: startCaption,
                 onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) },
-                inlineVideo: viewer.inlineVideo
+                inlineVideo: viewer.inlineVideo, contentAbove: $threadContentAbove
             ).id(root.eventID)
             VStack(spacing: 0) {
                 if room.canPostMessages == false {
@@ -1600,7 +1637,7 @@ struct RootView: View {
     }
     private func startReply(_ message: ChatMessage, surface: MessageReplyTarget.Surface, session: UUID, timeline: UUID)
     {
-        guard !matrix.isPreview, localReady, pendingRoomID == nil, route == .home, channelTab == .messages,
+        guard !matrix.isPreview, localReady, pendingRoomID == nil, route == .home,
             room?.id == message.roomID, room?.membership == "join",
             matrix.notificationSessionID == session, matrix.timelineSelectionID == timeline
         else { return }
@@ -1614,7 +1651,7 @@ struct RootView: View {
     }
     private func prepareReply(_ target: MessageReplyTarget) {
         guard target.isCurrent(replyTarget, owner: replyOwner), !matrix.isPreview,
-            route == .home, channelTab == .messages, room?.id == target.message.roomID, room?.membership == "join"
+            route == .home, room?.id == target.message.roomID, room?.membership == "join"
         else { return }
         replyError = nil
         if pendingRoomID == nil, matrix.isLiveTimelineReady(roomID: target.message.roomID),
@@ -1629,7 +1666,7 @@ struct RootView: View {
         Task { @MainActor in
             @MainActor func isCurrent() -> Bool {
                 navigationGeneration == generation && target.isCurrent(replyTarget, owner: replyOwner) && route == .home
-                    && channelTab == .messages && room?.id == target.message.roomID && room?.membership == "join"
+                    && room?.id == target.message.roomID && room?.membership == "join"
             }
             guard isCurrent() else { return }
             do {
@@ -1688,6 +1725,9 @@ struct RootView: View {
                 for: matrix.rooms.first { $0.id == id }, selectedRoomID: matrix.selectedRoomID,
                 explicitEventID: eventID, opensThread: thread != nil)
         let destinationEventID = eventID ?? resumeAnchor
+        if let current = matrix.selectedRoomID, current != id, let open = threadRoot { leftThreads[current] = open }
+        // Only a plain visit: a jump to a message or a thread of its own wins.
+        let leftThread = thread == nil && eventID == nil && restoringReply == nil ? leftThreads[id] : nil
         let requiresRoomSelection = !matrix.isLiveTimelineReady(roomID: id) || pendingRoomID != nil
         // The cases below that open a new timeline.
         if destinationEventID != nil || thread == nil || requiresRoomSelection {
@@ -1715,7 +1755,7 @@ struct RootView: View {
             workspaceInitialized = true
         }
         route = .home
-        channelTab = .messages
+        if id != matrix.selectedRoomID { channelPanel = nil }
         matrix.setMessageActionThread(rootID: nil)
         threadRoot = nil
         threadReadyID = nil
@@ -1729,7 +1769,7 @@ struct RootView: View {
         if matrix.isPreview {
             matrix.selectPreviewRoom(id)
             pendingRoomID = nil
-            if let thread {
+            if let thread = thread ?? leftThread {
                 threadRoot = thread
                 matrix.openPreviewThread(thread)
                 threadReadyID = thread.eventID
@@ -1740,9 +1780,7 @@ struct RootView: View {
             Task { @MainActor in
                 guard navigationGeneration == generation, composerIdentity == identity else { return }
                 if let restoringReply {
-                    guard restoringReply.isCurrent(replyTarget, owner: replyOwner), route == .home,
-                        channelTab == .messages,
-                        room?.id == id
+                    guard restoringReply.isCurrent(replyTarget, owner: replyOwner), route == .home, room?.id == id
                     else {
                         pendingRoomID = nil
                         return
@@ -1760,9 +1798,7 @@ struct RootView: View {
                 else { return }
                 pendingRoomID = nil
                 if let restoringReply {
-                    guard restoringReply.isCurrent(replyTarget, owner: replyOwner), route == .home,
-                        channelTab == .messages,
-                        room?.id == id
+                    guard restoringReply.isCurrent(replyTarget, owner: replyOwner), route == .home, room?.id == id
                     else { return }
                     guard matrix.isLiveTimelineReady(roomID: id) else {
                         replyOpening = false
@@ -1772,37 +1808,62 @@ struct RootView: View {
                 }
                 // A jump to a thread reply opens its thread beside the conversation, as Slack does.
                 let replyRoot = replyRootID.flatMap { root in matrix.messages.first { $0.eventID == root } }
-                if let thread = thread ?? replyRoot {
-                    threadRoot = thread
-                    openingThreadID = thread.eventID
-                    do {
-                        try await matrix.loadThread(thread)
-                        guard navigationGeneration == generation, composerIdentity == identity,
-                            matrix.selectedRoomID == id, threadRoot?.eventID == thread.eventID
-                        else { return }
-                        threadReadyID = thread.eventID
-                        openingThreadID = nil
-                        Performance.finishOnScreen(.threadOpen, ["messages": matrix.threadMessages.count])
-                        if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
-                            replyOpening = false
-                            replyError = nil
-                        }
-                    } catch {
-                        guard navigationGeneration == generation, composerIdentity == identity,
-                            matrix.selectedRoomID == id
-                        else { return }
-                        openingThreadID = nil
-                        if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
-                            replyOpening = false
-                            replyError = MatrixService.safeError(error)
-                        } else {
-                            threadLoadError = MatrixService.safeError(error)
-                        }
-                    }
+                if let thread = thread ?? replyRoot ?? leftThread {
+                    await loadThread(thread, generation: generation, identity: identity, restoringReply: restoringReply)
                 } else if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
                     replyOpening = false
                     replyError = nil
                 }
+            }
+        }
+    }
+    /// A thread in the conversation on screen opens beside it, which stays as it is; one elsewhere opens with its
+    /// conversation.
+    private func openThread(_ root: ChatMessage, room id: String) {
+        guard id == matrix.selectedRoomID, pendingRoomID == nil, route == .home,
+            matrix.isPreview || matrix.isLiveTimelineReady(roomID: id)
+        else { return selectRoom(id, record: true, thread: root) }
+        let generation = UUID()
+        navigationGeneration = generation
+        matrix.setMessageActionThread(rootID: nil)
+        threadReadyID = nil
+        threadLoadError = nil
+        if matrix.isPreview {
+            threadRoot = root
+            matrix.openPreviewThread(root)
+            threadReadyID = root.eventID
+            return
+        }
+        let identity = composerIdentity
+        Task { @MainActor in await loadThread(root, generation: generation, identity: identity, restoringReply: nil) }
+    }
+    private func loadThread(
+        _ thread: ChatMessage, generation: UUID, identity: ComposerIdentity, restoringReply: MessageReplyTarget?
+    ) async {
+        let id = thread.roomID
+        threadRoot = thread
+        openingThreadID = thread.eventID
+        do {
+            try await matrix.loadThread(thread)
+            guard navigationGeneration == generation, composerIdentity == identity,
+                matrix.selectedRoomID == id, threadRoot?.eventID == thread.eventID
+            else { return }
+            threadReadyID = thread.eventID
+            openingThreadID = nil
+            Performance.finishOnScreen(.threadOpen, ["messages": matrix.threadMessages.count])
+            if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
+                replyOpening = false
+                replyError = nil
+            }
+        } catch {
+            guard navigationGeneration == generation, composerIdentity == identity, matrix.selectedRoomID == id
+            else { return }
+            openingThreadID = nil
+            if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
+                replyOpening = false
+                replyError = MatrixService.safeError(error)
+            } else {
+                threadLoadError = MatrixService.safeError(error)
             }
         }
     }
@@ -1836,7 +1897,7 @@ struct RootView: View {
             guard let root = candidates.first(where: { $0.eventID == rootID && $0.roomID == message.roomID }) else {
                 return
             }
-            selectRoom(root.roomID, record: true, thread: root)
+            openThread(root, room: root.roomID)
             return
         }
         Performance.start(.threadOpen)
@@ -1847,7 +1908,7 @@ struct RootView: View {
             message: message, owner: composerIdentity,
             selection: matrix.timelineSelectionID, navigation: navigationGeneration,
             workspace: workspaceID, sourceRoute: route,
-            selectedRoomID: matrix.selectedRoomID, tab: channelTab)
+            selectedRoomID: matrix.selectedRoomID)
         pendingThreadOpen = request
         threadOpenTask = Task { @MainActor in
             do {
@@ -1859,7 +1920,7 @@ struct RootView: View {
                 threadOpenTask = nil
                 pendingThreadOpen = nil
                 threadOpenError = nil
-                selectRoom(root.roomID, record: true, thread: root)
+                openThread(root, room: root.roomID)
             } catch is CancellationError {
                 if pendingThreadOpen?.id == request.id { cancelThreadOpen() }
             } catch {
@@ -1877,7 +1938,7 @@ struct RootView: View {
         pendingThreadOpen?.id == request.id && request.owner == composerIdentity && !matrix.isPreview
             && request.selection == matrix.timelineSelectionID && request.navigation == navigationGeneration
             && request.workspace == workspaceID
-            && route == request.sourceRoute && channelTab == request.tab && pendingRoomID == nil && localReady
+            && route == request.sourceRoute && pendingRoomID == nil && localReady
             && matrix.selectedRoomID == request.selectedRoomID
             && matrix.rooms.contains(where: { $0.id == request.message.roomID && $0.membership == "join" })
     }
@@ -2059,7 +2120,7 @@ struct RootView: View {
     }
     private func startForward(_ target: MessageActionTarget) {
         guard !hasModal, !hasNativeModal, !matrix.verification.isPresented,
-            !matrix.isPreview, localReady, pendingRoomID == nil, route == .home, channelTab == .messages,
+            !matrix.isPreview, localReady, pendingRoomID == nil, route == .home,
             room?.id == target.message.roomID, room?.membership == "join",
             matrix.isCurrentMessageAction(target)
         else { return }
@@ -2068,7 +2129,7 @@ struct RootView: View {
     private func cancelStaleForward() {
         guard let selection = forwarding else { return }
         guard selection.navigation == navigationGeneration, selection.workspaceID == workspaceID,
-            route == .home, channelTab == .messages, pendingRoomID == nil,
+            route == .home, pendingRoomID == nil,
             room?.id == selection.target.message.roomID, room?.membership == "join",
             matrix.isCurrentMessageAction(selection.target)
         else {
@@ -2078,7 +2139,7 @@ struct RootView: View {
     }
     private func startCaption(_ target: MessageActionTarget) {
         guard !hasModal, !hasNativeModal, !matrix.verification.isPresented,
-            !matrix.isPreview, localReady, pendingRoomID == nil, route == .home, channelTab == .messages,
+            !matrix.isPreview, localReady, pendingRoomID == nil, route == .home,
             room?.id == target.message.roomID, room?.membership == "join",
             matrix.isCurrentMessageAction(target)
         else { return }
@@ -2087,7 +2148,7 @@ struct RootView: View {
     private func cancelStaleCaption() {
         guard let selection = mediaCaption else { return }
         guard selection.navigation == navigationGeneration, selection.workspaceID == workspaceID,
-            route == .home, channelTab == .messages, pendingRoomID == nil,
+            route == .home, pendingRoomID == nil,
             room?.id == selection.target.message.roomID, room?.membership == "join",
             matrix.isCurrentMessageAction(selection.target)
         else {
@@ -2097,7 +2158,7 @@ struct RootView: View {
     }
     private func startEdit(_ action: MessageActionTarget) {
         let message = action.message
-        guard !matrix.isPreview, localReady, pendingRoomID == nil, route == .home, channelTab == .messages,
+        guard !matrix.isPreview, localReady, pendingRoomID == nil, route == .home,
             room?.id == message.roomID, room?.membership == "join", matrix.isCurrentMessageAction(action),
             let target = MessageEditTarget(message: message, surface: action.surface, context: editContext)
         else { return }
@@ -2116,7 +2177,7 @@ struct RootView: View {
             action.surface == target.surface,
             matrix.isCurrentMessageAction(action)
         else { return false }
-        return isCurrentComposer(context) && pendingRoomID == nil && route == .home && channelTab == .messages
+        return isCurrentComposer(context) && pendingRoomID == nil && route == .home
             && room?.id == target.message.roomID && room?.membership == "join"
             && target.isCurrent(editTarget, in: editContext)
     }
@@ -2225,7 +2286,7 @@ struct RootView: View {
             MessageReplyTarget.authorizes(
                 reply, current: replyTarget, owner: replyOwner, roomID: room.id, threadID: threadID),
             reply == nil
-                || (route == .home && channelTab == .messages && room.id == self.room?.id
+                || (route == .home && room.id == self.room?.id
                     && matrix.isLiveTimelineReady(roomID: room.id) && !replyOpening && replyError == nil
                     && !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         else {
@@ -2536,7 +2597,7 @@ struct RootView: View {
         workspaceInitialized = false
         channelDetails = nil
         leaving = nil
-        channelTab = .messages
+        channelPanel = nil
         pinPermissionRoomID = nil
         pinPermission = false
         route = .home
@@ -2553,9 +2614,11 @@ struct RootView: View {
         profilePane = nil
         roomDetails = nil
         roomNotifications = nil
+        leftThreads = [:]
         loadLocalData()
     }
     private func closeThread() {
+        if let id = matrix.selectedRoomID { leftThreads[id] = nil }
         navigationGeneration = UUID()
         if replyTarget?.threadID != nil { cancelReply() }
         matrix.setMessageActionThread(rootID: nil)
@@ -2644,7 +2707,7 @@ struct RootView: View {
             route = .home
         case "toggle-sidebar":
             // A window too narrow for the sidebar can only show it as the drawer.
-            if SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom, paneOpen: paneOpen) {
+            if !(paneOpen ? arrangement.sidebarFitsBesidePane : arrangement.sidebarFits) {
                 sidebarDrawer.toggle()
             } else {
                 sidebarHidden.toggle()
@@ -2656,6 +2719,7 @@ struct RootView: View {
                 return
             }
             if route == .home, threadRoot != nil { closeThread() }
+            channelPanel = nil
         case "mark-read":
             if sidebarCollapsed && sidebarDrawer {
                 sidebarDrawer = false
@@ -2669,7 +2733,7 @@ struct RootView: View {
                 markReadState(room, unread: false)
             }
         case "react-last":
-            guard route == .home, channelTab == .messages, editTarget == nil,
+            guard route == .home, editTarget == nil,
                 let last = matrix.messages.last(where: { $0.sendState == "sent" && !$0.isRedacted }),
                 let target = matrix.captureMessageAction(message: last, surface: .conversation)
             else { return }
@@ -2705,7 +2769,6 @@ struct RootView: View {
 /// What the read policies need from the window's own state.
 private struct ReadInputs {
     var route: AppRoute
-    var tab: ChannelTab
     var workspaceID: String?
     var visibleBottomRoomID: String?
     var windowCanRead: Bool
@@ -2732,7 +2795,7 @@ private struct ReadInputs {
             selectedRoomID: matrix.selectedRoomID,
             latestVisibleEventID: latest?.kind == "m.room.encrypted" ? nil : latest?.eventID,
             isPreview: matrix.isPreview, isJoined: shownRoom(matrix, workspaceID: workspaceID)?.membership == "join",
-            isMainTimeline: route == .home && tab == .messages,
+            isMainTimeline: route == .home,
             isLiveTimeline: matrix.focusedEventID == nil && matrix.status == .ready,
             isAtBottom: visibleBottomRoomID == matrix.selectedRoomID && visibleBottomRoomID != nil,
             isWindowActive: visible, isWindowVisible: visible, isWindowUnoccluded: visible,
@@ -2835,11 +2898,13 @@ private struct SidebarToggle: View {
 /// The title bar's search field, or in a narrow window a button that opens it in its place until it closes.
 private struct TitleSearch<Field: View>: View {
     let bar: SearchBar
-    let fits: Bool
+    let widths: PaneWidths
+    let fits: (PaneWidths) -> Bool
     @ViewBuilder let field: () -> Field
     @State private var open = false
     var body: some View {
-        Group {
+        let fits = fits(widths)
+        return Group {
             if fits || open {
                 // Opened from the button, ⌘G or ⌘F: the field was not there to take the cursor, so it takes it now.
                 field().onAppear { if open { bar.focus() } }
@@ -2948,4 +3013,37 @@ private struct ComposerCard: ViewModifier {
             .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
             .elevation(.e2, cornerRadius: m.radiusLarge)
     }
+}
+
+/// The widths that change with every step of a resize: the window's, and a divider's while it is dragged, at 100%
+/// zoom. Only the frames and controls that need a width read them, so a step lays the window out without building
+/// it again.
+@Observable final class PaneWidths {
+    var available: CGFloat = 1_440
+    var sidebar: CGFloat?
+    var pane: CGFloat?
+}
+
+/// `content`, built once by its parent, as wide as `width` makes it.
+private struct Sized<Content: View>: View {
+    let widths: PaneWidths
+    let width: (PaneWidths) -> CGFloat
+    let content: Content
+    init(_ widths: PaneWidths, width: @escaping (PaneWidths) -> CGFloat, @ViewBuilder content: () -> Content) {
+        self.widths = widths
+        self.width = width
+        self.content = content()
+    }
+    var body: some View { content.frame(width: width(widths)) }
+}
+
+/// Builds `content` from the widths, so only it redraws as they change.
+private struct WithWidths<Content: View>: View {
+    let widths: PaneWidths
+    @ViewBuilder let content: (PaneWidths) -> Content
+    init(_ widths: PaneWidths, @ViewBuilder content: @escaping (PaneWidths) -> Content) {
+        self.widths = widths
+        self.content = content
+    }
+    var body: some View { content(widths) }
 }

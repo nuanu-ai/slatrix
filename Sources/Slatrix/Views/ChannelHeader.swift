@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The conversation's buttons in the toolbar, in one capsule: members, which opens Members; pins and files, which
-/// swap the timeline for that list and back; and ⋯ with the rest. Reads the member list itself, so members arriving
+/// open that list beside the conversation and close it; and ⋯ with the rest. Reads the member list itself, so members arriving
 /// redraw only the capsule.
 struct ChannelHeader: View {
     enum Action: Hashable {
@@ -12,7 +12,7 @@ struct ChannelHeader: View {
     }
     let matrix: MatrixService
     let room: ChatRoom
-    @Binding var tab: ChannelTab
+    @Binding var panel: ChannelPanel?
     let perform: (Action) -> Void
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
@@ -42,11 +42,11 @@ struct ChannelHeader: View {
         }.foregroundStyle(colors.textSecondary)
     }
 
-    /// Shows a list in the timeline's place, or the timeline again; the accent marks the one showing.
-    private func toggle(_ value: ChannelTab, symbol: String, label: String, count: Int = 0) -> some View {
-        let shown = tab == value
+    /// Opens a list beside the conversation, or closes it; the accent marks the one showing.
+    private func toggle(_ value: ChannelPanel, symbol: String, label: String, count: Int = 0) -> some View {
+        let shown = panel == value
         return Button {
-            tab = shown ? .messages : value
+            panel = shown ? nil : value
         } label: {
             Image(systemName: shown ? symbol + ".fill" : symbol).font(m.font(.body))
                 .foregroundStyle(shown ? appearance.colors.accent : appearance.colors.textSecondary)

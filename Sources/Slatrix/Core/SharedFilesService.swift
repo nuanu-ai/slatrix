@@ -268,13 +268,6 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
         }
     }
 
-    /// Refresh: the conversation's timeline read again, not its kept list.
-    func reload(roomID id: String) async {
-        close()
-        kept.take(id)?.cancel()
-        await open(roomID: id)
-    }
-
     private func restore(_ entry: Kept, roomID id: String) {
         scope = entry.scope
         roomID = id

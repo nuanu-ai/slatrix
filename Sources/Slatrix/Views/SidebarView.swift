@@ -26,7 +26,6 @@ struct SidebarView: View {
     var onHide: () -> Void
     /// Set while an update waits or in the preview, for the button beside you at the bottom.
     var accessory: (title: String, action: () -> Void)? = nil
-    var listWidth: CGFloat = 264
     var onBrowseChannels: () -> Void
     /// Section titles folded shut; held by the window, so they survive the sidebar moving into the drawer and back.
     @Binding var collapsed: Set<String>
@@ -70,7 +69,6 @@ struct SidebarView: View {
             footer
         }
         .padding(.horizontal, m(10))
-        .frame(width: listWidth)
         .background(colors.sidebar, in: RoundedRectangle(cornerRadius: m.radiusPanel))
         .elevation(.e1, cornerRadius: m.radiusPanel)
         .foregroundStyle(colors.textBody)
