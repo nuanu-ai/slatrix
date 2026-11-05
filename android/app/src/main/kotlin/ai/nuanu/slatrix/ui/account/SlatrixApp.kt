@@ -73,6 +73,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import ai.nuanu.slatrix.core.OpenChannel
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.MatrixActivity
+import ai.nuanu.slatrix.core.ActivityBadge
+import ai.nuanu.slatrix.core.RoomUnread
 import ai.nuanu.slatrix.core.inWorkspace
 import ai.nuanu.slatrix.core.MatrixThreadFeed
 import ai.nuanu.slatrix.core.RoomSummary
@@ -176,6 +178,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                     (id ?: WorkspaceRail.AllToken).let { remembered = it; workspacePreferences.selectedSpaceId = it }
                 }
                 val thread = threads?.selected?.collectAsState()?.value
+                // However a thread opens, its replies count as opened, and so do the ones that land while it shows.
+                LaunchedEffect(activity, thread?.room?.id, thread?.threadRoot) {
+                    val roomId = thread?.room?.id ?: return@LaunchedEffect
+                    val root = thread.threadRoot ?: return@LaunchedEffect
+                    activity?.items?.collect { activity.markThreadRead(roomId, root) }
+                }
                 // A thread's root follows the channel under it, which alone sees the root's edits.
                 LaunchedEffect(thread?.conversation, selected?.conversation) {
                     val channel = selected?.conversation?.takeIf { selected.room.id == thread?.room?.id } ?: return@LaunchedEffect
@@ -268,7 +276,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 }
                             }.takeIf { preferences },
                         )) {
-                            LiveHome(userId, userAvatarUrl, rooms, workspace, search, people, jump, { you = true }, selectedSpaceId, chooseSpace,
+                            LiveHome(userId, userAvatarUrl, rooms, workspace, search, people, activity, jump, { you = true }, selectedSpaceId, chooseSpace,
                                 { channels = it }, { invitation = it }, { newMessage = true }, { id, name -> person = id to name }, later = {
                                     LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
                                         { item -> roomList?.value?.rooms?.firstOrNull { it.id == item.roomId }?.let { room ->
@@ -434,7 +442,7 @@ private fun rememberConversation(client: Client, roomId: String, view: Conversat
 /** Collects the room list here, so its updates recompose Home rather than the whole app. */
 @Composable
 private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?, workspace: MatrixWorkspace?, search: MatrixSearch?,
-    people: MatrixPeople?,
+    people: MatrixPeople?, feed: MatrixActivity?,
     jump: (RoomSummary, String, String?) -> Unit, onYou: () -> Unit,
     selectedSpaceId: String?, onSpace: (String?) -> Unit, onChannels: (ChannelPage) -> Unit, onInvitation: (String) -> Unit, onNewMessage: () -> Unit,
     onPerson: (userId: String, name: String?) -> Unit, later: @Composable () -> Unit,
@@ -447,6 +455,8 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
     }
     val preferences = remember(userId, context) { WorkspacePreferences(context, userId) }
     var collapsed by remember(preferences) { mutableStateOf(preferences.collapsedSections) }
+    // Read only by the tab bar, so a new Activity item doesn't recompose Home.
+    val activityItems = feed?.items?.collectAsState()
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
         collapsedSections = collapsed, onCollapsedSections = { collapsed = it; preferences.collapsedSections = it },
@@ -476,7 +486,12 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
                     }
                 }, recents, { recents = recentStore.add(it) }, people?.results?.collectAsState()?.value ?: PeopleSearchState(),
                 { people?.search(it) }, { onPerson(it.id, it.name) }, onClose, open)
-        }, userAvatarUrl = userAvatarUrl, activity = activity)
+        }, userAvatarUrl = userAvatarUrl, activityCount = {
+            // As the Activity list is scoped; invitations show on Home whatever the workspace, so they all count.
+            val inScope = state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
+            ActivityBadge.count(inScope.map { RoomUnread(mentions = it.mentions) } + state.invitations.map { RoomUnread(membership = "invite") },
+                activityItems?.value.orEmpty().inWorkspace(state.rooms, selectedSpaceId))
+        }, activity = activity)
 }
 
 /** Collects Activity here, so a new item recomposes only its tab. An item opens at its message. */

@@ -210,6 +210,14 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: activity.badge
+    @Test fun aSummaryCarriesItsUnreadMentionsForActivity() = runTest {
+        val design = TestRoom(roomInfo("!design:example.org", "design").copy(numUnreadMentions = 2u, numUnreadMessages = 5u))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(design)))
+        assertEquals(2L, rooms.state.first { !it.loading }.rooms.single().mentions)
+        rooms.close()
+    }
+
     // capability: conversation.pins
     @Test fun aSummaryCarriesItsPinsInTheOrderPinnedAndWhetherYouMayPin() = runTest {
         val design = TestRoom(roomInfo("!design:example.org", "design").copy(pinnedEventIds = listOf("\$old", "\$new")))

@@ -175,7 +175,9 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     /** Home's closed sections, kept with the account, and where a change to them goes. */
     collapsedSections: Set<String> = emptySet(), onCollapsedSections: (Set<String>) -> Unit = {},
     /** Search, opened from Home's search bar over the whole screen; it calls back to close. */
-    search: @Composable (onClose: () -> Unit) -> Unit = {}, userAvatarUrl: String? = null, activity: @Composable () -> Unit = {},
+    search: @Composable (onClose: () -> Unit) -> Unit = {}, userAvatarUrl: String? = null,
+    /** Activity's red count, read only by its tab, so a change redraws the tab bar alone. */
+    activityCount: () -> Int = { 0 }, activity: @Composable () -> Unit = {},
     later: @Composable () -> Unit = {}) {
     // The tabs sit side by side, so a swipe moves between them as Telegram's folders do, and a tap slides there.
     val pager = rememberPagerState { HomeTab.entries.size }
@@ -232,8 +234,9 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
         // The lists scroll on under the tab capsule, and end clear of it and of New message above it.
         val clearance = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + UiMetrics.TabBar + UiMetrics.GapSmall * 2 +
             (UiMetrics.Fab + UiMetrics.GapLarge) * (if (beside) 0 else 1)
-        // Tabs change only from the tab bar, as in Slack, so a sideways swipe on a row is only ever the row's.
-        HorizontalPager(pager, Modifier.fillMaxSize().glassSource(glass), userScrollEnabled = false, key = { HomeTab.entries[it] }) { page ->
+        // Each tab owns its title, which slides with it under the finger rather than swap halfway. A row with a sideways
+        // gesture of its own, such as a Later card, takes the drags that start on it in that direction.
+        HorizontalPager(pager, Modifier.fillMaxSize().glassSource(glass), key = { HomeTab.entries[it] }) { page ->
             val pageTab = HomeTab.entries[page]
             Column(Modifier.fillMaxSize()) {
                 HomeHeader(pageTab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
@@ -266,7 +269,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
             horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
             if (!beside) newMessage()
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-                TabCapsule(glass, tab, { pager.currentPage + pager.currentPageOffsetFraction }, Modifier.weight(1f)) {
+                TabCapsule(glass, tab, { pager.currentPage + pager.currentPageOffsetFraction }, activityCount, Modifier.weight(1f)) {
                     scope.launch { pager.animateScrollToPage(it.ordinal) }
                 }
                 if (beside) newMessage()
@@ -319,7 +322,8 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
 
 /** Design B's tab bar: a capsule of frosted glass floating over the list, the open tab on an accent tint. */
 @Composable
-private fun TabCapsule(glass: HazeState, tab: HomeTab, position: () -> Float, modifier: Modifier, onTab: (HomeTab) -> Unit) {
+private fun TabCapsule(glass: HazeState, tab: HomeTab, position: () -> Float, activityCount: () -> Int, modifier: Modifier,
+    onTab: (HomeTab) -> Unit) {
     val colors = SlatrixTheme.colors
     Row(modifier.heightIn(min = UiMetrics.TabBar).glass(glass, colors.glass, CircleShape, lifted = true)
         .padding(UiMetrics.TabInset).selectableGroup()
@@ -334,7 +338,14 @@ private fun TabCapsule(glass: HazeState, tab: HomeTab, position: () -> Float, mo
             Column(Modifier.weight(1f).heightIn(min = UiMetrics.TabBar - UiMetrics.TabInset * 2).clip(CircleShape)
                 .selectable(selected, role = Role.Tab) { onTab(destination) },
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Icon(if (selected) destination.selectedIcon else destination.icon, null, Modifier.size(UiMetrics.LargeIcon), tint = tint)
+                val count = if (destination == HomeTab.Activity) activityCount() else 0
+                BadgedBox({
+                    if (count > 0) Badge(containerColor = colors.mention, contentColor = colors.onAccent) {
+                        Text(if (count > 99) "99+" else count.toString(), maxLines = 1)
+                    }
+                }) {
+                    Icon(if (selected) destination.selectedIcon else destination.icon, null, Modifier.size(UiMetrics.LargeIcon), tint = tint)
+                }
                 // A label too long for its tab at a large font shrinks rather than lose its end to the tab's round side.
                 Text(destination.label, Modifier.padding(horizontal = UiMetrics.GapSmall), style = MaterialTheme.typography.labelSmall,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, color = tint, maxLines = 1,

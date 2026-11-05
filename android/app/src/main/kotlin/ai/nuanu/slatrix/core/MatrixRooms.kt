@@ -77,6 +77,8 @@ data class RoomSummary(
     /** The pinned messages' event IDs, in the order they were pinned. */
     val pinned: List<String> = emptyList(),
     val avatarUrl: String? = null,
+    /** Unread mentions, which Activity's badge counts. */
+    val mentions: Long = 0,
 )
 
 /** A room's newest event; [body] is null when there is nothing to preview, such as a membership change. */
@@ -315,7 +317,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         )
         val summary = RoomSummary(
             id = info.id, name = name, direct = info.isDirect, topic = info.topic.orEmpty(),
-            unread = UnreadBadge.forRoom(unread),
+            unread = UnreadBadge.forRoom(unread), mentions = unread.mentions,
             initials = AvatarPlaceholder.initials(name), colorIndex = AvatarPlaceholder.colorIndex(name),
             spaceIds = ancestors(info.id),
             latest = followed[info.id]?.let { latest(it.room) },
