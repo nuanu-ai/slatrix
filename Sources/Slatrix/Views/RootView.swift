@@ -139,8 +139,9 @@ struct RootView: View {
     private var colors: AppColors { appearance.colors }
     /// Threads and profiles share one pane width, as in Slack.
     private static let paneWidth: CGFloat = 380
-    /// Where the window buttons end, in window points; they do not zoom.
-    private static let windowButtonsWidth: CGFloat = 72
+    /// Where the window buttons end, in window points: inset as far as they sit from the top, then AppKit's three
+    /// 14-point buttons 20 points apart.
+    private var windowButtonsWidth: CGFloat { (m.paneHeader - 14) / 2 + 54 }
     static let searchWidth: CGFloat = 180
     private var paneOpen: Bool { profilePane != nil || (room != nil && threadRoot != nil) }
     /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
@@ -161,7 +162,7 @@ struct RootView: View {
         // Beside the sidebar, or after the window buttons and the button that brings it back.
         let leading =
             sidebarCollapsed
-            ? (Self.windowButtonsWidth + m.control + m.sp12) / m.zoom
+            ? (windowButtonsWidth + m.control + m.sp12) / m.zoom
             : (sidebarListWidth + m.sidebarInset) / m.zoom + SidebarLayout.handleWidth
         return SidebarLayout.searchFits(
             availableWidth: available, toolbarWidth: available - leading - occupiedInspectorWidth)
@@ -1013,7 +1014,7 @@ struct RootView: View {
             }.disabled(matrix.user == nil)
         }
         // The window buttons are AppKit chrome and do not zoom.
-        .padding(.leading, sidebarCollapsed ? Self.windowButtonsWidth + m.sp16 : m.sp20).padding(.trailing, m.sp16)
+        .padding(.leading, sidebarCollapsed ? windowButtonsWidth + m.sp16 : m.sp20).padding(.trailing, m.sp16)
         .frame(height: m.paneHeader).background(WindowDragArea())
         .foregroundStyle(colors.textSecondary)
     }

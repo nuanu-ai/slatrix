@@ -8,7 +8,7 @@ import Testing
 @MainActor
 struct WindowButtonsCenteringTests {
     @Test(
-        "The window buttons hold the title bar's midline on every frame of a resize from any edge",
+        "The window buttons sit inset from the corner and hold the title bar's midline through a resize from any edge",
         // The bar at 100% and 150% zoom.
         arguments: [40.0, 60.0])
     func holdThroughResize(barHeight: Double) async throws {
@@ -26,6 +26,9 @@ struct WindowButtonsCenteringTests {
         let close = try #require(window.standardWindowButton(.closeButton))
         func offset() -> CGFloat { close.convert(close.bounds, to: nil).midY - (hosting.bounds.height - barHeight / 2) }
         #expect(await eventually { abs(offset()) <= 1 }, "\(offset())")
+        // Inset from the corner as far from the left edge as from the top, not against the window's edge.
+        let frame = close.convert(close.bounds, to: nil)
+        #expect(abs(frame.minX - (hosting.bounds.height - frame.maxY)) <= 1, "\(frame)")
 
         // A live resize sets the window's frame and draws it in one go, so each frame is checked right after, with
         // no turn of the run loop between. Dragging the left edge changes the width, the top edge the height, and
