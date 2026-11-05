@@ -95,20 +95,52 @@ class LiveHomeScreenTest {
         compose.onNodeWithText("Person 39").assertIsDisplayed()
     }
 
-    @Test fun aSwipeAcrossHomeStaysOnItsTabSinceTabsChangeFromTheTabBarAsInSlack() {
+    // capability: home.swipe-tabs
+    @Test fun swipingAcrossHomeMovesBetweenTabsAsTappingDoes() {
         val people = listOf(direct("!p:example.org", "Person 1", latest = LatestMessage("Hello", 1_000L, false)))
         compose.setContent {
             SlatrixTheme {
                 LiveHomeScreen("@alex:example.org", RoomListState(people, loading = false, spacesKnown = true), {}, {}, {})
             }
         }
-        compose.onNodeWithText("Person 1").performTouchInput { swipeLeft() }
-        compose.waitForIdle()
-        tab("Home").assertIsSelected()
-        tab("DMs").performClick()
+        compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.HorizontalScrollAxisRange)).performTouchInput { swipeLeft() }
+        compose.waitUntil { tab("DMs").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false } }
+        compose.onNodeWithText("Hello").assertIsDisplayed()
         compose.onNodeWithText("Hello").performTouchInput { swipeRight() }
+        compose.waitUntil { tab("Home").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false } }
+    }
+
+    @Test fun aTabsTitleSlidesWithItsPageUnderTheFinger() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(listOf(channel("!general:example.org", "general")), loading = false,
+                    spacesKnown = true), {}, {}, {})
+            }
+        }
+        // Its right edge, since a node's bounds stop at the screen's.
+        val rest = compose.onNodeWithText("All conversations").bounds().right
+        val pages = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.HorizontalScrollAxisRange))
+        val width = pages.bounds().width
+        pages.performTouchInput { down(center); repeat(8) { moveBy(androidx.compose.ui.geometry.Offset(-width * 0.05f, 0f)) } }
         compose.waitForIdle()
-        tab("DMs").assertIsSelected()
+        val moved = compose.onNodeWithText("All conversations").bounds().right
+        assertTrue("from $rest to $moved of $width", moved < rest - width * 0.25f)
+    }
+
+    // capability: activity.badge
+    @Test fun theActivityTabShowsItsCountAndNothingWhenThereIsNone() {
+        var count by mutableStateOf(0)
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(emptyList(), loading = false, spacesKnown = true), {}, {}, {},
+                    activityCount = { count })
+            }
+        }
+        tab("Activity").assert(!hasText("0"))
+        compose.runOnIdle { count = 3 }
+        tab("Activity").assert(hasText("3"))
+        compose.runOnIdle { count = 120 }
+        tab("Activity").assert(hasText("99+"))
     }
 
     @Test fun theSearchBarScrollsAwayUnderTheTopBarWithTheList() {

@@ -23,6 +23,8 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -136,6 +138,31 @@ class LaterScreenTest {
         compose.waitUntil(10_000) { removed.isNotEmpty() }
         assertEquals(listOf("\$one"), removed)
         compose.onNodeWithText("Marked as done").assertDoesNotExist()
+    }
+
+    // capability: home.swipe-tabs
+    @Test fun inLaterASwipeChangesTabsUnlessItStartsLeftOnACard() {
+        val saved = listOf(SavedMessage("!design:example.org", "\$one", 1_000))
+        val removed = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
+                    later = { LaterScreen(saved, rooms, { SavedPreview("@sam:example.org", "Sam", "Ship the draft", 1_000) }, {}, { removed += it.eventId }) })
+            }
+        }
+        tab("Later").performClick()
+        compose.onNodeWithText("Ship the draft").performTouchInput { swipeRight() }
+        compose.waitUntil { tab("DMs").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false } }
+
+        tab("Later").performClick()
+        compose.onNodeWithText("Ship the draft").assertIsDisplayed()
+        // Below the only card, on the list's empty space.
+        compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.HorizontalScrollAxisRange)).performTouchInput {
+            swipe(Offset(width * 0.9f, height * 0.6f), Offset(width * 0.1f, height * 0.6f))
+        }
+        compose.waitUntil { tab("Activity").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false } }
+        compose.onNodeWithText("Marked as done").assertDoesNotExist()
+        assertEquals(emptyList<String>(), removed)
     }
 
     private fun tab(label: String) =
