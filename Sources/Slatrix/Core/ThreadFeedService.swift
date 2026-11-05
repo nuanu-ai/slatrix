@@ -52,7 +52,7 @@ enum ThreadFeedMapping {
     }
 
     static func message(_ event: ThreadListItemEvent, roomID: String) -> ChatMessage {
-        let name = MatrixMapping.profileName(event.senderProfile, fallback: event.sender)
+        let name = MatrixMapping.profileName(event.senderProfile, userID: event.sender)
         var message: ChatMessage
         if case .msgLike(let content) = event.content {
             message = MatrixMapping.project(

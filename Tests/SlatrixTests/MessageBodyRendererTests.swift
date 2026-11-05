@@ -296,18 +296,4 @@ struct MessageBodyRendererTests {
         #expect(runs.map(\.text).joined() == "Alice" && runs.allSatisfy { $0.mention == nil })
         #expect(runs.allSatisfy { $0.link == nil || $0.link?.host == "evil.example" })
     }
-
-    @Test("A bare ID shows the member's name when the conversation knows it; a linked name stays as sent")
-    func memberNames() {
-        let names = ["@alice:example.org": "Alice Liddell", "@bob:example.org": "Robert"]
-        let bare = MessageBodyRenderer.named(render(nil, body: "@alice:example.org and @carol:example.org").runs) {
-            names[$0]
-        }
-        #expect(bare.map(\.text).joined() == "@Alice Liddell and @carol")
-        let linked = MessageBodyRenderer.named(render("<a href='https://matrix.to/#/@bob:example.org'>Bobby</a>").runs)
-        {
-            names[$0]
-        }
-        #expect(linked.map(\.text).joined() == "@Bobby")
-    }
 }

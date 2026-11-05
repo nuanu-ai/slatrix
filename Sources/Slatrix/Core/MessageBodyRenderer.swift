@@ -188,13 +188,14 @@ final class MessageBodyRenderer: @unchecked Sendable {
         return MatrixID.isUser(id) ? id : nil
     }
 
-    /// A mention that reads "@localpart" shows the member's display name once the conversation knows it.
+    /// A mention shows the name the conversation knows its person by now, whatever label the sender's app gave it.
     static func named(_ runs: [MessageBodyRun], name: (String) -> String?) -> [MessageBodyRun] {
-        runs.map { run in
-            guard let id = run.mention, run.text == "@" + MatrixID.localpart(id), let name = name(id), !name.isEmpty
-            else { return run }
+        runs.indices.map { index in
+            let run = runs[index]
+            guard let id = run.mention, let name = name(id), !name.isEmpty else { return run }
             var named = run
-            named.text = "@" + name
+            // An older app's mention split in two links is one mention.
+            named.text = index > 0 && runs[index - 1].mention == id ? "" : "@" + name
             return named
         }
     }

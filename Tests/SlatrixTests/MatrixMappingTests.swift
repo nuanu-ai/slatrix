@@ -69,13 +69,13 @@ struct MatrixMappingTests {
         #expect(message.attachment == nil && message.formattedBody == nil)
     }
 
-    @Test("A sender's name falls back to their ID until the profile resolves")
+    @Test("A sender reads as their localpart until the profile resolves, and a shared name carries the ID")
     func profileName() {
-        #expect(MatrixMapping.profileName(.pending, fallback: "@alice:example.org") == "@alice:example.org")
+        #expect(MatrixMapping.profileName(.pending, userID: "@alice:example.org") == "alice")
         #expect(
             MatrixMapping.profileName(
-                .ready(displayName: "Alice", displayNameAmbiguous: false, avatarUrl: nil, status: nil, call: nil),
-                fallback: "@alice:example.org") == "Alice")
+                .ready(displayName: "Alice", displayNameAmbiguous: true, avatarUrl: nil, status: nil, call: nil),
+                userID: "@alice:example.org") == "Alice (@alice:example.org)")
     }
 
     // capability: message.reactions.show
@@ -102,7 +102,7 @@ struct MatrixMappingTests {
                 MessageReaction(
                     key: "👍", count: 2, mine: true, senders: ["@alice:example.org", "@bob:example.org"])
             ])
-        #expect(message?.senderName == "@alice:example.org")
+        #expect(message?.senderName == "alice")
     }
 
     @Test(
