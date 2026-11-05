@@ -19,7 +19,7 @@ struct MenuRow<Icon: View>: View {
     var body: some View {
         let colors = appearance.colors
         Button(action: action) {
-            HStack(spacing: m(10)) {
+            HStack(spacing: m.sp8) {
                 icon.frame(width: m.avatarSmall, height: m.avatarSmall)
                     .foregroundStyle(selected ? colors.onAccent : colors.textTertiary)
                 Text(title).font(m.font(.body, unread ? .semibold : .regular))
@@ -36,7 +36,7 @@ struct MenuRow<Icon: View>: View {
                         .foregroundStyle(selected ? colors.accentFill : colors.onAccent)
                 }
             }
-            .lineLimit(1).padding(.leading, m(10)).padding(.trailing, m.sp12).frame(height: m.menuRow)
+            .lineLimit(1).padding(.leading, m.sp8).padding(.trailing, m.sp12).frame(height: m.menuRow)
             .background(
                 selected ? colors.accentFill : hovering ? colors.hover : .clear,
                 in: RoundedRectangle(cornerRadius: m.radius))

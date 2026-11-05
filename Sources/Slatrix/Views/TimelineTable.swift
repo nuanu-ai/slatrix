@@ -915,7 +915,7 @@ struct TimelineTable: NSViewRepresentable {
         // A row too short for the gap above it centers the toolbar instead.
         let inset = max(0, min(m.sp4, (rect.height - size.height) / 2))
         let y = min(max(top.y + inset, visible.minY + m.sp4), visible.maxY - size.height)
-        toolbar.frame.origin = NSPoint(x: top.x - m.sp16 - size.width, y: y)
+        toolbar.frame.origin = NSPoint(x: top.x - (context.isThread ? m.sp16 : m.sp20) - size.width, y: y)
         toolbar.isHidden = false
     }
 
@@ -1193,7 +1193,7 @@ private struct TimelineWelcomeRow: View {
                 Image(systemName: "lock.shield").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     .help("End-to-end encrypted").accessibilityLabel("End-to-end encrypted")
             }
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(m.sp24)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(m.sp20)
     }
 }
 
@@ -1221,7 +1221,7 @@ private struct TimelineUnreadDivider: View {
         HStack(spacing: m.sp4) {
             Rectangle().fill(colors.accentFill).frame(height: 1)
             Text("New").font(m.font(.subheadline, .semibold)).foregroundStyle(colors.accent)
-        }.padding(.leading, m.sp24).padding(.trailing, m.sp16).padding(.vertical, m.sp8)
+        }.padding(.horizontal, m.sp20).padding(.vertical, m.sp8)
             .accessibilityElement(children: .ignore).accessibilityLabel("New messages begin here")
     }
 }

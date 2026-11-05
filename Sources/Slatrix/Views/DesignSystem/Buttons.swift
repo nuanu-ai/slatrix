@@ -242,15 +242,14 @@ private struct FocusRing: ViewModifier {
     }
 }
 
-/// The toolbar's grouped buttons: a capsule a hair above the canvas.
+/// The toolbar’s grouped buttons: a capsule a hair above the canvas, around icon buttons at their standard size.
 struct ToolbarCapsule<Content: View>: View {
-    var padding: CGFloat = 0
     @ViewBuilder let content: Content
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
     var body: some View {
-        HStack(spacing: 0) { content }.padding(.horizontal, padding).frame(height: m.control)
+        HStack(spacing: 0) { content }.padding(.horizontal, m.sp2).frame(height: m.control)
             .glass(appearance.colors.control, in: Capsule(), cornerRadius: m.control / 2)
     }
 }
