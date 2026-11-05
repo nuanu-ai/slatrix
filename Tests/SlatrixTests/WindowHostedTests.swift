@@ -19,6 +19,8 @@ struct WindowHostedTests {
 
         init(zoom: Double = 1) {
             _ = NSApplication.shared
+            // A pane dragged in an earlier test keeps its width; every window here opens panes at their own.
+            UserDefaults.standard.removeObject(forKey: "layout.paneWidth")
             matrix.enterPreview()
             messages = busyConversation(1_000, roomID: matrix.selectedRoomID!, tag: UUID().uuidString)
             matrix.messages = messages
@@ -227,6 +229,60 @@ struct WindowHostedTests {
             return harness.mainThreadTime(100) { _ in editor.insertText("a", replacementRange: editor.selectedRange()) }
         }
         #expect(time < .milliseconds(1_700), "\(time)")
+    }
+
+    @Test(
+        "Dragging the thread's divider through 60 widths beside a 1,000-message conversation stays within budget",
+        .tags(.budget), .enabled(if: budgetsEnabled))
+    func paneResizeBudget() async throws {
+        let time = try await fastest {
+            let harness = Harness()
+            defer { harness.close() }
+            #expect(await harness.settle())
+            try harness.openThread()
+            #expect(await eventually { harness.dividers == 2 })
+            let divider = try #require(
+                harness.shown().filter { String(describing: type(of: $0)) == "ResizePointerView" }
+                    .max { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX })
+            let line = divider.convert(divider.bounds, to: nil).midX
+            func send(_ type: NSEvent.EventType, _ x: CGFloat) throws {
+                harness.window.sendEvent(
+                    try #require(
+                        NSEvent.mouseEvent(
+                            with: type, location: NSPoint(x: x, y: 450), modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: harness.window.windowNumber,
+                            context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+            }
+            try send(.leftMouseDown, line)
+            defer { try? send(.leftMouseUp, line) }
+            // Narrower and back, as a reader settles on a width.
+            var farthest: CGFloat = 0
+            let time = harness.mainThreadTime(60) { step in
+                try? send(.leftMouseDragged, line + CGFloat(step < 30 ? step : 60 - step) * 4)
+                farthest = max(farthest, divider.convert(divider.bounds, to: nil).midX - line)
+            }
+            // The drag reached the pane: it narrowed as far as the pointer went.
+            #expect(farthest >= 100, "\(farthest)")
+            return time
+        }
+        #expect(time < .seconds(2), "\(time)")
+    }
+
+    @Test(
+        "Resizing the window through 60 widths, a 1,000-message conversation and a thread open, stays within budget",
+        .tags(.budget), .enabled(if: budgetsEnabled))
+    func windowResizeBudget() async throws {
+        let time = try await fastest {
+            let harness = Harness()
+            defer { harness.close() }
+            #expect(await harness.settle())
+            try harness.openThread()
+            #expect(await eventually { harness.dividers == 2 })
+            return harness.mainThreadTime(60) { step in
+                harness.resize(1_440 - CGFloat(step < 30 ? step : 60 - step) * 4)
+            }
+        }
+        #expect(time < .seconds(2), "\(time)")
     }
 
     // capability: conversation.members

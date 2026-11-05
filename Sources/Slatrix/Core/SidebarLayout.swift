@@ -61,6 +61,25 @@ enum SidebarLayout {
         return min(wanted, space)
     }
 
+    /// Where the sidebar and a pane go at a window width. Only crossing a threshold changes it, so a resize builds
+    /// the window again only there.
+    struct Arrangement: Equatable {
+        var sidebarFits: Bool
+        var sidebarFitsBesidePane: Bool
+        var paneFitsBesideSidebar: Bool
+        var paneFitsAlone: Bool
+    }
+
+    static func arrangement(availableWidth: CGFloat) -> Arrangement {
+        Arrangement(
+            sidebarFits: !collapses(availableWidth: availableWidth),
+            sidebarFitsBesidePane: !collapses(availableWidth: availableWidth, paneOpen: true),
+            paneFitsBesideSidebar: paneWidth(preferred: 0, ideal: minimumPaneWidth, availableWidth: availableWidth)
+                != nil,
+            paneFitsAlone: paneWidth(
+                preferred: 0, ideal: minimumPaneWidth, availableWidth: availableWidth, sidebarShown: false) != nil)
+    }
+
     /// The conversations a section lists. A collapsed one still lists the open conversation and every unread one,
     /// as Slack does.
     static func sectionRooms(_ rooms: [ChatRoom], collapsed: Bool, selectedID: String?) -> [ChatRoom] {

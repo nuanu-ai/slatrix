@@ -60,10 +60,8 @@ struct RootView: View {
     @State private var collapsedSections: Set<String> = []
     /// The dragged thread and details pane width at 100% zoom; 0 until dragged, for each pane's own width.
     @AppStorage("layout.paneWidth") private var preferredPaneWidth = 0.0
-    @State private var resizingPaneWidth: CGFloat?
-    /// Unscaled, like the stored preference: SidebarLayout works at 100% zoom.
-    @State private var resizingSidebarWidth: CGFloat?
-    @State private var availableContentWidth: CGFloat = 1_440
+    @State private var widths = PaneWidths()
+    @State private var arrangement = SidebarLayout.arrangement(availableWidth: 1_440)
     /// Preferences, ⌘K and the shortcuts list, shown in the window like Slack's. Not read by this body, so opening
     /// one re-renders only the modal host, not the whole window.
     @State private var modals = InWindowModal()
@@ -144,41 +142,49 @@ struct RootView: View {
     private var windowButtonsWidth: CGFloat { (m.paneHeader - 14) / 2 + 54 }
     static let searchWidth: CGFloat = 180
     private var paneOpen: Bool { profilePane != nil || (room != nil && threadRoot != nil) }
-    /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
-    private var inspectorWidth: CGFloat? {
-        guard paneOpen else { return nil }
-        return SidebarLayout.paneWidth(
-            preferred: resizingPaneWidth ?? CGFloat(preferredPaneWidth),
-            ideal: Self.paneWidth,
-            availableWidth: availableContentWidth / m.zoom, sidebarShown: !sidebarCollapsed)
-    }
+    /// Whether an open pane sits beside the conversation; otherwise it lies over it.
+    private var paneBeside: Bool { sidebarCollapsed ? arrangement.paneFitsAlone : arrangement.paneFitsBesideSidebar }
     /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
     /// open pane.
     private var sidebarCollapsed: Bool {
-        sidebarHidden || SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom, paneOpen: paneOpen)
+        sidebarHidden || !(paneOpen ? arrangement.sidebarFitsBesidePane : arrangement.sidebarFits)
     }
-    private var searchFits: Bool {
-        let available = availableContentWidth / m.zoom
+    // The widths below read `widths`, which changes with every step of a resize, so only the frames and controls
+    // that need a width call them; the window's body reads `arrangement`, which changes only at a threshold.
+    /// The thread or details pane width at 100% zoom, nil when it covers the conversation.
+    private func paneWidth(_ widths: PaneWidths) -> CGFloat? {
+        guard paneOpen else { return nil }
+        return SidebarLayout.paneWidth(
+            preferred: widths.pane ?? CGFloat(preferredPaneWidth), ideal: Self.paneWidth,
+            availableWidth: widths.available / m.zoom, sidebarShown: !sidebarCollapsed)
+    }
+    /// Pane width plus its divider, at 100% zoom.
+    private func occupiedPaneWidth(_ widths: PaneWidths) -> CGFloat {
+        paneWidth(widths).map { $0 + SidebarLayout.handleWidth } ?? 0
+    }
+    private func sidebarWidth(_ widths: PaneWidths) -> CGFloat {
+        m(
+            SidebarLayout.effective(
+                preferred: widths.sidebar ?? SidebarLayout.validatedPreferred(preferredSidebarWidth),
+                availableWidth: widths.available / m.zoom, inspectorWidth: occupiedPaneWidth(widths)))
+    }
+    private func searchFits(_ widths: PaneWidths) -> Bool {
+        let available = widths.available / m.zoom
         // Beside the sidebar, or after the window buttons and the button that brings it back.
         let leading =
             sidebarCollapsed
             ? (windowButtonsWidth + m.control + m.sp12) / m.zoom
-            : (sidebarListWidth + m.sidebarInset) / m.zoom + SidebarLayout.handleWidth
+            : (sidebarWidth(widths) + m.sidebarInset) / m.zoom + SidebarLayout.handleWidth
         return SidebarLayout.searchFits(
-            availableWidth: available, toolbarWidth: available - leading - occupiedInspectorWidth)
-    }
-    /// Pane width plus its divider, at 100% zoom.
-    private var occupiedInspectorWidth: CGFloat { inspectorWidth.map { $0 + SidebarLayout.handleWidth } ?? 0 }
-    private var sidebarListWidth: CGFloat {
-        m(
-            SidebarLayout.effective(
-                preferred: resizingSidebarWidth ?? SidebarLayout.validatedPreferred(preferredSidebarWidth),
-                availableWidth: availableContentWidth / m.zoom, inspectorWidth: occupiedInspectorWidth))
+            availableWidth: available, toolbarWidth: available - leading - occupiedPaneWidth(widths))
     }
     private var layoutMeasurement: some View {
         GeometryReader { geometry in
-            Color.clear.onAppear { availableContentWidth = geometry.size.width }
-                .onChange(of: geometry.size.width) { _, width in availableContentWidth = width }
+            Color.clear.onChange(of: geometry.size.width / m.zoom, initial: true) { _, width in
+                widths.available = geometry.size.width
+                let next = SidebarLayout.arrangement(availableWidth: width)
+                if next != arrangement { arrangement = next }
+            }
         }
     }
 
@@ -680,12 +686,15 @@ struct RootView: View {
                     HStack(spacing: 0) {
                         if !sidebarCollapsed {
                             sidebar.padding([.leading, .vertical], m.sidebarInset).transition(.move(edge: .leading))
-                            ResizeHandle(
-                                currentWidth: sidebarListWidth, onChange: resizeSidebar, onCommit: commitSidebarWidth,
-                                onReset: {
-                                    resizingSidebarWidth = nil
-                                    preferredSidebarWidth = Double(SidebarLayout.defaultWidth)
-                                })
+                            WithWidths(widths) { widths in
+                                ResizeHandle(
+                                    currentWidth: sidebarWidth(widths), onChange: resizeSidebar,
+                                    onCommit: commitSidebarWidth,
+                                    onReset: {
+                                        widths.sidebar = nil
+                                        preferredSidebarWidth = Double(SidebarLayout.defaultWidth)
+                                    })
+                            }
                         }
                         HStack(spacing: 0) {
                             VStack(spacing: 0) {
@@ -709,22 +718,27 @@ struct RootView: View {
                             .overlay(alignment: .top) { banners.padding(.top, m.paneHeader) }
                             // Too narrow to sit beside: the pane lies over the conversation's right side.
                             .overlay(alignment: .trailing) {
-                                if paneOpen && inspectorWidth == nil {
+                                if paneOpen && !paneBeside {
                                     inspector(room).frame(maxWidth: m(Self.paneWidth))
                                         .elevation(.e3, cornerRadius: 0)
                                 }
                             }
-                            if let width = inspectorWidth {
-                                ResizeHandle(
-                                    pane: .trailing,
-                                    label: profilePane != nil
-                                        ? "Profile width" : threadRoot != nil ? "Thread width" : "Details width",
-                                    currentWidth: m(width), onChange: resizePane, onCommit: commitPaneWidth,
-                                    onReset: {
-                                        resizingPaneWidth = nil
-                                        preferredPaneWidth = 0
-                                    })
-                                inspector(room).layoutIsolated().frame(width: m(width))
+                            if paneOpen && paneBeside {
+                                WithWidths(widths) { widths in
+                                    ResizeHandle(
+                                        pane: .trailing,
+                                        label: profilePane != nil
+                                            ? "Profile width" : threadRoot != nil ? "Thread width" : "Details width",
+                                        currentWidth: m(paneWidth(widths) ?? Self.paneWidth), onChange: resizePane,
+                                        onCommit: commitPaneWidth,
+                                        onReset: {
+                                            widths.pane = nil
+                                            preferredPaneWidth = 0
+                                        })
+                                }
+                                Sized(widths, width: { m(paneWidth($0) ?? Self.paneWidth) }) {
+                                    inspector(room).layoutIsolated()
+                                }
                             }
                         }
                     }
@@ -817,24 +831,24 @@ struct RootView: View {
     private func resizeSidebar(_ width: CGFloat) {
         guard width.isFinite else { return }
         let limit = SidebarLayout.effective(
-            preferred: SidebarLayout.maximumWidth, availableWidth: availableContentWidth / m.zoom,
-            inspectorWidth: occupiedInspectorWidth)
-        resizingSidebarWidth = min(limit, max(SidebarLayout.minimumWidth, width / m.zoom))
+            preferred: SidebarLayout.maximumWidth, availableWidth: widths.available / m.zoom,
+            inspectorWidth: occupiedPaneWidth(widths))
+        widths.sidebar = min(limit, max(SidebarLayout.minimumWidth, width / m.zoom))
     }
     private func resizePane(_ width: CGFloat) {
         guard width.isFinite else { return }
-        resizingPaneWidth = min(SidebarLayout.maximumPaneWidth, max(SidebarLayout.minimumPaneWidth, width / m.zoom))
+        widths.pane = min(SidebarLayout.maximumPaneWidth, max(SidebarLayout.minimumPaneWidth, width / m.zoom))
     }
     private func commitPaneWidth() {
-        guard resizingPaneWidth != nil else { return }
+        guard widths.pane != nil else { return }
         // Keep what is on screen, not a drag past the limit, so a wider window later does not jump.
-        if let shown = inspectorWidth { preferredPaneWidth = Double(shown) }
-        resizingPaneWidth = nil
+        if let shown = paneWidth(widths) { preferredPaneWidth = Double(shown) }
+        widths.pane = nil
     }
     private func commitSidebarWidth() {
-        guard let width = resizingSidebarWidth else { return }
+        guard let width = widths.sidebar else { return }
         preferredSidebarWidth = Double(width)
-        resizingSidebarWidth = nil
+        widths.sidebar = nil
     }
 
     private func acknowledgeVisibleTimeline() async {
@@ -928,6 +942,9 @@ struct RootView: View {
 
     /// The conversation list, beside the conversation or in the drawer.
     private var sidebar: some View {
+        Sized(widths, width: sidebarWidth) { sidebarContent }
+    }
+    private var sidebarContent: some View {
         SidebarView(
             matrix: matrix,
             route: Binding(
@@ -961,8 +978,8 @@ struct RootView: View {
             }, onEditWorkspace: { roomDetails = DetailsSelection(id: $0) },
             onNotifications: { roomNotifications = DetailsSelection(id: $0) },
             onHide: { handleMenu("toggle-sidebar") }, accessory: sidebarAccessory,
-            listWidth: sidebarListWidth, onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections
-        ).layoutIsolated().frame(width: sidebarListWidth)
+            onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections
+        ).layoutIsolated()
     }
 
     /// The collapsed sidebar, slid over the conversation from the title bar's button, with a scrim that closes it.
@@ -1005,7 +1022,7 @@ struct RootView: View {
             }
             title().frame(maxWidth: .infinity, alignment: .leading).padding(.leading, m.sp4)
             trailing()
-            TitleSearch(bar: searchBar, fits: searchFits) {
+            TitleSearch(bar: searchBar, widths: widths, fits: searchFits) {
                 SearchBarField(
                     bar: searchBar,
                     prompt: WorkspaceRail.searchPrompt(workspaceID: workspaceID, workspaces: matrix.workspaces),
@@ -2645,7 +2662,7 @@ struct RootView: View {
             route = .home
         case "toggle-sidebar":
             // A window too narrow for the sidebar can only show it as the drawer.
-            if SidebarLayout.collapses(availableWidth: availableContentWidth / m.zoom, paneOpen: paneOpen) {
+            if !(paneOpen ? arrangement.sidebarFitsBesidePane : arrangement.sidebarFits) {
                 sidebarDrawer.toggle()
             } else {
                 sidebarHidden.toggle()
@@ -2836,11 +2853,13 @@ private struct SidebarToggle: View {
 /// The title bar's search field, or in a narrow window a button that opens it in its place until it closes.
 private struct TitleSearch<Field: View>: View {
     let bar: SearchBar
-    let fits: Bool
+    let widths: PaneWidths
+    let fits: (PaneWidths) -> Bool
     @ViewBuilder let field: () -> Field
     @State private var open = false
     var body: some View {
-        Group {
+        let fits = fits(widths)
+        return Group {
             if fits || open {
                 // Opened from the button, ⌘G or ⌘F: the field was not there to take the cursor, so it takes it now.
                 field().onAppear { if open { bar.focus() } }
@@ -2968,4 +2987,37 @@ private struct ComposerCard: ViewModifier {
             .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
             .elevation(.e2, cornerRadius: m.radiusLarge)
     }
+}
+
+/// The widths that change with every step of a resize: the window's, and a divider's while it is dragged, at 100%
+/// zoom. Only the frames and controls that need a width read them, so a step lays the window out without building
+/// it again.
+@Observable final class PaneWidths {
+    var available: CGFloat = 1_440
+    var sidebar: CGFloat?
+    var pane: CGFloat?
+}
+
+/// `content`, built once by its parent, as wide as `width` makes it.
+private struct Sized<Content: View>: View {
+    let widths: PaneWidths
+    let width: (PaneWidths) -> CGFloat
+    let content: Content
+    init(_ widths: PaneWidths, width: @escaping (PaneWidths) -> CGFloat, @ViewBuilder content: () -> Content) {
+        self.widths = widths
+        self.width = width
+        self.content = content()
+    }
+    var body: some View { content.frame(width: width(widths)) }
+}
+
+/// Builds `content` from the widths, so only it redraws as they change.
+private struct WithWidths<Content: View>: View {
+    let widths: PaneWidths
+    @ViewBuilder let content: (PaneWidths) -> Content
+    init(_ widths: PaneWidths, @ViewBuilder content: @escaping (PaneWidths) -> Content) {
+        self.widths = widths
+        self.content = content
+    }
+    var body: some View { content(widths) }
 }
