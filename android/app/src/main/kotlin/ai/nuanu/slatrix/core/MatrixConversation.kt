@@ -161,6 +161,13 @@ fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Bo
 
 private const val MAX_BLANK_PAGES = 5
 private const val ROOT_KEY = "thread-root"
+
+// Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
+private fun ConversationMessage.asThreadRoot() = copy(id = ROOT_KEY, grouped = false)
+
+/** What a conversation shows before its timeline loads: a thread's [root] at once, in the row it then keeps. */
+internal fun opening(root: ConversationMessage?, error: String? = null) =
+    ConversationState(rows = listOfNotNull(root?.asThreadRoot()), loading = root == null, error = error)
 private const val NOTICE_MILLIS = 4_000L
 
 /** The relation that puts an attachment in a thread, as the Mac sends it. */
@@ -186,16 +193,14 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     /** [at] is where the unread messages start, so it opens there without a highlight. */
     private val resume: Boolean = false,
     private val view: ConversationView = ConversationView.Timeline) {
-    // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
-    @Volatile private var root = root?.copy(id = ROOT_KEY, grouped = false)
+    @Volatile private var root = root?.asThreadRoot()
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
     /** Thread replies waiting to be copied to the channel: they outlast the thread, and end with the session's [scope]. */
     private val copies = SupervisorJob(scope.coroutineContext[Job])
     private val copying = CoroutineScope(scope.coroutineContext + copies)
     private val ownUserId = room.ownUserId()
-    private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null,
-        ownUserId = ownUserId, startsAtUnread = resume))
+    private val mutableState = MutableStateFlow(opening(this.root).copy(ownUserId = ownUserId, startsAtUnread = resume))
     val state: StateFlow<ConversationState> = mutableState.asStateFlow()
     private val ready = CompletableDeferred<Unit>()
     private val updates = Channel<Update>(Channel.UNLIMITED)
@@ -440,7 +445,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         channel.map { state -> state.rows.firstOrNull { (it as? ConversationMessage)?.eventId == id } as? ConversationMessage }
             .filterNotNull().distinctUntilChanged().collect { copy ->
                 operations.launch {
-                    root = copy.copy(id = ROOT_KEY, grouped = false)
+                    root = copy.asThreadRoot()
                     mutableState.update { state ->
                         state.copy(rows = state.rows.map { if (it is ConversationMessage && it.id == ROOT_KEY) it.withEdit(copy) else it })
                     }

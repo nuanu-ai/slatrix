@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.waiting
 import ai.nuanu.slatrix.core.SavedPreview
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.mutableStateMapOf
@@ -321,7 +322,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     }
     val conversation = open.conversation
     val composer = open.composer
-    val timeline = conversation?.state?.collectAsState()?.value ?: ConversationState(error = open.error)
+    val timeline = conversation?.state?.collectAsState()?.value ?: open.waiting()
     val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
     val scope = rememberCoroutineScope()
     var details by rememberSaveable(open.room.id) { mutableStateOf(false) }

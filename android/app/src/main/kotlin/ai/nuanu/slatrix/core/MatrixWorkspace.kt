@@ -36,6 +36,9 @@ data class OpenChannel(
     val typing: MatrixTyping? = null,
 )
 
+/** What shows while the conversation opens: a thread's root, as its channel showed it. */
+fun OpenChannel.waiting(): ConversationState = opening(root, error)
+
 private const val RECENT = 4
 
 class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
