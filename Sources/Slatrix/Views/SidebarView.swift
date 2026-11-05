@@ -32,15 +32,14 @@ struct SidebarView: View {
     @Environment(\.metrics) private var m
     private var colors: AppColors { appearance.colors }
     private var workspace: Workspace? { matrix.workspaces.first { $0.id == workspaceID } }
-    /// Mentions and invitations in this space, which Activity lists.
     private var activityCount: Int {
-        matrix.rooms.reduce(0) { count, room in
-            if room.isSpace { return count + (room.membership == "invite" ? 1 : 0) }
-            guard room.membership != "leave",
-                WorkspaceMembership.includes(direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID)
-            else { return count }
-            return count + (room.membership == "invite" ? 1 : room.mentions)
+        let rooms = matrix.rooms.filter { room in
+            room.isSpace
+                ? room.membership == "invite"
+                : WorkspaceMembership.includes(direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID)
         }
+        let ids = Set(rooms.map(\.id))
+        return ActivityBadge.count(rooms: rooms, items: matrix.activity.items.filter { ids.contains($0.roomID) })
     }
     private var visibleRooms: [ChatRoom] {
         matrix.rooms.filter { room in

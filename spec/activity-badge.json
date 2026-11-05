@@ -1,0 +1,23 @@
+{
+  "about": "Activity's red count, as in Slack: mentions you haven't read, thread replies Activity lists that you haven't opened, and invitations. Direct messages and channels keep their own badges, so their messages count here only when they mention you. Rooms are those in the workspace shown: mentions is the server's highlight count, membership defaults to \"join\". A reply is a thread reply Activity listed in one of them; opened is true once you opened it, or its thread. A reply that mentions you already counts through its room's mentions.",
+  "count": [
+    { "name": "Nothing new counts nothing", "rooms": [{}], "replies": [], "count": 0 },
+    { "name": "Mentions add up across rooms", "rooms": [{ "mentions": 2 }, { "mentions": 1 }], "replies": [], "count": 3 },
+    { "name": "An invitation counts one", "rooms": [{ "membership": "invite" }], "replies": [], "count": 1 },
+    { "name": "A room you left counts nothing", "rooms": [{ "mentions": 3, "membership": "leave" }], "replies": [], "count": 0 },
+    { "name": "A thread reply you haven't opened counts", "rooms": [{}], "replies": [{}], "count": 1 },
+    { "name": "An opened reply counts nothing", "rooms": [{}], "replies": [{ "opened": true }], "count": 0 },
+    {
+      "name": "A reply that mentions you counts once",
+      "rooms": [{ "mentions": 1 }],
+      "replies": [{ "mention": true }],
+      "count": 1
+    },
+    {
+      "name": "Mentions, replies and invitations add up",
+      "rooms": [{ "mentions": 2 }, { "membership": "invite" }],
+      "replies": [{}, {}, { "opened": true }],
+      "count": 5
+    }
+  ]
+}

@@ -1817,6 +1817,7 @@ struct RootView: View {
     /// A thread in the conversation on screen opens beside it, which stays as it is; one elsewhere opens with its
     /// conversation.
     private func openThread(_ root: ChatMessage, room id: String) {
+        matrix.activity.markThreadOpened(roomID: id, rootID: root.eventID)
         guard id == matrix.selectedRoomID, pendingRoomID == nil, route == .home,
             matrix.isPreview || matrix.isLiveTimelineReady(roomID: id)
         else { return selectRoom(id, record: true, thread: root) }
@@ -2106,6 +2107,7 @@ struct RootView: View {
             }
             return
         }
+        if let rootID = item.threadRootID { matrix.activity.markThreadOpened(roomID: item.roomID, rootID: rootID) }
         if let eventID = item.eventID {
             selectRoom(item.roomID, record: true, eventID: eventID)
         } else {
