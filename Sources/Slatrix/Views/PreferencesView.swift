@@ -5,6 +5,7 @@ struct PreferencesView: View {
     private static let size = CGSize(width: 848, height: 600)
     private static let navWidth: CGFloat = 188
     private static let miniatureHeight: CGFloat = 72
+    private static let aboutIcon: CGFloat = 64
     @Environment(\.metrics) private var m
     @EnvironmentObject var appearance: AppearanceStore
     let matrix: MatrixService
@@ -277,33 +278,25 @@ struct PreferencesView: View {
                 sectionTitle("Open Slatrix at login")
             }.toggleStyle(.switch)
             Divider().overlay(colors.border)
-            VStack(alignment: .leading, spacing: m.sp12) {
-                sectionTitle("About Slatrix")
-                detailRow("Version", value: PlatformIntegration.shared.version)
-                linkRow("Copyright", title: "© 2026 Nuanu AI Lab", url: "https://nuanu.ai")
-                linkRow("Source code", title: "github.com/nuanu-ai/slatrix", url: "https://github.com/nuanu-ai/slatrix")
-            }
+            HStack(alignment: .top, spacing: m.sp16) {
+                Image(nsImage: NSApplication.shared.applicationIconImage).resizable()
+                    .frame(width: m(Self.aboutIcon), height: m(Self.aboutIcon)).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: m.sp4) {
+                    sectionTitle("Slatrix")
+                    Text("Version \(PlatformIntegration.shared.version)").foregroundStyle(colors.textSecondary)
+                        .textSelection(.enabled)
+                    Link("© 2026 Nuanu AI Lab", destination: URL(string: "https://nuanu.ai")!).buttonStyle(.textLink)
+                        .padding(.top, m.sp8)
+                    Link("Source code on GitHub", destination: URL(string: "https://github.com/nuanu-ai/slatrix")!)
+                        .buttonStyle(.textLink)
+                }.font(m.font(.body))
+            }.padding(m.sp16).frame(maxWidth: .infinity, alignment: .leading).background(
+                colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
         }
     }
 
     private func sectionTitle(_ title: String) -> some View {
         Text(title).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
-    }
-
-    private func detailRow(_ title: String, value: String) -> some View {
-        HStack {
-            Text(title).foregroundStyle(colors.textSecondary)
-            Spacer()
-            Text(value).textSelection(.enabled)
-        }.font(m.font(.body))
-    }
-
-    private func linkRow(_ title: String, title link: String, url: String) -> some View {
-        HStack {
-            Text(title).foregroundStyle(colors.textSecondary)
-            Spacer()
-            Link(link, destination: URL(string: url)!).buttonStyle(.textLink)
-        }.font(m.font(.body))
     }
 
     private func choiceTile<Preview: View>(
