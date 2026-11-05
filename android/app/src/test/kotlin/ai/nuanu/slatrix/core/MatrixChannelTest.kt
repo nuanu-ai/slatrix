@@ -87,25 +87,6 @@ class MatrixChannelTest {
         assertFailure("Something went wrong. Try again.") { channel.leave() }
     }
 
-    // capability: channel.link-workspace
-    @Test fun linkingAddsTheChannelToAWorkspaceYouManageOrTakesItOut() = runTest {
-        val studio = ChannelRoom(roomInfo("!studio:example.org", "Studio", space = true))
-        val spaces = ChannelSpaces()
-        val linked = MatrixChannel(ChannelClient(room, settings, listOf(studio), spaces), "!design:example.org")
-        linked.setInWorkspace("!studio:example.org", true)
-        linked.setInWorkspace("!studio:example.org", true)
-        assertEquals(listOf("!studio:example.org"), spaces.parents["!design:example.org"])
-        linked.setInWorkspace("!studio:example.org", false)
-        assertEquals(emptyList<String>(), spaces.parents["!design:example.org"])
-        assertFailure("This channel isn’t in that workspace.") { linked.setInWorkspace("!studio:example.org", false) }
-
-        studio.powers = TestPowers(spaceChild = false)
-        assertFailure("You don’t have permission to manage channels in this workspace.") {
-            linked.setInWorkspace("!studio:example.org", true)
-        }
-        assertEquals(emptyList<String>(), spaces.parents["!design:example.org"])
-    }
-
     private suspend fun assertFailure(message: String, action: suspend () -> Unit) {
         assertEquals(message, runCatching { action() }.exceptionOrNull()?.message)
     }
