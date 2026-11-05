@@ -80,8 +80,8 @@ import java.util.Locale
 private enum class HomeTab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
     Home("Home", SlackIcons.Home, SlackIcons.HomeFilled),
     Dms("DMs", SlackIcons.Messages, SlackIcons.MessagesFilled),
-    Activity("Activity", SlackIcons.Bell, SlackIcons.BellFilled),
     Later("Later", SlackIcons.Bookmark, SlackIcons.BookmarkFilled),
+    Activity("Activity", SlackIcons.Bell, SlackIcons.BellFilled),
 }
 
 /**
