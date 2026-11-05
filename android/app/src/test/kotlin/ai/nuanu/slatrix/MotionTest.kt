@@ -30,6 +30,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotEquals
+import androidx.compose.ui.test.onRoot
 import org.junit.Rule
 import ai.nuanu.slatrix.ui.account.LiveWorkspace
 import ai.nuanu.slatrix.ui.account.WorkspaceCover
@@ -154,6 +155,24 @@ class MotionTest {
             dispatcher.onBackPressed()
         }
         compose.runOnIdle { assertTrue(went) }
+    }
+
+    // A profile's back swipe faded it over the page under it and moved it only a quarter of the way.
+    @Test fun aBackSwipeCarriesThePageWithTheFinger() {
+        lateinit var dispatcher: OnBackPressedDispatcher
+        compose.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            SlatrixTheme { LivePreferencesScreen(false, null, false, {}, {}, {}) }
+        }
+        compose.waitForIdle()
+        val rest = bounds("Color mode")
+        val width = compose.onRoot().fetchSemanticsNode().boundsInRoot.width
+        compose.runOnUiThread {
+            dispatcher.dispatchOnBackStarted(BackEventCompat(0f, 800f, 0f, BackEventCompat.EDGE_LEFT))
+            dispatcher.dispatchOnBackProgressed(BackEventCompat(width / 2, 800f, 0.5f, BackEventCompat.EDGE_LEFT))
+        }
+        compose.waitForIdle()
+        assertEquals("Halfway across, the page is halfway off", rest.left + width / 2, bounds("Color mode").left, 1f)
     }
 
     /** After [show], [text] is still on its way in two frames later, and in place, as it stays, 150 ms after that. */

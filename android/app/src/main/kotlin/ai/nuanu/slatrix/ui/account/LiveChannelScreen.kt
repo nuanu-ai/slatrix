@@ -284,9 +284,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val glass = rememberGlass()
     // The header floats over the messages, which start under it; the scaffold measures it first, so they never move.
     Scaffold(Modifier.graphicsLayer {
-        // A back swipe slides the conversation off under the finger, as a pushed page leaves.
-        alpha = 1 - back.value
-        translationX = back.value * Motion.PushDistance * size.width
+        // A back swipe carries the conversation off under the finger, over the page it goes back to.
+        translationX = back.value * size.width
     }, topBar = { ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails) },
         containerColor = colors.canvas, contentWindowInsets = WindowInsets(0)) { bars ->
     val header = bars.calculateTopPadding()

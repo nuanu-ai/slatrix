@@ -104,9 +104,8 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
 internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable () -> Unit = {}, content: LazyListScope.() -> Unit) {
     val back = rememberPredictiveBack(onBack = onBack)
     Column(Modifier.fillMaxSize().graphicsLayer {
-        // A back swipe slides the page off under the finger.
-        alpha = 1 - back.value
-        translationX = back.value * Motion.PushDistance * size.width
+        // A back swipe carries the page off under the finger, over the one it goes back to.
+        translationX = back.value * size.width
     }.background(SlatrixTheme.colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.HeaderRow).padding(horizontal = UiMetrics.GapTiny),
             verticalAlignment = Alignment.CenterVertically) {
