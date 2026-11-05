@@ -12,6 +12,8 @@ import ai.nuanu.slatrix.core.ThreadOrigin
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
+import ai.nuanu.slatrix.ui.account.WorkspaceCover
+import ai.nuanu.slatrix.ui.account.LiveWorkspace
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -42,7 +44,7 @@ import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasProgressBarRangeInfo
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.performScrollToIndex
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.material3.Text
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -580,29 +582,32 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("typing", substring = true).assertDoesNotExist()
     }
 
-    // capability: conversation.keep-position
-    @Test fun comingBackToAConversationShowsItWhereTheReaderLeftItThoughNewMessagesCame() {
-        val state = mutableStateOf(ConversationState((1..200).map { message("Message $it", minutes = it) }, loading = false))
-        val shown = mutableStateOf(true)
+    @Test fun aThreadOverAConversationReturnsToTheSamePlaceButLeavingOpensItAtTheNewest() {
+        val state = ConversationState((1..200).map { message("Message $it", minutes = it) }, loading = false)
+        val page = mutableStateOf<String?>("design")
         compose.setContent {
             SlatrixTheme {
-                val saved = rememberSaveableStateHolder()
-                if (shown.value) saved.SaveableStateProvider("design") {
-                    LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
-                }
+                LiveWorkspace(when (page.value) {
+                    "thread" -> WorkspaceCover("thread", 2) { Text("Thread") }
+                    "design" -> WorkspaceCover("design", 1) {
+                        LiveChannelScreen(room, state, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+                    }
+                    else -> null
+                }) { Text("Home") }
             }
         }
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(60)
-        // Partway through a row, so the place has an offset.
-        compose.onNode(hasScrollToIndexAction()).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 150f) }
-        val before = compose.onNodeWithText("Message 140").fetchSemanticsNode().boundsInRoot
-
-        compose.runOnIdle { shown.value = false }
-        compose.runOnIdle { state.value = state.value.copy(rows = state.value.rows + message("Message 201", minutes = 201)) }
-        compose.runOnIdle { shown.value = true }
         compose.onNodeWithText("Message 140").assertIsDisplayed()
-        assertEquals(before, compose.onNodeWithText("Message 140").fetchSemanticsNode().boundsInRoot)
-        compose.onNodeWithText("Message 201").assertIsNotDisplayed()
+
+        compose.runOnIdle { page.value = "thread" }
+        compose.onNodeWithText("Thread").assertIsDisplayed()
+        compose.runOnIdle { page.value = "design" }
+        compose.onNodeWithText("Message 140").assertIsDisplayed()
+
+        compose.runOnIdle { page.value = null }
+        compose.onNodeWithText("Home").assertIsDisplayed()
+        compose.runOnIdle { page.value = "design" }
+        compose.onNodeWithText("Message 200").assertIsDisplayed()
     }
 
     @Test fun aLongMessagesBubbleTakesMostOfANarrowPhonesWidth() {

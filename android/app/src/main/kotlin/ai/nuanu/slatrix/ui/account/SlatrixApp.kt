@@ -67,7 +67,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
 import ai.nuanu.slatrix.core.OpenChannel
 import ai.nuanu.slatrix.core.ConversationMessage
@@ -78,7 +77,6 @@ import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.ThreadFeedState
 import ai.nuanu.slatrix.core.WorkspaceMembership
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -172,7 +170,6 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                     (id ?: WorkspaceRail.AllToken).let { remembered = it; workspacePreferences.selectedSpaceId = it }
                 }
                 val thread = threads?.selected?.collectAsState()?.value
-                val covered = rememberSaveableStateHolder()
                 // Opens a message highlighted in its conversation and a thread reply in its thread too: for notifications
                 // and Activity, and next for search results and reply quotes.
                 val jump: (RoomSummary, String, String?) -> Unit = remember(workspace, threads) {
@@ -246,15 +243,13 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } }
                             // A conversation slides in over Home, and a thread over its conversation.
                             thread != null -> WorkspaceCover("${thread.room.id} ${thread.threadRoot}", 2) {
-                                covered.SaveableStateProvider("${thread.room.id} ${thread.threadRoot}") { key(thread.room.id, thread.threadRoot) {
                                 LiveConversation(thread, threads, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name })
-                            } } }
-                            // Kept while a thread or a profile covers it, so Back returns to the same place.
-                            selected != null -> WorkspaceCover(selected.room.id, 1) { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
+                            }
+                            selected != null -> WorkspaceCover(selected.room.id, 1) {
                                 LiveConversation(selected, workspace, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name }) { root, row ->
                                     threads?.open(selected.room, root, root = row)
                                 }
-                            } } }
+                            }
                             else -> null
                         }) {
                             LiveHome(userId, userAvatarUrl, rooms, workspace, search, people, jump, { you = true }, selectedSpaceId, chooseSpace,

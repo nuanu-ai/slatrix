@@ -90,16 +90,21 @@ private enum class HomeTab(val label: String, val icon: ImageVector, val selecte
  */
 class WorkspaceCover(val key: Any, val depth: Int, val content: @Composable () -> Unit)
 
+private const val Home = "home"
+
 /**
  * Shows [cover] in Home's place, and gives Home back its tab, search and scroll position after. Going deeper slides the
  * new page in over 140 ms with the page it covers still drawn under it, so nothing blank shows; going back is instant,
- * since predictive back has already played the way out under the finger.
+ * since predictive back has already played the way out under the finger. A page keeps its state, such as where a
+ * conversation was scrolled, while others cover it, and loses it once Home shows, so a conversation left and opened
+ * again starts at its New line or its newest message, as Slack's does.
  */
 @Composable
 fun LiveWorkspace(cover: WorkspaceCover?, home: @Composable () -> Unit) {
     val saved = rememberSaveableStateHolder()
-    val page = cover ?: WorkspaceCover(Unit, 0) { saved.SaveableStateProvider("home", home) }
-    val shown = remember { object { var page = page; var under: WorkspaceCover? = null } }
+    val page = cover ?: WorkspaceCover(Home, 0, home)
+    val shown = remember { object { var page = page; var under: WorkspaceCover? = null; val kept = mutableSetOf<String>() } }
+    if (cover == null) shown.kept.removeAll { saved.removeState(it); true } else shown.kept += cover.key.toString()
     if (shown.page.key != page.key) shown.under = shown.page.takeIf { page.depth > it.depth }
     shown.page = page
     val slide = remember(page.key) { Animatable(if (shown.under == null) 1f else 0f) }
@@ -115,7 +120,7 @@ fun LiveWorkspace(cover: WorkspaceCover?, home: @Composable () -> Unit) {
             Box(if (each === page) Modifier.fillMaxSize().graphicsLayer {
                 alpha = slide.value
                 translationX = (1 - slide.value) * Motion.PushDistance * size.width
-            } else Modifier.fillMaxSize()) { each.content() }
+            } else Modifier.fillMaxSize()) { saved.SaveableStateProvider(each.key.toString(), each.content) }
         }
     }
 }

@@ -657,7 +657,6 @@ class MatrixConversationTest {
         conversation.close()
     }
 
-    // capability: conversation.keep-position
     @Test fun comingBackToAKeptConversationLeavesLastVisitsJumpUnreadStartAndHoldBehind() = runTest {
         val live = ConversationTimeline(listOf(conversationItem("a", "\$a", "Hello"), conversationItem("b", "\$b", "World")))
         val conversation = MatrixConversation(backgroundScope, JumpRoom(live, ConversationTimeline(emptyList())), at = "\$a")

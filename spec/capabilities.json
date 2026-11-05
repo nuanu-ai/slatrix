@@ -43,7 +43,7 @@
     {"id": "conversation.read", "what": "Reading a conversation's newest messages marks it read.", "mac": "done", "android": "done"},
     {"id": "conversation.mark-read", "what": "Mark a conversation, or every conversation, read.", "mac": "done", "android": "done"},
     {"id": "conversation.mark-unread", "what": "Mark a conversation unread.", "mac": "done", "android": "done"},
-    {"id": "conversation.keep-position", "what": "Coming back to a conversation returns to where you were reading.", "mac": "done", "android": "done"},
+    {"id": "conversation.keep-position", "what": "Coming back to a conversation returns to where you were reading.", "mac": "done", "android": "n/a: as in Slack's mobile app, a conversation opens at its New line or its newest message"},
     {"id": "conversation.jump-to-message", "what": "A message opened from search or a link shows highlighted in its conversation.", "mac": "done", "android": "done"},
     {"id": "conversation.jump-to-newest", "what": "A button over the composer takes you back to the newest message once you scroll up or open an older one.", "mac": "done", "android": "done"},
     {"id": "conversation.members", "what": "See a conversation's members from its header.", "mac": "done", "android": "done"},
