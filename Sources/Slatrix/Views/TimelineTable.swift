@@ -119,8 +119,8 @@ struct TimelineTable: NSViewRepresentable {
     var onLoadOlder: () -> Void
     var onLoadNewer: () -> Void
     /// Whether the newest message is on screen, whether to offer "Jump to recent", and whether messages sit above the
-    /// top edge.
-    var onScroll: (Bool, Bool, Bool) -> Void
+    /// top edge, nil until the table shows its rows.
+    var onScroll: (Bool, Bool, Bool?) -> Void
 
     func makeCoordinator() -> TimelineTableCoordinator { TimelineTableCoordinator() }
 
@@ -204,7 +204,7 @@ struct TimelineTable: NSViewRepresentable {
     /// Whether the reader moved the view since the table last put it somewhere.
     private var scrolledByReader = false
     private var atOlderMessage = false
-    private var reported: (Bool, Bool, Bool)?
+    private var reported: (Bool, Bool, Bool?)?
     /// Where the reader was before the scroll view laid out its clip, which a new size has already moved.
     private var tiling: Policy.Position?
     /// While the table waits for its first rows.
@@ -805,7 +805,7 @@ struct TimelineTable: NSViewRepresentable {
             viewport.isAtBottom,
             opened
                 && Policy.showsJumpToLatest(viewport, live: configuration.live, scrolledByReader: scrolledByReader),
-            scrollView.contentView.bounds.minY > 0.5
+            opened ? scrollView.contentView.bounds.minY > 0.5 : nil
         )
         if reported.map({ $0 != state }) ?? true {
             reported = state

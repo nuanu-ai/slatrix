@@ -868,7 +868,9 @@ extension TimelineHostedTests {
 }
 
 extension TimelineHostedTests {
-    @Test("The timeline says when messages sit above its top edge, so the header can draw its line")
+    @Test(
+        "The timeline says when messages sit above its top edge, so the header can draw its line, and not before it opens"
+    )
     func reportsContentAbove() async throws {
         let context = TimelineRowContext()
         context.matrix = MatrixService()
@@ -882,19 +884,34 @@ extension TimelineHostedTests {
                         canPin: false, highlighted: false, sendBusy: false)))
         }
         var above: Bool?
+        var reports: [Bool] = []
         let window = offscreenWindow(NSSize(width: 620, height: 400))
-        let hosting = NSHostingView(
-            rootView: TimelineTable(
+        func table(_ entries: [TimelineEntry]) -> TimelineTable {
+            TimelineTable(
                 entries: entries, context: context, live: true, bottomAligned: true, focusedEventID: nil, jumpID: nil,
                 startsAtUnread: false, memoryKey: nil, canLoadOlder: false, canLoadNewer: false,
-                scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {}, onScroll: { _, _, top in above = top }))
+                scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {},
+                onScroll: { _, _, top in
+                    if let top {
+                        above = top
+                        reports.append(top)
+                    }
+                })
+        }
+        // A conversation switched to shows before its messages arrive.
+        let hosting = NSHostingView(rootView: table([]))
         window.contentView = hosting
         defer {
             window.contentView = nil
             window.close()
         }
-        // Opened at the newest message, older ones sit above.
+        hosting.layoutSubtreeIfNeeded()
+        await drainMainActor()
+        hosting.rootView = table(entries)
+        // Opened at the newest message, older ones sit above. It says so first, not after a moment with no line: a
+        // conversation switched to keeps the line it had.
         #expect(await eventually { above == true })
+        #expect(reports.first == true, "\(reports)")
         let scrollView = try #require(Harness.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
         scrollView.contentView.scroll(to: .zero)
         scrollView.reflectScrolledClipView(scrollView.contentView)

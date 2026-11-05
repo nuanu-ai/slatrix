@@ -93,6 +93,9 @@ struct RootView: View {
     @State private var pinPermissionRoomID: String?
     @State private var pinPermission = false
     @State private var threadRoot: ChatMessage?
+    /// Whether messages sit under the conversation's and the thread's headers, which then draw their lines.
+    @State private var conversationContentAbove = false
+    @State private var threadContentAbove = false
     /// Threads left open in a conversation, by room, for this session: coming back opens them again, as in Slack.
     @State private var leftThreads: [String: ChatMessage] = [:]
     /// The thread whose "Also send to #channel" is checked; another thread starts unchecked, as in Slack.
@@ -1071,7 +1074,7 @@ struct RootView: View {
                     }, onJumpToLatest: { selectRoom(room.id) }, startsAtUnread: isResumingUnread,
                     editing: editTarget?.surface == .conversation, onForward: startForward, onEditCaption: startCaption,
                     onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
-                    inlineVideo: viewer.inlineVideo
+                    inlineVideo: viewer.inlineVideo, contentAbove: $conversationContentAbove
                 ).id("\(room.id):\(matrix.timelineSelectionID)")
                 VStack(spacing: 0) {
                     if room.canPostMessages == false {
@@ -1217,7 +1220,7 @@ struct RootView: View {
                     threadReadViewport.record(visible, from: identity, current: matrix.threadReadIdentity)
                 }, onForward: startForward, onEditCaption: startCaption,
                 onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) },
-                inlineVideo: viewer.inlineVideo
+                inlineVideo: viewer.inlineVideo, contentAbove: $threadContentAbove
             ).id(root.eventID)
             VStack(spacing: 0) {
                 if room.canPostMessages == false {

@@ -30,6 +30,9 @@ struct TimelineView: View {
     var onOpenMedia: ((ChatMessage) -> Void)? = nil
     /// The window's one inline video player.
     var inlineVideo: InlineVideo? = nil
+    /// Messages scrolled up under the header, which then gets its line. Held by the pane, so a conversation switched
+    /// to keeps the line until its own messages say otherwise.
+    var contentAbove: Binding<Bool> = .constant(false)
     @State private var loadingHistory = false
     @State private var deleting: MessageActionTarget?
     @State private var cancelling: ChatMessage?
@@ -37,8 +40,6 @@ struct TimelineView: View {
     @State private var sendActions = Set<String>()
     @State private var linkCopy: LinkCopy?
     @State private var jumpVisible = false
-    /// Messages scrolled up under the header, which then gets its line.
-    @State private var contentAbove = false
     @State private var atBottom = false
     /// The message jumped to, while its highlight lasts.
     @State private var highlighted: String?
@@ -75,12 +76,12 @@ struct TimelineView: View {
             onScroll: { atBottom, showsJump, scrolled in
                 self.atBottom = atBottom
                 jumpVisible = showsJump
-                contentAbove = scrolled
+                if let scrolled, scrolled != contentAbove.wrappedValue { contentAbove.wrappedValue = scrolled }
                 onBottomVisibilityChange?(atBottom)
             }
         )
         .overlay(alignment: .top) {
-            if contentAbove { Divider().overlay(colors.border) }
+            if contentAbove.wrappedValue { Divider().overlay(colors.border) }
         }
         .overlay(alignment: .bottomTrailing) {
             if jumpVisible && !messages.isEmpty {
