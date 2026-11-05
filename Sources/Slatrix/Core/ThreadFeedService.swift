@@ -31,9 +31,7 @@ struct ThreadFeedItem: Identifiable, Hashable {
 
     /// What a row shows for `snapshot`, the thread list's placeholder for this message.
     func shown(_ snapshot: ChatMessage) -> ChatMessage {
-        guard var message else {
-            return state == .failed ? ThreadFeedService.placeholder(snapshot, failed: true) : snapshot
-        }
+        guard var message else { return ThreadFeedService.placeholder(snapshot, failed: state == .failed) }
         message.replyCount = snapshot.replyCount
         return message
     }
@@ -233,6 +231,9 @@ final class RoomSubscriptionCoordinator {
     var totalRoomCount: Int { roomStates.count }
     var canCheckMore: Bool { roomStates.contains { $0.state == .unloaded } }
     private(set) var isActive = false
+    /// True while opening checks every room's first page and the first screen's current text, so the list shows once,
+    /// in its final order, instead of rows arriving and moving under the reader.
+    private(set) var isDiscovering = false
     // Thread-list pages and the preview timelines in the feed share two requests at a time.
     private let limit = ConcurrencyLimit(slots: 2)
     private var client: Client?
@@ -278,6 +279,12 @@ final class RoomSubscriptionCoordinator {
     @ObservationIgnored private var previews: [String: Preview] = [:]
     @ObservationIgnored private var previewOrder: [String] = []
     @ObservationIgnored private var shownPreviews: [String: ThreadPreview] = [:]
+    /// What the feed last showed and each message's current content, kept across closing so a reopened feed shows
+    /// them at once while it checks again; signing out forgets them.
+    @ObservationIgnored private var lastShown: (workspaceID: String?, items: [ThreadFeedItem])?
+    @ObservationIgnored private var current: [String: ChatMessage] = [:]
+    private static let firstScreen = 8
+    @ObservationIgnored private var publishPending = false
 
     func open(
         client: Client, rooms: [ChatRoom], workspaceID: String?,
@@ -289,6 +296,9 @@ final class RoomSubscriptionCoordinator {
         self.workspaceID = workspaceID
         self.subscriptions = subscriptions
         let token = generation
+        if let lastShown, lastShown.workspaceID == workspaceID { items = lastShown.items }
+        isDiscovering = true
+        defer { if generation == token { isDiscovering = false } }
         updateRooms(rooms)
         if self.rooms.isEmpty {
             do { try await subscriptions([]) } catch {
@@ -302,9 +312,33 @@ final class RoomSubscriptionCoordinator {
             // A cancelled or competing operation must not turn automatic discovery into a busy loop.
             if Set(roomStates.filter { $0.state == .unloaded }.map(\.id)) == pending { break }
         }
+        guard generation == token else { return }
+        // The thread list carries messages as first sent, so the first screen waits for its current text, briefly.
+        let first = Array(sortedItems().prefix(Self.firstScreen))
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { try? await Task.sleep(for: .seconds(1.5)) }
+            group.addTask { @MainActor in
+                await withTaskGroup(of: Void.self) { rows in
+                    for item in first { rows.addTask { @MainActor in await self.hydratePreview(item) } }
+                }
+            }
+            await group.next()
+            group.cancelAll()
+        }
+        guard generation == token else { return }
+        isDiscovering = false
+        publishItems()
+    }
+
+    /// Forgets what the feed showed, for signing out.
+    func reset() {
+        close()
+        lastShown = nil
+        current = [:]
     }
 
     func close() {
+        if isActive, !isDiscovering { lastShown = (workspaceID, items) }
         generation = UUID()
         for item in records.values { item.cancel() }
         records = [:]
@@ -319,6 +353,7 @@ final class RoomSubscriptionCoordinator {
         items = []
         roomStates = []
         isLoading = false
+        isDiscovering = false
         errorMessage = nil
         liveRoomCount = 0
         isActive = false
@@ -400,8 +435,8 @@ final class RoomSubscriptionCoordinator {
         let id = ActivityService.key(roomID: roomID, eventID: eventID)
         if let shown = shownPreviews[id] { return shown }
         // Filled without reading it: the feed's body calls this, and only the row may observe the preview.
-        let preview = previews[id]
-        let shown = ThreadPreview(state: preview?.state ?? .snapshot, message: preview?.message, error: preview?.error)
+        let content = content(id)
+        let shown = ThreadPreview(state: content.state, message: content.message, error: content.error)
         shownPreviews[id] = shown
         return shown
     }
@@ -506,6 +541,7 @@ final class RoomSubscriptionCoordinator {
             preview.message = message
             preview.state = .ready
             preview.error = nil
+            current[id] = message
         } catch {
             guard self.generation == generation, previews[id]?.token == previewToken, preview.revision == revision
             else { return }
@@ -534,7 +570,7 @@ final class RoomSubscriptionCoordinator {
                         else { return }
                         current.revision = revision
                         current.values = values
-                        self.publishItems()
+                        self.publishSoon()
                     }
                 }))
         record.handles.append(
@@ -625,29 +661,53 @@ final class RoomSubscriptionCoordinator {
     }
 
     private func publishItems() {
-        items = rooms.flatMap { room -> [ThreadFeedItem] in
+        guard !isDiscovering else { return }
+        // Rooms report their thread lists again and again as sync runs; an unchanged list must not redraw the feed.
+        let next = sortedItems()
+        if next != items { items = next }
+    }
+
+    /// Rooms report their thread lists in bursts as sync runs; the feed sorts once for the whole burst.
+    private func publishSoon() {
+        guard !publishPending else { return }
+        publishPending = true
+        let token = generation
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.publishPending = false
+            if self.generation == token { self.publishItems() }
+        }
+    }
+
+    private func sortedItems() -> [ThreadFeedItem] {
+        let all = rooms.flatMap { room -> [ThreadFeedItem] in
             guard let record = records[room.id] else { return [] }
             if let projected = record.projected { return projected }
-            let projected = ThreadFeedMapping.project(record.values, room: room).map {
-                var item = $0
-                item.root = Self.placeholder(item.root, failed: false)
-                item.latest = item.latest.map { Self.placeholder($0, failed: false) }
-                return item
-            }
+            let projected = ThreadFeedMapping.project(record.values, room: room)
             record.projected = projected
             return projected
         }
-        .sorted { $0.lastActivityAt == $1.lastActivityAt ? $0.id < $1.id : $0.lastActivityAt > $1.lastActivityAt }
+        // Sorted by key: comparing the items themselves copies two messages per comparison, on every room's update.
+        return all.indices.map { (date: all[$0].lastActivityAt, id: all[$0].id, index: $0) }
+            .sorted { $0.date == $1.date ? $0.id < $1.id : $0.date > $1.date }
+            .map { all[$0.index] }
     }
 
     /// Copies a message's preview to the row showing it, if one does.
     private func show(_ id: String) {
         guard let shown = shownPreviews[id] else { return }
+        let content = content(id)
+        if shown.state != content.state { shown.state = content.state }
+        if shown.message != content.message { shown.message = content.message }
+        if shown.error != content.error { shown.error = content.error }
+    }
+
+    /// A message's live preview, else what it last read as, so a row never falls back to the text as first sent.
+    private func content(_ id: String) -> (state: ThreadPreview.State, message: ChatMessage?, error: String?) {
         let preview = previews[id]
-        let state = preview?.state ?? .snapshot
-        if shown.state != state { shown.state = state }
-        if shown.message != preview?.message { shown.message = preview?.message }
-        if shown.error != preview?.error { shown.error = preview?.error }
+        if preview?.state == .ready { return (.ready, preview?.message, nil) }
+        if let message = current[id] { return (.ready, message, nil) }
+        return (preview?.state ?? .snapshot, nil, preview?.error)
     }
 
     static func placeholder(_ message: ChatMessage, failed: Bool) -> ChatMessage {

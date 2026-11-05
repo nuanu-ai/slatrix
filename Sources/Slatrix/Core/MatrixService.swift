@@ -1099,7 +1099,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         pinnedMessages.attach(nil)
         savedMessages.attach(nil, accountID: nil)
         sharedFiles.attach(nil)
-        threadFeed.close()
+        threadFeed.reset()
         activity.clear()
         roomSubscriptions.attach(nil)
         avatarImages.clear()

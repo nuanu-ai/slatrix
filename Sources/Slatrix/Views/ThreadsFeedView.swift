@@ -29,7 +29,7 @@ struct ThreadsFeedView: View {
                 }.disabled(feed.isLoading)
             }
             if feed.items.isEmpty {
-                if feed.isLoading {
+                if feed.isLoading || feed.isDiscovering {
                     SkeletonRows(interval: .threadsLoading)
                 } else {
                     EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No threads yet") {
@@ -160,9 +160,10 @@ private struct ThreadFeedRow: View {
                     VStack(alignment: .leading, spacing: m.sp4) {
                         Text(rootMessage.senderName).font(m.font(.body, .semibold)).foregroundStyle(
                             colors.textPrimary)
-                        previewBody(rootMessage, state: root.state).font(m.font(.reading)).foregroundStyle(
-                            colors.textBody
-                        ).lineLimit(3).multilineTextAlignment(.leading)
+                        previewBody(rootMessage, state: root.state, shape: item.root).font(m.font(.reading))
+                            .foregroundStyle(
+                                colors.textBody
+                            ).lineLimit(3).multilineTextAlignment(.leading)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if let latest, let snapshot = item.latest {
@@ -177,9 +178,10 @@ private struct ThreadFeedRow: View {
                                 Text(message.senderName).font(m.font(.subheadline, .semibold))
                                 Text("Latest reply").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                             }
-                            previewBody(message, state: latest.state).font(m.font(.subheadline)).foregroundStyle(
-                                colors.textSecondary
-                            ).lineLimit(2).multilineTextAlignment(.leading)
+                            previewBody(message, state: latest.state, shape: snapshot).font(m.font(.subheadline))
+                                .foregroundStyle(
+                                    colors.textSecondary
+                                ).lineLimit(2).multilineTextAlignment(.leading)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }.fixedSize(horizontal: false, vertical: true)
                 }
@@ -209,13 +211,18 @@ private struct ThreadFeedRow: View {
             }
     }
 
-    @ViewBuilder private func previewBody(_ message: ChatMessage, state: ThreadPreview.State) -> some View {
-        if state == .ready {
+    /// Until its current text is read, a message shows as bars the shape of the text it was first sent with, so the
+    /// row keeps about its height and never shows a version that may since have been edited.
+    @ViewBuilder private func previewBody(_ message: ChatMessage, state: ThreadPreview.State, shape: ChatMessage)
+        -> some View
+    {
+        switch state {
+        case .ready:
             NativeMessageBody(
                 body: Self.preview(message), formattedBody: message.formattedBody, showsSpoilerControl: false
             ).allowsHitTesting(false)
-        } else {
-            Text(Self.preview(message))
+        case .failed: Text(Self.preview(message))
+        case .snapshot, .loading: Text(Self.preview(shape)).redacted(reason: .placeholder).accessibilityHidden(true)
         }
     }
     private static func preview(_ message: ChatMessage) -> String {
