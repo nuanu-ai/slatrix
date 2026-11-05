@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.AvatarPlaceholder
+import ai.nuanu.slatrix.core.DisplayNames
 import ai.nuanu.slatrix.ui.designsystem.bubble
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
 import ai.nuanu.slatrix.ui.designsystem.message
@@ -59,7 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 fun LiveYouScreen(userId: String, name: String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
     onViewProfile: ((name: String?) -> Unit)? = null, onBack: () -> Unit, avatarUrl: String? = null) {
     val colors = SlatrixTheme.colors
-    val localpart = userId.removePrefix("@").substringBefore(':')
+    val localpart = DisplayNames.localpart(userId)
     var confirming by rememberSaveable { mutableStateOf(false) }
     if (confirming) {
         AlertDialog(

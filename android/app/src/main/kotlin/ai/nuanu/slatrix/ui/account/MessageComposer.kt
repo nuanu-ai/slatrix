@@ -5,6 +5,7 @@ import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ComposerStyle
 import ai.nuanu.slatrix.core.ComposerStyles
 import ai.nuanu.slatrix.core.ComposerTarget
+import ai.nuanu.slatrix.core.DisplayNames
 import ai.nuanu.slatrix.core.MentionCandidate
 import ai.nuanu.slatrix.core.MentionPeople
 import ai.nuanu.slatrix.core.MentionSearch
@@ -310,7 +311,7 @@ private fun MentionList(candidates: List<MentionCandidate>, onPick: (MentionCand
                                 UiMetrics.CompactAvatar, candidate.person.avatarUrl)
                             Text(candidate.person.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(candidate.person.id.removePrefix("@").substringBefore(':'), style = MaterialTheme.typography.bodyMedium,
+                            Text(DisplayNames.localpart(candidate.person.id), style = MaterialTheme.typography.bodyMedium,
                                 color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         MentionCandidate.Room -> {

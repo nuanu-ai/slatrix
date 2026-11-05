@@ -216,7 +216,7 @@ object ComposerFormat {
                 if (!literal && id != null) {
                     formatted = true
                     mentions += id
-                    val label = node.wholeText().trim().let { if (it.isEmpty() || it == id) localpart(id) else it.trimStart('@') }
+                    val label = node.wholeText().trim().let { if (it.isEmpty() || it == id) DisplayNames.localpart(id) else it.trimStart('@') }
                     return Fragment("@$label", "<a href=\"${escape(permalink(id))}\">${escape(label)}</a>")
                 }
                 val inner = children(node, literal = true)
@@ -272,7 +272,7 @@ object ComposerFormat {
                 } else {
                     mentions += id
                     formatted = true
-                    val label = localpart(id)
+                    val label = DisplayNames.localpart(id)
                     body.append("@$label")
                     html.append("<a href=\"${escape(permalink(id))}\">${escape(label)}</a>")
                 }
@@ -311,7 +311,6 @@ object ComposerFormat {
     internal fun safeLink(link: String): String? = runCatching { URI(link) }.getOrNull()
         ?.takeIf { it.scheme?.lowercase() in setOf("https", "http", "mailto", "matrix") }?.toString()
 
-    internal fun localpart(id: String) = id.drop(1).substringBefore(':')
     internal fun permalink(id: String) = "https://matrix.to/#/$id"
     private fun escape(text: String): String = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("\u00a0", "&nbsp;")
 }

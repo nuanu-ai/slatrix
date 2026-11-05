@@ -37,8 +37,7 @@ class MatrixChannel(private val client: Client, private val roomId: String) {
             while (true) {
                 val chunk = iterator.nextChunk(500u) ?: break
                 chunk.filter { it.membership is MembershipState.Join }.mapTo(members) { member ->
-                    ChannelMember(member.userId, member.displayName?.takeIf { it.isNotBlank() }
-                        ?: member.userId.removePrefix("@").substringBefore(':'), member.avatarUrl)
+                    ChannelMember(member.userId, member.nameOf(), member.avatarUrl)
                 }
             }
         }

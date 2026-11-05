@@ -157,6 +157,8 @@ data class ConversationState(
      * so: m.fully_read can trail a read receipt.
      */
     val startsAtUnread: Boolean = false,
+    /** Everyone in the room by name, for mentions and reactions. */
+    val names: Map<String, String> = emptyMap(),
 )
 
 /** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
@@ -255,6 +257,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             }) { shown = it }
             currentCoroutineContext().ensureActive()
             ready.complete(Unit)
+            operations.launch { nameEveryone() }
             // A thread shows its reply wherever it is; a channel first checks whether its live timeline holds it.
             var deciding = at != null && threadRoot == null
             var oldest: String? = null
@@ -337,6 +340,27 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             throw failure
         }
         return source
+    }
+
+    /**
+     * Names the room's members as the device knows them, then again once the server's list is in. The SDK names senders
+     * the sync left out with that list too, in their rows.
+     */
+    private suspend fun nameEveryone() {
+        readNames()
+        quietly { timeline().fetchMembers() } ?: return
+        readNames()
+    }
+
+    private suspend fun readNames() {
+        val names = quietly {
+            room.membersNoSync().use { members ->
+                buildMap<String, String> {
+                    while (true) for (member in members.nextChunk(500u) ?: break) put(member.userId, member.nameOf())
+                }
+            }
+        } ?: return
+        mutableState.update { it.copy(names = names) }
     }
 
     private suspend fun timeline(): Timeline {
@@ -834,9 +858,6 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val ULong.long get() = coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
     private val ULong.int get() = coerceAtMost(Int.MAX_VALUE.toULong()).toInt()
 
-    private fun name(profile: ProfileDetails, sender: String) =
-        (profile as? ProfileDetails.Ready)?.displayName?.takeIf { it.isNotBlank() } ?: sender
-
     /** Parents asked for once each, since the SDK updates every reply that quotes one when it arrives. */
     private val askedFor = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
@@ -854,7 +875,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             is EmbeddedEventDetails.Ready -> {
                 val shown = (parent.content as? TimelineItemContent.MsgLike)?.content?.kind?.let(::shown)
                     ?: Shown(MessageKind.Unsupported, "Unsupported message")
-                ReplyPreview(id, ReplyPreview.State.Ready, name(parent.senderProfile, parent.sender), oneLine(shown))
+                ReplyPreview(id, ReplyPreview.State.Ready, parent.senderProfile.nameOf(parent.sender), oneLine(shown))
             }
             is EmbeddedEventDetails.Error -> ReplyPreview(id, ReplyPreview.State.Unavailable)
             is EmbeddedEventDetails.Pending -> ReplyPreview(id, ReplyPreview.State.Loading)
@@ -886,7 +907,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             else -> null
         }
         val content = (event.content as? TimelineItemContent.MsgLike)?.content ?: return null
-        val senderName = name(event.senderProfile, event.sender)
+        val senderName = event.senderProfile.nameOf(event.sender)
         val shown = shown(content.kind)
         val failure = event.localSendState as? EventSendState.SendingFailed
         return ConversationMessage(
@@ -918,7 +939,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             thread = content.threadSummary?.let { summary ->
                 val latest = summary.latestEvent() as? EmbeddedEventDetails.Ready
                 MessageThread(summary.numReplies().coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
-                    latest?.let { name(it.senderProfile, it.sender) },
+                    latest?.let { it.senderProfile.nameOf(it.sender) },
                     latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong(),
                     (latest?.senderProfile as? ProfileDetails.Ready)?.avatarUrl)
             }?.takeIf { it.replies > 0 },

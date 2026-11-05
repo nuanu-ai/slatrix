@@ -43,7 +43,7 @@ object MentionSearch {
         val name = fold(member.name)
         if (name.startsWith(query)) return 0
         if ((1 until name.length).any { !name[it - 1].isLetterOrDigit() && name.startsWith(query, it) }) return 1
-        val localpart = fold(member.id.removePrefix("@").substringBefore(':'))
+        val localpart = fold(DisplayNames.localpart(member.id))
         if (localpart.startsWith(query)) return 2
         // Across a space only whole words count, so typing on after a mention doesn't keep matching. The server name
         // is left out: everyone on it would match.

@@ -152,7 +152,7 @@ object MessageBodyRenderer {
                     next = next.copy(link = link, mention = id)
                     if (id != null) {
                         val label = node.wholeText().trim()
-                        val shown = if (label.isEmpty() || label == id) ComposerFormat.localpart(id) else label.trimStart('@')
+                        val shown = if (label.isEmpty() || label == id) DisplayNames.localpart(id) else label.trimStart('@')
                         // 0.2.8 and 0.2.9 split each mention into two links before its last letter; the second continues it.
                         return append((if (runs.lastOrNull()?.style?.mention == id) "" else "@") + shown, next)
                     }
@@ -217,10 +217,14 @@ object MessageBodyRenderer {
         }
     }
 
-    /** User IDs and @room typed as text become mentions, which read "@localpart". */
+    /** [runs] with each mention reading as the name [names] knows its person by. */
+    fun named(runs: List<MessageRun>, names: Map<String, String>) =
+        runs.map { run -> run.mention?.let(names::get)?.let { run.copy(text = DisplayNames.mention(it)) } ?: run }
+
+    /** User IDs and @room typed as text become mentions, which read "@localpart" until [named]. */
     private fun mentioned(runs: List<MessageRun>) = split(runs, ComposerFormat.mentioned, '@') { id, run ->
         if (id == "@room") MessageRun(id, run.styles, mention = id)
-        else MessageRun("@" + ComposerFormat.localpart(id), run.styles, ComposerFormat.permalink(id), id)
+        else MessageRun("@" + DisplayNames.localpart(id), run.styles, ComposerFormat.permalink(id), id)
     }
 
     /** Web and mail addresses typed as text become links, as in Slack. */
