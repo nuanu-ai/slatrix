@@ -17,6 +17,24 @@ struct ActivityItem: Identifiable, Hashable {
     var kind: Kind
     var avatarURL: String? = nil
     var allowsNativeNotification = true
+    /// You opened its thread, so it leaves Activity's count.
+    var opened = false
+}
+
+/// Activity's red count, as in Slack: unread mentions, thread replies Activity lists that you haven't opened, and
+/// invitations. Direct messages and channels keep their own badges, so their messages count only as mentions.
+enum ActivityBadge {
+    static func count(rooms: [ChatRoom], items: [ActivityItem]) -> Int {
+        let mentions = rooms.reduce(0) { count, room in
+            switch room.membership {
+            case "invite": count + 1
+            case "leave": count
+            default: count + room.mentions
+            }
+        }
+        // A reply that mentions you already counts through its room's mentions.
+        return mentions + items.count { $0.kind == .message && $0.threadRootID != nil && !$0.hasMention && !$0.opened }
+    }
 }
 
 @MainActor
@@ -87,6 +105,12 @@ struct ActivityItem: Identifiable, Hashable {
         String(MatrixMapping.previewText(body, formatted: formatted).prefix(4096))
     }
 
+    func markThreadOpened(roomID: String, rootID: String) {
+        for index in items.indices where items[index].roomID == roomID && items[index].threadRootID == rootID {
+            items[index].opened = true
+        }
+    }
+
     @discardableResult
     func record(_ item: ActivityItem) -> Bool {
         if seenIDs.contains(item.id) {
@@ -94,6 +118,7 @@ struct ActivityItem: Identifiable, Hashable {
             if let index = items.firstIndex(where: { $0.id == item.id }) {
                 var updated = item
                 if updated.kind == .invite { updated.timestamp = items[index].timestamp }
+                updated.opened = items[index].opened
                 items[index] = updated
             }
             return false
