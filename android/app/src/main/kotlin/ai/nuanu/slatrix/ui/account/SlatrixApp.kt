@@ -382,7 +382,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                     val state = files?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load files")
                     // Asks for the next page, which after a failed one is that page again.
                     SharedFiles(state, { attachment, width, height, full -> media.picture(attachment, width, height, full) },
-                        { openAttachment(context, media, it) }) { files?.loadOlder() }
+                        { openAttachment(context, media, it) }, { media.file(it) }) { files?.loadOlder() }
                 })
             }
         }

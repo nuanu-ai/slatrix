@@ -1,5 +1,12 @@
 package ai.nuanu.slatrix
 
+import androidx.compose.ui.test.onAllNodesWithText
+import ai.nuanu.slatrix.ui.account.dayLabel
+import org.robolectric.Shadows.shadowOf
+import java.io.File
+import androidx.test.core.app.ApplicationProvider
+import android.net.Uri
+import android.content.Intent
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
@@ -70,6 +77,7 @@ class MessageContentTest {
     private var opened: MessageAttachment? = null
     private val picture = CompletableDeferred<ByteArray?>()
     private val opening = CompletableDeferred<String?>()
+    private var download: File? = null
 
     private fun show(vararg messages: ConversationMessage, set: (@Composable () -> Unit) -> Unit = { compose.setContent(it) }) {
         set {
@@ -78,7 +86,7 @@ class MessageContentTest {
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
                     onOpenThread = { thread = it }, actions = MessageActions(onReact = { message, key -> toggled = message to key }),
                     onOpenMessage = { jumped = it }, loadPicture = { _, _, _, _ -> picture.await() },
-                    onOpenFile = { opened = it; opening.await() })
+                    onOpenFile = { opened = it; opening.await() }, loadFile = { download })
             }
         }
     }
@@ -217,6 +225,33 @@ class MessageContentTest {
         compose.onNodeWithContentDescription("office.jpg").performClick()
         compose.onNodeWithContentDescription("Close").assertIsDisplayed().performClick()
         compose.onNodeWithContentDescription("Close").assertDoesNotExist()
+    }
+
+    // capability: message.media-viewer
+    @Test fun theViewerSaysWhoSentThePictureAndSharesOrSavesIt() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        download = File(context.cacheDir, "media/office.jpg").apply { parentFile!!.mkdirs(); writeText("pixels") }
+        show(message("office.jpg").copy(kind = MessageKind.Attachment,
+            attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 6, 1600, 900, source)))
+        compose.onNodeWithContentDescription("office.jpg").performClick()
+        compose.onNode(hasText("Mira") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        compose.onNode(hasText(dayLabel(1_700_000_000_000L), substring = true) and hasAnyAncestor(isDialog())).assertIsDisplayed()
+
+        compose.onNodeWithContentDescription("Share").performClick()
+        compose.waitUntil { shadowOf(context).peekNextStartedActivity() != null }
+        val shared = shadowOf(context).nextStartedActivity.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)!!
+        assertEquals(Intent.ACTION_SEND, shared.action)
+        assertEquals("image/jpeg", shared.type)
+        val uri = shared.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)!!
+        assertEquals("pixels", context.contentResolver.openInputStream(uri)!!.reader().readText())
+
+        compose.onNodeWithContentDescription("Save to device").performClick()
+        // Held, since the notice leaves on its own after a moment.
+        compose.mainClock.autoAdvance = false
+        compose.waitUntil {
+            compose.mainClock.advanceTimeByFrame()
+            compose.onAllNodesWithText("Saved to Pictures").fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     // capability: message.media-viewer

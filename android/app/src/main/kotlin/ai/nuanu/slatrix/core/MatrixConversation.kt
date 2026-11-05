@@ -754,7 +754,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private fun Source.unread(): String? = UnreadLine.first(items.map {
         when (it) {
             ReadMarker -> UnreadLine.Mark(readMarker = true)
-            is ConversationMessage -> UnreadLine.Mark(shown = it.eventId)
+            is ConversationMessage -> UnreadLine.Mark(shown = it.eventId, own = it.own)
             else -> UnreadLine.Mark()
         }
     })

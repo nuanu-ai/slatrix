@@ -474,6 +474,37 @@ class LiveChannelScreenTest {
         compose.runOnIdle { assertEquals(1, opened) }
     }
 
+    // capability: conversation.read
+    @Test fun aLongUnreadMessageReadsOnceItShowsNotWhenItsEndScrollsIn() {
+        val long = (1..120).joinToString(" ") { "Line $it of the release notes." }
+        val read = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message("Hello", 0), message(long, 1)), loading = false,
+                    firstUnread = "\$$long", startsAtUnread = true), ComposerState(loading = false), {}, {}, {}, {},
+                    { read += it }, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("New").assertIsDisplayed()
+        compose.waitUntil { read.isNotEmpty() }
+        compose.runOnIdle { assertEquals("\$$long", read.last()) }
+    }
+
+    @Test fun aMessageThatArrivesWhileTheConversationIsOpenAddsNoNewLine() {
+        val state = mutableStateOf(ConversationState(listOf(message("Hello", 0)), loading = false))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("Hello").assertIsDisplayed()
+        compose.runOnIdle {
+            state.value = state.value.copy(rows = state.value.rows + message("Back from lunch", 1), firstUnread = "\$Back from lunch")
+        }
+        compose.onNodeWithText("Back from lunch").assertIsDisplayed()
+        compose.onNodeWithText("New").assertDoesNotExist()
+    }
+
     // capability: conversation.unread-line
     @Test fun anUnreadConversationOpensWithItsNewLineAtTheTopAndKeepsItOnceRead() {
         val many = (1..200).map { message("Message $it", minutes = it) }

@@ -17,7 +17,7 @@ class UnreadLineTest {
                 when (val value = it.asString) {
                     "marker" -> UnreadLine.Mark(readMarker = true)
                     "hidden" -> UnreadLine.Mark()
-                    else -> UnreadLine.Mark(shown = value)
+                    else -> UnreadLine.Mark(shown = value.removePrefix("own:"), own = value.startsWith("own:"))
                 }
             }
             assertEquals(case["name"].asString, case["line"].orNull(), UnreadLine.first(marks))

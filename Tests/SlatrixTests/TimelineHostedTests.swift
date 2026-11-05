@@ -843,7 +843,7 @@ extension TimelineHostedTests {
             rootView: TimelineTable(
                 entries: entries, context: context, live: true, bottomAligned: true, focusedEventID: nil, jumpID: nil,
                 startsAtUnread: false, memoryKey: nil, canLoadOlder: false, canLoadNewer: false,
-                scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {}, onScroll: { _, _, _ in }))
+                scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {}, onScroll: { _, _, _, _ in }))
         window.contentView = hosting
         defer {
             window.contentView = nil
@@ -887,7 +887,8 @@ extension TimelineHostedTests {
             rootView: TimelineTable(
                 entries: entries, context: context, live: true, bottomAligned: true, focusedEventID: nil, jumpID: nil,
                 startsAtUnread: false, memoryKey: nil, canLoadOlder: false, canLoadNewer: false,
-                scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {}, onScroll: { _, _, top in above = top }))
+                scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {},
+                onScroll: { _, _, top, _ in above = top }))
         window.contentView = hosting
         defer {
             window.contentView = nil

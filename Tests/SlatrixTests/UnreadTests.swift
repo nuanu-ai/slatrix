@@ -83,7 +83,10 @@ struct UnreadMappingTests {
             switch item {
             case "marker": UnreadMapping.Mark(isReadMarker: true)
             case "hidden": UnreadMapping.Mark()
-            default: UnreadMapping.Mark(shownEventID: item)
+            default:
+                UnreadMapping.Mark(
+                    shownEventID: item.hasPrefix("own:") ? String(item.dropFirst(4)) : item,
+                    isOwn: item.hasPrefix("own:"))
             }
         }
         #expect(UnreadMapping.firstUnreadEventID(in: marks) == spec.line)
@@ -227,5 +230,29 @@ struct UnreadSDKActionsTests {
         current = false
         timeline.forwardGate.release()
         await #expect(throws: CancellationError.self) { _ = try await page.value }
+    }
+}
+
+/// The shared cases in `spec/read-state.json`.
+struct ReadStateSpec: Decodable {
+    struct Seen: Decodable, CustomTestStringConvertible {
+        var name: String
+        var message, screen: [CGFloat]
+        var seen: Bool
+        var testDescription: String { name }
+    }
+    var seen: [Seen]
+}
+
+struct ReadStateSpecTests {
+    // capability: conversation.read
+    @Test(
+        "When the newest message counts as seen",
+        arguments: try SharedSpec.decode("spec/read-state.json", as: ReadStateSpec.self).seen)
+    func seen(spec: ReadStateSpec.Seen) {
+        #expect(
+            ReadStatePolicy.isSeen(
+                top: spec.message[0], bottom: spec.message[1], screenTop: spec.screen[0], screenBottom: spec.screen[1])
+                == spec.seen)
     }
 }

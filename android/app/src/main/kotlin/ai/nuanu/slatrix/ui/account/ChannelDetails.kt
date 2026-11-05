@@ -73,7 +73,7 @@ data class ChannelDetailsActions(
 
 /** Every message in a conversation, threads included, to find what was shared, and asking for older ones. */
 data class SharedFiles(val state: ConversationState = ConversationState(), val loadPicture: PictureLoader = { _, _, _, _ -> null },
-    val onOpenFile: suspend (MessageAttachment) -> String? = { null }, val onLoadMore: () -> Unit = {})
+    val onOpenFile: suspend (MessageAttachment) -> String? = { null }, val loadFile: FileLoader? = null, val onLoadMore: () -> Unit = {})
 
 /** A conversation's pinned messages as they load, and unpinning one. */
 data class PinnedMessages(val state: ConversationState = ConversationState(), val onUnpin: (ConversationMessage) -> Unit = {})
@@ -363,8 +363,11 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
     // Saved, so the viewer stays open on the same image when the phone turns.
     var viewing by rememberSaveable { mutableStateOf<String?>(null) }
     viewing?.let { id ->
-        files.state.rows.find { it.id == id }?.let { (it as? ConversationMessage)?.attachment }
-            ?.let { MediaViewer(it, tile to tile, files.loadPicture) { viewing = null } }
+        (files.state.rows.find { it.id == id } as? ConversationMessage)?.let { message ->
+            message.attachment?.let {
+                MediaViewer(it, tile to tile, files.loadPicture, message.senderName, message.timestamp, files.loadFile) { viewing = null }
+            }
+        }
     }
     val shared = remember(files.state.rows) {
         files.state.rows.asReversed().filterIsInstance<ConversationMessage>().flatMap { message ->

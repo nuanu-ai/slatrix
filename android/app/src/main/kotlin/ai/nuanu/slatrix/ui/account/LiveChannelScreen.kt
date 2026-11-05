@@ -5,6 +5,7 @@ import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationRow
 import ai.nuanu.slatrix.core.caption
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.ReadState
 import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
@@ -147,7 +148,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // null at the newest. Kept while the conversation is left, and restored when its rows still hold that row.
     var place by rememberSaveable { mutableStateOf<Pair<String, Int>?>(null) }
     val newLine = remember { object { var at: String? = null; var start: String? = null; var decided = false; var back: Pair<String, Int>? = null } }
-    if (newLine.at == null && state.rows.any { it is ConversationMessage && it.eventId != null && it.eventId == state.firstUnread }) {
+    // Decided as it opens: nothing that arrives while it's open, read as it comes, adds a line.
+    if (!newLine.decided && state.rows.any { it is ConversationMessage && it.eventId != null && it.eventId == state.firstUnread }) {
         newLine.at = state.firstUnread
     }
     if (!newLine.decided && !state.loading && state.rows.isNotEmpty()) {
@@ -166,8 +168,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         if (!resumed || !jumped) return@LaunchedEffect
         snapshotFlow {
             list.layoutInfo.visibleItemsInfo.any { item ->
-                item.key == latest.id && item.offset + item.size <= list.layoutInfo.viewportEndOffset &&
-                    item.offset + item.size > list.layoutInfo.viewportStartOffset
+                item.key == latest.id && ReadState.seen(item.offset.toFloat(), (item.offset + item.size).toFloat(),
+                    list.layoutInfo.viewportStartOffset.toFloat(), list.layoutInfo.viewportEndOffset.toFloat())
             }
         }.distinctUntilChanged().collect { visible -> if (visible) read(event) }
     }
@@ -201,11 +203,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             }
             list.scrollToItem(rows.size - 1 - index)
             if (target == newLine.start) {
-                // The line tops the screen with the unread messages under it; fewer than a screenful sit at the bottom.
+                // The line tops the screen with the unread messages under it; fewer than a screenful sit at the bottom, and
+                // one message taller than the screen shows from its start.
                 val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == rows.size - 1 - index }
                 val info = list.layoutInfo
                 val visible = info.viewportSize.height - info.beforeContentPadding - info.afterContentPadding
-                list.scrollBy(-(visible - (item?.size ?: 0)).coerceAtLeast(0).toFloat())
+                list.scrollBy(-(visible - (item?.size ?: 0)).toFloat())
                 return@LaunchedEffect
             }
             // The list is reversed, so the message sits at the bottom; newer ones below lift it a third of the way up.
@@ -254,7 +257,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // The row and its tile's pixels, saved, so the viewer stays open on the same image when the phone turns.
     var viewing by rememberSaveable { mutableStateOf<Pair<String, Pair<Int, Int>>?>(null) }
     viewing?.let { (id, tile) ->
-        (state.rows.find { it.id == id } as? ConversationMessage)?.attachment?.let { MediaViewer(it, tile, loadPicture) { viewing = null } }
+        (state.rows.find { it.id == id } as? ConversationMessage)?.let { message ->
+            message.attachment?.let { MediaViewer(it, tile, loadPicture, message.senderName, message.timestamp, loadFile) { viewing = null } }
+        }
     }
     val files = rememberCoroutineScope()
     // A file opens from the screen, not its row, so scrolling the row away doesn't cancel the download.
