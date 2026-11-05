@@ -197,7 +197,7 @@ struct Snapshots {
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         let item = try #require(message.menu(for: event)?.items.first { $0.identifier?.rawValue == "thread" })
         _ = item.target?.perform(item.action, with: item)
-        for width in [480, 600, 800, 1000, 1440] {
+        for width in [480, 600, 800, 1000, 1280, 1440] {
             window.setContentSize(NSSize(width: width, height: 900))
             try write(await settledImage(hosting), "width-\(width)-thread-\(theme.rawValue)")
         }

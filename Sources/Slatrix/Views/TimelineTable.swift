@@ -1125,7 +1125,8 @@ struct TimelineRow: View, Equatable {
                     isPinned: row.pinned, sendFailure: row.sendFailure, sendBusy: row.sendBusy, hovered: hovered,
                     timeLabel: row.time,
                     avatar: AvatarView(
-                        name: message.senderName, size: metrics.messageAvatar, matrix: matrix,
+                        name: message.senderName, size: context.isThread ? metrics.avatar : metrics.messageAvatar,
+                        matrix: matrix,
                         source: message.avatarURL),
                     replierAvatar: message.lastReply.map {
                         AvatarView(
@@ -1207,7 +1208,8 @@ private struct TimelineDayDivider: View {
         Text(label).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
             .padding(.horizontal, m.sp8 + m.sp2).padding(.vertical, m(3))
             .overlay(Capsule().strokeBorder(colors.border))
-            .frame(maxWidth: .infinity).padding(.top, m.sp16).padding(.bottom, m.sp8)
+            // With the rows around it: 24 above the day and 16 below, as the boards space it.
+            .frame(maxWidth: .infinity).padding(.top, m.sp20).padding(.bottom, m.sp4)
             .accessibilityAddTraits(.isHeader)
     }
 }

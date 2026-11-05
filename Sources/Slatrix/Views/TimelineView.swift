@@ -471,6 +471,7 @@ struct MessageRow: View {
     private var pendingSend: Bool { own && message.sendState != "sent" }
     private var sending: Bool { pendingSend && sendFailure == nil }
     private var compact: Bool { appearance.density == .compact }
+    private var avatarSide: CGFloat { isThread ? m.avatar : m.messageAvatar }
     private var time: String { timeLabel ?? message.timestamp.formatted(.dateTime.hour().minute()) }
     var body: some View {
         layout
@@ -487,24 +488,25 @@ struct MessageRow: View {
             .contentShape(Rectangle())
     }
     private var layout: some View {
-        HStack(alignment: .top, spacing: m.sp12) {
+        // A thread's pane is narrow, so its rows give the text more of it.
+        HStack(alignment: .top, spacing: isThread ? m.sp8 : m.sp12) {
             if !compact {
                 if grouped || !appearance.showAvatars {
                     // One line: "12:00 AM" is wider than the gutter, and a wrap would grow the row on hover.
                     Text(hovered ? time : "").font(m.font(.subheadline)).lineLimit(1).fixedSize()
-                        .foregroundStyle(colors.textSecondary).frame(width: m.messageAvatar, alignment: .trailing)
+                        .foregroundStyle(colors.textSecondary).frame(width: avatarSide, alignment: .trailing)
                         .overlay(alignment: .trailing) { if grouped && sending && !hovered { clock } }
                         .padding(.top, m.sp4)
                 } else {
                     Button {
                         actions.openProfile?()
                     } label: {
-                        avatar ?? AvatarView(name: message.senderName, size: m.messageAvatar)
+                        avatar ?? AvatarView(name: message.senderName, size: avatarSide)
                     }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help(
                         "View \(message.senderName)’s profile")
                 }
             }
-            VStack(alignment: .leading, spacing: m.sp4) {
+            VStack(alignment: .leading, spacing: m.sp2) {
                 if isPinned {
                     Label("Pinned", systemImage: "pin.fill").font(m.font(.subheadline))
                         .foregroundStyle(colors.textSecondary)
@@ -554,12 +556,13 @@ struct MessageRow: View {
                         Text("(edited)").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     }
                     // A reused cell shows another message: a download or preview in flight must not carry over.
-                    if let attachment { attachment.padding(.vertical, m.sp4).id(message.id) }
-                    if !message.reactions.isEmpty { reactions.padding(.top, m.sp2) }
+                    if let attachment { attachment.padding(.top, m(6)).id(message.id) }
+                    if !message.reactions.isEmpty { reactions.padding(.top, m(6)) }
                     if !isThread && message.replyCount > 0 {
                         ThreadRepliesBar(
                             count: message.replyCount, lastReply: message.lastReply, avatar: replierAvatar,
-                            prepare: actions.prepareThread, action: actions.thread)
+                            prepare: actions.prepareThread, action: actions.thread
+                        ).padding(.top, m.sp4)
                     }
                     if pendingSend, let failure = sendFailure {
                         VStack(alignment: .leading, spacing: m.sp4) {
@@ -583,7 +586,9 @@ struct MessageRow: View {
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(.horizontal, isThread ? m.sp20 : m.sp24).padding(.top, grouped || compact ? 3 : 12)
+        }.padding(.horizontal, isThread ? m.sp16 : m.sp24)
+            // The boards' rhythm: 16 between senders, 4 between one sender's messages.
+            .padding(.top, grouped ? 0 : compact ? m.sp2 : m.sp12)
             .padding(.bottom, m.sp4)
     }
     private var clock: some View { SendingClock(since: message.timestamp) }
@@ -711,8 +716,10 @@ private struct ThreadRepliesBar: View {
                     Text(ThreadReply.lastReplyText(lastReply.timestamp, now: Date())).font(m.font(.body))
                         .foregroundStyle(colors.textSecondary)
                 }
-            }.lineLimit(1).padding(m.sp4).frame(maxWidth: m(Self.maxWidth), minHeight: m.sp32, alignment: .leading)
-                .background(hovering ? colors.hover : .clear, in: shape)
+            }.lineLimit(1).padding(.horizontal, m.sp4).frame(
+                maxWidth: m(Self.maxWidth), minHeight: m.sp24, alignment: .leading
+            )
+            .background(hovering ? colors.hover : .clear, in: shape)
         }.buttonStyle(.row)
             .onHover {
                 hovering = $0

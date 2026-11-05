@@ -168,7 +168,7 @@ private struct ThreadFeedRow: View {
                 if let latest, let snapshot = item.latest {
                     let message = latest.shown(snapshot)
                     HStack(alignment: .top, spacing: m.sp8) {
-                        RoundedRectangle(cornerRadius: 1).fill(colors.border).frame(width: 2).padding(
+                        RoundedRectangle(cornerRadius: 1).fill(colors.border).frame(width: m(2)).padding(
                             .leading, m.sp16)
                         AvatarView(
                             name: message.senderName, size: m.avatarMedium, matrix: matrix, source: message.avatarURL)
