@@ -708,11 +708,36 @@ struct TimelineTable: NSViewRepresentable {
         let largest = differences.max { abs($0) < abs($1) } ?? 0
         let newest = rows.lastIndex { if case .message = $0.kind { true } else { false } }
         let below = newest.map { viewport.contentHeight - table.rect(ofRow: $0).maxY } ?? 0
+        // Rows that fit and sit at the bottom still showed space over the composer; these tell the newest row's own
+        // text and contents apart.
+        var under = -1
+        var slack = -1
+        var shape = 0
+        if let newest, case .message(let entry) = rows[newest].kind,
+            let cell = table.view(atColumn: 0, row: newest, makeIfNecessary: false) as? TimelineCell
+        {
+            func texts(_ view: NSView) -> [MessageTextView] {
+                (view as? MessageTextView).map { [$0] } ?? view.subviews.flatMap(texts)
+            }
+            let frames = texts(cell).map { ($0, $0.convert($0.bounds, to: cell)) }
+            if let (text, frame) = frames.max(by: { cell.isFlipped ? $0.1.maxY < $1.1.maxY : $0.1.minY > $1.1.minY }) {
+                under = Int((cell.isFlipped ? cell.bounds.maxY - frame.maxY : frame.minY).rounded())
+                if let layout = text.layoutManager, let container = text.textContainer {
+                    slack = Int((text.frame.height - layout.usedRect(for: container).height).rounded())
+                }
+            }
+            let message = entry.message
+            shape =
+                (entry.grouped ? 1 : 0) + (message.attachment != nil ? 2 : 0) + (message.replyCount > 0 ? 4 : 0)
+                + (message.reactions.isEmpty ? 0 : 8) + (message.replyPreview != nil ? 16 : 0)
+        }
         Performance.event(
             .timelineFit,
             [
                 "misfit": differences.count, "px": Int(largest), "bottom": Int(viewport.distanceFromBottom.rounded()),
                 "opening": opening, "live": configuration?.live == false ? 0 : 1, "below": Int(below.rounded()),
+                "height": newest.map { Int(table.rect(ofRow: $0).height.rounded()) } ?? 0, "under": under,
+                "slack": slack, "shape": shape,
             ])
     }
 
