@@ -49,8 +49,8 @@ struct AppColors {
     var overlay: Color { Color(hex: dark ? 0x252528 : 0xfbfbfd) }
     /// The toolbar's capsules and the composer, which sit a hair above the canvas.
     var control: Color { Color(hex: dark ? 0x1f1f22 : 0xffffff) }
-    /// Tooltips: a dark bubble in light mode, and in dark mode a step lighter than every surface.
-    var tooltip: Color { Color(hex: dark ? 0x2e2e32 : 0x1d1d1f) }
+    /// Tooltips: a dark bubble in both themes, darker than the conversation in dark mode.
+    var tooltip: Color { Color(hex: dark ? 0x0b0b0c : 0x1d1d1f) }
     var onTooltip: Color { Color(hex: 0xffffff) }
     /// Dims the window under a modal.
     var scrim: Color { Color.black.opacity(dark ? 0.48 : 0.32) }
