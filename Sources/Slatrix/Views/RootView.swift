@@ -93,6 +93,8 @@ struct RootView: View {
     @State private var pinPermissionRoomID: String?
     @State private var pinPermission = false
     @State private var threadRoot: ChatMessage?
+    /// Threads left open in a conversation, by room, for this session: coming back opens them again, as in Slack.
+    @State private var leftThreads: [String: ChatMessage] = [:]
     /// The thread whose "Also send to #channel" is checked; another thread starts unchecked, as in Slack.
     @State private var channelCopyRootID: String?
     @State private var navigationGeneration = UUID()
@@ -1706,6 +1708,9 @@ struct RootView: View {
                 for: matrix.rooms.first { $0.id == id }, selectedRoomID: matrix.selectedRoomID,
                 explicitEventID: eventID, opensThread: thread != nil)
         let destinationEventID = eventID ?? resumeAnchor
+        if let current = matrix.selectedRoomID, current != id, let open = threadRoot { leftThreads[current] = open }
+        // Only a plain visit: a jump to a message or a thread of its own wins.
+        let leftThread = thread == nil && eventID == nil && restoringReply == nil ? leftThreads[id] : nil
         let requiresRoomSelection = !matrix.isLiveTimelineReady(roomID: id) || pendingRoomID != nil
         // The cases below that open a new timeline.
         if destinationEventID != nil || thread == nil || requiresRoomSelection {
@@ -1747,7 +1752,7 @@ struct RootView: View {
         if matrix.isPreview {
             matrix.selectPreviewRoom(id)
             pendingRoomID = nil
-            if let thread {
+            if let thread = thread ?? leftThread {
                 threadRoot = thread
                 matrix.openPreviewThread(thread)
                 threadReadyID = thread.eventID
@@ -1790,7 +1795,7 @@ struct RootView: View {
                 }
                 // A jump to a thread reply opens its thread beside the conversation, as Slack does.
                 let replyRoot = replyRootID.flatMap { root in matrix.messages.first { $0.eventID == root } }
-                if let thread = thread ?? replyRoot {
+                if let thread = thread ?? replyRoot ?? leftThread {
                     threadRoot = thread
                     openingThreadID = thread.eventID
                     do {
@@ -2571,9 +2576,11 @@ struct RootView: View {
         profilePane = nil
         roomDetails = nil
         roomNotifications = nil
+        leftThreads = [:]
         loadLocalData()
     }
     private func closeThread() {
+        if let id = matrix.selectedRoomID { leftThreads[id] = nil }
         navigationGeneration = UUID()
         if replyTarget?.threadID != nil { cancelReply() }
         matrix.setMessageActionThread(rootID: nil)

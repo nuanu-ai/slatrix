@@ -526,6 +526,33 @@ struct WindowHostedTests {
         }
     }
 
+    @Test("A thread left open in a channel is open again on coming back to the channel")
+    func threadSurvivesLeaving() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        try harness.openThread()
+        #expect(await eventually { harness.dividers == 2 })
+        // The thread's first message, in the pane right of the conversation's divider.
+        let root = try #require(harness.messages.last?.body)
+        func threadShown() -> Bool {
+            let shown = harness.shown()
+            guard
+                let edge = shown.filter({ String(describing: type(of: $0)) == "ResizePointerView" })
+                    .map({ $0.convert($0.bounds, to: nil).maxX }).max()
+            else { return false }
+            return shown.contains {
+                ($0 as? MessageTextView)?.string == root && $0.convert($0.bounds, to: nil).minX > edge
+            }
+        }
+        #expect(await eventually { threadShown() })
+
+        harness.menu("next-conversation")
+        #expect(await eventually { harness.dividers == 1 })
+        harness.menu("back")
+        #expect(await eventually { harness.dividers == 2 && threadShown() })
+    }
+
     @Test("At 150% zoom an open thread stays inside the panel")
     func paneFitsAtZoom() async throws {
         let harness = Harness(zoom: 1.5)
