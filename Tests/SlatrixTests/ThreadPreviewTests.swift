@@ -30,7 +30,7 @@ struct ThreadPreviewTests {
     func snapshotIsPlaceholder() async throws {
         let row = try await open()
         let shown = preview("$root")
-        #expect(shown.state == .snapshot && !shown.shown(row.root).body.contains("Original snapshot"))
+        #expect(!shown.shown(row.root).body.contains("Original snapshot"))
     }
 
     @Test("Hydration shows the SDK's current edit of the root and deletion of the latest reply")
@@ -132,7 +132,7 @@ struct ThreadPreviewTests {
 
 @MainActor
 struct ThreadPreviewCacheTests {
-    @Test("Hydrated previews are bounded; an evicted row hydrates again without losing its new timeline")
+    @Test("Hydrated previews are bounded; an evicted row keeps its current text and hydrates again")
     func boundedCache() async throws {
         let ids = (0..<65).map { "$cache-\($0)" }
         let timelines = Dictionary(
@@ -149,13 +149,13 @@ struct ThreadPreviewCacheTests {
         func state(_ row: ThreadFeedItem) -> ThreadPreview.State {
             feed.preview(roomID: row.roomID, eventID: row.root.eventID).state
         }
-        let evicted = feed.items.filter { state($0) == .snapshot }
+        let evicted = feed.items.filter { timelines[$0.root.id]?.allListenersCancelled == true }
         #expect(evicted.count == 1)
         let row = try #require(evicted.first)
-        await feed.hydratePreview(row)
         #expect(state(row) == .ready)
-        #expect(feed.items.filter { state($0) == .snapshot }.count == 1)
+        await feed.hydratePreview(row)
         #expect(timelines[row.root.id]?.allListenersCancelled == false)
+        #expect(feed.items.filter { timelines[$0.root.id]?.allListenersCancelled == true }.count == 1)
         feed.close()
     }
 

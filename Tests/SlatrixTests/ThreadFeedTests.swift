@@ -218,6 +218,45 @@ struct ThreadFeedDiscoveryTests {
         #expect(feed.checkedRoomCount == rooms.count && !feed.canCheckMore && !feed.isLoading)
     }
 
+    @Test("Threads shows its list once every room's first page is in, so threads never arrive and move on screen")
+    func showsOnce() async {
+        let sdkRooms = Dictionary(
+            uniqueKeysWithValues: rooms.map { room in
+                let id = "$root-\(room.id)"
+                return (
+                    room.id,
+                    FakeThreadRoom(
+                        threads: FakeThreadList([
+                            ThreadListItem(rootEvent: threadEvent(id), latestEvent: nil, numReplies: 1)
+                        ]), timelines: [id: FakeEventTimeline(textEvent(id, body: "Current"))])
+                )
+            })
+        var shownWhilePaging: [Int] = []
+        await feed.open(client: FakeThreadClient(sdkRoom, rooms: sdkRooms), rooms: rooms, workspaceID: nil) { _ in
+            shownWhilePaging.append(feed.items.count)
+        }
+        #expect(shownWhilePaging.allSatisfy { $0 == 0 } && feed.items.count == rooms.count)
+    }
+
+    @Test("Threads opened again shows what it last showed at once, in its current text, while it checks again")
+    func reopensAtOnce() async throws {
+        let room = FakeThreadRoom(
+            threads: FakeThreadList([ThreadListItem(rootEvent: threadEvent("$root"), latestEvent: nil, numReplies: 1)]),
+            timelines: ["$root": FakeEventTimeline(textEvent("$root", body: "Edited successfully", edited: true))])
+        let client = FakeThreadClient(room)
+        await feed.open(client: client, rooms: [rooms[0]], workspaceID: nil) { _ in }
+        feed.close()
+        var shownOnReopen: [String] = []
+        await feed.open(client: client, rooms: [rooms[0]], workspaceID: nil) { _ in
+            if shownOnReopen.isEmpty {
+                shownOnReopen = feed.items.map {
+                    feed.preview(roomID: $0.roomID, eventID: $0.root.eventID).shown($0.root).body
+                }
+            }
+        }
+        #expect(shownOnReopen == ["Edited successfully"])
+    }
+
     @Test("Closing Threads before discovery starts sends no page requests")
     func closeStopsDiscovery() async {
         await feed.open(client: FakeThreadClient(sdkRoom), rooms: rooms, workspaceID: nil) { _ in feed.close() }

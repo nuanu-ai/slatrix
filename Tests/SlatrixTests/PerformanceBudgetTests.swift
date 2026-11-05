@@ -73,6 +73,37 @@ struct PerformanceBudgetTests {
         return client
     }
 
+    @Test("Every room of a busy account reporting its threads again updates Threads within budget")
+    func threadFeedBudget() async {
+        let rooms = (0..<40).map { ChatRoom(id: "!room\($0):example.org", name: "Room \($0)") }
+        let lists = Dictionary(
+            uniqueKeysWithValues: rooms.enumerated().map { index, room in
+                let threads = (0..<10).map { thread in
+                    let id = "$root-\(index)-\(thread)"
+                    return ThreadListItem(
+                        rootEvent: threadEvent(id, timestamp: UInt64(index * 10 + thread) * 1_000),
+                        latestEvent: threadEvent(id + "-reply", timestamp: UInt64(index * 10 + thread) * 1_000 + 500),
+                        numReplies: 3)
+                }
+                return (room.id, FakeThreadList(threads))
+            })
+        let client = FakeThreadClient(
+            FakeThreadRoom(), rooms: lists.mapValues { FakeThreadRoom(threads: $0) })
+        let feed = ThreadFeedService()
+        await feed.open(client: client, rooms: rooms, workspaceID: nil) { _ in }
+        let time = await fastest(of: 5) {
+            let start = threadCPUTime()
+            for list in lists.values { list.replaySnapshot() }
+            // Once for the rooms' callbacks and once for the list they publish.
+            await drainMainActor()
+            await drainMainActor()
+            return threadCPUTime() - start
+        }
+        #expect(feed.items.count == 400)
+        #expect(time < .milliseconds(35), "\(time)")
+        feed.close()
+    }
+
     @Test("A 50-message diff on a 1,000-message timeline is applied and projected within budget")
     func timelineDiffBudget() async {
         let service = MatrixService()
