@@ -138,9 +138,12 @@ enum MatrixMapping {
         }
     }
 
-    static func profileName(_ profile: ProfileDetails, fallback: String) -> String {
-        if case .ready(let name, _, _, _, _) = profile { return name ?? fallback }
-        return fallback
+    /// `userID`'s name from the SDK's profile of them in a room; their localpart until it's ready.
+    static func profileName(_ profile: ProfileDetails, userID: String) -> String {
+        guard case .ready(let name, let ambiguous, _, _, _) = profile else {
+            return DisplayNames.name(userID, member: nil)
+        }
+        return DisplayNames.name(userID, member: name, ambiguous: ambiguous)
     }
 
     static func htmlBody(_ formatted: FormattedBody?) -> String? {
@@ -192,7 +195,7 @@ enum MatrixMapping {
             return ChatReplyPreview(state: .failed, eventID: eventID, body: "Original message unavailable")
         case .ready(let content, let sender, let profile, _, _):
             var preview = ChatReplyPreview(
-                state: .ready, eventID: eventID, senderID: sender, senderName: profileName(profile, fallback: sender),
+                state: .ready, eventID: eventID, senderID: sender, senderName: profileName(profile, userID: sender),
                 body: "Room event", kind: "m.room.event")
             // A reply preview is a leaf: never traverse this event's own reply or thread details.
             guard case .msgLike(let message) = content else { return preview }
@@ -265,7 +268,7 @@ enum MatrixMapping {
                 var avatar: String?
                 if case .ready(_, _, let url, _, _) = profile { avatar = url }
                 message.lastReply = ThreadReply(
-                    senderID: sender, senderName: profileName(profile, fallback: sender), avatarURL: avatar,
+                    senderID: sender, senderName: profileName(profile, userID: sender), avatarURL: avatar,
                     timestamp: Date(timeIntervalSince1970: Double(timestamp) / 1000))
             }
         }
@@ -338,7 +341,7 @@ enum MatrixMapping {
         let eventID = identifier(item.eventOrTransactionId)
         var result = project(
             content, id: uniqueID ?? eventID, roomID: roomID, senderID: item.sender,
-            senderName: profileName(item.senderProfile, fallback: item.sender), timestamp: item.timestamp)
+            senderName: profileName(item.senderProfile, userID: item.sender), timestamp: item.timestamp)
         if uniqueID != nil { result.timelineEventID = eventID }
         result.reactions = item.reactions.map {
             MessageReaction(
@@ -363,7 +366,7 @@ enum MatrixMapping {
                 case .msgLike(let content) = value.content,
                 seen.insert("\(room)|\(value.eventId)").inserted
             else { return nil }
-            let name = profileName(value.senderProfile, fallback: value.sender)
+            let name = profileName(value.senderProfile, userID: value.sender)
             var message = project(
                 content, id: value.eventId, roomID: room, senderID: value.sender, senderName: name,
                 timestamp: value.timestamp)
@@ -3000,7 +3003,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 while !Task.isCancelled, let chunk = iterator.nextChunk(chunkSize: 500), !chunk.isEmpty {
                     result += chunk.map {
                         ChatUser(
-                            id: $0.userId, name: $0.displayName ?? $0.userId, avatarURL: $0.avatarUrl,
+                            id: $0.userId,
+                            name: DisplayNames.name($0.userId, member: $0.displayName, ambiguous: $0.isNameAmbiguous),
+                            avatarURL: $0.avatarUrl,
                             membership: Self.membership($0.membership))
                     }
                 }
@@ -3183,7 +3188,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             sessionGeneration == generation, user?.id == id
         else { return }
         // An edit saved here meanwhile is newer than what the server just said.
-        if profileRevision == names { user?.name = profile.displayName ?? id }
+        if profileRevision == names { user?.name = DisplayNames.name(id, member: nil, global: profile.displayName) }
         if avatarRevision == avatars { user?.avatarURL = profile.avatarUrl }
     }
     /// Uploads `photo` as your profile photo, or removes yours when nil.

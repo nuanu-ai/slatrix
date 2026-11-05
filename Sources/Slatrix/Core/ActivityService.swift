@@ -80,7 +80,7 @@ enum ActivityBadge {
             item = ActivityItem(
                 id: Self.key(roomID: roomID, eventID: event.eventId()), roomID: roomID, eventID: event.eventId(),
                 roomName: notification.roomInfo.displayName, senderID: event.senderId(),
-                senderName: notification.senderInfo.displayName ?? event.senderId(), body: String(body.prefix(4096)),
+                senderName: Self.senderName(notification, event.senderId()), body: String(body.prefix(4096)),
                 timestamp: Date(timeIntervalSince1970: Double(event.timestamp()) / 1000),
                 hasMention: notification.hasMention == true,
                 threadRootID: notification.threadId ?? event.threadRootEventId(), kind: .message,
@@ -89,12 +89,17 @@ enum ActivityBadge {
             item = ActivityItem(
                 id: Self.key(roomID: roomID, eventID: "invite:\(sender)"), roomID: roomID, eventID: nil,
                 roomName: notification.roomInfo.displayName, senderID: sender,
-                senderName: notification.senderInfo.displayName ?? sender,
+                senderName: Self.senderName(notification, sender),
                 body: "You were invited to this conversation", timestamp: receivedAt, hasMention: false,
                 threadRootID: nil, kind: .invite, avatarURL: notification.senderInfo.avatarUrl)
         }
         item.allowsNativeNotification = notification.actions.map { $0.contains(.notify) } ?? true
         return record(item) ? item : nil
+    }
+
+    private nonisolated static func senderName(_ notification: NotificationItem, _ userID: String) -> String {
+        DisplayNames.name(
+            userID, member: notification.senderInfo.displayName, ambiguous: notification.senderInfo.isNameAmbiguous)
     }
 
     nonisolated static func key(roomID: String, eventID: String) -> String {

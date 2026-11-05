@@ -389,7 +389,9 @@ private final class DeviceVerificationObserver: VerificationStateListener, @unch
             rotateFlowObserver()
             request = Request(
                 userID: details.senderProfile.userId,
-                name: details.senderProfile.displayName ?? details.senderProfile.userId, deviceID: details.deviceId,
+                name: DisplayNames.name(
+                    details.senderProfile.userId, member: nil, global: details.senderProfile.displayName),
+                deviceID: details.deviceId,
                 deviceName: details.deviceDisplayName, flowID: details.flowId,
                 firstSeen: Date(timeIntervalSince1970: Double(details.firstSeenTimestamp) / 1000))
             clearComparison()
