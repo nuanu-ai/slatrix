@@ -21,6 +21,12 @@ struct SavedMessages: Equatable, Sendable {
         var isSaved: Bool
         var ts: Int64
         var key: Key { Key(roomID: reference.roomID, eventID: reference.eventID) }
+        /// At the same moment saved beats removed, completed beats archived beats in progress, and a later reminder
+        /// beats an earlier one or none, so a list an older build wrote back can't erase them.
+        var rank: (Int64, Int, Int64) {
+            let state = isSaved ? 1 + (LaterState.allCases.firstIndex(of: reference.laterState) ?? 0) : 0
+            return (ts, state, reference.remindAt.map(SavedMessages.milliseconds) ?? -1)
+        }
     }
     private static let savedLimit = 10_000
     private static let removedLimit = 1_000
@@ -37,10 +43,22 @@ struct SavedMessages: Equatable, Sendable {
             var roomID: String
             var eventID: String
             var ts: Int64
+            var state: LaterState?
+            var remindAt: Int64?
             enum CodingKeys: String, CodingKey {
                 case roomID = "room_id"
                 case eventID = "event_id"
-                case ts
+                case ts, state
+                case remindAt = "remind_at"
+            }
+            init(from decoder: Decoder) throws {
+                let values = try decoder.container(keyedBy: CodingKeys.self)
+                roomID = try values.decode(String.self, forKey: .roomID)
+                eventID = try values.decode(String.self, forKey: .eventID)
+                ts = try values.decode(Int64.self, forKey: .ts)
+                // What an entry adds to the ID and time never costs it its place.
+                state = try? values.decodeIfPresent(LaterState.self, forKey: .state)
+                remindAt = (try? values.decodeIfPresent(Int64.self, forKey: .remindAt)).flatMap { $0 }
             }
         }
         struct Lenient: Decodable {
@@ -57,10 +75,12 @@ struct SavedMessages: Equatable, Sendable {
         }
         func entries(_ items: [Lenient]?, saved: Bool) -> [Entry] {
             (items ?? []).compactMap(\.item).compactMap { item in
+                let remindAt = item.remindAt.flatMap { (0...Self.maxTimestamp).contains($0) ? Self.date($0) : nil }
                 let reference = SavedMessageReference(
-                    roomID: item.roomID, eventID: item.eventID, savedAt: Self.date(item.ts))
+                    roomID: item.roomID, eventID: item.eventID, savedAt: Self.date(item.ts), state: item.state,
+                    remindAt: remindAt)
                 guard reference.hasValidIDs, (0...Self.maxTimestamp).contains(item.ts) else { return nil }
-                return Entry(reference: reference, isSaved: saved, ts: item.ts)
+                return Self.entry(reference, saved: saved)
             }
         }
         self.init(entries(content.saved, saved: true) + entries(content.removed, saved: false))
@@ -69,7 +89,7 @@ struct SavedMessages: Equatable, Sendable {
     private init(_ entries: [Entry]) {
         var latest: [Key: Entry] = [:]
         for entry in entries {
-            if let kept = latest[entry.key], kept.ts > entry.ts || (kept.ts == entry.ts && !entry.isSaved) { continue }
+            if let kept = latest[entry.key], kept.rank >= entry.rank { continue }
             latest[entry.key] = entry
         }
         let ordered = latest.values.sorted { a, b in
@@ -86,16 +106,43 @@ struct SavedMessages: Equatable, Sendable {
         SavedMessages(saved: saved + other.saved, removed: removed + other.removed)
     }
 
-    /// Saves or removes the message, stamped after any entry it has so a slow clock can't lose the change; a message
-    /// already as asked stays as it is.
+    /// Saves or removes the message; a message already as asked, in any tab, stays as it is.
     func setting(roomID: String, eventID: String, saved isSaved: Bool, at now: Date) -> SavedMessages {
-        let same = { (item: SavedMessageReference) in item.roomID == roomID && item.eventID == eventID }
-        guard saved.contains(where: same) != isSaved else { return self }
-        let previous = (saved + removed).filter(same).map { Self.milliseconds($0.savedAt) }.max()
-        let ts = max(Self.milliseconds(now), previous.map { $0 + 1 } ?? 0)
-        let entry = SavedMessageReference(roomID: roomID, eventID: eventID, savedAt: Self.date(ts))
-        if isSaved { return SavedMessages(saved: saved + [entry], removed: removed) }
-        return SavedMessages(saved: saved, removed: removed + [entry])
+        guard (find(roomID, eventID) != nil) != isSaved else { return self }
+        return stamped(SavedMessageReference(roomID: roomID, eventID: eventID), saved: isSaved, at: now)
+    }
+
+    /// Moves a saved message to another tab, clearing its reminder; one already there stays as it is.
+    func changing(roomID: String, eventID: String, to state: LaterState, at now: Date) -> SavedMessages {
+        guard let current = find(roomID, eventID), current.laterState != state else { return self }
+        return stamped(SavedMessageReference(roomID: roomID, eventID: eventID, state: state), saved: true, at: now)
+    }
+
+    /// Sets the message's reminder, or clears it with nil, keeping it in progress and saving it if it wasn't.
+    func reminding(roomID: String, eventID: String, at remindAt: Date?, now: Date) -> SavedMessages {
+        let current = find(roomID, eventID)
+        if remindAt == nil, current?.remindAt == nil { return self }
+        if let current, current.laterState == .inProgress,
+            current.remindAt.map(Self.milliseconds) == remindAt.map(Self.milliseconds)
+        {
+            return self
+        }
+        return stamped(
+            SavedMessageReference(roomID: roomID, eventID: eventID, remindAt: remindAt), saved: true, at: now)
+    }
+
+    /// A tab's messages: In progress puts reminders first, soonest due first; every tab is otherwise newest first.
+    func tab(_ state: LaterState) -> [SavedMessageReference] {
+        let shown = saved.filter { $0.laterState == state }
+        guard state == .inProgress else { return shown }
+        let reminders = shown.compactMap { item in item.remindAt.map { (item, $0) } }.enumerated()
+            .sorted { ($0.element.1, $0.offset) < ($1.element.1, $1.offset) }.map(\.element.0)
+        return reminders + shown.filter { $0.remindAt == nil }
+    }
+
+    /// The reminders still to come, soonest first: what a device notifies of.
+    func reminders(after now: Date) -> [SavedMessageReference] {
+        tab(.inProgress).filter { $0.remindAt.map { $0 > now } ?? false }
     }
 
     /// The content to write over the account's list, or nil when it already says the same.
@@ -104,25 +151,80 @@ struct SavedMessages: Equatable, Sendable {
     /// Both lists, newest first, as the account data event holds them.
     var json: String {
         func items(_ list: [SavedMessageReference]) -> [[String: Any]] {
-            list.map { ["room_id": $0.roomID, "event_id": $0.eventID, "ts": Self.milliseconds($0.savedAt)] }
+            list.map {
+                var item: [String: Any] = [
+                    "room_id": $0.roomID, "event_id": $0.eventID, "ts": Self.milliseconds($0.savedAt),
+                ]
+                if let state = $0.state { item["state"] = state.rawValue }
+                if let remindAt = $0.remindAt { item["remind_at"] = Self.milliseconds(remindAt) }
+                return item
+            }
         }
         let content: [String: Any] = ["saved": items(saved), "removed": items(removed)]
         let data = try? JSONSerialization.data(withJSONObject: content, options: [.sortedKeys])
         return String(decoding: data ?? Data("{}".utf8), as: UTF8.self)
     }
 
+    private func find(_ roomID: String, _ eventID: String) -> SavedMessageReference? {
+        saved.first { $0.roomID == roomID && $0.eventID == eventID }
+    }
+
+    /// The new entry lands after any the message has, so a slow clock can't lose the change.
+    private func stamped(_ change: SavedMessageReference, saved isSaved: Bool, at now: Date) -> SavedMessages {
+        let previous = (saved + removed).filter { $0.roomID == change.roomID && $0.eventID == change.eventID }
+            .map { Self.milliseconds($0.savedAt) }.max()
+        var entry = change
+        entry.savedAt = Self.date(max(Self.milliseconds(now), previous.map { $0 + 1 } ?? 0))
+        if isSaved { return SavedMessages(saved: saved + [entry], removed: removed) }
+        return SavedMessages(saved: saved, removed: removed + [entry])
+    }
+
     private static func entry(_ reference: SavedMessageReference, saved: Bool) -> Entry {
         let ts = milliseconds(reference.savedAt)
         return Entry(
-            reference: SavedMessageReference(roomID: reference.roomID, eventID: reference.eventID, savedAt: date(ts)),
+            reference: SavedMessageReference(
+                roomID: reference.roomID, eventID: reference.eventID, savedAt: date(ts),
+                state: saved ? reference.state : nil,
+                remindAt: saved ? reference.remindAt.map { date(milliseconds($0)) } : nil),
             isSaved: saved, ts: ts)
     }
     /// The vault only holds finite dates.
-    private static func milliseconds(_ date: Date) -> Int64 {
+    fileprivate static func milliseconds(_ date: Date) -> Int64 {
         Int64(min(max((date.timeIntervalSince1970 * 1_000).rounded(), 0), Double(maxTimestamp)))
     }
     private static func date(_ milliseconds: Int64) -> Date {
         Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
+    }
+}
+
+/// Remind me's choices, as Slack offers them.
+enum ReminderPreset: CaseIterable {
+    case in20Minutes, in1Hour, in3Hours, tomorrow, nextWeek
+
+    var title: String {
+        switch self {
+        case .in20Minutes: "In 20 minutes"
+        case .in1Hour: "In 1 hour"
+        case .in3Hours: "In 3 hours"
+        case .tomorrow: "Tomorrow"
+        case .nextWeek: "Next week"
+        }
+    }
+
+    /// Real minutes and hours from now; tomorrow and next week at 9:00 on the calendar's clock.
+    func date(from now: Date, in calendar: Calendar = .current) -> Date {
+        func nine(_ day: Date) -> Date { calendar.date(bySettingHour: 9, minute: 0, second: 0, of: day) ?? day }
+        let today = calendar.startOfDay(for: now)
+        switch self {
+        case .in20Minutes: return now.addingTimeInterval(20 * 60)
+        case .in1Hour: return now.addingTimeInterval(60 * 60)
+        case .in3Hours: return now.addingTimeInterval(3 * 60 * 60)
+        case .tomorrow: return nine(calendar.date(byAdding: .day, value: 1, to: today) ?? today)
+        case .nextWeek:
+            let monday = calendar.nextDate(
+                after: today, matching: DateComponents(weekday: 2), matchingPolicy: .nextTime)
+            return nine(monday ?? today)
+        }
     }
 }
 
@@ -203,7 +305,19 @@ private final class AccountDataObserver: RawAccountDataListener {
     }
 
     func set(roomID: String, eventID: String, saved: Bool) {
-        update(list.setting(roomID: roomID, eventID: eventID, saved: saved, at: Date()))
+        change(list.setting(roomID: roomID, eventID: eventID, saved: saved, at: Date()))
+    }
+
+    func set(roomID: String, eventID: String, state: LaterState) {
+        change(list.changing(roomID: roomID, eventID: eventID, to: state, at: Date()))
+    }
+
+    func remind(roomID: String, eventID: String, at remindAt: Date?) {
+        change(list.reminding(roomID: roomID, eventID: eventID, at: remindAt, now: Date()))
+    }
+
+    private func change(_ next: SavedMessages) {
+        update(next)
         // Until the account is read nothing is written, so a read that failed must not hold this back.
         if published == nil { read() }
     }

@@ -1,5 +1,5 @@
 {
-  "about": "Later: one list per account, which every device reads and writes in the global account data event eventType. Its content holds saved, the messages saved for later, and removed, the ones taken out of Later; each entry is room_id, event_id and ts, when it was saved or removed in milliseconds since 1970. It never holds message text. reading: the list a device takes from content. An entry without a room ID (!), an event ID ($) and a whole ts from zero to 2^53 - 1, the integers JSON holds exactly, is skipped. A message keeps only its latest entry, saved or removed, and saved wins a tie. Both lists run newest first, then by room and event ID. At most the newest 10,000 saved messages and the newest 1,000 removals are kept; a count rather than an age, so a device whose clock runs ahead can't make the others forget removals. merging: a device merges the list it holds with the account's, null when the server has none, by the same rules; it writes the result only when that differs from the account's list. setting: saving a message (saved true) or removing it (saved false) at now; the new entry lands after any the message already has, so a clock running behind can't lose the change, and a message already as asked stays as it is.",
+  "about": "Later: one list per account, which every device reads and writes in the global account data event eventType. Its content holds saved, the messages saved for later, and removed, the ones taken out of Later; each entry is room_id, event_id and ts, when it was saved or removed in milliseconds since 1970. It never holds message text. reading: the list a device takes from content. An entry without a room ID (!), an event ID ($) and a whole ts from zero to 2^53 - 1, the integers JSON holds exactly, is skipped. A message keeps only its latest entry, saved or removed, and saved wins a tie. Both lists run newest first, then by room and event ID. At most the newest 10,000 saved messages and the newest 1,000 removals are kept; a count rather than an age, so a device whose clock runs ahead can't make the others forget removals. merging: a device merges the list it holds with the account's, null when the server has none, by the same rules; it writes the result only when that differs from the account's list. setting: saving a message (saved true) or removing it (saved false) at now; the new entry lands after any the message already has, so a clock running behind can't lose the change, and a message already as asked stays as it is. An entry in saved may also hold state, archived or completed, and remind_at, when its reminder is due, in the same milliseconds; without them the message is in progress with no reminder. An older build keeps the entry and drops what it doesn't know, so it never loses a saved message. On reading, a state other than those two reads as in progress, a remind_at that isn't a whole ts is dropped, and only a message in progress keeps one. At the same moment saved beats removed, completed beats archived beats in progress, and a later reminder beats an earlier one or none, so a list an older build wrote back can't erase them. changing: marking a saved message complete, archiving it or moving it back to in progress at now, stamped as setting is; it clears the reminder, and a message not in Later, or already as asked, stays as it is. reminding: a reminder at remind_at, or null to clear it, stamped the same way; it brings the message back to in progress, saves one not in Later, and one already as asked stays as it is. tabs: In progress lists messages with a reminder first, soonest due first, then the rest newest first; Archived and Completed run newest first; a reminder due at or before now is overdue, and the message stays in progress. notifying: what a device schedules a notification for, the reminders still to come on messages in progress, soonest first, so one already due when a device learns of it doesn't notify again. presets: Remind me's choices from now in time_zone: in 20 minutes, in 1 hour, in 3 hours, tomorrow at 9:00 and the next Monday at 9:00.",
   "eventType": "ai.nuanu.slatrix.later",
   "reading": [
     {
@@ -109,6 +109,101 @@
       "name": "Content that isn't an object reads as an empty list",
       "content": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }],
       "expected": { "saved": [], "removed": [] }
+    },
+    {
+      "name": "A message keeps its state and reminder",
+      "content": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "completed" },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955300000, "state": "archived" },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955400000, "remind_at": 1761956100000 }
+        ]
+      },
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955400000, "remind_at": 1761956100000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955300000, "state": "archived" },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "completed" }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "name": "A state it doesn't know reads as in progress, and a reminder that isn't a time is dropped",
+      "content": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "snoozed" },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955200000, "state": 3 },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955200000, "remind_at": "1761956100000" },
+          { "room_id": "!design:example.org", "event_id": "$four", "ts": 1761955200000, "remind_at": -1 },
+          { "room_id": "!design:example.org", "event_id": "$five", "ts": 1761955200000, "remind_at": 9007199254740992 },
+          { "room_id": "!design:example.org", "event_id": "$six", "ts": 1761955200000, "remind_at": 1761956100000.5 },
+          { "room_id": "!design:example.org", "event_id": "$seven", "ts": 1761955200000, "state": "in_progress" }
+        ]
+      },
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$five", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$four", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$seven", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$six", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955200000 }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "name": "Only a message in progress keeps a reminder",
+      "content": {
+        "saved": [
+          {
+            "room_id": "!design:example.org",
+            "event_id": "$one",
+            "ts": 1761955200000,
+            "state": "completed",
+            "remind_at": 1761956100000
+          },
+          {
+            "room_id": "!design:example.org",
+            "event_id": "$two",
+            "ts": 1761955200000,
+            "state": "archived",
+            "remind_at": 1761956100000
+          }
+        ]
+      },
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "completed" },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955200000, "state": "archived" }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "name": "At the same moment completed beats archived beats in progress, and a later reminder beats an earlier one",
+      "content": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "archived" },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "completed" },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955200000, "state": "archived" },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955200000, "remind_at": 1761955800000 },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955200000, "remind_at": 1761956100000 },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955200000 }
+        ]
+      },
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "completed" },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955200000, "remind_at": 1761956100000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955200000, "state": "archived" }
+        ],
+        "removed": []
+      }
     }
   ],
   "merging": [
@@ -197,6 +292,45 @@
       "remote": null,
       "expected": { "saved": [], "removed": [] },
       "writes": false
+    },
+    {
+      "name": "A list an older build wrote back without states and reminders leaves them standing, and puts them back",
+      "local": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "completed" },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955300000, "remind_at": 1761956100000 }
+        ]
+      },
+      "remote": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955300000 },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }
+        ]
+      },
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955300000, "remind_at": 1761956100000 },
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "completed" }
+        ],
+        "removed": []
+      },
+      "writes": true
+    },
+    {
+      "name": "A message completed on another device moves to Completed here",
+      "local": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "remind_at": 1761956100000 }
+        ]
+      },
+      "remote": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000, "state": "completed" }]
+      },
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000, "state": "completed" }],
+        "removed": []
+      },
+      "writes": false
     }
   ],
   "setting": [
@@ -273,6 +407,354 @@
       "expected": {
         "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }],
         "removed": []
+      }
+    },
+    {
+      "name": "Saving a completed message keeps it as it was",
+      "list": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "completed" }]
+      },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "saved": true,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "completed" }],
+        "removed": []
+      }
+    },
+    {
+      "name": "Removing an archived message takes it out of Later",
+      "list": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "archived" }]
+      },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "saved": false,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [],
+        "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }]
+      }
+    }
+  ],
+  "changing": [
+    {
+      "name": "Marking complete moves the message to Completed and clears its reminder",
+      "list": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "remind_at": 1761956100000 }
+        ]
+      },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "state": "completed",
+      "now": 1761955300000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000, "state": "completed" }],
+        "removed": []
+      }
+    },
+    {
+      "name": "Archiving moves the message to Archived and clears its reminder",
+      "list": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "remind_at": 1761956100000 }
+        ]
+      },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "state": "archived",
+      "now": 1761955300000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000, "state": "archived" }],
+        "removed": []
+      }
+    },
+    {
+      "name": "Marking a completed message incomplete brings it back to In progress",
+      "list": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "completed" }]
+      },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "state": "in_progress",
+      "now": 1761955300000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }],
+        "removed": []
+      }
+    },
+    {
+      "name": "Moving an archived message to In progress brings it back",
+      "list": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "archived" }]
+      },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "state": "in_progress",
+      "now": 1761955300000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }],
+        "removed": []
+      }
+    },
+    {
+      "name": "A message already as asked stays as it was, reminder and all",
+      "list": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "remind_at": 1761956100000 }
+        ]
+      },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "state": "in_progress",
+      "now": 1761955300000,
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "remind_at": 1761956100000 }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "name": "A message that isn't in Later stays out of it",
+      "list": { "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "state": "completed",
+      "now": 1761955300000,
+      "expected": {
+        "saved": [],
+        "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }]
+      }
+    },
+    {
+      "name": "A clock behind the list still lands the change a millisecond after it",
+      "list": { "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }] },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "state": "completed",
+      "now": 1761955200000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300001, "state": "completed" }],
+        "removed": []
+      }
+    }
+  ],
+  "reminding": [
+    {
+      "name": "A reminder keeps a message in progress, due then",
+      "list": { "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "remind_at": 1761956500000,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000, "remind_at": 1761956500000 }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "name": "A reminder brings a completed message back to In progress",
+      "list": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "completed" }]
+      },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "remind_at": 1761956500000,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000, "remind_at": 1761956500000 }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "name": "A reminder about a message not in Later saves it",
+      "list": { "removed": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 }] },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "remind_at": 1761956500000,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000, "remind_at": 1761956500000 }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "name": "Clearing a reminder keeps the message in progress",
+      "list": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "remind_at": 1761956100000 }
+        ]
+      },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "remind_at": null,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955300000 }],
+        "removed": []
+      }
+    },
+    {
+      "name": "The same reminder again changes nothing",
+      "list": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "remind_at": 1761956100000 }
+        ]
+      },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "remind_at": 1761956100000,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "remind_at": 1761956100000 }
+        ],
+        "removed": []
+      }
+    },
+    {
+      "name": "Clearing a reminder on a message without one changes nothing",
+      "list": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "archived" }]
+      },
+      "room_id": "!design:example.org",
+      "event_id": "$one",
+      "remind_at": null,
+      "now": 1761955300000,
+      "expected": {
+        "saved": [{ "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "archived" }],
+        "removed": []
+      }
+    }
+  ],
+  "tabs": [
+    {
+      "name": "Each message shows in the tab of its state",
+      "list": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955300000, "state": "archived" },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955400000, "state": "completed" }
+        ],
+        "removed": [{ "room_id": "!design:example.org", "event_id": "$four", "ts": 1761955500000 }]
+      },
+      "now": 1761955600000,
+      "expected": { "in_progress": ["$one"], "archived": ["$two"], "completed": ["$three"], "overdue": [] }
+    },
+    {
+      "name": "In progress puts reminders first, soonest due first, then the rest newest first",
+      "list": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955300000 },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955250000, "remind_at": 1761964200000 },
+          { "room_id": "!design:example.org", "event_id": "$four", "ts": 1761955220000, "remind_at": 1761956000000 }
+        ]
+      },
+      "now": 1761955600000,
+      "expected": { "in_progress": ["$four", "$three", "$two", "$one"], "archived": [], "completed": [], "overdue": [] }
+    },
+    {
+      "name": "A reminder that has come due marks the message overdue and keeps it first in In progress",
+      "list": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955500000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955200000, "remind_at": 1761955600000 },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955210000, "remind_at": 1761955700000 }
+        ]
+      },
+      "now": 1761955600000,
+      "expected": { "in_progress": ["$two", "$three", "$one"], "archived": [], "completed": [], "overdue": ["$two"] }
+    },
+    {
+      "name": "Archived and Completed run newest first",
+      "list": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "state": "archived" },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955300000, "state": "archived" },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955200000, "state": "completed" },
+          { "room_id": "!design:example.org", "event_id": "$four", "ts": 1761955300000, "state": "completed" }
+        ]
+      },
+      "now": 1761955600000,
+      "expected": { "in_progress": [], "archived": ["$two", "$one"], "completed": ["$four", "$three"], "overdue": [] }
+    }
+  ],
+  "notifying": [
+    {
+      "name": "A device notifies of each reminder still to come, soonest first, and not of one already due",
+      "list": {
+        "saved": [
+          { "room_id": "!design:example.org", "event_id": "$one", "ts": 1761955200000, "remind_at": 1761955500000 },
+          { "room_id": "!design:example.org", "event_id": "$two", "ts": 1761955200000, "remind_at": 1761956100000 },
+          { "room_id": "!design:example.org", "event_id": "$three", "ts": 1761955200000, "remind_at": 1761955800000 },
+          { "room_id": "!design:example.org", "event_id": "$four", "ts": 1761955200000 },
+          { "room_id": "!design:example.org", "event_id": "$five", "ts": 1761955200000, "state": "completed" }
+        ]
+      },
+      "now": 1761955600000,
+      "expected": [
+        { "room_id": "!design:example.org", "event_id": "$three", "remind_at": 1761955800000 },
+        { "room_id": "!design:example.org", "event_id": "$two", "remind_at": 1761956100000 }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "A Thursday afternoon",
+      "now": 1793907000000,
+      "time_zone": "America/New_York",
+      "expected": {
+        "in_20_minutes": 1793908200000,
+        "in_1_hour": 1793910600000,
+        "in_3_hours": 1793917800000,
+        "tomorrow": 1793973600000,
+        "next_week": 1794232800000
+      }
+    },
+    {
+      "name": "Late on a Sunday, tomorrow is next week",
+      "now": 1794178200000,
+      "time_zone": "Europe/Berlin",
+      "expected": {
+        "in_20_minutes": 1794179400000,
+        "in_1_hour": 1794181800000,
+        "in_3_hours": 1794189000000,
+        "tomorrow": 1794211200000,
+        "next_week": 1794211200000
+      }
+    },
+    {
+      "name": "On a Monday, next week is seven days away",
+      "now": 1794207600000,
+      "time_zone": "Europe/Berlin",
+      "expected": {
+        "in_20_minutes": 1794208800000,
+        "in_1_hour": 1794211200000,
+        "in_3_hours": 1794218400000,
+        "tomorrow": 1794297600000,
+        "next_week": 1794816000000
+      }
+    },
+    {
+      "name": "The night clocks go back counts real hours",
+      "now": 1792884600000,
+      "time_zone": "Europe/Berlin",
+      "expected": {
+        "in_20_minutes": 1792885800000,
+        "in_1_hour": 1792888200000,
+        "in_3_hours": 1792895400000,
+        "tomorrow": 1793001600000,
+        "next_week": 1793001600000
       }
     }
   ]

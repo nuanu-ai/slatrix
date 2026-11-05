@@ -191,6 +191,31 @@ struct ProtectedLocalStateStoreTests {
         #expect(try await store.open(accountID: account).state.savedRemovals == state.savedRemovals)
     }
 
+    // capability: later.complete
+    // capability: later.remind
+    @Test("Later's tabs and reminders are kept with the account's other private state")
+    func laterStatesPersist() async throws {
+        let access = try await store.open(accountID: account)
+        var state = original
+        state.saved = [
+            SavedMessageReference(
+                roomID: "!fixture:example.org", eventID: "$done", savedAt: Date(timeIntervalSince1970: 2_000),
+                state: .completed),
+            SavedMessageReference(
+                roomID: "!fixture:example.org", eventID: "$soon", savedAt: Date(timeIntervalSince1970: 2_000),
+                remindAt: Date(timeIntervalSince1970: 3_000)),
+        ]
+        try await store.save(state, access: access, revision: 1)
+        #expect(try await store.open(accountID: account).state.saved == state.saved)
+    }
+
+    @Test("A Later tab a newer build wrote opens here as in progress, keeping the rest of the vault")
+    func unknownLaterState() throws {
+        let stored = #"{"roomID":"!fixture:example.org","eventID":"$one","savedAt":0,"state":"snoozed"}"#
+        let item = try JSONDecoder().decode(SavedMessageReference.self, from: Data(stored.utf8))
+        #expect(item.laterState == .inProgress)
+    }
+
     @Test("A removal from Later that isn't a room and an event is refused, as a saved message would be")
     func savedRemovalsValidated() {
         let removal = SavedMessageReference(roomID: "fixture", eventID: "$removed", savedAt: Date())

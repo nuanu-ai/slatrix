@@ -81,7 +81,7 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 0) {
                 shortcut(.activity, label: "Activity", badge: activityCount)
                 shortcut(.threads, label: "Threads")
-                shortcut(.saved, label: "Later", count: matrix.savedMessages.list.saved.count)
+                shortcut(.saved, label: "Later", count: matrix.savedMessages.list.tab(.inProgress).count)
                 shortcut(.drafts, label: "Drafts", count: draftCount ?? draftRoomIDs.count)
                 if visibleRooms.contains(where: \.favorite) {
                     roomSection("Starred", rooms: visibleRooms.filter(\.favorite)) { EmptyView() }

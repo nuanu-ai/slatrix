@@ -20,7 +20,8 @@ struct SavedMessagesHostedTests {
         var opened: SavedMessageReference?
         let hosting = NSHostingView(
             rootView: SavedMessagesView(
-                matrix: matrix, saved: [reference], onOpen: { opened = $0 }, onRemove: { _ in }
+                matrix: matrix, list: SavedMessages(saved: [reference]),
+                actions: LaterActions(open: { opened = $0 }, move: { _, _ in }, remind: { _, _ in }, remove: { _ in })
             ).environmentObject(AppearanceStore()))
         let window = offscreenWindow(NSSize(width: 700, height: 500))
         window.contentView = hosting
@@ -48,6 +49,6 @@ struct SavedMessagesHostedTests {
                         timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                         context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
         }
-        #expect(await eventually { opened == reference })
+        #expect(await eventually { opened?.id == reference.id })
     }
 }
