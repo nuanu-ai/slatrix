@@ -25,9 +25,6 @@ import dev.chrisbanes.haze.HazeState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.onPlaced
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -255,10 +252,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         loadOlder()
     }
     val back = rememberPredictiveBack(onBack = onBack)
-    var menu by remember { mutableStateOf<Pair<ConversationMessage, LiftedMessage?>?>(null) }
+    var menu by remember { mutableStateOf<ConversationMessage?>(null) }
     // Inside a thread, Reply has nowhere further to go.
-    menu?.let { (message, lifted) ->
-        MessageActionsHost(message, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent, lifted) { menu = null }
+    menu?.let { message ->
+        MessageActionsHost(message, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent) { menu = null }
     }
     var reacted by remember { mutableStateOf<ConversationMessage?>(null) }
     // The row and its tile's pixels, saved, so the viewer stays open on the same image when the phone turns.
@@ -324,14 +321,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val next = rows.getOrNull(rows.size - index) as? ConversationMessage
                             val last = next == null || !next.grouped || restarts(next)
                             val root = threadRoot != null && row.eventId == threadRoot
-                            // The menu lifts the row as drawn here, so it draws the same row again.
-                            val draw: @Composable ((ConversationMessage, Float?) -> Unit) -> Unit = { onMenu ->
-                                LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId,
-                                    actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
-                                    loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
-                                    loadThreadOrigin, actions.onQuote, onMenu)
-                            }
-                            draw { message, top -> menu = message to top?.let { LiftedMessage(it) { draw { _, _ -> } } } }
+                            LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId,
+                                actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
+                                loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
+                                loadThreadOrigin, actions.onQuote) { menu = it }
                             // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                             if (root) RepliesBar(replies)
                         }
@@ -549,13 +542,11 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?, onReply: ((ConversationMessage) -> Unit)?,
-    onMenu: (ConversationMessage, top: Float?) -> Unit) {
+    onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
     val own = message.own
-    // Kept without state, so scrolling never recomposes for it; read only when the menu opens over the row.
-    val placed = remember { arrayOfNulls<LayoutCoordinates>(1) }
-    fun menu() = onMenu(message, placed[0]?.takeIf { it.isAttached }?.positionInWindow()?.y)
+    fun menu() = onMenu(message)
     val haptics = LocalHapticFeedback.current
     // A swipe right replies, as in a messenger: the bubble follows the finger, the reply sign fades in behind it, and
     // crossing the threshold ticks once; read while drawing, so the drag never recomposes the row.
@@ -585,7 +576,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             scaleX = 0.6f + 0.4f * shown
             scaleY = scaleX
         }, tint = colors.textSecondary)
-    Row(Modifier.fillMaxWidth().graphicsLayer { translationX = drag.value }.onPlaced { placed[0] = it }
+    Row(Modifier.fillMaxWidth().graphicsLayer { translationX = drag.value }
         // Only a failed message answers a tap, as in Slack; any message opens its menu on a long press, with a tick.
         .then(if (failed) Modifier.combinedClickable(onClickLabel = "Message actions", onLongClickLabel = "Message actions",
             onLongClick = ::menu, onClick = ::menu)

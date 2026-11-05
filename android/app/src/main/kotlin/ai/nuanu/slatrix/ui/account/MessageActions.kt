@@ -11,8 +11,7 @@ import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.core.RoomSummary
-import ai.nuanu.slatrix.ui.designsystem.GlassMenu
-import ai.nuanu.slatrix.ui.designsystem.MenuDivider
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.MenuItem
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -27,7 +26,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddReaction
@@ -59,7 +61,9 @@ import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /** What the message sheet can do; an action left null isn't offered. */
@@ -88,7 +92,7 @@ data class MessageActions(
     val onSave: ((ConversationMessage, Boolean) -> Unit)? = null,
 )
 
-/** The menu's reaction bar holds five, beside Add reaction, so it fits the narrowest phones. */
+/** The sheet's reaction row holds five, beside Add reaction, so each keeps a full touch target on the narrowest phones. */
 private const val QUICK_REACTIONS = 5
 
 private val textKinds = setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)
@@ -96,17 +100,13 @@ private val textKinds = setOf(MessageKind.Text, MessageKind.Notice, MessageKind.
 /** What a forward can copy: text, and any attachment, which goes as the same media. */
 private val forwardKinds = textKinds + MessageKind.Attachment
 
-/** Where a long-pressed message sat in the window, and the message drawn again, for the menu to lift in place. */
-internal class LiftedMessage(val top: Float, val row: @Composable () -> Unit)
-
-/** The long-press menu, the emoji picker it opens and the delete confirmation, one after another. */
+/** The long-press sheet, the emoji picker it opens and the delete confirmation, one after another. */
 @Composable
 internal fun MessageActionsHost(message: ConversationMessage, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
-    onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit, lifted: LiftedMessage? = null,
-    onDismiss: () -> Unit) {
+    onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit, onDismiss: () -> Unit) {
     var step by remember(message.id) { mutableStateOf(Step.Sheet) }
     when (step) {
-        Step.Sheet -> MessageMenu(message, actions, onOpenThread, onRetrySend, onDeleteUnsent, lifted, { step = it }, onDismiss)
+        Step.Sheet -> MessageSheet(message, actions, onOpenThread, onRetrySend, onDeleteUnsent, { step = it }, onDismiss)
         Step.Picker -> EmojiPickerSheet(actions.recent, { emoji -> actions.onReact?.invoke(message, emoji); onDismiss() }, onDismiss)
         Step.ConfirmDelete -> AlertDialog(onDismissRequest = onDismiss,
             title = { Text("Delete message") },
@@ -124,9 +124,13 @@ internal fun MessageActionsHost(message: ConversationMessage, actions: MessageAc
 
 private enum class Step { Sheet, Picker, ConfirmDelete, Caption }
 
+/**
+ * Slack's message sheet: the quick reactions across its top, where the thumb already is, over its actions. The actions
+ * scroll inside the lower part of the screen, so the reactions never climb out of reach.
+ */
 @Composable
-private fun MessageMenu(message: ConversationMessage, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
-    onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit, lifted: LiftedMessage?,
+private fun MessageSheet(message: ConversationMessage, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
+    onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit,
     onStep: (Step) -> Unit, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
     val clipboard = LocalClipboard.current
@@ -137,66 +141,80 @@ private fun MessageMenu(message: ConversationMessage, actions: MessageActions, o
         onDismiss()
     }
     val react = actions.onReact.takeIf { eventId != null }
-    GlassMenu(onDismiss, "Message from ${message.senderName}", message.own, lifted?.top, lifted?.row,
-        reactions = react?.let { { ->
-            actions.quick.forEach { emoji ->
-                Box(Modifier.sizeIn(minWidth = UiMetrics.ReactionButton, minHeight = UiMetrics.ReactionButton).clip(CircleShape).clickable(role = Role.Button) { it(message, emoji); onDismiss() }
-                    .semantics { contentDescription = "React with $emoji" }, contentAlignment = Alignment.Center) {
-                    Text(emoji, style = MaterialTheme.typography.headlineSmall)
+    BottomSheet(onDismiss, colors.overlay) {
+        BoxWithConstraints(Modifier.semantics { paneTitle = "Message from ${message.senderName}" }) {
+            val most = maxHeight * UiMetrics.MessageSheetShare
+            Column {
+                if (react != null) Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapMedium).padding(bottom = UiMetrics.GapSmall),
+                    horizontalArrangement = Arrangement.SpaceEvenly) {
+                    actions.quick.forEach { emoji ->
+                        ReactionButton("React with $emoji", { react(message, emoji); onDismiss() }) {
+                            Text(emoji, style = MaterialTheme.typography.headlineSmall)
+                        }
+                    }
+                    ReactionButton("Add reaction", { onStep(Step.Picker) }) {
+                        Icon(Icons.Outlined.AddReaction, null, Modifier.size(UiMetrics.SheetIcon), tint = colors.textSecondary)
+                    }
+                }
+                Column(Modifier.heightIn(max = most).verticalScroll(rememberScrollState()).padding(bottom = UiMetrics.GapSmall)) {
+                    MessageSheetItems(message, eventId, actions, onOpenThread, onRetrySend, onDeleteUnsent, ::copy, scope, onStep, onDismiss)
                 }
             }
-            Box(Modifier.sizeIn(minWidth = UiMetrics.ReactionButton, minHeight = UiMetrics.ReactionButton).clip(CircleShape).clickable(role = Role.Button) { onStep(Step.Picker) }
-                .semantics { contentDescription = "Add reaction" }, contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.AddReaction, null, Modifier.size(UiMetrics.SheetIcon), tint = colors.textSecondary)
-            }
-        } }) {
-        if (message.sendState == MessageSendState.Failed) {
-            if (message.canRetry) MenuItem(Icons.Outlined.Refresh, "Retry") { onRetrySend(message); onDismiss() }
-            MenuItem(Icons.Outlined.Delete, "Delete message", colors.destructive) { onDeleteUnsent(message); onDismiss() }
-        }
-        if (eventId == null) {
-            if (message.kind in textKinds) MenuItem(Icons.Outlined.Title, "Copy text") { copy(message.body) }
-            return@GlassMenu
-        }
-        // Grouped as the board has them: answering and keeping, then copying and marking, then changing your own.
-        val quote = actions.onQuote
-        val forward = actions.onForward?.takeIf { message.kind in forwardKinds }
-        val save = actions.onSave
-        if (onOpenThread != null) MenuItem(Icons.Outlined.ChatBubbleOutline, "Reply in thread") { onOpenThread(eventId); onDismiss() }
-        if (quote != null) MenuItem(Icons.Outlined.FormatQuote, "Quote") { quote(message); onDismiss() }
-        if (forward != null) MenuItem(SlackIcons.Forward, "Forward") { forward(message); onDismiss() }
-        if (save != null) {
-            val isSaved = eventId in actions.saved
-            MenuItem(if (isSaved) SlackIcons.BookmarkFilled else SlackIcons.Bookmark, if (isSaved) "Remove from Later" else "Save for later") {
-                save(message, !isSaved); onDismiss()
-            }
-        }
-        val answers = onOpenThread != null || quote != null || forward != null || save != null
-        val link = actions.link
-        val markUnread = actions.onMarkUnread
-        val pin = actions.onPin
-        if (answers) MenuDivider()
-        if (message.kind in textKinds) MenuItem(Icons.Outlined.Title, "Copy text") { copy(message.body) }
-        if (link != null) MenuItem(Icons.Outlined.Link, "Copy link") { scope.launch { link(message)?.let { copy(it) } ?: onDismiss() } }
-        if (markUnread != null) MenuItem(SlackIcons.MarkUnread, "Mark unread") { markUnread(); onDismiss() }
-        if (pin != null) {
-            val pinned = eventId in actions.pinned
-            MenuItem(Icons.Outlined.PushPin, if (pinned) "Unpin from ${actions.place}" else "Pin to ${actions.place}") {
-                pin(message, !pinned); onDismiss()
-            }
-        }
-        val edit = actions.onEdit?.takeIf { message.editable }
-        // As on the Mac, an image's or a file's.
-        val caption = message.own && actions.onEditCaption != null &&
-            message.attachment?.kind in setOf(MessageAttachment.Kind.Image, MessageAttachment.Kind.File)
-        val delete = message.own && actions.onDelete != null
-        if (edit != null || caption || delete) {
-            MenuDivider()
-            if (edit != null) MenuItem(Icons.Outlined.Edit, "Edit message") { edit(message); onDismiss() }
-            if (caption) MenuItem(Icons.Outlined.Edit, "Edit caption") { onStep(Step.Caption) }
-            if (delete) MenuItem(Icons.Outlined.Delete, "Delete message", colors.destructive) { onStep(Step.ConfirmDelete) }
         }
     }
+}
+
+/** A round quick reaction, a full touch target wide, so a thumb can't miss it. */
+@Composable
+private fun ReactionButton(label: String, onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(Modifier.size(UiMetrics.Touch).clip(CircleShape).background(SlatrixTheme.colors.reaction).clickable(role = Role.Button, onClick = onClick)
+        .semantics { contentDescription = label }, contentAlignment = Alignment.Center) { content() }
+}
+
+/** The actions in Slack's order: answering and keeping, then copying and marking, then changing your own. */
+@Composable
+private fun MessageSheetItems(message: ConversationMessage, eventId: String?, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
+    onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit, copy: (String) -> Unit,
+    scope: CoroutineScope, onStep: (Step) -> Unit, onDismiss: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    if (message.sendState == MessageSendState.Failed) {
+        if (message.canRetry) MenuItem(Icons.Outlined.Refresh, "Retry") { onRetrySend(message); onDismiss() }
+        MenuItem(Icons.Outlined.Delete, "Delete message", colors.destructive) { onDeleteUnsent(message); onDismiss() }
+    }
+    if (eventId == null) {
+        if (message.kind in textKinds) MenuItem(Icons.Outlined.Title, "Copy text") { copy(message.body) }
+        return
+    }
+    val quote = actions.onQuote
+    val forward = actions.onForward?.takeIf { message.kind in forwardKinds }
+    val save = actions.onSave
+    if (onOpenThread != null) MenuItem(Icons.Outlined.ChatBubbleOutline, "Reply in thread") { onOpenThread(eventId); onDismiss() }
+    if (quote != null) MenuItem(Icons.Outlined.FormatQuote, "Quote") { quote(message); onDismiss() }
+    if (forward != null) MenuItem(SlackIcons.Forward, "Forward") { forward(message); onDismiss() }
+    if (save != null) {
+        val isSaved = eventId in actions.saved
+        MenuItem(if (isSaved) SlackIcons.BookmarkFilled else SlackIcons.Bookmark, if (isSaved) "Remove from Later" else "Save for later") {
+            save(message, !isSaved); onDismiss()
+        }
+    }
+    val link = actions.link
+    val markUnread = actions.onMarkUnread
+    val pin = actions.onPin
+    if (message.kind in textKinds) MenuItem(Icons.Outlined.Title, "Copy text") { copy(message.body) }
+    if (link != null) MenuItem(Icons.Outlined.Link, "Copy link") { scope.launch { link(message)?.let { copy(it) } ?: onDismiss() } }
+    if (markUnread != null) MenuItem(SlackIcons.MarkUnread, "Mark unread") { markUnread(); onDismiss() }
+    if (pin != null) {
+        val pinned = eventId in actions.pinned
+        MenuItem(Icons.Outlined.PushPin, if (pinned) "Unpin from ${actions.place}" else "Pin to ${actions.place}") {
+            pin(message, !pinned); onDismiss()
+        }
+    }
+    if (actions.onEdit != null && message.editable) MenuItem(Icons.Outlined.Edit, "Edit message") { actions.onEdit.invoke(message); onDismiss() }
+    // As on the Mac, an image's or a file's.
+    if (message.own && actions.onEditCaption != null && message.attachment?.kind in setOf(MessageAttachment.Kind.Image, MessageAttachment.Kind.File)) {
+        MenuItem(Icons.Outlined.Edit, "Edit caption") { onStep(Step.Caption) }
+    }
+    if (message.own && actions.onDelete != null) MenuItem(Icons.Outlined.Delete, "Delete message", colors.destructive) { onStep(Step.ConfirmDelete) }
 }
 
 /** The sheet's actions on an open conversation; reacting also moves the emoji up your recent list. */

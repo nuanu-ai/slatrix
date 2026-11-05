@@ -56,13 +56,8 @@ object UiMetrics {
     val NarrowPhone = 320.dp
     val WidePhone = 412.dp
     val GlassBlur = 24.dp
-    /** The message menu: its card's width and rows, the reaction bar and its buttons, and the blur of the screen behind. */
-    val MenuWidth = 252.dp
-    val MenuItem = 44.dp
-    val MenuInset = 6.dp
-    val ReactionBar = 52.dp
-    val ReactionButton = 40.dp
-    val MenuBlur = 14.dp
+    /** The most of the screen a message sheet's actions take before they scroll, so its reactions stay within thumb reach. */
+    const val MessageSheetShare = 0.45f
     val GlassLift = 12.dp
     val WallpaperGrid = 20.dp
     val WallpaperDot = 1.dp
