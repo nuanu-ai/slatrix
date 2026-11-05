@@ -19,6 +19,17 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import kotlinx.coroutines.launch
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.delay
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -58,16 +69,26 @@ fun LaterScreen(saved: List<SavedMessage>, rooms: List<RoomSummary>, load: suspe
     // Kept by message, so a save time merged from another device doesn't read a card again.
     previews: MutableMap<Pair<String, String>, SavedPreview?> = remember { mutableStateMapOf() },
     list: LazyListState = rememberLazyListState()) {
-    val newestFirst = remember(saved) { saved.sortedByDescending { it.savedAt } }
+    // A card marked done leaves at once but is removed only once its Undo has gone, so Undo puts it back where it was.
+    var done by remember { mutableStateOf<SavedMessage?>(null) }
+    val remove by rememberUpdatedState(onRemove)
+    done?.let { item -> LaunchedEffect(item) { delay(UiMetrics.NoticeMillis); remove(item); done = null } }
+    DisposableEffect(Unit) { onDispose { done?.let(remove) } }
+    val markDone = { item: SavedMessage -> done?.let(remove); done = item }
+    val newestFirst = remember(saved, done) { saved.filter { it != done }.sortedByDescending { it.savedAt } }
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(top = UiMetrics.GapSmall)) {
-        if (saved.isEmpty()) item {
+        if (newestFirst.isEmpty()) item {
             Text("Nothing saved for later", Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyLarge,
                 color = SlatrixTheme.colors.textSecondary)
         }
         // The room's length first, as the Mac's ID does, so two different pairs never make the same key.
         items(newestFirst, key = { "${it.roomId.length}:${it.roomId}${it.eventId}" }) { item ->
-            SavedCard(item, rooms.firstOrNull { it.id == item.roomId }, previews, load, { onOpen(item) }) { onRemove(item) }
+            SavedCard(item, rooms.firstOrNull { it.id == item.roomId }, previews, load, { onOpen(item) }) { markDone(item) }
         }
+    }
+    if (done != null) Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge).semantics { liveRegion = LiveRegionMode.Polite },
+        action = { TextButton(onClick = { done = null }) { Text("Undo") } }) { Text("Marked as done") }
     }
 }
 
@@ -80,8 +101,8 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
     val loaded = key in previews
     val preview = previews[key]
     val haptics = LocalHapticFeedback.current
-    // A swipe left removes the card, as Slack's Later does: the card follows the finger and the bookmark fades in behind
-    // it. Only a leftward start is the card's; a rightward one stays with the tabs, so DMs is still a swipe away.
+    // A swipe left marks the card done, as Slack's Later does: the card follows the finger and the bookmark fades in
+    // behind it.
     val drag = remember { Animatable(0f) }
     val reach = with(LocalDensity.current) { UiMetrics.Swipe.toPx() }
     val swipes = rememberCoroutineScope()

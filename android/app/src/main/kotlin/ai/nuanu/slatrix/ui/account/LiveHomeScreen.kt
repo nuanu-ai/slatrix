@@ -231,8 +231,8 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
         // The lists scroll on under the tab capsule, and end clear of it and of New message above it.
         val clearance = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + UiMetrics.TabBar + UiMetrics.GapSmall * 2 +
             (UiMetrics.Fab + UiMetrics.GapLarge) * (if (beside) 0 else 1)
-        // Each tab owns its title, which slides with it under the finger rather than swap halfway.
-        HorizontalPager(pager, Modifier.fillMaxSize().glassSource(glass), key = { HomeTab.entries[it] }) { page ->
+        // Tabs change only from the tab bar, as in Slack, so a sideways swipe on a row is only ever the row's.
+        HorizontalPager(pager, Modifier.fillMaxSize().glassSource(glass), userScrollEnabled = false, key = { HomeTab.entries[it] }) { page ->
             val pageTab = HomeTab.entries[page]
             Column(Modifier.fillMaxSize()) {
                 HomeHeader(pageTab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
