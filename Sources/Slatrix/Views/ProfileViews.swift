@@ -35,14 +35,14 @@ struct ProfilePane: View {
                         }.multilineTextAlignment(.center)
                         // Where Slack shows a title; Matrix has a status instead.
                         if let status = person.status {
-                            Text(status).font(m.font(.reading)).foregroundStyle(colors.textSecondary)
+                            Text(status).font(m.font(.body)).foregroundStyle(colors.textSecondary)
                         }
                         if person.inCall {
                             Label {
                                 Text("In a call")
                             } icon: {
                                 Image(systemName: "video.fill").foregroundStyle(colors.presenceActive)
-                            }.font(m.font(.reading)).foregroundStyle(colors.textSecondary)
+                            }.font(m.font(.body)).foregroundStyle(colors.textSecondary)
                         }
                     }.multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                     ProfileActions(
@@ -52,13 +52,13 @@ struct ProfilePane: View {
                     .id(userID)
                     VStack(alignment: .leading, spacing: m.sp2) {
                         Text("Matrix ID").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                        Text(userID).font(m.font(.reading)).foregroundStyle(colors.textPrimary).lineLimit(1)
+                        Text(userID).font(m.font(.body)).foregroundStyle(colors.textPrimary).lineLimit(1)
                             .truncationMode(.middle).textSelection(.enabled)
                     }
-                    .padding(.horizontal, m.sp12).padding(.vertical, m(10))
+                    .padding(m.sp16)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(colors.sunken, in: RoundedRectangle(cornerRadius: m.radiusLarge))
-                }.padding(.horizontal, m.sp20).padding(.vertical, m.sp24)
+                    .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+                }.padding(.horizontal, m.sp16).padding(.vertical, m.sp24)
             }
         }
         .foregroundStyle(colors.textBody).background(colors.canvas)
@@ -91,7 +91,7 @@ struct ShownProfile {
     }
 }
 
-/// Slack's row of outlined buttons: Message for someone else, Edit profile for you, then ⋮. Message opens or creates
+/// Slack's row of outlined buttons: Message for someone else, Edit profile for you, then ⋯. Message opens or creates
 /// the direct message; its spinner waits like every other, and a failure shows under the row.
 private struct ProfileActions: View {
     @Environment(Toasts.self) private var toasts: Toasts?
@@ -124,9 +124,13 @@ private struct ProfileActions: View {
                     .buttonStyle(.primary)
                     .disabled(request != nil || matrix.isPreview || (try? PeopleMapping.validatedID(userID)) == nil)
                 }
-                Button(action: showMenu) {
-                    Image(systemName: "ellipsis").rotationEffect(.degrees(90)).accessibilityLabel("More actions")
-                }.buttonStyle(.secondaryIcon).help("More actions")
+                Menu {
+                    Button("Copy member ID") { copy(userID, confirmation: "Member ID copied") }
+                    Button("Copy link to profile") { copy(MatrixID.permalink(userID), confirmation: "Link copied") }
+                } label: {
+                    Image(systemName: "ellipsis")
+                }.menuStyle(.button).buttonStyle(.secondaryIcon).menuIndicator(.hidden).fixedSize()
+                    .help("More actions").accessibilityLabel("More actions")
             }.controlSize(.large)
             if let error {
                 Text(error).font(m.font(.subheadline)).foregroundStyle(appearance.colors.destructive)
@@ -155,19 +159,9 @@ private struct ProfileActions: View {
         }
     }
 
-    /// A native menu, as everywhere.
-    private func showMenu() {
-        let copy = { [toasts] (text: String, confirmation: String) in
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
-            toasts?.show(confirmation)
-        }
-        let commands = [
-            MessageMenuCommand(id: "copy-id", title: "Copy member ID") { [userID] in copy(userID, "Member ID copied") },
-            MessageMenuCommand(id: "copy-link", title: "Copy link to profile") { [userID] in
-                copy(MatrixID.permalink(userID), "Link copied")
-            },
-        ]
-        NativeMessageMenu.make(commands: commands).popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    private func copy(_ text: String, confirmation: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        toasts?.show(confirmation)
     }
 }

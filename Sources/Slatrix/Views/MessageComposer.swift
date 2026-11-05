@@ -150,9 +150,10 @@ struct MessageComposer: View {
             colors.control, in: RoundedRectangle(cornerRadius: m.controlLarge / 2), cornerRadius: m.controlLarge / 2,
             elevated: false
         )
+        // The resting edge is the glass's, or the elevation's hairline before macOS 26; focus adds the accent.
         .overlay(
             RoundedRectangle(cornerRadius: m.controlLarge / 2).strokeBorder(
-                editor.isFocused ? colors.accentLine : colors.border, lineWidth: 1)
+                editor.isFocused ? colors.accentLine : .clear, lineWidth: 1)
         )
         .elevation(.e1, cornerRadius: m.controlLarge / 2)
         // Suggestions, errors and hints float above the composer instead of growing it.

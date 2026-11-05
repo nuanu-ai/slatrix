@@ -11,7 +11,7 @@ struct EmptyStateView<Action: View>: View {
     var body: some View {
         VStack(spacing: m.sp12) {
             Image(systemName: symbol).font(m.font(.title1)).foregroundStyle(.secondary)
-            Text(title).font(m.font(.reading, .semibold)).multilineTextAlignment(.center).frame(
+            Text(title).font(m.font(.body, .semibold)).multilineTextAlignment(.center).frame(
                 maxWidth: m(Self.textWidth))
             action().buttonStyle(.textLink).font(m.font(.body))
         }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(m.sp32)
@@ -33,7 +33,7 @@ struct InlineErrorView: View {
             Image(systemName: "exclamationmark.circle").foregroundStyle(colors.warning)
             Text(message).font(m.font(.subheadline)).textSelection(.enabled).frame(
                 maxWidth: .infinity, alignment: .leading)
-            if let dismiss { IconButton(symbol: "xmark", label: "Dismiss error", role: .subheadline, action: dismiss) }
+            if let dismiss { CloseButton(label: "Dismiss error", action: dismiss) }
         }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8).background(colors.warning.opacity(0.08))
             .accessibilityElement(
                 children: .combine)

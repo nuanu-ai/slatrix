@@ -59,7 +59,7 @@ struct PreferencesView: View {
                             error = nil
                         } label: {
                             Label(item.title, systemImage: item.symbol)
-                                .font(m.font(.reading, tab == item ? .semibold : .regular))
+                                .font(m.font(.body))
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, m.sp12).frame(
                                     height: m.control
                                 )
@@ -74,7 +74,6 @@ struct PreferencesView: View {
                 Divider().overlay(colors.border)
                 ScrollView {
                     VStack(alignment: .leading, spacing: m.sp24) {
-                        Text(tab.title).font(m.font(.title1, .bold)).foregroundStyle(colors.textPrimary)
                         if let error {
                             InlineErrorView(message: error, dismiss: { self.error = nil }).clipShape(
                                 RoundedRectangle(cornerRadius: m.radius))
@@ -296,7 +295,7 @@ struct PreferencesView: View {
     }
 
     private func sectionTitle(_ title: String) -> some View {
-        Text(title).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
+        Text(title).font(m.font(.body, .bold)).foregroundStyle(colors.textPrimary)
     }
 
     private func choiceTile<Preview: View>(
