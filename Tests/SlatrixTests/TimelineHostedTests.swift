@@ -685,7 +685,7 @@ extension TimelineHostedTests {
         harness.scrollView?.subviews.first { $0 is TimelineToolbarView && !$0.isHidden }
     }
 
-    @Test("Hovering a message floats the toolbar over its top edge, and no row moves or changes height")
+    @Test("Hovering a message floats the toolbar inside its top right, and no row moves or changes height")
     func hoverKeepsRowsStill() async throws {
         var messages = Self.actionable(0..<30)
         messages[27].reactions = [MessageReaction(key: "👍", count: 2, mine: true, senders: [Self.user, "@b:x"])]
@@ -709,7 +709,8 @@ extension TimelineHostedTests {
             let frame = row.convert(row.bounds, to: nil)
             let shown = try #require(toolbar(harness))
             let bar = shown.convert(shown.bounds, to: nil)
-            #expect(abs(bar.midY - frame.maxY) < 1, "\(body)")
+            // At the row's top right, inside it, so it covers no other message.
+            #expect(bar.maxY <= frame.maxY && bar.minY >= frame.minY, "\(body): \(bar) in \(frame)")
             #expect(bar.maxX < frame.maxX && bar.height >= MessageToolbar.button)
             // The hovered row lays out at the height it was measured at without hover.
             #expect(abs(row.height(width: row.bounds.width) - row.bounds.height) < 0.5, "\(body)")

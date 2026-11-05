@@ -879,7 +879,8 @@ struct TimelineTable: NSViewRepresentable {
         placeToolbar()
     }
 
-    /// The one hover toolbar, centered on the hovered row's top edge as Slack's is, and kept inside the viewport.
+    /// The one hover toolbar, at the hovered row's top right and inside the row, so it covers no other message, and
+    /// kept inside the viewport.
     private func placeToolbar() {
         guard let id = hoveredID, let row = index[id], case .message(let entry) = rows[row].kind,
             !entry.message.isRedacted, let context = configuration?.context
@@ -899,7 +900,9 @@ struct TimelineTable: NSViewRepresentable {
         let top = scrollView.convert(NSPoint(x: rect.maxX, y: rect.minY), from: table)
         // In the scroll view's flipped coordinates, from the viewport's top down.
         let visible = scrollView.contentView.frame
-        let y = min(max(top.y - size.height / 2, visible.minY + m.sp4), visible.maxY - size.height)
+        // A row too short for the gap above it centers the toolbar instead.
+        let inset = max(0, min(m.sp4, (rect.height - size.height) / 2))
+        let y = min(max(top.y + inset, visible.minY + m.sp4), visible.maxY - size.height)
         toolbar.frame.origin = NSPoint(x: top.x - m.sp16 - size.width, y: y)
         toolbar.isHidden = false
     }
