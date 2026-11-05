@@ -29,7 +29,6 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
@@ -404,9 +403,6 @@ private fun ChatHeader(room: RoomSummary, thread: Boolean, typing: List<String>,
                 else ChannelGlyph(room.isPrivate, colors.textPrimary)
             }
             lines()
-        }
-        if (!thread) IconButton(onClick = onOpenDetails) {
-            Icon(Icons.Outlined.MoreVert, "Conversation details", tint = colors.textSecondary)
         }
     }
 }

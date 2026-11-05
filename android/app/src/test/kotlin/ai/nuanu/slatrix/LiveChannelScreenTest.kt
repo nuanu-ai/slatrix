@@ -458,6 +458,20 @@ class LiveChannelScreenTest {
         compose.waitUntil { newer > 0 }
     }
 
+    @Test fun theNameInTheHeaderIsTheOneWayToDetails() {
+        var opened = 0
+        val dm = room.copy(name = "Wanda Moss", direct = true)
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(dm, ConversationState(listOf(message("Hello", 0)), loading = false), ComposerState(loading = false),
+                    {}, {}, {}, {}, {}, {}, {}, {}, onOpenDetails = { opened++ })
+            }
+        }
+        compose.onNodeWithContentDescription("Conversation details").assertDoesNotExist()
+        compose.onNodeWithText("Wanda Moss").performClick()
+        compose.runOnIdle { assertEquals(1, opened) }
+    }
+
     // capability: conversation.unread-line
     @Test fun anUnreadConversationOpensWithItsNewLineAtTheTopAndKeepsItOnceRead() {
         val many = (1..200).map { message("Message $it", minutes = it) }
@@ -468,7 +482,7 @@ class LiveChannelScreenTest {
             }
         }
         compose.onNodeWithText("New").assertIsDisplayed()
-        val header = compose.onNodeWithContentDescription("Conversation details").fetchSemanticsNode().boundsInRoot
+        val header = compose.onNodeWithContentDescription("Back").fetchSemanticsNode().boundsInRoot
         val newLine = compose.onNodeWithText("New").fetchSemanticsNode().boundsInRoot
         assertTrue("The line clears the header over the list", newLine.top >= header.bottom)
         compose.onNodeWithText("Message 185").assertIsDisplayed()
