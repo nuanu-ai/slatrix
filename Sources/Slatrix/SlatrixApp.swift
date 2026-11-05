@@ -38,15 +38,15 @@ struct SlatrixApp: App {
                 Button("Preferences…") { menuAction("preferences") }.keyboardShortcut(",")
             }
             CommandGroup(after: .newItem) {
-                Button("New message") { menuAction("new-message") }.keyboardShortcut("n")
-                Button("New channel") { menuAction("new-channel") }.keyboardShortcut(
+                Button("New Message…") { menuAction("new-message") }.keyboardShortcut("n")
+                Button("New Channel…") { menuAction("new-channel") }.keyboardShortcut(
                     "n", modifiers: [.command, .shift])
                 Divider()
-                Button("Attach file…") { menuAction("attach") }.keyboardShortcut("u")
+                Button("Attach File…") { menuAction("attach") }.keyboardShortcut("u")
             }
             CommandGroup(before: .toolbar) {
                 SidebarMenuItem { menuAction("toggle-sidebar") }
-                Button("Toggle right pane") { menuAction("toggle-pane") }.keyboardShortcut(".")
+                RightPaneMenuItem { menuAction("toggle-pane") }
                 Divider()
                 Button("Actual Size") { appearance.zoom = 1 }.keyboardShortcut("0")
                 Button("Zoom In") { appearance.zoom = AppearanceStore.zoomedIn(appearance.zoom) }
@@ -58,27 +58,27 @@ struct SlatrixApp: App {
             CommandMenu("Go") {
                 Button("Jump to…") { menuAction("search") }.keyboardShortcut("k")
                 Button("Search…") { menuAction("search-messages") }.keyboardShortcut("g")
-                Button("Search in conversation…") { menuAction("search-conversation") }.keyboardShortcut("f")
+                Button("Search in Conversation…") { menuAction("search-conversation") }.keyboardShortcut("f")
                 Divider()
                 Button("Back") { menuAction("back") }.keyboardShortcut("[")
                 Button("Forward") { menuAction("forward") }.keyboardShortcut("]")
                 Divider()
-                Button("Previous conversation") { menuAction("previous-conversation") }.keyboardShortcut(
+                Button("Previous Conversation") { menuAction("previous-conversation") }.keyboardShortcut(
                     .upArrow, modifiers: [.option])
-                Button("Next conversation") { menuAction("next-conversation") }.keyboardShortcut(
+                Button("Next Conversation") { menuAction("next-conversation") }.keyboardShortcut(
                     .downArrow, modifiers: [.option])
-                Button("Previous unread conversation") { menuAction("previous-unread") }.keyboardShortcut(
+                Button("Previous Unread Conversation") { menuAction("previous-unread") }.keyboardShortcut(
                     .upArrow, modifiers: [.option, .shift])
-                Button("Next unread conversation") { menuAction("next-unread") }.keyboardShortcut(
+                Button("Next Unread Conversation") { menuAction("next-unread") }.keyboardShortcut(
                     .downArrow, modifiers: [.option, .shift])
                 Divider()
                 Button("Threads") { menuAction("threads") }.keyboardShortcut("t", modifiers: [.command, .shift])
-                Button("Direct messages") { menuAction("dms") }.keyboardShortcut("k", modifiers: [.command, .shift])
+                Button("Direct Messages") { menuAction("dms") }.keyboardShortcut("k", modifiers: [.command, .shift])
                 Button("Activity") { menuAction("activity") }.keyboardShortcut("m", modifiers: [.command, .shift])
                 Button("Later") { menuAction("later") }.keyboardShortcut("s", modifiers: [.command, .shift])
                 Button("People") { menuAction("people") }.keyboardShortcut("e", modifiers: [.command, .shift])
                 Button("Files") { menuAction("files") }
-                Button("Browse channels") { menuAction("browse-channels") }.keyboardShortcut(
+                Button("Browse Channels") { menuAction("browse-channels") }.keyboardShortcut(
                     "l", modifiers: [.command, .shift])
                 Divider()
                 // ⌘1–⌘9 switch workspaces in rail order, as in Slack.
@@ -88,20 +88,20 @@ struct SlatrixApp: App {
                     ),
                     id: \.offset
                 ) { index, space in
-                    Button(space?.name ?? "All conversations") { menuAction("workspace-\(index + 1)") }
+                    Button(space?.name ?? "All Conversations") { menuAction("workspace-\(index + 1)") }
                         .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
                 }
             }
             CommandMenu("Conversation") {
                 // Esc and ⇧Esc are routed in SlatrixAppDelegate, so the composer can use Esc first.
-                Button("Mark as read") { menuAction("mark-read") }
-                Button("Mark all as read") { menuAction("mark-all-read") }
+                Button("Mark as Read") { menuAction("mark-read") }
+                Button("Mark All as Read") { menuAction("mark-all-read") }
                 Divider()
-                Button("React to last message…") { menuAction("react-last") }.keyboardShortcut(
+                Button("React to Last Message…") { menuAction("react-last") }.keyboardShortcut(
                     "\\", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .help) {
-                Button("Keyboard shortcuts…") { menuAction("shortcuts") }.keyboardShortcut("/")
+                Button("Keyboard Shortcuts…") { menuAction("shortcuts") }.keyboardShortcut("/")
             }
         }
         #if DEBUG
@@ -131,6 +131,15 @@ private struct SidebarMenuItem: View {
     var body: some View {
         Button(shown == false ? "Show Sidebar" : "Hide Sidebar", action: action)
             .keyboardShortcut("d", modifiers: [.command, .shift])
+    }
+}
+
+/// ⌘. closes the thread, list or profile beside the conversation; there is nothing for it to open.
+private struct RightPaneMenuItem: View {
+    let action: () -> Void
+    @FocusedValue(\.rightPaneShown) private var shown
+    var body: some View {
+        Button("Hide Right Pane", action: action).keyboardShortcut(".").disabled(shown != true)
     }
 }
 

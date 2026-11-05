@@ -358,7 +358,7 @@ struct SearchResultsView: View {
     }
 
     private var loadMoreButton: some View {
-        Button("Load more", action: loadMore).buttonStyle(.textLink).font(m.font(.subheadline, .medium))
+        Button("Show more", action: loadMore).buttonStyle(.textLink).font(m.font(.subheadline, .medium))
             .disabled(paging || searchBusy)
             // Beside the button, so it never moves when the spinner shows.
             .overlay(alignment: .leading) {

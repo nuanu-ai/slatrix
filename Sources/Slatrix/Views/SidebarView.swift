@@ -67,7 +67,7 @@ struct SidebarView: View {
                 list
             }
         }
-        .padding(.horizontal, m(10))
+        .padding(.horizontal, m.sp8)
         // The list scrolls on under you, through the bar's material.
         .safeAreaInset(edge: .bottom, spacing: 0) { footer }
         .background(colors.sidebar)
@@ -121,7 +121,7 @@ struct SidebarView: View {
             Spacer(minLength: m.sp2)
             IconButton(symbol: "square.and.pencil", label: "New message", role: .body) { onCreate(.directMessage) }
                 .foregroundStyle(colors.textSecondary)
-        }.padding(.leading, m.sp8).frame(height: m(36))
+        }.padding(.leading, m.sp8).frame(height: m.control)
     }
 
     /// You, with your status, Preferences and signing out; and an update or the preview's way out beside you.
@@ -143,13 +143,13 @@ struct SidebarView: View {
                     Text(matrix.user?.name ?? "You").font(m.font(.body)).foregroundStyle(colors.textPrimary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                }.padding(.leading, m(6)).frame(height: m.controlLarge).modifier(SidebarRowFill(selected: false))
+                }.padding(.leading, m.sp8).frame(height: m.controlLarge).modifier(SidebarRowFill(selected: false))
             }.menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden)
                 .accessibilityLabel("Your profile and status")
             if let accessory {
                 Button(accessory.title, action: accessory.action).buttonStyle(.primary).controlSize(.small)
             }
-        }.padding(.horizontal, m(10)).padding(.vertical, m(6))
+        }.padding(.horizontal, m.sp8).padding(.vertical, m.sp8)
             .modifier(FooterPlate())
     }
 
@@ -266,7 +266,7 @@ private struct SpacesMenu: View {
             Button("Create a space…") { onCreate(.workspace) }
             Button("Join a space…") { onCreate(.join) }
         } label: {
-            HStack(spacing: m(5)) {
+            HStack(spacing: m.sp4) {
                 Text(current?.name ?? "All conversations").font(m.font(.title3, .semibold))
                     .foregroundStyle(colors.textPrimary).lineLimit(1).truncationMode(.tail)
                 Image(systemName: "chevron.down").font(m.font(.subheadline, .semibold))
@@ -365,7 +365,7 @@ private struct SidebarRoomRow: View, Equatable {
                 if case .count(let count) = badge { CountBadge(text: count) }
             }
             .foregroundStyle(room.muted && !selected ? colors.textSecondary : colors.textPrimary)
-            .padding(.leading, room.isDirect ? m(6) : m.sp8).padding(.trailing, m.sp8).frame(height: m.row)
+            .padding(.leading, room.isDirect ? m.sp4 : m.sp8).padding(.trailing, m.sp8).frame(height: m.row)
             .modifier(SidebarRowFill(selected: selected))
         }.buttonStyle(.row).help(room.name)
             // The pointer rests on a row before the click; opening the timeline then hides its cache read.
@@ -379,10 +379,14 @@ private struct SidebarRoomRow: View, Equatable {
                 ].compactMap(\.self).joined(separator: ", ")
             )
             .contextMenu {
-                Button("Mark unread") { onMarkUnread(room) }.disabled(isPreview || room.membership != "join")
-                Button("Mark read") { onMarkRead(room) }.disabled(isPreview || room.membership != "join")
+                if room.hasUnread {
+                    Button("Mark as read") { onMarkRead(room) }.disabled(isPreview || room.membership != "join")
+                } else {
+                    Button("Mark as unread") { onMarkUnread(room) }.disabled(isPreview || room.membership != "join")
+                }
                 Divider()
-                Button(room.favorite ? "Remove from Starred" : "Move to Starred") {
+                let noun = room.isDirect ? "conversation" : "channel"
+                Button(room.favorite ? "Unstar \(noun)" : "Star \(noun)") {
                     Task {
                         do { try await matrix.setFavorite(room, value: !room.favorite) } catch {
                             matrix.errorMessage = MatrixService.safeError(error)

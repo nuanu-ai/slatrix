@@ -19,12 +19,12 @@ struct ChannelHeader: View {
 
     var body: some View {
         let colors = appearance.colors
-        ToolbarCapsule(padding: m.sp4) {
+        ToolbarCapsule {
             if !ConversationHeader.isOneToOne(room) {
                 Button {
                     perform(.details(.members))
                 } label: {
-                    HStack(spacing: m(5)) {
+                    HStack(spacing: m.sp4) {
                         Image(systemName: "person.2").font(m.font(.body))
                         Text("\(room.memberCount)").font(m.font(.body)).monospacedDigit()
                     }.padding(.horizontal, m.sp8).frame(height: m.iconButton)
@@ -36,7 +36,7 @@ struct ChannelHeader: View {
             Menu {
                 NativeMessageMenuCommands(commands: Self.menu(for: room, isPreview: matrix.isPreview, perform: perform))
             } label: {
-                Image(systemName: "ellipsis").font(m.font(.body)).frame(width: m.control, height: m.iconButton)
+                Image(systemName: "ellipsis").font(m.font(.body)).frame(width: m.iconButton, height: m.iconButton)
             }.menuStyle(.button).buttonStyle(.icon).menuIndicator(.hidden).fixedSize().help("More actions")
                 .accessibilityLabel("More actions")
         }.foregroundStyle(colors.textSecondary)
@@ -50,7 +50,7 @@ struct ChannelHeader: View {
         } label: {
             Image(systemName: shown ? symbol + ".fill" : symbol).font(m.font(.body))
                 .foregroundStyle(shown ? appearance.colors.accent : appearance.colors.textSecondary)
-                .frame(width: m.control, height: m.iconButton)
+                .frame(width: m.iconButton, height: m.iconButton)
         }.buttonStyle(.icon).help(label)
             .accessibilityLabel(count > 0 ? "\(label), \(count)" : label)
             .accessibilityAddTraits(shown ? .isSelected : [])
@@ -73,7 +73,7 @@ struct ChannelHeader: View {
                         AvatarView(name: room.name, size: m.avatarMedium, matrix: matrix, source: room.avatarURL)
                     }
                     VStack(alignment: .leading, spacing: m(1)) {
-                        HStack(spacing: m(3)) {
+                        HStack(spacing: m.sp4) {
                             if !room.isDirect {
                                 Image(systemName: room.channelSymbol).font(m.font(.body, .medium))
                                     .foregroundStyle(colors.textSecondary)
@@ -125,8 +125,8 @@ struct ChannelHeader: View {
             item("star", room.favorite ? "Unstar \(noun)" : "Star \(noun)", enabled: !isPreview, .star),
             MessageMenuCommand(id: "people-divider", isSeparator: true),
             item("invite", "Invite people…", enabled: joined && room.canInvite != false, .invite),
-            item("mark-unread", "Mark unread", enabled: joined, .markUnread),
-            item("mark-read", "Mark read", enabled: joined, .markRead),
+            item("mark-unread", "Mark as unread", enabled: joined, .markUnread),
+            item("mark-read", "Mark as read", enabled: joined, .markRead),
             MessageMenuCommand(id: "link-divider", isSeparator: true),
             item("copy-link", "Copy link", enabled: !isPreview, .copyLink),
             item("search", "Search in \(noun)", .search),

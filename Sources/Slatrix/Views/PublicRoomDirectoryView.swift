@@ -183,7 +183,7 @@ struct PublicRoomDirectoryView: View {
         Button(action: loadMore) {
             HStack(spacing: m.sp8) {
                 if service.isLoading { DelayedProgress() }
-                Text(service.isLoading ? "Loading…" : "Load more")
+                Text(service.isLoading ? "Loading…" : "Show more")
             }.font(m.font(.subheadline, .medium))
         }.buttonStyle(.textLink).disabled(!current || searching || resolvingID != nil)
     }
