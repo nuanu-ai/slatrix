@@ -24,10 +24,12 @@ import os
         /// A second after a conversation opens: visible rows whose height is not their content's, the largest
         /// difference (positive cuts content off, negative leaves space), the distance from the newest message, where
         /// it opened (0 the newest message, 1 where the reader left, 2 the unread line, 3 a linked message),
-        /// whether it is live, and the height of the rows under the newest message. Then the newest message's row: its
-        /// height, the space under its text (-1 without text), how much taller its text view is than the text, and
-        /// its shape (1 grouped, 2 attachment, 4 thread, 8 reactions, 16 reply quote).
+        /// whether it is live, the height of the rows under the newest message, the space shown past it, and the
+        /// composer's height over the rows.
         case timelineFit
+        /// The timeline showed space past its newest message although its rows fill the screen, and was put back at
+        /// the bottom: how much space, the composer's height over the rows, and how much taller the table was than them.
+        case timelineGap
 
         var label: String { String(describing: self).replacing(#/[A-Z]/#) { "." + $0.output.lowercased() } }
     }
