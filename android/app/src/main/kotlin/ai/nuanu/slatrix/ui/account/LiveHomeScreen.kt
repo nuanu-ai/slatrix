@@ -60,6 +60,15 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
@@ -84,45 +93,70 @@ private enum class HomeTab(val label: String, val icon: ImageVector, val selecte
     Activity("Activity", SlackIcons.Bell, SlackIcons.BellFilled),
 }
 
-/**
- * What covers Home, such as a conversation. A cover deeper than the one before slides in over it; one at depth 0 eases
- * itself in, as a pushed page does.
- */
-class WorkspaceCover(val key: Any, val depth: Int, val content: @Composable () -> Unit)
+/** A page over Home, such as a conversation, kept by [key] while it stays in the stack. */
+class WorkspaceCover(val key: Any, val content: @Composable () -> Unit)
 
 private const val Home = "home"
 
 /**
- * Shows [cover] in Home's place, and gives Home back its tab, search and scroll position after. Going deeper slides the
- * new page in over 140 ms with the page it covers still drawn under it, so nothing blank shows; going back is instant,
- * since predictive back has already played the way out under the finger. A page keeps its state, such as where a
- * conversation was scrolled, while others cover it, and loses it once Home shows, so a conversation left and opened
- * again starts at its New line or its newest message, as Slack's does.
+ * Home with [covers] over it, bottom to top. A page pushed over the one on top slides in over 140 ms with that page
+ * drawn under it, so nothing blank shows; one that leaves goes at once, since predictive back has already played the
+ * way out under the finger. Pages under the top stay composed, so going back finds one as it was, Home's tab, search
+ * and scroll included, and the one right under the top draws, for a back swipe to show. Covered pages stop at
+ * CREATED, as a backgrounded app's do, so they read no messages and take no Back. A page that leaves loses its state,
+ * so a conversation opened again starts at its New line or its newest message, as Slack's does.
  */
 @Composable
-fun LiveWorkspace(cover: WorkspaceCover?, home: @Composable () -> Unit) {
+fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
     val saved = rememberSaveableStateHolder()
-    val page = cover ?: WorkspaceCover(Home, 0, home)
-    val shown = remember { object { var page = page; var under: WorkspaceCover? = null; val kept = mutableSetOf<String>() } }
-    if (cover == null) shown.kept.removeAll { saved.removeState(it); true } else shown.kept += cover.key.toString()
-    if (shown.page.key != page.key) shown.under = shown.page.takeIf { page.depth > it.depth }
-    shown.page = page
-    val slide = remember(page.key) { Animatable(if (shown.under == null) 1f else 0f) }
-    var settled by remember(page.key) { mutableStateOf(shown.under == null) }
-    LaunchedEffect(slide) {
-        slide.animateTo(1f, Motion.pane())
-        shown.under = null
-        settled = true
-    }
+    val pages = listOf(WorkspaceCover(Home, home)) + covers
+    val top = pages.last().key
+    val shown = remember { object { var top: Any = Home; var keys = setOf<Any>(Home) } }
+    // Pushed when the page that was on top stays, under it.
+    val pushed = shown.top != top && pages.any { it.key == shown.top }
+    val keys = pages.map { it.key }.toSet()
+    (shown.keys - keys).forEach { saved.removeState(it.toString()) }
+    shown.top = top
+    shown.keys = keys
+    val slide = remember(top) { Animatable(if (pushed) 0f else 1f) }
+    LaunchedEffect(slide) { slide.animateTo(1f, Motion.pane()) }
     Box(Modifier.fillMaxSize()) {
-        // One keyed loop, so the page under keeps its composition as it moves from on top to underneath.
-        for (each in listOfNotNull(shown.under.takeUnless { settled }, page)) key(each.key) {
-            Box(if (each === page) Modifier.fillMaxSize().graphicsLayer {
-                alpha = slide.value
-                translationX = (1 - slide.value) * Motion.PushDistance * size.width
-            } else Modifier.fillMaxSize()) { saved.SaveableStateProvider(each.key.toString(), each.content) }
-        }
+        pages.forEachIndexed { index, page -> key(page.key) {
+            val depth = pages.lastIndex - index
+            val settled = slide.value == 1f
+            Box(Modifier.fillMaxSize().then(when {
+                depth == 0 -> Modifier.graphicsLayer {
+                    alpha = slide.value
+                    translationX = (1 - slide.value) * Motion.PushDistance * size.width
+                }
+                depth == 1 && !settled -> Modifier
+                // Out of the accessibility tree, and drawn only right under the top.
+                else -> Modifier.clearAndSetSemantics {}.graphicsLayer { if (depth > 1) alpha = 0f }
+            // The top takes every touch, so none reaches a page under it.
+            }).pointerInput(Unit) {}) {
+                Covered(depth > 0) { saved.SaveableStateProvider(page.key.toString(), page.content) }
+            }
+        } }
     }
+}
+
+/** Holds [content]'s lifecycle at CREATED while [covered], and otherwise follows the screen's. */
+@Composable
+private fun Covered(covered: Boolean, content: @Composable () -> Unit) {
+    val parent = LocalLifecycleOwner.current
+    val cap = if (covered) Lifecycle.State.CREATED else Lifecycle.State.RESUMED
+    val owner = remember(parent) { object : LifecycleOwner {
+        override val lifecycle = LifecycleRegistry(this).apply { currentState = minOf(parent.lifecycle.currentState, cap) }
+    } }
+    DisposableEffect(parent, cap) {
+        val follow = LifecycleEventObserver { _, _ -> owner.lifecycle.currentState = minOf(parent.lifecycle.currentState, cap) }
+        parent.lifecycle.addObserver(follow)
+        onDispose { parent.lifecycle.removeObserver(follow) }
+    }
+    DisposableEffect(owner) {
+        onDispose { if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED)) owner.lifecycle.currentState = Lifecycle.State.DESTROYED }
+    }
+    CompositionLocalProvider(LocalLifecycleOwner provides owner, content = content)
 }
 
 @Composable

@@ -5,6 +5,9 @@ import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.ui.account.LiveYouScreen
 import ai.nuanu.slatrix.ui.account.PersonProfileScreen
 import ai.nuanu.slatrix.ui.account.EditProfileScreen
+import ai.nuanu.slatrix.ui.account.LiveEditProfile
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.hasText
 import ai.nuanu.slatrix.ui.account.PhotoCropScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
@@ -76,6 +79,14 @@ class EditProfileScreenTest {
     }
 
     // capability: profile.edit-photo
+    // Edit profile opened on a blank page, then filled in.
+    @Test fun editProfileOpensWithTheNameTheProfileAlreadyShows() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent { SlatrixTheme { LiveEditProfile(null, "@alex:example.org", Person("@alex:example.org", "Alex Doe")) {} } }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNode(hasSetTextAction()).assert(hasText("Alex Doe"))
+    }
+
     @Test fun aPhotoCanBeUploadedOrRemoved() {
         val asked = mutableListOf<String>()
         compose.setContent {

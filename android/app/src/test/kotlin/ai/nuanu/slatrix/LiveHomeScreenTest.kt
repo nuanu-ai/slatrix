@@ -77,7 +77,7 @@ class LiveHomeScreenTest {
         val open = mutableStateOf(false)
         compose.setContent {
             SlatrixTheme {
-                LiveWorkspace(if (open.value) WorkspaceCover("design", 1) { Text("Conversation") } else null) {
+                LiveWorkspace(listOfNotNull(WorkspaceCover("design") { Text("Conversation") }.takeIf { open.value })) {
                     LiveHomeScreen("@alex:example.org", RoomListState(people, loading = false, spacesKnown = true), { open.value = true }, {}, {})
                 }
             }

@@ -73,6 +73,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ai.nuanu.slatrix.core.Person
 import org.matrix.rustcomponents.sdk.Client
 
 /**
@@ -193,18 +194,19 @@ fun PhotoCropScreen(photo: ImageBitmap, onCancel: () -> Unit, onSave: (CropSquar
 }
 
 /**
- * Edit profile, live: your name and photo as the account has them. A picked photo goes through the crop first; what you
+ * Edit profile, live: your name and photo as the account has them, shown at once from the profile it opened from,
+ * [known], when that has them. A picked photo goes through the crop first; what you
  * picked and how you cropped it outlive a rotation, and the photo is encoded only at Save, as on the Mac. Save sends what
  * changed, then goes back, and can't be left halfway.
  */
 @Composable
-fun LiveEditProfile(client: Client?, userId: String, onBack: () -> Unit) {
+fun LiveEditProfile(client: Client?, userId: String, known: Person? = null, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf<String?>(null) }
-    val current by produceState<Pair<String, String?>?>(null, client) {
+    val current by produceState(known?.let { it.name to it.avatarUrl }, client) {
         value = try {
-            client?.let { it.displayName() to it.avatarUrl() } ?: ("" to null)
+            client?.let { it.displayName() to it.avatarUrl() } ?: value ?: ("" to null)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

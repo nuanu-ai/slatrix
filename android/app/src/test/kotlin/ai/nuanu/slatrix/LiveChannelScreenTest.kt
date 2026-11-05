@@ -658,13 +658,12 @@ class LiveChannelScreenTest {
         val page = mutableStateOf<String?>("design")
         compose.setContent {
             SlatrixTheme {
-                LiveWorkspace(when (page.value) {
-                    "thread" -> WorkspaceCover("thread", 2) { Text("Thread") }
-                    "design" -> WorkspaceCover("design", 1) {
+                LiveWorkspace(listOfNotNull(
+                    WorkspaceCover("design") {
                         LiveChannelScreen(room, state, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
-                    }
-                    else -> null
-                }) { Text("Home") }
+                    }.takeIf { page.value != null },
+                    WorkspaceCover("thread") { Text("Thread") }.takeIf { page.value == "thread" },
+                )) { Text("Home") }
             }
         }
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(60)

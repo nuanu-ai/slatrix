@@ -1,6 +1,5 @@
 package ai.nuanu.slatrix.ui.account
 
-import ai.nuanu.slatrix.core.MatrixAvatars
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.runtime.Composable
@@ -16,7 +15,10 @@ import kotlinx.coroutines.withContext
 
 /** Pictures for avatar URLs at a size in pixels. */
 interface AvatarLoader {
-    /** A picture already in memory, so a row that comes back into view never flashes its initials. */
+    /**
+     * A picture already in memory, so a row that comes back into view never flashes its initials: at [sizePx], or until
+     * that loads, at another size.
+     */
     fun cached(url: String, sizePx: Int): ImageBitmap? = null
 
     suspend fun load(url: String, sizePx: Int): ImageBitmap?
@@ -28,16 +30,17 @@ val LocalAvatarLoader = staticCompositionLocalOf<AvatarLoader> {
     }
 }
 
-/** Decodes [avatars]' thumbnails off the main thread and keeps them in memory for the session. */
-class SessionAvatars(private val avatars: MatrixAvatars) : AvatarLoader {
+/** Decodes [thumbnail]'s pictures, by URL and size, off the main thread and keeps them in memory for the session. */
+class SessionAvatars(private val thumbnail: suspend (url: String, sizePx: Int) -> ByteArray?) : AvatarLoader {
     private val pictures = object : LruCache<String, ImageBitmap>(AvatarCacheBytes) {
         override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
     }
 
-    override fun cached(url: String, sizePx: Int): ImageBitmap? = pictures["$url@$sizePx"]
+    override fun cached(url: String, sizePx: Int): ImageBitmap? =
+        pictures["$url@$sizePx"] ?: pictures.snapshot().filterKeys { it.startsWith("$url@") }.values.maxByOrNull { it.width }
 
-    override suspend fun load(url: String, sizePx: Int): ImageBitmap? = cached(url, sizePx)
-        ?: avatars.thumbnail(url, sizePx)?.let { bytes -> withContext(Dispatchers.Default) { decode(bytes, sizePx) } }
+    override suspend fun load(url: String, sizePx: Int): ImageBitmap? = pictures["$url@$sizePx"]
+        ?: thumbnail(url, sizePx)?.let { bytes -> withContext(Dispatchers.Default) { decode(bytes, sizePx) } }
             ?.also { pictures.put("$url@$sizePx", it) }
 
     /** A server may send the original for a thumbnail, so it is decoded at the power-of-two scale nearest the tile. */
@@ -59,7 +62,9 @@ internal fun rememberAvatar(url: String?, size: Dp): ImageBitmap? {
     val pixels = with(LocalDensity.current) { size.roundToPx() }
     // The state outlives a change of URL, so every change sets it, to the new picture or to none.
     val picture by produceState(url?.let { loader.cached(it, pixels) }, url, pixels, loader) {
-        value = url?.let { loader.cached(it, pixels) ?: loader.load(it, pixels) }
+        value = url?.let { loader.cached(it, pixels) }
+        // The size asked for replaces one cached at another size, which stays if it doesn't load.
+        url?.let { loader.load(it, pixels) }?.let { value = it }
     }
     return picture
 }

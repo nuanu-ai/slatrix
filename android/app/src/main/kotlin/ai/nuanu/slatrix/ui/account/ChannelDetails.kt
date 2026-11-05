@@ -96,21 +96,24 @@ fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetails
     LaunchedEffect(room.id, loads) { notifications = attempt { actions.notifications() } }
     // Outlives the pages, so going back doesn't cancel a change on its way.
     val scope = rememberCoroutineScope()
-    // Whether the page showing came back from one over it, so it shows at once rather than easing in.
-    var returning by remember { mutableStateOf(false) }
-    val open = { next: DetailsPage -> opener = page; page = next; returning = false }
-    val details = { page = DetailsPage.Details; returning = true }
-    CompositionLocalProvider(LocalReturning provides returning) { when (page) {
-        DetailsPage.Details -> DetailsPage(room, notifications?.getOrNull(), actions, scope, onLeft, onBack, open,
+    val open = { next: DetailsPage -> opener = page; page = next }
+    val details = { page = DetailsPage.Details }
+    // Each page pushes over the details, and Add people over the page it was opened from.
+    LiveWorkspace(listOfNotNull(opener.takeIf { page == DetailsPage.AddPeople }, page).filter { it != DetailsPage.Details }.map { each ->
+        WorkspaceCover(each) { when (each) {
+            DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, onPerson, details)
+            DetailsPage.Edit -> EditPage(room, actions, scope, details)
+            DetailsPage.Notifications -> NotificationsPage(notifications, actions, scope, { notifications = Result.success(it) },
+                { loads++ }, details)
+            DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener }
+            DetailsPage.Pins -> PinsPage(room, me, actions.pins(), onOpenMessage, details)
+            DetailsPage.Files -> FilesPage(actions.files(), onOpenMessage, details)
+            DetailsPage.Details -> Unit
+        } }
+    }) {
+        DetailsPage(room, notifications?.getOrNull(), actions, scope, onLeft, onBack, open,
             spaces.filter { it.id in room.spaceIds }.map { it.name })
-        DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, onPerson, details)
-        DetailsPage.Edit -> EditPage(room, actions, scope, details)
-        DetailsPage.Notifications -> NotificationsPage(notifications, actions, scope, { notifications = Result.success(it) },
-            { loads++ }, details)
-        DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener; returning = true }
-        DetailsPage.Pins -> PinsPage(room, me, actions.pins(), onOpenMessage, details)
-        DetailsPage.Files -> FilesPage(actions.files(), onOpenMessage, details)
-    } }
+    }
 }
 
 private fun noun(room: RoomSummary) = if (room.direct) "conversation" else "channel"
