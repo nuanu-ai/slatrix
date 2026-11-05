@@ -138,4 +138,8 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     systemProperty("slatrix.root", rootDir.parentFile.absolutePath)
+    // Tests read the shared cases and tokens, so a change there must not reuse a cached pass.
+    for (shared in listOf("spec", "design")) {
+        inputs.dir(rootDir.parentFile.resolve(shared)).withPathSensitivity(PathSensitivity.RELATIVE)
+    }
 }

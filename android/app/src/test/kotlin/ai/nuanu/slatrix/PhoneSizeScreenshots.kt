@@ -25,11 +25,13 @@ import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.MessageThread
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.core.SavedList
 import ai.nuanu.slatrix.core.SavedMessage
 import ai.nuanu.slatrix.core.SavedPreview
 import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.BrowseChannelsScreen
+import ai.nuanu.slatrix.ui.account.LaterActions
 import ai.nuanu.slatrix.ui.account.LaterScreen
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
@@ -145,9 +147,10 @@ class PhoneSizeScreenshots(private val screen: String, private val width: Int, p
                     "\$a" to SavedPreview("@mira:example.org", "Mira Chen", "The new onboarding flow is up on staging. Would love eyes on the empty states.", now - hour),
                     "\$b" to SavedPreview("@wanda:example.org", "Wanda Moss", "Can you look at the release notes before lunch?", now - 26 * hour),
                 )
-                LaterScreen(listOf(SavedMessage("!design:example.org", "\$a", 2), SavedMessage("!wm:example.org", "\$b", 1)),
+                LaterScreen(SavedList(listOf(SavedMessage("!design:example.org", "\$a", 2, remindAt = now - 10 * 60_000),
+                    SavedMessage("!wm:example.org", "\$b", 1, remindAt = now + 2 * hour))),
                     listOf(room, RoomSummary("!wm:example.org", "Wanda Moss", true, "", UnreadBadge.None, "WM", 1)),
-                    { previews[it.eventId] }, {}, {})
+                    { previews[it.eventId] }, LaterActions({}), now = { now })
             }
         }
     }
