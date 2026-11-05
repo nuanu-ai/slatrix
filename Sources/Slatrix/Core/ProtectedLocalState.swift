@@ -2,20 +2,48 @@ import CryptoKit
 import Darwin
 import Foundation
 
+/// Where a message stands in Later: Slack's In progress, Archived and Completed tabs.
+enum LaterState: String, Codable, Sendable, CaseIterable {
+    case inProgress = "in_progress"
+    case archived, completed
+}
+
 struct SavedMessageReference: Codable, Hashable, Identifiable {
     var roomID: String
     var eventID: String
+    /// When it was saved, removed or last changed.
     var savedAt: Date
+    /// Nil for in progress, so a vault from before Later had tabs still opens.
+    private(set) var state: LaterState?
+    /// When its reminder is due; only a message in progress has one.
+    private(set) var remindAt: Date?
     var id: String { "\(roomID.utf8.count):\(roomID)\(eventID)" }
+    var laterState: LaterState { state ?? .inProgress }
+    func isOverdue(at now: Date) -> Bool { remindAt.map { $0 <= now } ?? false }
     /// A room (!) and an event ($), as untrusted IDs must be.
     var hasValidIDs: Bool {
         ProtectedLocalState.validID(roomID) && roomID.hasPrefix("!") && ProtectedLocalState.validID(eventID)
             && eventID.hasPrefix("$")
     }
-    init(roomID: String, eventID: String, savedAt: Date = Date()) {
+    init(
+        roomID: String, eventID: String, savedAt: Date = Date(), state: LaterState? = nil, remindAt: Date? = nil
+    ) {
         self.roomID = roomID
         self.eventID = eventID
         self.savedAt = savedAt
+        self.state = state == .inProgress ? nil : state
+        self.remindAt = self.state == nil ? remindAt : nil
+    }
+    private enum CodingKeys: String, CodingKey { case roomID, eventID, savedAt, state, remindAt }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        // A state a later build wrote reads as in progress here, rather than costing the vault.
+        self.init(
+            roomID: try values.decode(String.self, forKey: .roomID),
+            eventID: try values.decode(String.self, forKey: .eventID),
+            savedAt: try values.decode(Date.self, forKey: .savedAt),
+            state: try? values.decodeIfPresent(LaterState.self, forKey: .state),
+            remindAt: try values.decodeIfPresent(Date.self, forKey: .remindAt))
     }
 }
 
@@ -51,7 +79,8 @@ struct ProtectedLocalState: Codable, Equatable {
         for list in [saved, savedRemovals ?? []] {
             var seen = Set<String>()
             for item in list {
-                guard item.hasValidIDs, item.savedAt.timeIntervalSince1970.isFinite, seen.insert(item.id).inserted
+                guard item.hasValidIDs, item.savedAt.timeIntervalSince1970.isFinite,
+                    item.remindAt?.timeIntervalSince1970.isFinite ?? true, seen.insert(item.id).inserted
                 else { throw ProtectedLocalStateError.invalidData }
             }
         }

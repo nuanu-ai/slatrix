@@ -14,6 +14,8 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
     private var notificationAccountConfigured = false
     private lazy var delivery = DesktopNotificationDelivery(
         transport: SystemDesktopNotificationTransport(center: notificationCenter))
+    private(set) lazy var laterReminders = LaterReminderSchedule(
+        transport: SystemLaterReminderTransport(center: notificationCenter))
 
     enum PlatformError: LocalizedError {
         case unsupportedLink
@@ -176,8 +178,35 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
         center?.removePendingNotificationRequests(withIdentifiers: [identifier])
         center?.removeDeliveredNotifications(withIdentifiers: [identifier])
     }
+    /// Later's reminders stay queued: `LaterReminderSchedule` keeps them to the account and its choices.
     func clear() {
-        center?.removeAllDeliveredNotifications()
-        center?.removeAllPendingNotificationRequests()
+        guard let center else { return }
+        center.removeAllDeliveredNotifications()
+        center.getPendingNotificationRequests { requests in
+            center.removePendingNotificationRequests(
+                withIdentifiers: requests.map(\.identifier).filter { !$0.hasPrefix(LaterReminderSchedule.prefix) })
+        }
+    }
+}
+
+@MainActor private final class SystemLaterReminderTransport: LaterReminderTransport {
+    let center: UNUserNotificationCenter?
+    init(center: UNUserNotificationCenter?) { self.center = center }
+    func scheduled() async -> [String] { await center?.pendingNotificationRequests().map(\.identifier) ?? [] }
+    func schedule(_ identifier: String, at date: Date, notification: DesktopMessageNotification) async throws {
+        guard let center else { return }
+        let content = UNMutableNotificationContent()
+        content.title = String(notification.title.prefix(256))
+        content.body = String(notification.body.prefix(4096))
+        content.sound = notification.playSound ? .default : nil
+        content.userInfo = notification.target.userInfo
+        let when = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        try await center.add(
+            UNNotificationRequest(
+                identifier: identifier, content: content,
+                trigger: UNCalendarNotificationTrigger(dateMatching: when, repeats: false)))
+    }
+    func cancel(_ identifiers: [String]) {
+        center?.removePendingNotificationRequests(withIdentifiers: identifiers)
     }
 }

@@ -531,6 +531,42 @@ struct RootView: View {
                 if !enabled { PlatformIntegration.shared.clearNotifications() }
             }
             .onChange(of: appearance.notificationPreview) { _, _ in platform.clearNotificationPreviews() }
+            .task(
+                id: LaterReminderInputs(
+                    list: matrix.savedMessages.list, accountID: reminderAccount,
+                    preview: appearance.notificationPreview)
+            ) { await syncLaterReminders() }
+    }
+
+    private struct LaterReminderInputs: Equatable {
+        var list: SavedMessages
+        var accountID: String?
+        var preview: Bool
+    }
+    /// Who Later's reminders notify: nobody in the preview or with notifications off.
+    private var reminderAccount: String? {
+        appearance.notifications && !matrix.isPreview ? matrix.user?.id : nil
+    }
+    private func syncLaterReminders() async {
+        let preview = appearance.notificationPreview
+        let account = reminderAccount
+        await platform.laterReminders.sync(matrix.savedMessages.list, accountID: account) { item in
+            guard let account,
+                let target = MatrixNotificationTarget(accountID: account, roomID: item.roomID, eventID: item.eventID)
+            else { return nil }
+            guard preview else {
+                return DesktopMessageNotification(target: target, title: "Slatrix", body: "Reminder", playSound: true)
+            }
+            let room = matrix.rooms.first { $0.id == item.roomID }
+            var (title, body) = (room?.name ?? "Slatrix", "Reminder")
+            if let message = try? await matrix.messagePreview(roomID: item.roomID, eventID: item.eventID) {
+                let text = DesktopMessageNotification.message(
+                    room: room?.name ?? "", sender: message.senderName, direct: room?.isDirect ?? false,
+                    body: message.body)
+                (title, body) = (text.title, "Reminder: \(text.text)")
+            }
+            return DesktopMessageNotification(target: target, title: title, body: body, playSound: true)
+        }
     }
 
     private var linkPresentedContent: some View {
@@ -1381,12 +1417,20 @@ struct RootView: View {
     }
     private var savedCollection: some View {
         SavedMessagesView(
-            matrix: matrix, saved: matrix.savedMessages.list.saved,
-            onOpen: { item in selectRoom(item.roomID, record: true, eventID: item.eventID) },
-            onRemove: { item in
-                matrix.savedMessages.set(roomID: item.roomID, eventID: item.eventID, saved: false)
-                toasts.show("Removed from Later")
-            }
+            matrix: matrix, list: matrix.savedMessages.list,
+            actions: LaterActions(
+                open: { item in selectRoom(item.roomID, record: true, eventID: item.eventID) },
+                move: { item, state in
+                    matrix.savedMessages.set(roomID: item.roomID, eventID: item.eventID, state: state)
+                    toasts.show(state.moved)
+                },
+                remind: { item, date in
+                    matrix.savedMessages.remind(roomID: item.roomID, eventID: item.eventID, at: date)
+                },
+                remove: { item in
+                    matrix.savedMessages.set(roomID: item.roomID, eventID: item.eventID, saved: false)
+                    toasts.show("Removed from Later")
+                })
         ).id(composerGeneration)
     }
     private var draftsCollection: some View {

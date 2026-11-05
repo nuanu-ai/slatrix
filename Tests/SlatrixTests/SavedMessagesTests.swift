@@ -85,11 +85,97 @@ struct SavedMessagesRuleTests {
         }
     }
 
+    struct Changing: Decodable, Sendable, CustomTestStringConvertible {
+        var name: String
+        var list: JSONValue
+        var roomID: String
+        var eventID: String
+        var state: LaterState
+        var now: Int64
+        var expected: JSONValue
+        var testDescription: String { name }
+        enum CodingKeys: String, CodingKey {
+            case name, list, state, now, expected
+            case roomID = "room_id"
+            case eventID = "event_id"
+        }
+    }
+
+    struct Reminding: Decodable, Sendable, CustomTestStringConvertible {
+        var name: String
+        var list: JSONValue
+        var roomID: String
+        var eventID: String
+        var remindAt: Int64?
+        var now: Int64
+        var expected: JSONValue
+        var testDescription: String { name }
+        enum CodingKeys: String, CodingKey {
+            case name, list, now, expected
+            case roomID = "room_id"
+            case eventID = "event_id"
+            case remindAt = "remind_at"
+        }
+    }
+
+    struct Tabs: Decodable, Sendable, CustomTestStringConvertible {
+        struct Expected: Decodable, Equatable, Sendable {
+            var inProgress: [String]
+            var archived: [String]
+            var completed: [String]
+            var overdue: [String]
+            enum CodingKeys: String, CodingKey {
+                case archived, completed, overdue
+                case inProgress = "in_progress"
+            }
+        }
+        var name: String
+        var list: JSONValue
+        var now: Int64
+        var expected: Expected
+        var testDescription: String { name }
+    }
+
+    struct Notifying: Decodable, Sendable, CustomTestStringConvertible {
+        struct Reminder: Decodable, Equatable, Sendable {
+            var roomID: String
+            var eventID: String
+            var remindAt: Int64
+            enum CodingKeys: String, CodingKey {
+                case roomID = "room_id"
+                case eventID = "event_id"
+                case remindAt = "remind_at"
+            }
+        }
+        var name: String
+        var list: JSONValue
+        var now: Int64
+        var expected: [Reminder]
+        var testDescription: String { name }
+    }
+
+    struct Presets: Decodable, Sendable, CustomTestStringConvertible {
+        var name: String
+        var now: Int64
+        var timeZone: String
+        var expected: [String: Int64]
+        var testDescription: String { name }
+        enum CodingKeys: String, CodingKey {
+            case name, now, expected
+            case timeZone = "time_zone"
+        }
+    }
+
     struct Spec: Decodable {
         var eventType: String
         var reading: [Reading]
         var merging: [Merging]
         var setting: [Setting]
+        var changing: [Changing]
+        var reminding: [Reminding]
+        var tabs: [Tabs]
+        var notifying: [Notifying]
+        var presets: [Presets]
     }
 
     static let spec = Result { try SharedSpec.decode("spec/saved-messages.json", as: Spec.self) }
@@ -114,6 +200,70 @@ struct SavedMessagesRuleTests {
             roomID: spec.roomID, eventID: spec.eventID, saved: spec.saved,
             at: Date(timeIntervalSince1970: Double(spec.now) / 1_000))
         #expect(try JSONValue(json: changed.json) == spec.expected)
+    }
+
+    // capability: later.complete
+    // capability: later.archive
+    @Test(
+        "Completing, archiving and bringing back change Later as in every shared case",
+        arguments: try spec.get().changing)
+    func changing(spec: Changing) throws {
+        let changed = SavedMessages(json: spec.list.text).changing(
+            roomID: spec.roomID, eventID: spec.eventID, to: spec.state, at: Self.date(spec.now))
+        #expect(try JSONValue(json: changed.json) == spec.expected)
+    }
+
+    // capability: later.remind
+    @Test("Reminders change Later as in every shared case", arguments: try spec.get().reminding)
+    func reminding(spec: Reminding) throws {
+        let changed = SavedMessages(json: spec.list.text).reminding(
+            roomID: spec.roomID, eventID: spec.eventID, at: spec.remindAt.map(Self.date), now: Self.date(spec.now))
+        #expect(try JSONValue(json: changed.json) == spec.expected)
+    }
+
+    // capability: later.complete
+    // capability: later.archive
+    // capability: later.remind
+    @Test("Later's tabs list and order messages as in every shared case", arguments: try spec.get().tabs)
+    func tabs(spec: Tabs) {
+        let list = SavedMessages(json: spec.list.text)
+        let now = Self.date(spec.now)
+        let ids = { (state: LaterState) in list.tab(state).map(\.eventID) }
+        let shown = Tabs.Expected(
+            inProgress: ids(.inProgress), archived: ids(.archived), completed: ids(.completed),
+            overdue: list.tab(.inProgress).filter { $0.isOverdue(at: now) }.map(\.eventID))
+        #expect(shown == spec.expected)
+    }
+
+    // capability: later.remind
+    @Test("A device notifies of reminders as in every shared case", arguments: try spec.get().notifying)
+    func notifying(spec: Notifying) {
+        let reminders = SavedMessages(json: spec.list.text).reminders(after: Self.date(spec.now)).map {
+            Notifying.Reminder(
+                roomID: $0.roomID, eventID: $0.eventID,
+                remindAt: Int64(($0.remindAt?.timeIntervalSince1970 ?? 0) * 1_000))
+        }
+        #expect(reminders == spec.expected)
+    }
+
+    // capability: later.remind
+    @Test("Remind me's choices land when every shared case says", arguments: try spec.get().presets)
+    func presets(spec: Presets) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: spec.timeZone))
+        let keys: [ReminderPreset: String] = [
+            .in20Minutes: "in_20_minutes", .in1Hour: "in_1_hour", .in3Hours: "in_3_hours", .tomorrow: "tomorrow",
+            .nextWeek: "next_week",
+        ]
+        let times = Dictionary(
+            uniqueKeysWithValues: ReminderPreset.allCases.map {
+                (keys[$0] ?? "", Int64($0.date(from: Self.date(spec.now), in: calendar).timeIntervalSince1970 * 1_000))
+            })
+        #expect(times == spec.expected)
+    }
+
+    private static func date(_ milliseconds: Int64) -> Date {
+        Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
     }
 
     private static func references(_ count: Int) -> [SavedMessageReference] {
@@ -171,6 +321,25 @@ struct SavedMessagesServiceTests {
         let removedLater = #"{"room_id":"!design:example.org","event_id":"$one","ts":1761955500000}"#
         client.sync(#"{"saved":[\#(three)],"removed":[\#(removedLater)]}"#)
         #expect(await eventually { later.list.saved.map(\.eventID) == ["$three"] })
+    }
+
+    // capability: later.complete
+    // capability: later.remind
+    @Test("Completing one message and setting a reminder on another here reach the account for other devices")
+    func changesSync() async {
+        let client = LaterClient(server: #"{"saved":[\#(three),\#(one)],"removed":[]}"#)
+        let later = SavedMessagesService()
+        later.attach(client, accountID: owner)
+        #expect(await eventually { later.list.saved.count == 2 })
+        let due = Date(timeIntervalSince1970: 1_900_000_000)
+        later.set(roomID: "!design:example.org", eventID: "$one", state: .completed)
+        later.remind(roomID: "!general:example.org", eventID: "$three", at: due)
+        #expect(
+            await eventually {
+                let account = SavedMessages(json: client.server)
+                return account.tab(.completed).map(\.eventID) == ["$one"]
+                    && account.tab(.inProgress).map(\.remindAt) == [due]
+            })
     }
 
     @Test("A device's first run puts the list it kept into the account, under the shared type")

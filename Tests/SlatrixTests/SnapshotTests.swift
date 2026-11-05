@@ -596,6 +596,31 @@ struct Snapshots {
         }
     }
 
+    @Test("Later's In progress tab, with a reminder to come and one overdue", arguments: Theme.allCases)
+    func later(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let messages = matrix.messages.filter { !$0.body.isEmpty }.suffix(4)
+        let now = Date()
+        let reminders: [Date?] = [now + 2 * 3_600, now - 600, nil, nil]
+        var list = SavedMessages()
+        for (message, remindAt) in zip(messages, reminders) {
+            list = list.setting(roomID: message.roomID, eventID: message.eventID, saved: true, at: now)
+            if let remindAt {
+                list = list.reminding(roomID: message.roomID, eventID: message.eventID, at: remindAt, now: now)
+            }
+        }
+        if let done = messages.last {
+            list = list.changing(roomID: done.roomID, eventID: done.eventID, to: .completed, at: now)
+        }
+        matrix.savedMessages.merge(list, accountID: "preview.you")
+        try await render(RootView(matrix: matrix), theme: theme, name: "later") {
+            matrix.errorMessage = nil
+            NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "later"])
+        }
+    }
+
     @Test("The DMs page", arguments: Theme.allCases)
     func directMessages(theme: Theme) async throws {
         _ = NSApplication.shared
