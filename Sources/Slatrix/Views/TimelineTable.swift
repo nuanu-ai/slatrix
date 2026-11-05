@@ -205,6 +205,8 @@ struct TimelineTable: NSViewRepresentable {
     private var scrollingUp = true
     private var lastTop: CGFloat = 0
     private var applying = false
+    /// The reader's finger is on the trackpad, or its momentum and bounce are still running.
+    private var liveScrolling = false
     /// Whether the reader moved the view since the table last put it somewhere.
     private var scrolledByReader = false
     private var atOlderMessage = false
@@ -238,6 +240,12 @@ struct TimelineTable: NSViewRepresentable {
         NotificationCenter.default.addObserver(
             self, selector: #selector(boundsChanged), name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(liveScrollStarted), name: NSScrollView.willStartLiveScrollNotification,
+            object: scrollView)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(liveScrollEnded), name: NSScrollView.didEndLiveScrollNotification,
+            object: scrollView)
         scrollView.willTile = { [weak self] in self?.tiling = self?.opened == true ? self?.position() : nil }
         scrollView.onTile = { [weak self] in self?.viewportResized() }
         scrollView.onPointer = { [weak self] point in self?.pointerMoved(point) }
@@ -716,37 +724,31 @@ struct TimelineTable: NSViewRepresentable {
         let largest = differences.max { abs($0) < abs($1) } ?? 0
         let newest = rows.lastIndex { if case .message = $0.kind { true } else { false } }
         let below = newest.map { viewport.contentHeight - table.rect(ofRow: $0).maxY } ?? 0
-        // Rows that fit and sit at the bottom still showed space over the composer; these tell the newest row's own
-        // text and contents apart.
-        var under = -1
-        var slack = -1
-        var shape = 0
-        if let newest, case .message(let entry) = rows[newest].kind,
-            let cell = table.view(atColumn: 0, row: newest, makeIfNecessary: false) as? TimelineCell
-        {
-            func texts(_ view: NSView) -> [MessageTextView] {
-                (view as? MessageTextView).map { [$0] } ?? view.subviews.flatMap(texts)
-            }
-            let frames = texts(cell).map { ($0, $0.convert($0.bounds, to: cell)) }
-            if let (text, frame) = frames.max(by: { cell.isFlipped ? $0.1.maxY < $1.1.maxY : $0.1.minY > $1.1.minY }) {
-                under = Int((cell.isFlipped ? cell.bounds.maxY - frame.maxY : frame.minY).rounded())
-                if let layout = text.layoutManager, let container = text.textContainer {
-                    slack = Int((text.frame.height - layout.usedRect(for: container).height).rounded())
-                }
-            }
-            let message = entry.message
-            shape =
-                (entry.grouped ? 1 : 0) + (message.attachment != nil ? 2 : 0) + (message.replyCount > 0 ? 4 : 0)
-                + (message.reactions.isEmpty ? 0 : 8) + (message.replyPreview != nil ? 16 : 0)
-        }
         Performance.event(
             .timelineFit,
             [
                 "misfit": differences.count, "px": Int(largest), "bottom": Int(viewport.distanceFromBottom.rounded()),
                 "opening": opening, "live": configuration?.live == false ? 0 : 1, "below": Int(below.rounded()),
-                "height": newest.map { Int(table.rect(ofRow: $0).height.rounded()) } ?? 0, "under": under,
-                "slack": slack, "shape": shape,
+                "past": Int(viewport.overshoot.rounded()), "inset": Int(insets.bottom.rounded()),
             ])
+    }
+
+    /// Rows that fill the screen never leave space under the newest message. AppKit can leave the table taller than
+    /// its rows and the view at the table's end, past the newest message, over the composer.
+    private func closeGap() {
+        let viewport = viewport
+        guard opened, !applying, !liveScrolling, viewport.contentHeight > viewport.height, viewport.overshoot >= 1
+        else { return }
+        Performance.event(
+            .timelineGap,
+            [
+                "px": Int(viewport.overshoot.rounded()), "inset": Int(insets.bottom.rounded()),
+                "frame": Int((table.frame.height - viewport.contentHeight).rounded()),
+            ])
+        let wasApplying = applying
+        applying = true
+        scroll(to: .bottom)
+        applying = wasApplying
     }
 
     func stopLoading() {
@@ -829,6 +831,13 @@ struct TimelineTable: NSViewRepresentable {
         }
     }
 
+    @objc private func liveScrollStarted() { liveScrolling = true }
+
+    @objc private func liveScrollEnded() {
+        liveScrolling = false
+        afterScroll()
+    }
+
     @objc private func boundsChanged() {
         guard !applying, visible.size == NSSize(width: width, height: viewportHeight) else { return }
         // The reader moved: a linked message that has not loaded yet no longer takes over the view.
@@ -848,6 +857,7 @@ struct TimelineTable: NSViewRepresentable {
     /// Reports the viewport's state, keeps the hover with the pointer and loads history ahead of the reader.
     private func afterScroll() {
         guard let configuration else { return }
+        closeGap()
         if let pendingFocus, let row = rows.first(where: { $0.messageEventID == pendingFocus }) {
             self.pendingFocus = nil
             scrolledByReader = false

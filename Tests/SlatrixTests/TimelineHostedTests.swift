@@ -556,8 +556,20 @@ struct TimelineHostedTests {
         let fit = await firstPerformanceMessage(since: since) { $0.hasPrefix("event=timeline.fit ") }
         #expect(
             fit
-                == "event=timeline.fit misfit=0 px=0 bottom=0 opening=0 live=1 below=8 height=52 under=4 slack=0 "
-                + "shape=0")
+                == "event=timeline.fit misfit=0 px=0 bottom=0 opening=0 live=1 below=8 past=0 inset=100")
+    }
+
+    @Test("A conversation at its newest message shows no space under it, however the view got past it")
+    func noSpaceUnderNewest() async throws {
+        let harness = Harness(messages: Self.messages(0..<40))
+        defer { harness.close() }
+        await settle(harness)
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        // AppKit's own layout leaves the table taller than its rows and the view at the table's end.
+        table.setFrameSize(NSSize(width: table.frame.width, height: table.frame.height + 150))
+        harness.scroll(toTop: table.frame.height + Self.insets.bottom - harness.clip.bounds.height)
+        let end = table.rect(ofRow: table.numberOfRows - 1).maxY
+        #expect(abs(harness.clip.bounds.maxY - Self.insets.bottom - end) < 1)
     }
 
     @Test("Zooming in redraws the rows already on screen at the new size")

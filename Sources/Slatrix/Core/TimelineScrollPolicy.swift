@@ -22,6 +22,8 @@ enum TimelineScrollPolicy {
         var contentHeight: CGFloat
         var distanceFromBottom: CGFloat { max(0, contentHeight - top - height) }
         var isAtBottom: Bool { distanceFromBottom <= TimelineScrollPolicy.bottomTolerance }
+        /// Empty space the viewport shows past the end of the content.
+        var overshoot: CGFloat { max(0, top + height - contentHeight) }
 
         init(top: CGFloat, height: CGFloat, contentHeight: CGFloat) {
             self.top = top
