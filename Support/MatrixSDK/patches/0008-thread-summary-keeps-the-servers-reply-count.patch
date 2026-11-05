@@ -1,0 +1,113 @@
+diff --git a/crates/matrix-sdk-ui/src/timeline/controller/state_transaction.rs b/crates/matrix-sdk-ui/src/timeline/controller/state_transaction.rs
+index 88d3e73..da1a263 100644
+--- a/crates/matrix-sdk-ui/src/timeline/controller/state_transaction.rs
++++ b/crates/matrix-sdk-ui/src/timeline/controller/state_transaction.rs
+@@ -813,22 +813,26 @@ impl<'a, P: RoomDataProvider> TimelineStateTransaction<'a, P> {
+         // it should not impact performance too much.
+         let sdk_thread_summary = if let Some(event_id) = event.event_id() {
+             // Read the thread summary data from the `ThreadInfo` if it exists
+-            // in the Event Cache, because they are the most
+-            // up-to-date.
+-            if let Ok(Some(thread_info)) =
+-                self.meta.event_cache.thread_info(self.focus.room_id(), event_id).await
+-            {
+-                Some(SdkThreadSummary {
+-                    latest_reply: thread_info.latest_event.clone(),
+-                    num_replies: thread_info.number_of_replies,
+-                })
+-            }
+-            // Ah, the thread summary data don't exist in a `ThreadInfo` in the Event Cache.
+-            // Theoretically, the Event Cache **MUST HAVE** populated the `ThreadInfo`, but, in case
+-            // something bad happened, let's fallback to the `ThreadSummary` from the
+-            // `TimelineEvent`. It can be outdated but it's better than nothing.
+-            else {
+-                event.thread_summary()
++            // in the Event Cache, because they are the most up-to-date about
++            // the latest reply. It counts only the replies the Event Cache
++            // holds, though, and a thread read receipt alone makes one with
++            // none, so the server's bundled count wins when it's higher.
++            let cached =
++                match self.meta.event_cache.thread_info(self.focus.room_id(), event_id).await {
++                    Ok(Some(thread_info)) => Some(SdkThreadSummary {
++                        latest_reply: thread_info.latest_event.clone(),
++                        num_replies: thread_info.number_of_replies,
++                    }),
++                    _ => None,
++                };
++            match (cached, event.thread_summary()) {
++                (Some(cached), Some(bundled)) if bundled.num_replies > cached.num_replies => {
++                    Some(SdkThreadSummary {
++                        latest_reply: cached.latest_reply.or(bundled.latest_reply),
++                        num_replies: bundled.num_replies,
++                    })
++                }
++                (cached, bundled) => cached.or(bundled),
+             }
+         } else {
+             None
+diff --git a/crates/matrix-sdk-ui/tests/integration/timeline/thread.rs b/crates/matrix-sdk-ui/tests/integration/timeline/thread.rs
+index afb52b3..87dab26 100644
+--- a/crates/matrix-sdk-ui/tests/integration/timeline/thread.rs
++++ b/crates/matrix-sdk-ui/tests/integration/timeline/thread.rs
+@@ -303,6 +303,61 @@ async fn test_extract_bundled_thread_summary() {
+     assert_pending!(stream);
+ }
+ 
++#[async_test]
++async fn test_thread_read_receipt_keeps_the_bundled_reply_count() {
++    // A thread read receipt from another device makes a `ThreadInfo` before
++    // the event cache holds any of the thread's replies. The root still has
++    // as many replies as the server says.
++
++    let server = MatrixMockServer::new().await;
++    let client = client_with_threading_support(&server).await;
++    client.event_cache().subscribe().unwrap();
++
++    let room_id = room_id!("!a:b.c");
++    let thread_root = owned_event_id!("$root");
++    let own_user_id = client.user_id().unwrap().to_owned();
++    let f = EventFactory::new().room(room_id).sender(&ALICE);
++
++    let room = server
++        .sync_room(
++            &client,
++            JoinedRoomBuilder::new(room_id)
++                .add_timeline_event(
++                    f.text_msg("a change to review")
++                        .with_bundled_thread_summary(
++                            f.text_msg("looks good").event_id(event_id!("$latest")).into(),
++                            3,
++                            false,
++                        )
++                        .event_id(&thread_root),
++                )
++                .add_receipt(
++                    f.read_receipts()
++                        .add(
++                            event_id!("$latest"),
++                            &own_user_id,
++                            ReceiptType::Read,
++                            ReceiptThread::Thread(thread_root.clone()),
++                        )
++                        .into_event(),
++                ),
++        )
++        .await;
++
++    let timeline = room.timeline().await.unwrap();
++    let (mut items, mut stream) = timeline.subscribe().await;
++    while items.iter().all(|item| item.as_event().is_none()) {
++        assert_let_timeout!(Some(updates) = stream.next());
++        for update in updates {
++            update.apply(&mut items);
++        }
++    }
++
++    let root = items.iter().find_map(|item| item.as_event()).unwrap();
++    assert_let!(Some(summary) = root.content().thread_summary());
++    assert_eq!(summary.num_replies, 3);
++}
++
+ #[async_test]
+ async fn test_redact_thread_root_keeps_thread_summary() {
+     // Redacting the thread root must not hide the thread: the thread summary is

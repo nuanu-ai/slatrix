@@ -110,6 +110,12 @@ extension MessageReaction {
             }
         return "\(who) reacted with \(EmojiCatalog.shortcode(for: key))"
     }
+
+    /// The people a pill shows in place of its count, yours first; nil past three or while someone is unknown.
+    func faces(me: String?) -> [String]? {
+        guard count <= 3, senders.count == count else { return nil }
+        return senders.filter { $0 == me } + senders.filter { $0 != me }
+    }
 }
 
 /// Where the arrow keys take the selection in a grid of non-empty sections that each start a new row.
