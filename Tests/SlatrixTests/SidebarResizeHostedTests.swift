@@ -166,7 +166,7 @@ struct SidebarResizeHostedTests {
         try drag(by: -40)
         _ = await eventually { abs((frames().last?.minX ?? 0) - before.minX + 40) < 0.5 }
         #expect(abs(try #require(frames().last).minX - before.minX + 40) < 0.5)
-        #expect(UserDefaults.standard.double(forKey: "layout.paneWidth") == 420)
+        #expect(UserDefaults.standard.double(forKey: "layout.paneWidth") == 440)  // the 400 it opens at, plus the drag
 
         // Far past the limit, the conversation between the two dividers keeps its 360 pt.
         try drag(by: -2_000)
