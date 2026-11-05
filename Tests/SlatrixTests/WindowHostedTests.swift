@@ -526,6 +526,20 @@ struct WindowHostedTests {
         }
     }
 
+    @Test("Opening a thread in the open channel leaves the conversation as it is")
+    func threadKeepsConversation() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let newest = try harness.newest()
+        let before = newest.convert(newest.bounds, to: nil)
+        try harness.openThread()
+        #expect(await eventually { harness.dividers == 2 })
+        // The same row, not the conversation loaded again: it keeps its place against the composer.
+        #expect(newest.window != nil)
+        #expect(abs(newest.convert(newest.bounds, to: nil).minY - before.minY) < 1)
+    }
+
     @Test("A thread left open in a channel is open again on coming back to the channel")
     func threadSurvivesLeaving() async throws {
         let harness = Harness()
@@ -547,9 +561,11 @@ struct WindowHostedTests {
         }
         #expect(await eventually { threadShown() })
 
+        let channel = harness.matrix.selectedRoomID
         harness.menu("next-conversation")
         #expect(await eventually { harness.dividers == 1 })
-        harness.menu("back")
+        harness.menu("previous-conversation")
+        #expect(await eventually { harness.matrix.selectedRoomID == channel })
         #expect(await eventually { harness.dividers == 2 && threadShown() })
     }
 

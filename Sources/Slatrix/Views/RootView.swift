@@ -1799,36 +1799,61 @@ struct RootView: View {
                 // A jump to a thread reply opens its thread beside the conversation, as Slack does.
                 let replyRoot = replyRootID.flatMap { root in matrix.messages.first { $0.eventID == root } }
                 if let thread = thread ?? replyRoot ?? leftThread {
-                    threadRoot = thread
-                    openingThreadID = thread.eventID
-                    do {
-                        try await matrix.loadThread(thread)
-                        guard navigationGeneration == generation, composerIdentity == identity,
-                            matrix.selectedRoomID == id, threadRoot?.eventID == thread.eventID
-                        else { return }
-                        threadReadyID = thread.eventID
-                        openingThreadID = nil
-                        Performance.finishOnScreen(.threadOpen, ["messages": matrix.threadMessages.count])
-                        if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
-                            replyOpening = false
-                            replyError = nil
-                        }
-                    } catch {
-                        guard navigationGeneration == generation, composerIdentity == identity,
-                            matrix.selectedRoomID == id
-                        else { return }
-                        openingThreadID = nil
-                        if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
-                            replyOpening = false
-                            replyError = MatrixService.safeError(error)
-                        } else {
-                            threadLoadError = MatrixService.safeError(error)
-                        }
-                    }
+                    await loadThread(thread, generation: generation, identity: identity, restoringReply: restoringReply)
                 } else if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
                     replyOpening = false
                     replyError = nil
                 }
+            }
+        }
+    }
+    /// A thread in the conversation on screen opens beside it, which stays as it is; one elsewhere opens with its
+    /// conversation.
+    private func openThread(_ root: ChatMessage, room id: String) {
+        guard id == matrix.selectedRoomID, pendingRoomID == nil, route == .home, channelTab == .messages,
+            matrix.isPreview || matrix.isLiveTimelineReady(roomID: id)
+        else { return selectRoom(id, record: true, thread: root) }
+        let generation = UUID()
+        navigationGeneration = generation
+        matrix.setMessageActionThread(rootID: nil)
+        threadReadyID = nil
+        threadLoadError = nil
+        if matrix.isPreview {
+            threadRoot = root
+            matrix.openPreviewThread(root)
+            threadReadyID = root.eventID
+            return
+        }
+        let identity = composerIdentity
+        Task { @MainActor in await loadThread(root, generation: generation, identity: identity, restoringReply: nil) }
+    }
+    private func loadThread(
+        _ thread: ChatMessage, generation: UUID, identity: ComposerIdentity, restoringReply: MessageReplyTarget?
+    ) async {
+        let id = thread.roomID
+        threadRoot = thread
+        openingThreadID = thread.eventID
+        do {
+            try await matrix.loadThread(thread)
+            guard navigationGeneration == generation, composerIdentity == identity,
+                matrix.selectedRoomID == id, threadRoot?.eventID == thread.eventID
+            else { return }
+            threadReadyID = thread.eventID
+            openingThreadID = nil
+            Performance.finishOnScreen(.threadOpen, ["messages": matrix.threadMessages.count])
+            if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
+                replyOpening = false
+                replyError = nil
+            }
+        } catch {
+            guard navigationGeneration == generation, composerIdentity == identity, matrix.selectedRoomID == id
+            else { return }
+            openingThreadID = nil
+            if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
+                replyOpening = false
+                replyError = MatrixService.safeError(error)
+            } else {
+                threadLoadError = MatrixService.safeError(error)
             }
         }
     }
@@ -1862,7 +1887,7 @@ struct RootView: View {
             guard let root = candidates.first(where: { $0.eventID == rootID && $0.roomID == message.roomID }) else {
                 return
             }
-            selectRoom(root.roomID, record: true, thread: root)
+            openThread(root, room: root.roomID)
             return
         }
         Performance.start(.threadOpen)
@@ -1885,7 +1910,7 @@ struct RootView: View {
                 threadOpenTask = nil
                 pendingThreadOpen = nil
                 threadOpenError = nil
-                selectRoom(root.roomID, record: true, thread: root)
+                openThread(root, room: root.roomID)
             } catch is CancellationError {
                 if pendingThreadOpen?.id == request.id { cancelThreadOpen() }
             } catch {
