@@ -34,6 +34,8 @@ struct TimelineView: View {
     /// Messages scrolled up under the header, which then gets its line. Held by the pane, so a conversation switched
     /// to keeps the line until its own messages say otherwise.
     var contentAbove: Binding<Bool> = .constant(false)
+    /// The header's and the composer's heights, which float over the timeline's ends.
+    var insets = EdgeInsets()
     @State private var loadingHistory = false
     @State private var deleting: MessageActionTarget?
     @State private var cancelling: ChatMessage?
@@ -79,10 +81,13 @@ struct TimelineView: View {
                 jumpVisible = showsJump
                 if let scrolled, scrolled != contentAbove.wrappedValue { contentAbove.wrappedValue = scrolled }
                 onBottomVisibilityChange?(newestSeen)
-            }
+            }, insets: insets
         )
         .overlay(alignment: .top) {
-            if contentAbove.wrappedValue { Divider().overlay(colors.border) }
+            // From macOS 26 the header's edge effect shows messages passing under it in place of a line.
+            if #unavailable(macOS 26), contentAbove.wrappedValue {
+                Divider().overlay(colors.border).padding(.top, insets.top)
+            }
         }
         .overlay(alignment: .bottomTrailing) {
             if jumpVisible && !messages.isEmpty {
@@ -101,7 +106,7 @@ struct TimelineView: View {
                         .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
                         .background(colors.raised, in: Capsule()).overlay(Capsule().stroke(colors.border))
                         .elevation(.e2, cornerRadius: m.sp20)
-                }.buttonStyle(.row).padding(m.sp20).transition(.opacity)
+                }.buttonStyle(.row).padding(m.sp20).padding(.bottom, insets.bottom).transition(.opacity)
             }
         }
         .animation(Motion.overlay, value: jumpVisible)
@@ -954,5 +959,24 @@ extension TimelineRowContext {
             surface = .conversation
         }
         return matrix.captureMessagePermalink(message: message, surface: surface)
+    }
+}
+
+/// A timeline with its header over its top and its composer over its bottom, floating so rows scroll under both. Their
+/// heights, tracked here as the composer grows, keep the timeline's own view of the screen between them.
+struct TimelineUnderBars<Timeline: View, Header: View, Footer: View>: View {
+    @State private var insets = EdgeInsets()
+    let timeline: (EdgeInsets) -> Timeline
+    @ViewBuilder let header: Header
+    @ViewBuilder let footer: Footer
+
+    var body: some View {
+        timeline(insets)
+            .overlay(alignment: .top) {
+                header.onGeometryChange(for: CGFloat.self, of: \.size.height) { insets.top = $0 }
+            }
+            .overlay(alignment: .bottom) {
+                footer.onGeometryChange(for: CGFloat.self, of: \.size.height) { insets.bottom = $0 }
+            }
     }
 }
