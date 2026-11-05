@@ -705,11 +705,13 @@ struct TimelineTable: NSViewRepresentable {
             return abs(difference) >= 1 ? difference : nil
         }
         let largest = differences.max { abs($0) < abs($1) } ?? 0
+        let newest = rows.lastIndex { if case .message = $0.kind { true } else { false } }
+        let below = newest.map { viewport.contentHeight - table.rect(ofRow: $0).maxY } ?? 0
         Performance.event(
             .timelineFit,
             [
                 "misfit": differences.count, "px": Int(largest), "bottom": Int(viewport.distanceFromBottom.rounded()),
-                "opening": opening, "live": configuration?.live == false ? 0 : 1,
+                "opening": opening, "live": configuration?.live == false ? 0 : 1, "below": Int(below.rounded()),
             ])
     }
 

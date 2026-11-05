@@ -16,7 +16,7 @@
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
-    <key>NSHumanReadableCopyright</key><string>© 2026 Slatrix contributors</string>
+    <key>NSHumanReadableCopyright</key><string>© 2026 Nuanu AI Lab. https://nuanu.ai</string>
     <key>SUFeedURL</key><string>https://github.com/nuanu-ai/slatrix/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key><string>x39A6G7/iOI8F/kjZSDRXA/pXIpTQZvNw7JD/8RPBq8=</string>
     <key>SUEnableAutomaticChecks</key><true/>

@@ -478,7 +478,7 @@ struct TimelineHostedTests {
         defer { harness.close() }
         await settle(harness)
         let fit = await firstPerformanceMessage(since: since) { $0.hasPrefix("event=timeline.fit ") }
-        #expect(fit == "event=timeline.fit misfit=0 px=0 bottom=0 opening=0 live=1")
+        #expect(fit == "event=timeline.fit misfit=0 px=0 bottom=0 opening=0 live=1 below=8")
     }
 
     @Test("Zooming in redraws the rows already on screen at the new size")
