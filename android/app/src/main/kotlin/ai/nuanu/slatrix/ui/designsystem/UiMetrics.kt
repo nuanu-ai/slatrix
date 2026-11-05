@@ -31,8 +31,8 @@ object UiMetrics {
     val RowAvatar = 48.dp
     /** A sender's picture beside their bubbles. */
     val FeedAvatar = 32.dp
-    /** Material's search bar on Home. */
-    val SearchBar = 56.dp
+    /** Home's search bar, a little shorter than Material's, as Telegram's is. */
+    val SearchBar = 48.dp
     /** The floating tab capsule, its inset around the selected tab, and its gap above the screen's bottom. */
     val TabBar = 64.dp
     val TabInset = 4.dp

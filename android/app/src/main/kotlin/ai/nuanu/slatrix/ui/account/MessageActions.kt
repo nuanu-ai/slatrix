@@ -164,11 +164,12 @@ private fun MessageSheet(message: ConversationMessage, actions: MessageActions, 
     }
 }
 
-/** A round quick reaction, a full touch target wide, so a thumb can't miss it. */
+/** A round quick reaction, a full touch target wide, so a thumb can't miss it; its fill sits a little inside, so six never touch. */
 @Composable
 private fun ReactionButton(label: String, onClick: () -> Unit, content: @Composable () -> Unit) {
-    Box(Modifier.size(UiMetrics.Touch).clip(CircleShape).background(SlatrixTheme.colors.reaction).clickable(role = Role.Button, onClick = onClick)
-        .semantics { contentDescription = label }, contentAlignment = Alignment.Center) { content() }
+    Box(Modifier.size(UiMetrics.Touch).clip(CircleShape).clickable(role = Role.Button, onClick = onClick)
+        .semantics { contentDescription = label }.padding(UiMetrics.GapTiny / 2).background(SlatrixTheme.colors.reaction, CircleShape),
+        contentAlignment = Alignment.Center) { content() }
 }
 
 /** The actions in Slack's order: answering and keeping, then copying and marking, then changing your own. */

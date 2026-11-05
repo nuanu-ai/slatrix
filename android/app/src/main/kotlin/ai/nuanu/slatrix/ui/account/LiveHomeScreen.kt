@@ -229,22 +229,24 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
         // The lists scroll on under the tab capsule, and end clear of it and of New message above it.
         val clearance = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + UiMetrics.TabBar + UiMetrics.GapSmall * 2 +
             (UiMetrics.Fab + UiMetrics.GapLarge) * (if (beside) 0 else 1)
-        Column(Modifier.fillMaxSize().glassSource(glass)) {
-            HomeHeader(tab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                HorizontalPager(pager, Modifier.fillMaxSize(), key = { HomeTab.entries[it] }) { page ->
-                when (HomeTab.entries[page]) {
-                    HomeTab.Home -> Column {
-                        HomeSearchBar(state.spaces.firstOrNull { it.id == selectedSpaceId }?.name) { searching = true }
-                        HomeList(homeList, shown, selectedSpaceId, onRoom, (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } },
-                            onInvitation, clearance, collapsedSections, onCollapsedSections) { actions = it.id }
+        // Each tab owns its title, which slides with it under the finger rather than swap halfway.
+        HorizontalPager(pager, Modifier.fillMaxSize().glassSource(glass), key = { HomeTab.entries[it] }) { page ->
+            val pageTab = HomeTab.entries[page]
+            Column(Modifier.fillMaxSize()) {
+                HomeHeader(pageTab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    when (pageTab) {
+                        HomeTab.Home -> HomeList(homeList, shown, selectedSpaceId, onRoom,
+                            (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } }, onInvitation, clearance, collapsedSections,
+                            onCollapsedSections, { actions = it.id }) {
+                            HomeSearchBar(state.spaces.firstOrNull { it.id == selectedSpaceId }?.name) { searching = true }
+                        }
+                        HomeTab.Dms -> DirectList(directList, shown, onRoom, clearance) { actions = it.id }
+                        HomeTab.Activity -> Box(Modifier.padding(bottom = clearance)) { activity() }
+                        HomeTab.Later -> Box(Modifier.padding(bottom = clearance)) { later() }
                     }
-                    HomeTab.Dms -> DirectList(directList, shown, onRoom, clearance) { actions = it.id }
-                    HomeTab.Activity -> Box(Modifier.padding(bottom = clearance)) { activity() }
-                    HomeTab.Later -> Box(Modifier.padding(bottom = clearance)) { later() }
+                    OfflineBanner()
                 }
-                }
-                OfflineBanner()
             }
         }
         val newMessage = @Composable {
@@ -441,7 +443,7 @@ private enum class HomeSection(val label: String) {
 @Composable
 private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId: String?, onRoom: (String) -> Unit,
     onAddChannel: (() -> Unit)?, onInvitation: (String) -> Unit, bottom: Dp, saved: Set<String>, onSaved: (Set<String>) -> Unit,
-    onActions: (RoomSummary) -> Unit) {
+    onActions: (RoomSummary) -> Unit, search: @Composable () -> Unit) {
     // A saved workspace's channels are known only with its spaces, so its list waits for them rather than filling in.
     val waiting = state.loading || (selectedSpaceId != null && !state.spacesKnown)
     val sections = remember(state.rooms, selectedSpaceId) {
@@ -455,6 +457,8 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
     }
     var collapsed by remember(saved) { mutableStateOf(saved) }
     LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = bottom)) {
+        // The first row, so it scrolls away under the header with the list, as Telegram's does.
+        item(key = "search") { search() }
         if (waiting) {
             item { ConnectionIndicator(true, null) }
         } else {
@@ -481,18 +485,21 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
     }
 }
 
-/** A section's title after its arrow, in the column the rows' marks take, so titles line up with names; it opens and closes. */
+/**
+ * Slack's section header: its title in semibold at the list's edge, ahead of the rows' marks, then a chevron, with room
+ * above, so it reads as a heading over its rows rather than one of them. It opens and closes.
+ */
 @Composable
 private fun SectionHeader(section: HomeSection, open: Boolean, onToggle: () -> Unit) {
     val colors = SlatrixTheme.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.SectionHeader)
+    Row(Modifier.padding(top = UiMetrics.GapMedium).fillMaxWidth().heightIn(min = UiMetrics.SectionHeader)
         .clickable(role = Role.Button, onClickLabel = if (open) "Collapse" else "Expand", onClick = onToggle)
         .semantics(mergeDescendants = true) { stateDescription = if (open) "Expanded" else "Collapsed" }
         .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-        Lead { Icon(if (open) SlackIcons.ChevronDown else SlackIcons.ChevronRight, null, Modifier.size(glyph()), tint = colors.textSecondary) }
-        Text(section.label, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = colors.textSecondary,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
+        Text(section.label, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Icon(if (open) SlackIcons.ChevronDown else SlackIcons.ChevronRight, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.textSecondary)
     }
 }
 

@@ -107,6 +107,39 @@ class LiveHomeScreenTest {
         compose.waitUntil { tab("Home").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false } }
     }
 
+    @Test fun aTabsTitleSlidesWithItsPageUnderTheFinger() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(listOf(channel("!general:example.org", "general")), loading = false,
+                    spacesKnown = true), {}, {}, {})
+            }
+        }
+        // Its right edge, since a node's bounds stop at the screen's.
+        val rest = compose.onNodeWithText("All conversations").bounds().right
+        val pages = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.HorizontalScrollAxisRange))
+        val width = pages.bounds().width
+        pages.performTouchInput { down(center); repeat(8) { moveBy(androidx.compose.ui.geometry.Offset(-width * 0.05f, 0f)) } }
+        compose.waitForIdle()
+        val moved = compose.onNodeWithText("All conversations").bounds().right
+        assertTrue("from $rest to $moved of $width", moved < rest - width * 0.25f)
+    }
+
+    @Test fun theSearchBarScrollsAwayUnderTheTopBarWithTheList() {
+        val rooms = (0 until 40).map { channel("!c$it:example.org", "channel $it") }
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {}) } }
+        compose.onNodeWithText("Search").assertIsDisplayed()
+        compose.onNode(hasScrollToIndexAction() and SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
+            .performScrollToIndex(10)
+        compose.onNodeWithText("Search").assertDoesNotExist()
+    }
+
+    @Test fun aSectionHeaderStandsOutFromItsRowsAtTheirMarksEdge() {
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(listOf(channel("!general:example.org", "general")), loading = false, spacesKnown = true), {}, {}, {}) } }
+        val label = compose.onNodeWithText("Channels", useUnmergedTree = true).bounds()
+        val name = compose.onNodeWithText("general", useUnmergedTree = true).bounds()
+        assertTrue("label at ${label.left}, name at ${name.left}", label.left < name.left - with(compose.density) { UiMetrics.GapLarge.toPx() })
+    }
+
     private fun showTabBar(fontScale: Float) {
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
