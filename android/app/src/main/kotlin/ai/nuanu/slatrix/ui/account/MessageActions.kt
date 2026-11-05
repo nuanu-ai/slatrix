@@ -112,7 +112,10 @@ internal fun MessageActionsHost(message: ConversationMessage, actions: MessageAc
             title = { Text("Delete message") },
             text = { Text("Are you sure you want to delete this message? This cannot be undone.") },
             confirmButton = {
-                TextButton(onClick = { actions.onDelete?.invoke(message); onDismiss() }) {
+                TextButton(onClick = {
+                    if (message.sendState == MessageSendState.Failed) onDeleteUnsent(message) else actions.onDelete?.invoke(message)
+                    onDismiss()
+                }) {
                     Text("Delete", color = SlatrixTheme.colors.destructive)
                 }
             },
@@ -180,7 +183,7 @@ private fun MessageSheetItems(message: ConversationMessage, eventId: String?, ac
     val colors = SlatrixTheme.colors
     if (message.sendState == MessageSendState.Failed) {
         if (message.canRetry) MenuItem(Icons.Outlined.Refresh, "Retry") { onRetrySend(message); onDismiss() }
-        MenuItem(Icons.Outlined.Delete, "Delete message", colors.destructive) { onDeleteUnsent(message); onDismiss() }
+        MenuItem(Icons.Outlined.Delete, "Delete message", colors.destructive) { onStep(Step.ConfirmDelete) }
     }
     if (eventId == null) {
         if (message.kind in textKinds) MenuItem(Icons.Outlined.Title, "Copy text") { copy(message.body) }
