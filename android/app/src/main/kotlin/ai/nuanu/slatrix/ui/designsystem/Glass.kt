@@ -28,7 +28,6 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.unit.dp
-import dev.chrisbanes.haze.HazeProgressive
 import androidx.compose.ui.platform.LocalDensity
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
@@ -73,7 +72,8 @@ private fun Modifier.glassBackdrop(state: HazeState, fade: Float): Modifier {
     val colors = SlatrixTheme.colors
     return hazeEffect(state, HazeStyle(backgroundColor = colors.canvas, tint = HazeTint(colors.glassHeader), blurRadius = UiMetrics.GlassBlur,
         noiseFactor = 0f)) {
-        if (fade > 0f) progressive = HazeProgressive.verticalGradient(startIntensity = 0f, endY = fade, endIntensity = 1f)
+        // A mask fades the glass in rather than a progressive blur, whose shader software-rendered phones can't keep up with.
+        if (fade > 0f) mask = Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = fade)
     }
 }
 
