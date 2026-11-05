@@ -889,7 +889,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             }?.takeIf { it.replies > 0 },
             replyTo = content.inReplyTo?.let(::replyPreview),
             repliedToThread = content.threadRoot == null && content.inReplyTo?.let { quotesOwnWords(event.sender, content.kind, it) } == true,
-            attachment = shown.attachment,
+            attachment = shown.attachment?.let { if (event.isOwn) it.copy(own = true) else it },
             avatarUrl = (event.senderProfile as? ProfileDetails.Ready)?.avatarUrl,
         ).also { it.runs }
     }

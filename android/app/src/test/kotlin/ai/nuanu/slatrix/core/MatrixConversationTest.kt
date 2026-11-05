@@ -426,6 +426,16 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    @Test fun yourOwnAttachmentSaysSoForItsPictureToComeFromTheUpload() = runTest {
+        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/photo" }
+        fun item(id: String, own: Boolean) = conversationItem(id, "\$$id", "office.jpg", editable = own, content = TimelineItemContent.MsgLike(
+            MsgLikeContent(MsgLikeKind.Message(MessageContent(MessageType.Image(ImageMessageContent("office.jpg", null, null, source,
+                ImageInfo(900u, 1600u, "image/jpeg", 2_000_000u, null, null, null, false))), "office.jpg", false, null)), null, null, null)))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(ConversationTimeline(listOf(item("a", true), item("b", false)))))
+        assertEquals(listOf(true, false), conversation.state.first { it.rows.isNotEmpty() }.rows.messages.map { it.attachment?.own })
+        conversation.close()
+    }
+
     // capability: message.edited
     @Test fun anEditedMessageSaysSo() = runTest {
         val edited = TimelineItemContent.MsgLike(MsgLikeContent(

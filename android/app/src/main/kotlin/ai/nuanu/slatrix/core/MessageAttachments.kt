@@ -18,6 +18,8 @@ data class MessageAttachment(
     val thumbnailSize: Long? = null,
     /** A video's length. */
     val durationMillis: Long? = null,
+    /** Sent by you, so the SDK's store may hold it from the upload. */
+    val own: Boolean = false,
 ) {
     enum class Kind { Image, Video, Audio, File }
 }
