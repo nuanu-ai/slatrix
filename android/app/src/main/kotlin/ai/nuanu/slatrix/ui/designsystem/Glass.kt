@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.HazeTint
@@ -60,12 +61,25 @@ fun Modifier.glass(state: HazeState, tint: Color, shape: Shape, lifted: Boolean 
 @Composable
 fun Modifier.glassBar(state: HazeState): Modifier {
     val colors = SlatrixTheme.colors
-    return hazeEffect(state, HazeStyle(backgroundColor = colors.canvas, tint = HazeTint(colors.glassHeader), blurRadius = UiMetrics.GlassBlur,
-        noiseFactor = 0f)).drawWithContent {
+    return glassBackdrop(state, 0f).drawWithContent {
         drawContent()
         drawLine(colors.glassEdge, Offset(0f, size.height), Offset(size.width, size.height), UiMetrics.Hairline.toPx())
     }
 }
+
+@Composable
+private fun Modifier.glassBackdrop(state: HazeState, fade: Float): Modifier {
+    val colors = SlatrixTheme.colors
+    return hazeEffect(state, HazeStyle(backgroundColor = colors.canvas, tint = HazeTint(colors.glassHeader), blurRadius = UiMetrics.GlassBlur,
+        noiseFactor = 0f)) {
+        // A mask fades the glass in rather than a progressive blur, whose shader software-rendered phones can't keep up with.
+        if (fade > 0f) mask = Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = fade)
+    }
+}
+
+/** The header's glass for what floats over the messages' foot, as the composer does: it fades in from its top, so no edge shows. */
+@Composable
+fun Modifier.glassFoot(state: HazeState): Modifier = glassBackdrop(state, with(LocalDensity.current) { UiMetrics.GapSection.toPx() })
 
 /** A bubble's fill in [shape], over a hairline of [edge] a little below it, which lifts it off the wallpaper. */
 fun Modifier.bubble(shape: Shape, fill: Color, edge: Color): Modifier = this then BubbleElement(shape, fill, edge)
@@ -123,12 +137,14 @@ private const val WashTurn = 15.0
 private const val WashMiddle = 0.55f
 
 /**
- * A chat bubble: rounded all round except the corner toward its author, at the bottom, and the top one too when it
- * follows the same author's bubble, so a run of them reads as one.
+ * A chat bubble, rounded all round except toward its author: a corner that meets the same author's bubble above or
+ * below is tighter, and the last of a run ends in the tail, tighter still, so a run reads as one and ends once.
  */
-fun bubbleShape(own: Boolean, grouped: Boolean): Shape {
+fun bubbleShape(own: Boolean, grouped: Boolean, last: Boolean): Shape {
     val round = DesignTokens.radii.getValue("bubble").dp
+    val joined = DesignTokens.radii.getValue("small").dp
     val tail = DesignTokens.radii.getValue("extraSmall").dp
-    val top = if (grouped) tail else round
-    return if (own) RoundedCornerShape(round, top, tail, round) else RoundedCornerShape(top, round, round, tail)
+    val top = if (grouped) joined else round
+    val bottom = if (last) tail else joined
+    return if (own) RoundedCornerShape(round, top, bottom, round) else RoundedCornerShape(top, round, round, bottom)
 }

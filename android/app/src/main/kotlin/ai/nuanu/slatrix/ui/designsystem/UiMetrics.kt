@@ -31,8 +31,8 @@ object UiMetrics {
     val RowAvatar = 48.dp
     /** A sender's picture beside their bubbles. */
     val FeedAvatar = 32.dp
-    /** Material's search bar on Home. */
-    val SearchBar = 56.dp
+    /** Home's search bar, a little shorter than Material's, as Telegram's is. */
+    val SearchBar = 48.dp
     /** The floating tab capsule, its inset around the selected tab, and its gap above the screen's bottom. */
     val TabBar = 64.dp
     val TabInset = 4.dp
@@ -46,6 +46,9 @@ object UiMetrics {
     /** The faces on a thread's replies bar. */
     val Facepile = 20.dp
     val ThreadBar = 40.dp
+    /** A bubble's inset around its text, a little tighter than a card's, as a messenger's is. */
+    val BubbleInset = 10.dp
+    val BubbleInsetVertical = 6.dp
     /** The share of the width your bubble leaves on its far side, so a long one reaches about 85%, as in Telegram. */
     const val BubbleGutter = 0.12f
     /** Theirs leave a gutter that grows with the phone, from narrow at 320 dp to wide at 412 dp, past their picture's room. */
@@ -56,13 +59,8 @@ object UiMetrics {
     val NarrowPhone = 320.dp
     val WidePhone = 412.dp
     val GlassBlur = 24.dp
-    /** The message menu: its card's width and rows, the reaction bar and its buttons, and the blur of the screen behind. */
-    val MenuWidth = 252.dp
-    val MenuItem = 44.dp
-    val MenuInset = 6.dp
-    val ReactionBar = 52.dp
-    val ReactionButton = 40.dp
-    val MenuBlur = 14.dp
+    /** The most of the screen a message sheet's actions take before they scroll, so its reactions stay within thumb reach. */
+    const val MessageSheetShare = 0.45f
     val GlassLift = 12.dp
     val WallpaperGrid = 20.dp
     val WallpaperDot = 1.dp

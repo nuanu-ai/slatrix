@@ -17,17 +17,16 @@ import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.OnAccentFill
 import ai.nuanu.slatrix.ui.designsystem.bubble
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
+import ai.nuanu.slatrix.ui.designsystem.glassFoot
 import ai.nuanu.slatrix.ui.designsystem.glassBar
 import ai.nuanu.slatrix.ui.designsystem.glassSource
 import ai.nuanu.slatrix.ui.designsystem.rememberGlass
 import ai.nuanu.slatrix.ui.designsystem.wallpaper
 import dev.chrisbanes.haze.HazeState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.onPlaced
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -255,10 +254,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         loadOlder()
     }
     val back = rememberPredictiveBack(onBack = onBack)
-    var menu by remember { mutableStateOf<Pair<ConversationMessage, LiftedMessage?>?>(null) }
+    var menu by remember { mutableStateOf<ConversationMessage?>(null) }
     // Inside a thread, Reply has nowhere further to go.
-    menu?.let { (message, lifted) ->
-        MessageActionsHost(message, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent, lifted) { menu = null }
+    menu?.let { message ->
+        MessageActionsHost(message, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent) { menu = null }
     }
     var reacted by remember { mutableStateOf<ConversationMessage?>(null) }
     // The row and its tile's pixels, saved, so the viewer stays open on the same image when the phone turns.
@@ -282,16 +281,33 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     reacted?.let { ReactionsSheet(it.reactions, state.rows, state.ownUserId) { reacted = null } }
     val glass = rememberGlass()
-    // The header floats over the messages, which start under it; the scaffold measures it first, so they never move.
+    // The header and the composer float over the messages, which pass under both; the scaffold measures them first, so
+    // the messages never move.
     Scaffold(Modifier.graphicsLayer {
         // A back swipe carries the conversation off under the finger, over the page it goes back to.
         translationX = back.value * size.width
     }, topBar = { ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails) },
+        bottomBar = {
+            // On the header's glass, fading in without an edge, so the capsule floats over the messages.
+            Column(Modifier.imePadding().glassFoot(glass).navigationBarsPadding()) {
+                val placeholder = when {
+                    threadRoot != null -> "Add a reply"
+                    room.direct || room.isPrivate -> "Message ${room.name}"
+                    else -> "Message #${room.name}"
+                }
+                val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
+                if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders,
+                    aboveField = if (threadRoot != null && composer.target !is ComposerTarget.Edit) {
+                        { AlsoSendTo(room, composer.alsoToChannel, composerActions.onAlsoToChannel) }
+                    } else null) else CannotPost()
+            }
+        },
         containerColor = colors.canvas, contentWindowInsets = WindowInsets(0)) { bars ->
     val header = bars.calculateTopPadding()
-    Column(Modifier.fillMaxSize().wallpaper().navigationBarsPadding().imePadding()) {
-        // Only the messages pass under the header, so typing never redraws what it blurs.
-        Box(Modifier.weight(1f).fillMaxWidth().glassSource(glass)) {
+    val footer = bars.calculateBottomPadding()
+    // The glass blurs the wallpaper with the messages, so it takes the wallpaper's tint; typing never redraws either.
+    Box(Modifier.fillMaxSize().glassSource(glass).wallpaper()) {
+        Box(Modifier.fillMaxSize()) {
             val rows = state.rows
             // A reset re-pages the thread; the last count stays until the new one is known, so the bar doesn't blank.
             var replies by remember { mutableStateOf<Int?>(null) }
@@ -313,7 +329,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none(::opens)) 1f else 0f),
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
-                contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = jumpRoom)) {
+                contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = footer + jumpRoom)) {
                 itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row -> Box(Modifier.alpha(if (settled) 1f else 0f)) {
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
@@ -324,14 +340,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val next = rows.getOrNull(rows.size - index) as? ConversationMessage
                             val last = next == null || !next.grouped || restarts(next)
                             val root = threadRoot != null && row.eventId == threadRoot
-                            // The menu lifts the row as drawn here, so it draws the same row again.
-                            val draw: @Composable ((ConversationMessage, Float?) -> Unit) -> Unit = { onMenu ->
-                                LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId,
-                                    actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
-                                    loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
-                                    loadThreadOrigin, actions.onQuote, onMenu)
-                            }
-                            draw { message, top -> menu = message to top?.let { LiftedMessage(it) { draw { _, _ -> } } } }
+                            LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId,
+                                actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
+                                loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
+                                loadThreadOrigin, actions.onQuote) { menu = it }
                             // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                             if (root) RepliesBar(replies)
                         }
@@ -349,7 +361,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 }
             }
             val jumps = rememberCoroutineScope()
-            androidx.compose.animation.AnimatedVisibility(jumpShows, Modifier.align(Alignment.BottomEnd).padding(UiMetrics.GapLarge),
+            androidx.compose.animation.AnimatedVisibility(jumpShows, Modifier.align(Alignment.BottomEnd).padding(bottom = footer).padding(UiMetrics.GapLarge),
                 enter = fadeIn(Motion.pane()), exit = ExitTransition.None) {
                 Surface({
                     following = true
@@ -360,22 +372,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 }
             }
             Box(Modifier.padding(top = header)) { OfflineBanner() }
-            state.notice?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
+            val notices = Modifier.align(Alignment.BottomCenter).padding(bottom = footer).padding(UiMetrics.GapLarge)
+            state.notice?.let { Snackbar(notices) { Text(it) } }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
-                Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
-                    action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
-            } ?: fileError?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
+                Snackbar(notices, action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
+            } ?: fileError?.let { Snackbar(notices) { Text(it) } }
         }
-        val placeholder = when {
-            threadRoot != null -> "Add a reply"
-            room.direct || room.isPrivate -> "Message ${room.name}"
-            else -> "Message #${room.name}"
-        }
-        val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
-        if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders,
-            aboveField = if (threadRoot != null && composer.target !is ComposerTarget.Edit) {
-                { AlsoSendTo(room, composer.alsoToChannel, composerActions.onAlsoToChannel) }
-            } else null) else CannotPost()
     }
     }
 }
@@ -549,13 +551,11 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?, onReply: ((ConversationMessage) -> Unit)?,
-    onMenu: (ConversationMessage, top: Float?) -> Unit) {
+    onMenu: (ConversationMessage) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
     val own = message.own
-    // Kept without state, so scrolling never recomposes for it; read only when the menu opens over the row.
-    val placed = remember { arrayOfNulls<LayoutCoordinates>(1) }
-    fun menu() = onMenu(message, placed[0]?.takeIf { it.isAttached }?.positionInWindow()?.y)
+    fun menu() = onMenu(message)
     val haptics = LocalHapticFeedback.current
     // A swipe right replies, as in a messenger: the bubble follows the finger, the reply sign fades in behind it, and
     // crossing the threshold ticks once; read while drawing, so the drag never recomposes the row.
@@ -585,7 +585,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             scaleX = 0.6f + 0.4f * shown
             scaleY = scaleX
         }, tint = colors.textSecondary)
-    Row(Modifier.fillMaxWidth().graphicsLayer { translationX = drag.value }.onPlaced { placed[0] = it }
+    Row(Modifier.fillMaxWidth().graphicsLayer { translationX = drag.value }
         // Only a failed message answers a tap, as in Slack; any message opens its menu on a long press, with a tick.
         .then(if (failed) Modifier.combinedClickable(onClickLabel = "Message actions", onLongClickLabel = "Message actions",
             onLongClick = ::menu, onClick = ::menu)
@@ -615,14 +615,14 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
                 LiveAvatar(message.initials, message.colorIndex, UiMetrics.FeedAvatar, message.avatarUrl)
             }
         }
-        val shape = remember(own, message.grouped) { bubbleShape(own, message.grouped) }
+        val shape = remember(own, message.grouped, lastOfRun) { bubbleShape(own, message.grouped, lastOfRun) }
         val bubble = @Composable {
             val fill = SlatrixTheme.colors
             Box(Modifier.weight(1f, fill = false).bubble(shape, fill.bubbleIn, if (own) fill.bubbleIn.copy(alpha = 0f) else fill.bubbleEdge)) {
             val attachment = message.attachment
             // A picture or video runs to the bubble's edge with its time on it, as in a messenger; the rest keeps the text's inset.
             val media = attachment?.kind == MessageAttachment.Kind.Image || attachment?.kind == MessageAttachment.Kind.Video
-            val inset = if (media) Modifier.padding(horizontal = UiMetrics.GapMedium - UiMetrics.GapTiny) else Modifier
+            val inset = if (media) Modifier.padding(horizontal = UiMetrics.BubbleInset - UiMetrics.GapTiny) else Modifier
             // An attachment's text is its caption; without one it is the file's name, which the attachment shows.
             val body: (@Composable () -> Unit)? = if (attachment == null || message.caption != null) {
                 { MessageBody(message, if (message.sendState == MessageSendState.Sending) fill.textSecondary else fill.textBody, me, onPerson) }
@@ -636,7 +636,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             }
             val timeColor = if (failed && !own) fill.destructive else fill.textSecondary
             Column(Modifier.padding(if (media) PaddingValues(UiMetrics.GapTiny)
-                else PaddingValues(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall))) {
+                else PaddingValues(horizontal = UiMetrics.BubbleInset, vertical = UiMetrics.BubbleInsetVertical))) {
                 if (!own && !message.grouped) Text(message.senderName, inset.clickable(role = Role.Button) { onPerson(message.senderId) },
                     style = MaterialTheme.typography.labelLarge, color = fill.person(message.colorIndex), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 message.replyTo?.let { reply -> Box(inset) {
@@ -677,7 +677,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             }
             // In the bubble's bottom padding, so the bar comes and goes without moving anything.
             message.uploadProgress?.let {
-                Box(Modifier.matchParentSize().padding(start = UiMetrics.GapMedium, end = UiMetrics.GapMedium, bottom = UiMetrics.GapTiny),
+                Box(Modifier.matchParentSize().padding(start = UiMetrics.BubbleInset, end = UiMetrics.BubbleInset, bottom = UiMetrics.GapTiny),
                     contentAlignment = Alignment.BottomStart) {
                     LinearProgressIndicator({ it }, Modifier.fillMaxWidth().height(UiMetrics.GapTiny))
                 }
@@ -690,8 +690,8 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
 }
 
 /**
- * A bubble's text with its time: beside a single line when there's room, as a messenger sets it, or else on a line of
- * its own at the end.
+ * A bubble's text with its time: after the end of its last line when there's room, as a messenger sets it, or else on
+ * a line of its own at the end.
  */
 @Composable
 private fun TimedBody(body: (@Composable () -> Unit)?, modifier: Modifier = Modifier, time: @Composable () -> Unit) {
@@ -700,8 +700,9 @@ private fun TimedBody(body: (@Composable () -> Unit)?, modifier: Modifier = Modi
         val loose = constraints.copy(minWidth = 0, minHeight = 0)
         val t = text.measure(loose)
         val m = stamp.measure(loose)
-        val beside = t.width + gap + m.width <= constraints.maxWidth && t.height > 0
-        val width = (if (beside) t.width + gap + m.width else maxOf(t.width, m.width)).coerceIn(constraints.minWidth, constraints.maxWidth)
+        val end = t[LastLineEnd].takeIf { it != AlignmentLine.Unspecified } ?: t.width
+        val beside = end + gap + m.width <= constraints.maxWidth && t.height > 0
+        val width = (if (beside) maxOf(t.width, end + gap + m.width) else maxOf(t.width, m.width)).coerceIn(constraints.minWidth, constraints.maxWidth)
         val height = if (beside) t.height else t.height + m.height
         layout(width, height) {
             t.placeRelative(0, 0)
