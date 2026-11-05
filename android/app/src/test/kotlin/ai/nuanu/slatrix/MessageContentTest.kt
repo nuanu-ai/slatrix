@@ -7,6 +7,7 @@ import java.io.File
 import androidx.test.core.app.ApplicationProvider
 import android.net.Uri
 import android.content.Intent
+import androidx.core.content.FileProvider
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
@@ -237,6 +238,8 @@ class MessageContentTest {
         compose.onNode(hasText("Mira") and hasAnyAncestor(isDialog())).assertIsDisplayed()
         compose.onNode(hasText(dayLabel(1_700_000_000_000L), substring = true) and hasAnyAncestor(isDialog())).assertIsDisplayed()
 
+        // FileProvider keeps each authority's folders for the process, and each Robolectric test gets its own cache folder.
+        FileProvider::class.java.getDeclaredField("sCache").apply { isAccessible = true }.let { (it.get(null) as MutableMap<*, *>).clear() }
         compose.onNodeWithContentDescription("Share").performClick()
         compose.waitUntil { shadowOf(context).peekNextStartedActivity() != null }
         val shared = shadowOf(context).nextStartedActivity.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)!!
