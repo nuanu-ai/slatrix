@@ -17,6 +17,7 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -56,10 +57,12 @@ class MatrixAccountDeviceTest {
     )
 
     @Before fun setUp() { check(directory.mkdirs()) }
-    @After fun tearDown() {
+    @After fun tearDown(): Unit = runBlocking {
         scope.cancel()
         store.clear()
-        directory.deleteRecursively()
+        // A cancelled scope has each account let go of its sign-in on an IO thread, deleting that sign-in's fresh store
+        // while this walks the same folder, and Kotlin's walk fails when a folder goes from under it.
+        withTimeout(5_000) { while (!runCatching { directory.deleteRecursively() }.getOrDefault(false)) yield() }
     }
 
     @Test fun homeserverDiscoveryOnlyOffersAdvertisedMethodsWithoutSigningIn() = runBlocking {
