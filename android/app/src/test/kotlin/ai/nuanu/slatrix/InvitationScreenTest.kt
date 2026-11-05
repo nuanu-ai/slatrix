@@ -13,6 +13,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onNodeWithContentDescription
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -56,6 +57,15 @@ class InvitationScreenTest {
         compose.onNodeWithText("Decline").performClick()
         compose.onNodeWithText("Join").performClick()
         compose.runOnIdle { assertEquals(listOf("decline", "join"), answers) }
+    }
+
+    @Test fun anInvitationStillLoadingShowsItsPageRatherThanWhatIsUnderIt() {
+        var back = 0
+        compose.setContent {
+            SlatrixTheme { InvitationScreen(null, responding = false, error = null, onJoin = {}, onDecline = {}, onBack = { back++ }) }
+        }
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.runOnIdle { assertEquals(1, back) }
     }
 
     @Test fun anAnswerOnItsWayHoldsBothButtons() {
