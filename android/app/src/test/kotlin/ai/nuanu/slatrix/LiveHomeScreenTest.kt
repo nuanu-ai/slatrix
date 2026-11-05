@@ -59,6 +59,8 @@ import org.junit.Assert.assertTrue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.onNodeWithTag
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -421,6 +423,35 @@ class LiveHomeScreenTest {
         val blake = compose.onNodeWithText("Blake").fetchSemanticsNode().boundsInRoot
         val avery = compose.onNodeWithText("Avery").fetchSemanticsNode().boundsInRoot
         assertTrue("The newest conversation leads", blake.top < avery.top)
+    }
+
+    @Test fun aDirectMessagesTimeIsSmallAndQuietEvenWhileUnread() {
+        val rooms = listOf(direct("!sam:example.org", "Sam", unread = UnreadBadge.Count("2"), latest = LatestMessage("See you", 1_000, own = false)))
+        var expected: androidx.compose.ui.text.TextStyle? = null
+        compose.setContent {
+            SlatrixTheme {
+                expected = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(color = SlatrixTheme.colors.textSecondary)
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {})
+            }
+        }
+        tab("DMs").performClick()
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(1_000)), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val style = layouts.single().layoutInput.style
+        assertEquals(expected!!.fontSize, style.fontSize)
+        assertEquals(expected!!.color, style.color)
+    }
+
+    @Test fun anAvatarWithoutAPictureShadesItsColorDownward() {
+        compose.setContent { SlatrixTheme { androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.testTag("avatar")) { ai.nuanu.slatrix.ui.account.LiveAvatar("", 0, UiMetrics.RowAvatar) } } }
+        val avatar = compose.onNodeWithTag("avatar").fetchSemanticsNode().boundsInWindow
+        compose.runOnIdle {
+            val window = compose.activity.window.decorView
+            val image = Bitmap.createBitmap(window.width, window.height, Bitmap.Config.ARGB_8888).also { window.draw(Canvas(it)) }
+            fun lightness(y: Float) = Color(image.getPixel(avatar.center.x.toInt(), y.toInt())).let { it.red + it.green + it.blue }
+            assertTrue(lightness(avatar.top + avatar.height / 8) > lightness(avatar.bottom - avatar.height / 8))
+        }
     }
 
     @Test fun directMessageNamesLineUpWhateverTheirInitials() {

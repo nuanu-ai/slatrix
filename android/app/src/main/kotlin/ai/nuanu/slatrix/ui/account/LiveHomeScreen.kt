@@ -59,6 +59,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -420,8 +421,8 @@ private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, on
 @Composable
 private fun WorkspaceIcon(space: SpaceSummary?, size: Dp, loading: Boolean = false) {
     val colors = SlatrixTheme.colors
-    Box(Modifier.size(size).clip(MaterialTheme.shapes.medium)
-        .background(if (space != null) DesignTokens.avatarColors[space.colorIndex] else colors.accentTint), contentAlignment = Alignment.Center) {
+    val fill = if (space != null) AvatarStyle.fill(DesignTokens.avatarColors[space.colorIndex]) else SolidColor(colors.accentTint)
+    Box(Modifier.size(size).clip(MaterialTheme.shapes.medium).background(fill), contentAlignment = Alignment.Center) {
         if (space == null && !loading) Icon(SlackIcons.Tray, null, Modifier.size(UiMetrics.Icon), tint = colors.accent)
         else if (space != null) Text(space.initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label,
             color = colors.onAvatar, maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
@@ -596,8 +597,7 @@ private fun ConversationRow(room: RoomSummary, onRoom: (String) -> Unit, onActio
                 Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
                     fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 room.latest?.let {
-                    Text(latestTime(it.timestamp), style = MaterialTheme.typography.labelMedium,
-                        color = if (room.unread is UnreadBadge.Count) colors.accent else colors.textSecondary, maxLines = 1)
+                    Text(latestTime(it.timestamp), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, maxLines = 1)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
@@ -698,7 +698,7 @@ internal fun latestTime(timestamp: Long): String {
 @Composable
 internal fun LiveAvatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.Avatar, url: String? = null) {
     // People are round, as in every messenger; workspaces and channels are rounded squares.
-    Box(Modifier.size(size).clip(CircleShape).background(DesignTokens.avatarColors[colorIndex]), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(size).clip(CircleShape).background(AvatarStyle.fill(DesignTokens.avatarColors[colorIndex])), contentAlignment = Alignment.Center) {
         // Two letters shrink to fit, so every avatar in a list has the same width.
         Text(initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label, color = SlatrixTheme.colors.onAvatar,
             maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
