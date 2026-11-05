@@ -155,20 +155,22 @@ private val pictures = object : LruCache<String, ImageBitmap>((Runtime.getRuntim
  */
 @Composable
 internal fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): ImageBitmap? {
-    val key = "${attachment.source.url()}@${width}x$height${if (full) " full" else ""}"
-    val picture by produceState(pictures[key], key) {
-        if (value != null) return@produceState
-        value = try {
+    val url = attachment.source.url()
+    val key = "$url@${width}x$height${if (full) " full" else ""}"
+    val picture by produceState(pictures[key]?.let { url to it }, key) {
+        // The state outlives a change of size: this picture at its old size shows until the new one loads, another never does.
+        value = pictures[key]?.let { url to it } ?: value?.takeIf { it.first == url }
+        if (pictures[key] != null) return@produceState
+        try {
             load(attachment, width, height, full)?.let { bytes -> withContext(Dispatchers.Default) { decode(bytes, width, height, full) } }
-                ?.also { pictures.put(key, it) }
+                ?.also { pictures.put(key, it) }?.let { value = url to it }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            // The box stays empty; a broken picture never moves the row.
-            null
+            // A broken picture leaves the box as it is and never moves the row.
         }
     }
-    return picture
+    return picture?.second
 }
 
 /**

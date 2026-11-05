@@ -148,6 +148,8 @@ data class ConversationState(
     val notice: String? = null,
     /** The message it opened at, to show and highlight. */
     val highlight: String? = null,
+    /** Counts jumps within the open conversation, so a second one to the same message shows it again. */
+    val jump: Int = 0,
     /** Loaded around an older message rather than live, until the reader reaches the newest and it turns live. */
     val focused: Boolean = false,
     /** The first message after the read marker, which Slack's New line goes above; a thread has none, as on the Mac. */
@@ -159,6 +161,8 @@ data class ConversationState(
     val startsAtUnread: Boolean = false,
     /** Everyone in the room by name, for mentions and reactions. */
     val names: Map<String, String> = emptyMap(),
+    /** The pictures of those who have one, for the faces on reactions. */
+    val avatars: Map<String, String> = emptyMap(),
 )
 
 /** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
@@ -353,14 +357,18 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     }
 
     private suspend fun readNames() {
+        val avatars = mutableMapOf<String, String>()
         val names = quietly {
             room.membersNoSync().use { members ->
                 buildMap<String, String> {
-                    while (true) for (member in members.nextChunk(500u) ?: break) put(member.userId, member.nameOf())
+                    while (true) for (member in members.nextChunk(500u) ?: break) {
+                        put(member.userId, member.nameOf())
+                        member.avatarUrl?.let { avatars[member.userId] = it }
+                    }
                 }
             }
         } ?: return
-        mutableState.update { it.copy(names = names) }
+        mutableState.update { it.copy(names = names, avatars = avatars) }
     }
 
     private suspend fun timeline(): Timeline {
@@ -763,6 +771,13 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     fun revisit() {
         mutableState.update { it.copy(highlight = null, startsAtUnread = false) }
         operations.launch { readLock.withLock { heldUnread = false } }
+    }
+
+    /** Highlights [eventId] where it is when the rows on screen hold it, so a jump within the conversation doesn't reload it. */
+    fun show(eventId: String): Boolean {
+        if (mutableState.value.rows.none { (it as? ConversationMessage)?.eventId == eventId }) return false
+        mutableState.update { it.copy(highlight = eventId, jump = it.jump + 1, startsAtUnread = false) }
+        return true
     }
 
     suspend fun markUnread(): Boolean {

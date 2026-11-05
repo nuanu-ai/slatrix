@@ -159,7 +159,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val line = newLine.at
     val opensAt = state.highlight ?: newLine.start ?: newLine.back?.first
     fun opens(row: ConversationRow) = row.id == opensAt || (row as? ConversationMessage)?.eventId == opensAt
-    var jumped by remember(opensAt) { mutableStateOf(opensAt == null) }
+    var jumped by remember(opensAt, state.jump) { mutableStateOf(opensAt == null) }
     // Opened cold, sync holds only the newest message or two, so the messages wait until a page fills the screen under
     // them or there's no more to load, and the screen never fills in view.
     val filled by remember { derivedStateOf { list.canScrollForward } }
@@ -197,8 +197,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         if (following && jumped && !state.focused || newest?.own == true && newest.sendState == MessageSendState.Sending) list.scrollToItem(0)
     }
     // A jump shows its message a third of the way up and highlights it briefly, as on the Mac, once.
-    var lit by remember(opensAt) { mutableStateOf<String?>(null) }
-    LaunchedEffect(opensAt) {
+    var lit by remember(opensAt, state.jump) { mutableStateOf<String?>(null) }
+    LaunchedEffect(opensAt, state.jump) {
         val target = opensAt ?: return@LaunchedEffect
         val index = snapshotFlow { rows.indexOfLast { it.id == target || (it as? ConversationMessage)?.eventId == target } }.first { it >= 0 }
         following = false
@@ -340,7 +340,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val next = rows.getOrNull(rows.size - index) as? ConversationMessage
                             val last = next == null || !next.grouped || restarts(next)
                             val root = threadRoot != null && row.eventId == threadRoot
-                            LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId, state.names,
+                            LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId, state.names, state.avatars,
                                 actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
                                 loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
                                 loadThreadOrigin, actions.onQuote) { menu = it }
@@ -547,7 +547,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
  * color, atop the first; yours on the right in the accent. The time sits inside, after the last line when it fits.
  */
 @Composable
-private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me: String?, names: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
+private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me: String?, names: Map<String, String>, avatars: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?, onReply: ((ConversationMessage) -> Unit)?,
@@ -664,7 +664,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
                 if (body != null) TimedBody(body, if (media) inset.padding(vertical = UiMetrics.GapTiny) else Modifier) { time(timeColor) }
                 else if (!media) TimedBody(null, Modifier.align(Alignment.End)) { time(timeColor) }
                 if (message.reactions.isNotEmpty()) Box(inset) {
-                    Reactions(message.reactions, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
+                    Reactions(message.reactions, me, names, avatars, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
                 }
                 val root = message.eventId
                 // Inside a thread the root's replies bar says it instead.

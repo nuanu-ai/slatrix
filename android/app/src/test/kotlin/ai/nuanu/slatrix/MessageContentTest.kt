@@ -1,6 +1,10 @@
 package ai.nuanu.slatrix
 
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import ai.nuanu.slatrix.ui.account.dayLabel
 import org.robolectric.Shadows.shadowOf
 import java.io.File
@@ -77,6 +81,8 @@ class MessageContentTest {
     private var jumped: String? = null
     private var opened: MessageAttachment? = null
     private val picture = CompletableDeferred<ByteArray?>()
+    /** The widths pictures were asked for, in pixels. */
+    private val asked = mutableListOf<Int>()
     private val opening = CompletableDeferred<String?>()
     private var download: File? = null
 
@@ -87,7 +93,7 @@ class MessageContentTest {
                     names = mapOf("@mira:example.org" to "Mira")),
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
                     onOpenThread = { thread = it }, actions = MessageActions(onReact = { message, key -> toggled = message to key }),
-                    onOpenMessage = { jumped = it }, loadPicture = { _, _, _, _ -> picture.await() },
+                    onOpenMessage = { jumped = it }, loadPicture = { _, width, _, _ -> asked += width; picture.await() },
                     onOpenFile = { opened = it; opening.await() }, loadFile = { download })
             }
         }
@@ -150,9 +156,20 @@ class MessageContentTest {
             MessageReaction("🎉", 1, false, listOf("@sam:example.org")),
         ))
         show(shipped)
-        compose.onNode(hasText("👍") and hasText("2")).assertIsSelected()
-        compose.onNode(hasText("🎉") and hasText("1")).assertIsNotSelected().performClick()
+        compose.onNode(hasText("👍") and hasContentDescription("You and Mira")).assertIsSelected()
+        compose.onNode(hasText("🎉") and hasContentDescription("sam")).assertIsNotSelected().performClick()
         compose.runOnIdle { assertEquals(shipped to "🎉", toggled) }
+    }
+
+    // capability: message.reactions.show
+    @Test fun aPillShowsTheFacesOfWhoReactedYoursFirstAndTheCountPastThree() {
+        show(message("Ship it").copy(reactions = listOf(
+            MessageReaction("👍", 2, true, listOf("@mira:example.org", "@me:example.org")),
+            MessageReaction("🎉", 4, false, listOf("@a:example.org", "@b:example.org", "@c:example.org", "@d:example.org")),
+        )))
+        compose.onNode(hasText("👍") and hasContentDescription("You and Mira")).assertIsDisplayed()
+        compose.onNode(hasText("👍") and hasText("2")).assertDoesNotExist()
+        compose.onNode(hasText("🎉") and hasText("4")).assertIsDisplayed()
     }
 
     // capability: message.reactions.show
@@ -160,7 +177,7 @@ class MessageContentTest {
         show(message("Ship it").copy(reactions = listOf(
             MessageReaction("👍", 3, true, listOf("@mira:example.org", "@me:example.org", "@sam:example.org")),
         )))
-        compose.onNode(hasText("👍") and hasText("3")).performTouchInput { longClick() }
+        compose.onNode(hasText("👍")).performTouchInput { longClick() }
         compose.onNodeWithText("Mira, You and sam", substring = true).assertIsDisplayed()
     }
 
@@ -208,6 +225,22 @@ class MessageContentTest {
         compose.waitForIdle()
         assertEquals(before, compose.onNodeWithContentDescription("office.jpg").fetchSemanticsNode().boundsInRoot)
         compose.onNodeWithText("office.jpg", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    // capability: message.image
+    @Test fun anImageIsDecodedAgainForItsNewBoxWhenTheRoomForItChanges() {
+        val resized = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/resized" }
+        val width = mutableStateOf(412.dp)
+        show(message("wide.png").copy(kind = MessageKind.Attachment,
+            attachment = MessageAttachment(MessageAttachment.Kind.Image, "wide.png", "image/png", 2_000_000, 1600, 900, resized)),
+            set = { content -> compose.setContent { Box(Modifier.width(width.value)) { content() } } })
+        val png = ByteArrayOutputStream().also { Bitmap.createBitmap(16, 9, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        picture.complete(png.toByteArray())
+        compose.waitUntil { asked.isNotEmpty() }
+        val first = asked.last()
+
+        width.value = 320.dp
+        compose.waitUntil { asked.last() < first }
     }
 
     // capability: message.image

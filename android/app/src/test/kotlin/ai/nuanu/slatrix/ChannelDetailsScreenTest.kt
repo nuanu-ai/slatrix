@@ -158,6 +158,29 @@ class ChannelDetailsScreenTest {
         compose.onNodeWithText("Nothing").assertIsDisplayed()
     }
 
+    // capability: channel.details
+    @Test fun detailsOpenedAgainShowWhatTheyReadLastWhileTheyReadAgain() {
+        var memberReads = 0
+        var notificationReads = 0
+        val actions = ChannelDetailsActions(
+            members = { if (memberReads++ == 0) listOf(ChannelMember("@mira:example.org", "Mira Chen")) else awaitCancellation() },
+            notifications = {
+                if (notificationReads++ == 0) NotificationSetting(NotificationChoice.Mentions, NotificationChoice.All) else awaitCancellation()
+            })
+        val open = mutableStateOf(true)
+        compose.setContent { SlatrixTheme { if (open.value) ChannelDetailsScreen(room, null, actions, {}, {}) {} } }
+        compose.onNodeWithText("Mentions and keywords").assertIsDisplayed()
+        compose.onNodeWithText("Members").performClick()
+        compose.onNodeWithText("Mira Chen").assertIsDisplayed()
+
+        open.value = false
+        compose.waitForIdle()
+        open.value = true
+        compose.onNodeWithText("Mentions and keywords").assertIsDisplayed()
+        compose.onNodeWithText("Members").performClick()
+        compose.onNodeWithText("Mira Chen").assertIsDisplayed()
+    }
+
     @Test fun aNotificationChoiceThatFailsGoesBack() {
         details(room, ChannelDetailsActions(
             notifications = { NotificationSetting(NotificationChoice.All, NotificationChoice.Mentions) },

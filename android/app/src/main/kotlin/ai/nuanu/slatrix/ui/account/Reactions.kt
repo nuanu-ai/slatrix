@@ -1,6 +1,8 @@
 package ai.nuanu.slatrix.ui.account
 
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import androidx.compose.material3.Icon
@@ -38,16 +40,21 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 
-/** Slack's reaction chips under a message: a tap adds or takes back yours, a long press shows who reacted. */
+/**
+ * Slack's reaction chips under a message: a tap adds or takes back yours, a long press shows who reacted. A chip shows
+ * the faces of who reacted in place of its count, by the shared rule, from [avatars] by user ID over their initials.
+ */
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
-internal fun Reactions(reactions: List<MessageReaction>, onToggle: ((String) -> Unit)?, onShowWho: () -> Unit) {
+internal fun Reactions(reactions: List<MessageReaction>, me: String?, names: Map<String, String>, avatars: Map<String, String>,
+    onToggle: ((String) -> Unit)?, onShowWho: () -> Unit) {
     val colors = SlatrixTheme.colors
     FlowRow(Modifier.padding(top = UiMetrics.GapSmall), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall),
         verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
         for (reaction in reactions) {
+            val fill = if (reaction.mine) colors.accentFill else colors.reaction
             Row(Modifier.height(UiMetrics.ChipHeight)
-                .background(if (reaction.mine) colors.accentFill else colors.reaction, CircleShape)
+                .background(fill, CircleShape)
                 // Your own bubble tints every chip alike, so yours also wears an edge in the accent, white there.
                 .then(if (reaction.mine) Modifier.border(UiMetrics.Divider, colors.accent, CircleShape) else Modifier)
                 .semantics { selected = reaction.mine }
@@ -55,7 +62,17 @@ internal fun Reactions(reactions: List<MessageReaction>, onToggle: ((String) -> 
                 .padding(horizontal = UiMetrics.GapMedium),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
                 Text(reaction.key, style = MaterialTheme.typography.bodyLarge)
-                Text("${reaction.count}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium,
+                val faces = reaction.faces(me)
+                // Overlapping, each ringed in the chip's fill so the one beneath shows where it ends.
+                if (faces != null) Row(Modifier.semantics { contentDescription = who(faces, names, me) },
+                    horizontalArrangement = Arrangement.spacedBy(-UiMetrics.GapTiny)) {
+                    for (id in faces) {
+                        val name = names[id] ?: DisplayNames.localpart(id)
+                        Box(Modifier.border(UiMetrics.FaceRing, fill, CircleShape)) {
+                            LiveAvatar(AvatarPlaceholder.initials(name), AvatarPlaceholder.colorIndex(name), UiMetrics.Facepile, avatars[id])
+                        }
+                    }
+                } else Text("${reaction.count}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium,
                     color = if (reaction.mine) colors.onAccent else colors.textPrimary)
             }
         }
@@ -98,14 +115,18 @@ internal fun ReactionsSheet(reactions: List<MessageReaction>, names: Map<String,
     BottomSheet(onDismissRequest = onDismiss, containerColor = colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
             for (reaction in reactions) {
-                val who = reaction.senders.map { if (it == me) "You" else names[it] ?: DisplayNames.localpart(it) }
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge),
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
                     Text(reaction.key, style = MaterialTheme.typography.headlineSmall)
-                    Text(if (who.size > 1) who.dropLast(1).joinToString(", ") + " and " + who.last() else who.joinToString(),
-                        style = MaterialTheme.typography.bodyLarge, color = colors.textPrimary)
+                    Text(who(reaction.senders, names, me), style = MaterialTheme.typography.bodyLarge, color = colors.textPrimary)
                 }
             }
         }
     }
+}
+
+/** "Mira, You and sam": [ids] by the names the room knows them by, with you as "You". */
+private fun who(ids: List<String>, names: Map<String, String>, me: String?): String {
+    val who = ids.map { if (it == me) "You" else names[it] ?: DisplayNames.localpart(it) }
+    return if (who.size > 1) who.dropLast(1).joinToString(", ") + " and " + who.last() else who.joinToString()
 }
