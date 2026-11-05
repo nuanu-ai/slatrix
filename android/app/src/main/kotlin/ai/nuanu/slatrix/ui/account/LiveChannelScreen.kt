@@ -17,6 +17,7 @@ import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.OnAccentFill
 import ai.nuanu.slatrix.ui.designsystem.bubble
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
+import ai.nuanu.slatrix.ui.designsystem.glassFoot
 import ai.nuanu.slatrix.ui.designsystem.glassBar
 import ai.nuanu.slatrix.ui.designsystem.glassSource
 import ai.nuanu.slatrix.ui.designsystem.rememberGlass
@@ -280,16 +281,33 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     reacted?.let { ReactionsSheet(it.reactions, state.rows, state.ownUserId) { reacted = null } }
     val glass = rememberGlass()
-    // The header floats over the messages, which start under it; the scaffold measures it first, so they never move.
+    // The header and the composer float over the messages, which pass under both; the scaffold measures them first, so
+    // the messages never move.
     Scaffold(Modifier.graphicsLayer {
         // A back swipe carries the conversation off under the finger, over the page it goes back to.
         translationX = back.value * size.width
     }, topBar = { ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails) },
+        bottomBar = {
+            // On the header's glass, fading in without an edge, so the capsule floats over the messages.
+            Column(Modifier.glassFoot(glass).navigationBarsPadding().imePadding()) {
+                val placeholder = when {
+                    threadRoot != null -> "Add a reply"
+                    room.direct || room.isPrivate -> "Message ${room.name}"
+                    else -> "Message #${room.name}"
+                }
+                val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
+                if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders,
+                    aboveField = if (threadRoot != null && composer.target !is ComposerTarget.Edit) {
+                        { AlsoSendTo(room, composer.alsoToChannel, composerActions.onAlsoToChannel) }
+                    } else null) else CannotPost()
+            }
+        },
         containerColor = colors.canvas, contentWindowInsets = WindowInsets(0)) { bars ->
     val header = bars.calculateTopPadding()
-    Column(Modifier.fillMaxSize().wallpaper().navigationBarsPadding().imePadding()) {
-        // Only the messages pass under the header, so typing never redraws what it blurs.
-        Box(Modifier.weight(1f).fillMaxWidth().glassSource(glass)) {
+    val footer = bars.calculateBottomPadding()
+    // The glass blurs the wallpaper with the messages, so it takes the wallpaper's tint; typing never redraws either.
+    Box(Modifier.fillMaxSize().glassSource(glass).wallpaper()) {
+        Box(Modifier.fillMaxSize()) {
             val rows = state.rows
             // A reset re-pages the thread; the last count stays until the new one is known, so the bar doesn't blank.
             var replies by remember { mutableStateOf<Int?>(null) }
@@ -311,7 +329,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none(::opens)) 1f else 0f),
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
-                contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = jumpRoom)) {
+                contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = footer + jumpRoom)) {
                 itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row -> Box(Modifier.alpha(if (settled) 1f else 0f)) {
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
@@ -343,7 +361,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 }
             }
             val jumps = rememberCoroutineScope()
-            androidx.compose.animation.AnimatedVisibility(jumpShows, Modifier.align(Alignment.BottomEnd).padding(UiMetrics.GapLarge),
+            androidx.compose.animation.AnimatedVisibility(jumpShows, Modifier.align(Alignment.BottomEnd).padding(bottom = footer).padding(UiMetrics.GapLarge),
                 enter = fadeIn(Motion.pane()), exit = ExitTransition.None) {
                 Surface({
                     following = true
@@ -354,22 +372,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 }
             }
             Box(Modifier.padding(top = header)) { OfflineBanner() }
-            state.notice?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
+            val notices = Modifier.align(Alignment.BottomCenter).padding(bottom = footer).padding(UiMetrics.GapLarge)
+            state.notice?.let { Snackbar(notices) { Text(it) } }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
-                Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge),
-                    action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
-            } ?: fileError?.let { Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(it) } }
+                Snackbar(notices, action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
+            } ?: fileError?.let { Snackbar(notices) { Text(it) } }
         }
-        val placeholder = when {
-            threadRoot != null -> "Add a reply"
-            room.direct || room.isPrivate -> "Message ${room.name}"
-            else -> "Message #${room.name}"
-        }
-        val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
-        if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders,
-            aboveField = if (threadRoot != null && composer.target !is ComposerTarget.Edit) {
-                { AlsoSendTo(room, composer.alsoToChannel, composerActions.onAlsoToChannel) }
-            } else null) else CannotPost()
     }
     }
 }

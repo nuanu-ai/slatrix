@@ -684,6 +684,20 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Message 200").assertIsDisplayed()
     }
 
+    @Test fun messagesPassUnderTheComposerWhileTheNewestStaysAboveIt() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState((0 until 30).map { message("Message $it", it) }, loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        val field = compose.onNodeWithContentDescription("Message #design").getUnclippedBoundsInRoot()
+        val messages = compose.onNode(hasScrollToIndexAction()).getUnclippedBoundsInRoot()
+        val newest = compose.onNodeWithText("Message 29", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("messages end at ${messages.bottom}, the field starts at ${field.top}", messages.bottom > field.top)
+        assertTrue("the newest ends at ${newest.bottom}", newest.bottom <= field.top)
+    }
+
     @Test fun theTimeEndsAMessagesLastLineWhereItFits() {
         val note = "The empty states are ready for a look\nThanks"
         compose.setContent {

@@ -28,6 +28,8 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeProgressive
+import androidx.compose.ui.platform.LocalDensity
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.HazeTint
@@ -60,12 +62,24 @@ fun Modifier.glass(state: HazeState, tint: Color, shape: Shape, lifted: Boolean 
 @Composable
 fun Modifier.glassBar(state: HazeState): Modifier {
     val colors = SlatrixTheme.colors
-    return hazeEffect(state, HazeStyle(backgroundColor = colors.canvas, tint = HazeTint(colors.glassHeader), blurRadius = UiMetrics.GlassBlur,
-        noiseFactor = 0f)).drawWithContent {
+    return glassBackdrop(state, 0f).drawWithContent {
         drawContent()
         drawLine(colors.glassEdge, Offset(0f, size.height), Offset(size.width, size.height), UiMetrics.Hairline.toPx())
     }
 }
+
+@Composable
+private fun Modifier.glassBackdrop(state: HazeState, fade: Float): Modifier {
+    val colors = SlatrixTheme.colors
+    return hazeEffect(state, HazeStyle(backgroundColor = colors.canvas, tint = HazeTint(colors.glassHeader), blurRadius = UiMetrics.GlassBlur,
+        noiseFactor = 0f)) {
+        if (fade > 0f) progressive = HazeProgressive.verticalGradient(startIntensity = 0f, endY = fade, endIntensity = 1f)
+    }
+}
+
+/** The header's glass for what floats over the messages' foot, as the composer does: it fades in from its top, so no edge shows. */
+@Composable
+fun Modifier.glassFoot(state: HazeState): Modifier = glassBackdrop(state, with(LocalDensity.current) { UiMetrics.GapSection.toPx() })
 
 /** A bubble's fill in [shape], over a hairline of [edge] a little below it, which lifts it off the wallpaper. */
 fun Modifier.bubble(shape: Shape, fill: Color, edge: Color): Modifier = this then BubbleElement(shape, fill, edge)
