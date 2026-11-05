@@ -1,0 +1,44 @@
+diff --git a/crates/matrix-sdk/src/event_cache/caches/room/mod.rs b/crates/matrix-sdk/src/event_cache/caches/room/mod.rs
+index 9ee5ae9..4d15d68 100644
+--- a/crates/matrix-sdk/src/event_cache/caches/room/mod.rs
++++ b/crates/matrix-sdk/src/event_cache/caches/room/mod.rs
+@@ -922,6 +922,7 @@ mod timed_tests {
+             .text_msg("hey yo")
+             .sender(*ALICE)
+             .with_bundled_edit(f.text_msg("Hello, Kind Sir").sender(*ALICE))
++            .with_bundled_thread_summary(f.text_msg("a reply").sender(*ALICE).into(), 3, false)
+             .into_event();
+ 
+         let timeline = Timeline { limited: false, prev_batch: None, events: vec![ev] };
+@@ -981,6 +982,10 @@ mod timed_tests {
+             let original = msg.as_original().unwrap();
+             assert_eq!(original.content.body(), "hey yo");
+             assert!(original.unsigned.relations.replace.is_none());
++
++            // Except the thread's summary: the server's reply count is the
++            // only one for replies this cache never stored.
++            assert_eq!(events[0].thread_summary().unwrap().num_replies, 3);
+         });
+ 
+         // That's all, folks!
+diff --git a/crates/matrix-sdk/src/event_cache/persistence.rs b/crates/matrix-sdk/src/event_cache/persistence.rs
+index 11564ea..64461b8 100644
+--- a/crates/matrix-sdk/src/event_cache/persistence.rs
++++ b/crates/matrix-sdk/src/event_cache/persistence.rs
+@@ -266,9 +266,14 @@ fn strip_relations_if_present<T>(event: &mut Raw<T>) {
+         let mut val: serde_json::Value = event.deserialize_as().ok()?;
+         let unsigned = val.get_mut("unsigned")?;
+         let unsigned_obj = unsigned.as_object_mut()?;
+-        if unsigned_obj.remove("m.relations").is_some() {
+-            *event = Raw::new(&val).ok()?.cast_unchecked();
++        let relations = unsigned_obj.remove("m.relations")?;
++        // Keep the thread's summary: the server's reply count is the only one
++        // for replies this cache never stored.
++        if let Some(thread) = relations.get("m.thread") {
++            unsigned_obj
++                .insert("m.relations".to_owned(), serde_json::json!({ "m.thread": thread }));
+         }
++        *event = Raw::new(&val).ok()?.cast_unchecked();
+         None
+     };
+     let _ = closure();
