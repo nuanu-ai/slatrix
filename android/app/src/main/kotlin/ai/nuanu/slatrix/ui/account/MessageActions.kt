@@ -42,6 +42,11 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material3.AlertDialog
+import ai.nuanu.slatrix.core.EmojiCatalog
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -105,6 +110,9 @@ private val forwardKinds = textKinds + MessageKind.Attachment
 internal fun MessageActionsHost(message: ConversationMessage, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
     onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit, onDismiss: () -> Unit) {
     var step by remember(message.id) { mutableStateOf(Step.Sheet) }
+    // Read while the sheet is up, so Add reaction opens on every emoji at once.
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { EmojiCatalog.load(context) } }
     when (step) {
         Step.Sheet -> MessageSheet(message, actions, onOpenThread, onRetrySend, onDeleteUnsent, { step = it }, onDismiss)
         Step.Picker -> EmojiPickerSheet(actions.recent, { emoji -> actions.onReact?.invoke(message, emoji); onDismiss() }, onDismiss)
@@ -112,7 +120,10 @@ internal fun MessageActionsHost(message: ConversationMessage, actions: MessageAc
             title = { Text("Delete message") },
             text = { Text("Are you sure you want to delete this message? This cannot be undone.") },
             confirmButton = {
-                TextButton(onClick = { actions.onDelete?.invoke(message); onDismiss() }) {
+                TextButton(onClick = {
+                    if (message.sendState == MessageSendState.Failed) onDeleteUnsent(message) else actions.onDelete?.invoke(message)
+                    onDismiss()
+                }) {
                     Text("Delete", color = SlatrixTheme.colors.destructive)
                 }
             },
@@ -180,7 +191,7 @@ private fun MessageSheetItems(message: ConversationMessage, eventId: String?, ac
     val colors = SlatrixTheme.colors
     if (message.sendState == MessageSendState.Failed) {
         if (message.canRetry) MenuItem(Icons.Outlined.Refresh, "Retry") { onRetrySend(message); onDismiss() }
-        MenuItem(Icons.Outlined.Delete, "Delete message", colors.destructive) { onDeleteUnsent(message); onDismiss() }
+        MenuItem(Icons.Outlined.Delete, "Delete message", colors.destructive) { onStep(Step.ConfirmDelete) }
     }
     if (eventId == null) {
         if (message.kind in textKinds) MenuItem(Icons.Outlined.Title, "Copy text") { copy(message.body) }

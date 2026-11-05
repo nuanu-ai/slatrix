@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.NotificationPreferences
 import ai.nuanu.slatrix.core.NotifyAbout
+import ai.nuanu.slatrix.ui.designsystem.ListHeading
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.clickable
@@ -108,8 +109,7 @@ internal fun PreferenceRow(icon: ImageVector, title: String, modifier: Modifier,
 /** A group's heading, starting where the settings' titles do. */
 @Composable
 internal fun PreferenceHeading(text: String) {
-    Text(text, Modifier.padding(start = PreferenceInset, end = UiMetrics.GapLarge, top = UiMetrics.GapLarge, bottom = UiMetrics.GapSmall),
-        style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    ListHeading(text, Modifier.padding(start = PreferenceInset, end = UiMetrics.GapLarge, top = UiMetrics.GapLarge, bottom = UiMetrics.GapSmall))
 }
 
 /** Where a setting's title starts: past the row's edge, its icon and the gap after it. */

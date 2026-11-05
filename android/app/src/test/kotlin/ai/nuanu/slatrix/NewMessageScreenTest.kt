@@ -12,6 +12,8 @@ import ai.nuanu.slatrix.ui.account.SearchScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
@@ -83,6 +85,7 @@ class NewMessageScreenTest {
                     onQuery = { queries += it }, onPerson = { picked += it }, onRoom = { rooms += it }, onBack = {})
             }
         }
+        compose.onNodeWithText("Direct messages").assert(isHeading())
         compose.onNodeWithText("Wanda Moss").performClick()
         compose.onNode(hasSetTextAction()).performTextInput("sam")
         compose.onNodeWithText("@sam:example.org").assertIsDisplayed()

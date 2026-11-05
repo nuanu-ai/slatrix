@@ -60,7 +60,7 @@ class EditProfileScreenTest {
     // capability: profile.edit-name
     @Test fun youLeadsToYourProfile() {
         val asked = mutableListOf<String>()
-        compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, onViewProfile = { asked += "view" }, onBack = {}) } }
+        compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", "Alex Doe", {}, {}, onViewProfile = { asked += "view" }, onBack = {}) } }
         compose.onNodeWithText("View profile").performClick()
         compose.runOnIdle { assertEquals(listOf("view"), asked) }
     }

@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.waiting
 import ai.nuanu.slatrix.core.SavedPreview
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.mutableStateMapOf
@@ -57,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.CancellationException
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -154,6 +156,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 val selected = workspace?.selected?.collectAsState()?.value
                 val avatars = remember(client) { SessionAvatars(MatrixAvatars(client)::thumbnail) }
                 val userAvatarUrl by remember(client) { MatrixProfile(client).photo() }.collectAsState(null)
+                // Kept across visits and asked again on each, so You opens on your name rather than swapping it in.
+                val ownName by produceState<String?>(null, client, you) {
+                    value = try { client.displayName().takeIf { it.isNotBlank() } } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { value }
+                }
                 // Read inside derivedStateOf, so room list updates recompose the app only when the workspace changes.
                 // Only a pick is saved: a fallback while spaces still load must not replace what the person chose.
                 val roomList = rooms?.state?.collectAsState()
@@ -169,6 +176,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                     (id ?: WorkspaceRail.AllToken).let { remembered = it; workspacePreferences.selectedSpaceId = it }
                 }
                 val thread = threads?.selected?.collectAsState()?.value
+                // A thread's root follows the channel under it, which alone sees the root's edits.
+                LaunchedEffect(thread?.conversation, selected?.conversation) {
+                    val channel = selected?.conversation?.takeIf { selected.room.id == thread?.room?.id } ?: return@LaunchedEffect
+                    thread?.conversation?.followRoot(channel.state)
+                }
                 // Opens a message highlighted in its conversation and a thread reply in its thread too: for notifications
                 // and Activity, and next for search results and reply quotes.
                 val jump: (RoomSummary, String, String?) -> Unit = remember(workspace, threads) {
@@ -217,7 +229,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 LiveConversation(it, threads, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name })
                             } },
                             WorkspaceCover("you") {
-                                LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() },
+                                LiveYouScreen(userId, ownName,
                                     { preferences = true }, account::signOut, onViewProfile = { name -> person = userId to name },
                                     onBack = { you = false }, avatarUrl = userAvatarUrl)
                             }.takeIf { you },
@@ -316,7 +328,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     }
     val conversation = open.conversation
     val composer = open.composer
-    val timeline = conversation?.state?.collectAsState()?.value ?: ConversationState(error = open.error)
+    val timeline = conversation?.state?.collectAsState()?.value ?: open.waiting()
     val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
     val scope = rememberCoroutineScope()
     var details by rememberSaveable(open.room.id) { mutableStateOf(false) }

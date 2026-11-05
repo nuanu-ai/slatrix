@@ -560,7 +560,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
     // A swipe right replies, as in a messenger: the bubble follows the finger, the reply sign fades in behind it, and
     // crossing the threshold ticks once; read while drawing, so the drag never recomposes the row.
     val drag = remember(message.id) { Animatable(0f) }
-    val reach = with(LocalDensity.current) { UiMetrics.SwipeReply.toPx() }
+    val reach = with(LocalDensity.current) { UiMetrics.Swipe.toPx() }
     val swipes = rememberCoroutineScope()
     val reply = onReply?.takeIf { message.eventId != null && !failed }
     Box(Modifier.fillMaxWidth().then(if (reply == null) Modifier else Modifier.pointerInput(message, reply) {

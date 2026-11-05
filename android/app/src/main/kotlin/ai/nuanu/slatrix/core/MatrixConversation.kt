@@ -17,7 +17,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -157,6 +161,13 @@ fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Bo
 
 private const val MAX_BLANK_PAGES = 5
 private const val ROOT_KEY = "thread-root"
+
+// Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
+private fun ConversationMessage.asThreadRoot() = copy(id = ROOT_KEY, grouped = false)
+
+/** What a conversation shows before its timeline loads: a thread's [root] at once, in the row it then keeps. */
+internal fun opening(root: ConversationMessage?, error: String? = null) =
+    ConversationState(rows = listOfNotNull(root?.asThreadRoot()), loading = root == null, error = error)
 private const val NOTICE_MILLIS = 4_000L
 
 /** The relation that puts an attachment in a thread, as the Mac sends it. */
@@ -182,16 +193,14 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     /** [at] is where the unread messages start, so it opens there without a highlight. */
     private val resume: Boolean = false,
     private val view: ConversationView = ConversationView.Timeline) {
-    // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
-    private val root = root?.copy(id = ROOT_KEY, grouped = false)
+    @Volatile private var root = root?.asThreadRoot()
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
     /** Thread replies waiting to be copied to the channel: they outlast the thread, and end with the session's [scope]. */
     private val copies = SupervisorJob(scope.coroutineContext[Job])
     private val copying = CoroutineScope(scope.coroutineContext + copies)
     private val ownUserId = room.ownUserId()
-    private val mutableState = MutableStateFlow(ConversationState(rows = listOfNotNull(this.root), loading = this.root == null,
-        ownUserId = ownUserId, startsAtUnread = resume))
+    private val mutableState = MutableStateFlow(opening(this.root).copy(ownUserId = ownUserId, startsAtUnread = resume))
     val state: StateFlow<ConversationState> = mutableState.asStateFlow()
     private val ready = CompletableDeferred<Unit>()
     private val updates = Channel<Update>(Channel.UNLIMITED)
@@ -427,11 +436,31 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         done.await()
     }
 
+    /**
+     * Keeps a thread's root as its [channel] shows it, as the Mac does: the SDK's thread timeline keeps its root as first
+     * sent, since an edit to the root is an event in the channel's timeline.
+     */
+    suspend fun followRoot(channel: Flow<ConversationState>) {
+        val id = threadRoot ?: return
+        channel.map { state -> state.rows.firstOrNull { (it as? ConversationMessage)?.eventId == id } as? ConversationMessage }
+            .filterNotNull().distinctUntilChanged().collect { copy ->
+                operations.launch {
+                    root = copy.asThreadRoot()
+                    mutableState.update { state ->
+                        state.copy(rows = state.rows.map { if (it is ConversationMessage && it.id == ROOT_KEY) it.withEdit(copy) else it })
+                    }
+                }
+            }
+    }
+
+    private fun ConversationMessage.withEdit(channel: ConversationMessage) =
+        if (channel.edited) copy(body = channel.body, formattedBody = channel.formattedBody, edited = true) else this
+
     /** The thread's rows topped by its root, which keeps the channel's row so it never redraws when the thread loads it. */
     private fun withRoot(rows: List<ConversationRow>): List<ConversationRow> {
         val root = root ?: return rows
         val index = rows.indexOfFirst { (it as? ConversationMessage)?.eventId == root.eventId }
-        val shown = (rows.getOrNull(index) as? ConversationMessage)?.copy(id = ROOT_KEY) ?: root
+        val shown = (rows.getOrNull(index) as? ConversationMessage)?.copy(id = ROOT_KEY)?.withEdit(root) ?: root
         // Nothing sits above the root, as in Slack, and a reply on the root's day needs no divider under it either, so
         // the root never moves when the thread loads it.
         val rest = rows.drop(index + 1)
@@ -483,6 +512,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 }
                 echo?.let { copyToChannel(message, it) }
                 currentCoroutineContext().ensureActive()
+                // Posting reads the conversation, as in Slack, even one marked unread on this visit; an edit isn't a post.
+                if (message.target !is ComposerTarget.Edit) readLock.withLock { heldUnread = false }
                 // A message sent from an older place goes to the present, as sending in Slack takes you there.
                 if (shown?.focused == true) operations.launch {
                     pageLock.withLock {

@@ -84,7 +84,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean) {
                 Column {
                     Box(Modifier.fillMaxWidth().height(StatusBar).background(colors.canvas))
                     Box(Modifier.weight(1f)) {
-                        if (tab == "You") LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, onBack = {})
+                        if (tab == "You") LiveYouScreen("@alex:example.org", "Alex Doe", {}, {}, onBack = {})
                         else if (tab == "Preferences") LivePreferencesScreen(dark, null, false, {}, {}, {}) {
                             NotificationRows(NotifyAbout.DirectAndMentions, true, null, {}, {})
                         }

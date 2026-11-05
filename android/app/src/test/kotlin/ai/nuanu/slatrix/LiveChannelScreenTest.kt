@@ -64,6 +64,7 @@ import androidx.compose.ui.test.swipeRight
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotEquals
@@ -336,8 +337,11 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Lost on the way").performClick()
         compose.onNodeWithText("Retry").performClick()
         compose.runOnIdle { assertEquals(failed, retried) }
+        // Its sheet opens on a tap, near where the finger was, so a delete that loses the text asks first.
         compose.onNodeWithText("Lost on the way").performTouchInput { longClick() }
         compose.onNodeWithText("Delete message").performClick()
+        compose.runOnIdle { assertNull(deleted) }
+        compose.onNodeWithText("Delete").performClick()
         compose.runOnIdle { assertEquals(failed, deleted) }
     }
 

@@ -2,6 +2,7 @@ package ai.nuanu.slatrix
 
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.platform.LocalDensity
@@ -137,6 +138,7 @@ class LiveHomeScreenTest {
 
     @Test fun aSectionHeaderStandsOutFromItsRowsAtTheirMarksEdge() {
         compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(listOf(channel("!general:example.org", "general")), loading = false, spacesKnown = true), {}, {}, {}) } }
+        compose.onNodeWithText("Channels").assert(isHeading())
         val label = compose.onNodeWithText("Channels", useUnmergedTree = true).bounds()
         val name = compose.onNodeWithText("general", useUnmergedTree = true).bounds()
         assertTrue("label at ${label.left}, name at ${name.left}", label.left < name.left - with(compose.density) { UiMetrics.GapLarge.toPx() })
@@ -492,7 +494,7 @@ class LiveHomeScreenTest {
         var signedOut = false
         var back = false
         compose.setContent {
-            SlatrixTheme { LiveYouScreen("@alex:example.org", { null }, { preferences = true }, { signedOut = true }, onBack = { back = true }) }
+            SlatrixTheme { LiveYouScreen("@alex:example.org", null, { preferences = true }, { signedOut = true }, onBack = { back = true }) }
         }
         compose.onNodeWithText("@alex:example.org").assertIsDisplayed()
         compose.onNodeWithText("Preferences").performClick()
@@ -509,7 +511,7 @@ class LiveHomeScreenTest {
 
     // capability: profile.own
     @Test fun youShowsTheNameOnTheAccountsProfile() {
-        compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, onBack = {}) } }
+        compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", "Alex Doe", {}, {}, onBack = {}) } }
         compose.onNodeWithText("Alex Doe").assertIsDisplayed()
         compose.onNodeWithText("@alex:example.org").assertIsDisplayed()
     }

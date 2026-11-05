@@ -3,7 +3,9 @@ package ai.nuanu.slatrix.core
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -667,6 +669,20 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    @Test fun postingInAConversationMarkedUnreadReadsItAgainAsInSlack() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
+        val room = ConversationRoom(timeline)
+        val conversation = MatrixConversation(backgroundScope, room)
+        conversation.state.first { it.rows.isNotEmpty() }
+        assertTrue(conversation.markUnread())
+
+        timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
+        assertTrue(conversation.send(ComposerMessage("On it", null, emptyList(), false)))
+        assertTrue(conversation.markRead("\$one"))
+        assertFalse(room.markedUnread)
+        conversation.close()
+    }
+
     @Test fun comingBackToAKeptConversationLeavesLastVisitsJumpUnreadStartAndHoldBehind() = runTest {
         val live = ConversationTimeline(listOf(conversationItem("a", "\$a", "Hello"), conversationItem("b", "\$b", "World")))
         val conversation = MatrixConversation(backgroundScope, JumpRoom(live, ConversationTimeline(emptyList())), at = "\$a")
@@ -869,6 +885,26 @@ class MatrixConversationTest {
             conversationItem("thread-root", "\$root", "Plan?"), conversationItem("reply", "\$reply", "Yes")))))
         val loaded = conversation.state.first { it.rows.size == 2 }
         assertEquals("The root keeps its row, so it never redraws", listOf(first.rows.single().id, "reply"), loaded.rows.map { it.id })
+        conversation.close()
+    }
+
+    @Test fun aThreadShowsItsRootWithTheChannelsEditsSinceTheThreadKeepsItAsFirstSent() = runTest {
+        fun channelCopy(body: String) = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", body, null,
+            1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0, edited = true)
+        val channel = MutableStateFlow(ConversationState(rows = listOf(channelCopy("Plan for Friday"))))
+        val timeline = ConversationTimeline(emptyList())
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root",
+            root = channelCopy("Plan for Friday"))
+        backgroundScope.launch { conversation.followRoot(channel) }
+        runCurrent()
+        timeline.emit(listOf(TimelineDiff.Reset(listOf(conversationItem("thread-root", "\$root", "Plan?"),
+            conversationItem("reply", "\$reply", "Yes")))))
+        val loaded = conversation.state.first { it.rows.size == 2 }.rows.messages.first()
+        assertEquals("Plan for Friday", loaded.body)
+        assertTrue(loaded.edited)
+
+        channel.value = ConversationState(rows = listOf(channelCopy("Plan for Saturday")))
+        conversation.state.first { it.rows.messages.first().body == "Plan for Saturday" }
         conversation.close()
     }
 }

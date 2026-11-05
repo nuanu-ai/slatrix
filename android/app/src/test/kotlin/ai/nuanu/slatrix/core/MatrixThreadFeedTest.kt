@@ -14,6 +14,9 @@ class MatrixThreadFeedTest {
                 latest = event("\$answer", "@sam:example.org", 50u, "Yes, Friday")),
             thread(root = event("\$read", "@sam:example.org", 2u, "Budget?"),
                 latest = event("\$read-reply", "@mira:example.org", 40u, "Approved")),
+            // Your reply from another device, before its receipt arrives, leaves its thread read.
+            thread(root = event("\$offsite", "@sam:example.org", 5u, "Venue?"),
+                latest = event("\$booked", "@alex:example.org", 30u, "Booked")),
             thread(root = event("\$elsewhere", "@sam:example.org", 3u, "Lunch plans"),
                 latest = event("\$elsewhere-reply", "@mira:example.org", 60u, "Pizza")),
         ), receipts = mapOf("\$read" to UserReceipt("\$read-reply", Receipt(40u))))
@@ -31,8 +34,8 @@ class MatrixThreadFeedTest {
         val feed = MatrixThreadFeed(backgroundScope, client, "@alex:example.org", rooms)
 
         val items = feed.state.first { !it.loading }.items
-        assertEquals("A thread you never joined stays out", listOf("\$started", "\$asked", "\$read"), items.map { it.rootId })
-        assertEquals(listOf(true, false, false), items.map { it.unread })
+        assertEquals("A thread you never joined stays out", listOf("\$started", "\$asked", "\$read", "\$offsite"), items.map { it.rootId })
+        assertEquals(listOf(true, false, false, false), items.map { it.unread })
         val started = items.first()
         assertEquals("design", started.roomName)
         assertEquals("Shall we ship?", started.root.body)

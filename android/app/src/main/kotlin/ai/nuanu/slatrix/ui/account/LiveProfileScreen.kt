@@ -1,5 +1,8 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.BuildConfig
+import androidx.compose.ui.platform.LocalUriHandler
+
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.ui.designsystem.bubble
@@ -29,7 +32,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,20 +39,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import kotlinx.coroutines.CancellationException
 
 /**
- * You, pushed from Home's avatar as Slack does: who is signed in, Preferences, and signing out. The profile's name
- * replaces the ID's localpart once [loadName] returns it.
+ * You, pushed from Home's avatar as Slack does: who is signed in, Preferences, and signing out. Without a profile
+ * [name], the ID's localpart stands in.
  */
 @Composable
-fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
+fun LiveYouScreen(userId: String, name: String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
     onViewProfile: ((name: String?) -> Unit)? = null, onBack: () -> Unit, avatarUrl: String? = null) {
     val colors = SlatrixTheme.colors
     val localpart = userId.removePrefix("@").substringBefore(':')
-    val name by produceState<String?>(null, userId) {
-        value = try { loadName()?.takeIf { it.isNotBlank() } } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
-    }
     var confirming by rememberSaveable { mutableStateOf(false) }
     if (confirming) {
         AlertDialog(
@@ -176,8 +174,26 @@ fun LivePreferencesScreen(
                         }
                     }
                 }
+                PreferenceHeading("About")
+                AboutRow("Version", BuildConfig.VERSION_NAME)
+                AboutRow("Copyright", "© 2026 Nuanu AI Lab", "https://nuanu.ai")
+                AboutRow("Source code", "GitHub", "https://github.com/nuanu-ai/slatrix")
             }
         }
+}
+
+/** One of About's lines: what it is, and its value, a link when [url] is given, as on the Mac. */
+@Composable
+private fun AboutRow(label: String, value: String, url: String? = null) {
+    val colors = SlatrixTheme.colors
+    val uris = LocalUriHandler.current
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
+        .then(if (url != null) Modifier.clickable(role = Role.Button) { uris.openUri(url) } else Modifier)
+        .padding(start = PreferenceInset, end = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = if (url != null) colors.accent else colors.textSecondary, maxLines = 1)
+    }
 }
 
 /** What the message text size preview says. */

@@ -6,11 +6,14 @@ import ai.nuanu.slatrix.ui.account.InvitationScreen
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onNodeWithContentDescription
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -37,7 +40,7 @@ class InvitationScreenTest {
                     onInvitation = { opened += it })
             }
         }
-        compose.onNodeWithText("Invitations").assertIsDisplayed()
+        compose.onNodeWithText("Invitations").assert(isHeading())
         compose.onNodeWithText("Harbor").assertIsDisplayed()
         compose.onNodeWithText("design").performClick()
         compose.runOnIdle { assertEquals(listOf(design.id), opened) }
@@ -54,6 +57,15 @@ class InvitationScreenTest {
         compose.onNodeWithText("Decline").performClick()
         compose.onNodeWithText("Join").performClick()
         compose.runOnIdle { assertEquals(listOf("decline", "join"), answers) }
+    }
+
+    @Test fun anInvitationStillLoadingShowsItsPageRatherThanWhatIsUnderIt() {
+        var back = 0
+        compose.setContent {
+            SlatrixTheme { InvitationScreen(null, responding = false, error = null, onJoin = {}, onDecline = {}, onBack = { back++ }) }
+        }
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.runOnIdle { assertEquals(1, back) }
     }
 
     @Test fun anAnswerOnItsWayHoldsBothButtons() {
