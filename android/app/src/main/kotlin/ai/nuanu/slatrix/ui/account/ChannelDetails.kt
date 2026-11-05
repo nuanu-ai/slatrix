@@ -68,8 +68,14 @@ data class ChannelDetailsActions(
     /** The room's pinned messages, read while the Pinned messages page shows. */
     val pins: @Composable () -> PinnedMessages = { PinnedMessages() },
     val files: @Composable () -> SharedFiles = { SharedFiles() },
-    /** Adds the channel to a workspace or takes it out. */
+    /** What the details read last, which they show at once when opened again while they read it once more. */
+    val known: KnownDetails = KnownDetails(),
 )
+
+class KnownDetails {
+    var members: List<ChannelMember>? = null
+    var notifications: NotificationSetting? = null
+}
 
 /** Every message in a conversation, threads included, to find what was shared, and asking for older ones. */
 data class SharedFiles(val state: ConversationState = ConversationState(), val loadPicture: PictureLoader = { _, _, _, _ -> null },
@@ -92,8 +98,13 @@ fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetails
     // Where Add people goes back to: the page it was opened from.
     var opener by rememberSaveable { mutableStateOf(DetailsPage.Details) }
     var loads by remember { mutableIntStateOf(0) }
-    var notifications by remember { mutableStateOf<Result<NotificationSetting>?>(null) }
-    LaunchedEffect(room.id, loads) { notifications = attempt { actions.notifications() } }
+    var notifications by remember { mutableStateOf(actions.known.notifications?.let { Result.success(it) }) }
+    // Read again on every open, but a failure doesn't hide what was read before.
+    LaunchedEffect(room.id, loads) {
+        val read = attempt { actions.notifications() }
+        if (read.isSuccess || notifications?.isSuccess != true) notifications = read
+    }
+    SideEffect { notifications?.getOrNull()?.let { actions.known.notifications = it } }
     // Outlives the pages, so going back doesn't cancel a change on its way.
     val scope = rememberCoroutineScope()
     val open = { next: DetailsPage -> opener = page; page = next }
@@ -256,8 +267,12 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
     val colors = SlatrixTheme.colors
     var query by rememberSaveable { mutableStateOf("") }
     var tries by remember { mutableIntStateOf(0) }
-    var members by remember { mutableStateOf<Result<List<ChannelMember>>?>(null) }
-    LaunchedEffect(tries) { members = attempt { actions.members() } }
+    var members by remember { mutableStateOf(actions.known.members?.let { Result.success(it) }) }
+    LaunchedEffect(tries) {
+        val read = attempt { actions.members() }
+        if (read.isSuccess || members?.isSuccess != true) members = read
+    }
+    SideEffect { members?.getOrNull()?.let { actions.known.members = it } }
     val shown = remember(members, query) {
         members?.getOrNull()?.filter { query.isBlank() || it.name.contains(query.trim(), true) || it.id.contains(query.trim(), true) }
     }

@@ -43,8 +43,10 @@ object UiMetrics {
     val CompactRow = 48.dp
     val Badge = 20.dp
     val ChannelTile = 40.dp
-    /** The faces on a thread's replies bar. */
+    /** The faces on a thread's replies bar and in a reaction chip. */
     val Facepile = 20.dp
+    /** The ring around each of a reaction chip's overlapping faces. */
+    val FaceRing = 1.5.dp
     val ThreadBar = 40.dp
     /** A bubble's inset around its text, a little tighter than a card's, as a messenger's is. */
     val BubbleInset = 10.dp

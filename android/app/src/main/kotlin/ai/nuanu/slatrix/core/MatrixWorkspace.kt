@@ -144,6 +144,12 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
 
     private fun select(requested: OpenChannel?) {
         if (!worker.isActive) return
+        // A jump to a message the open channel shows stays in it, as on the Mac, once nothing else is on its way; the
+        // worker runs on this thread too, so what it published can't change underneath.
+        val here = current
+        if (requested?.at != null && !requested.resume && requested.threadRoot == null && here != null &&
+            mutableSelected.value === here && here.threadRoot == null && here.room.id == requested.room.id &&
+            here.conversation?.show(requested.at) == true) return
         val token = generation.incrementAndGet()
         // Shown at once, so the room left never shows again while its draft saves; a failed save brings it back.
         mutableSelected.value = requested

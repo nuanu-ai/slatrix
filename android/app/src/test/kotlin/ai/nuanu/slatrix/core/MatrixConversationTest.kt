@@ -35,6 +35,16 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.reactions.show
+    @Test fun everyonesPictureIsKnownForTheFacesOnReactions() = runTest {
+        val room = ConversationRoom(ConversationTimeline(emptyList())).apply {
+            members = listOf(member("@sam:example.org", "Sam").copy(avatarUrl = "mxc://example.org/sam"), member("@lena:example.org", "Lena"))
+        }
+        val conversation = MatrixConversation(backgroundScope, room)
+        conversation.state.first { it.avatars == mapOf("@sam:example.org" to "mxc://example.org/sam") }
+        conversation.close()
+    }
+
     @Test fun cachedMessagesAppearWhileOlderHistoryIsStillLoading() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))

@@ -508,6 +508,23 @@ class LiveChannelScreenTest {
         compose.waitUntil { newer > 0 }
     }
 
+    // capability: conversation.jump-to-message
+    @Test fun aJumpWithinTheOpenConversationShowsItsMessageEachTime() {
+        val many = (1..200).map { message("Message $it", minutes = it) }
+        val state = mutableStateOf(ConversationState(many, loading = false, hasMore = false))
+        compose.setContent {
+            SlatrixTheme { LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
+        }
+        compose.onNodeWithText("Message 200").assertIsDisplayed()
+        state.value = state.value.copy(highlight = "\$Message 20", jump = 1)
+        compose.onNodeWithText("Message 20").assertIsDisplayed()
+
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+        compose.onNodeWithText("Message 20").assertDoesNotExist()
+        state.value = state.value.copy(jump = 2)
+        compose.onNodeWithText("Message 20").assertIsDisplayed()
+    }
+
     @Test fun theNameInTheHeaderIsTheOneWayToDetails() {
         var opened = 0
         val dm = room.copy(name = "Wanda Moss", direct = true)

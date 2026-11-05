@@ -266,6 +266,27 @@ class MatrixWorkspaceTest {
         workspace.close()
     }
 
+    // capability: conversation.jump-to-message
+    @Test fun aJumpToAMessageTheOpenConversationShowsHighlightsItThereWithoutReloading() = runTest {
+        val client = WorkspaceClient()
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+        workspace.open(alpha)
+        val conversation = requireNotNull(workspace.selected.first { it?.conversation != null }?.conversation)
+        conversation.state.first { !it.loading }
+        client.emit(listOf(TimelineDiff.PushBack(conversationItem("a", "\$a", "Plan"))))
+        conversation.state.first { state -> state.rows.any { (it as? ConversationMessage)?.eventId == "\$a" } }
+
+        workspace.jumpTo(alpha, "\$a", threadRoot = null)
+        runCurrent()
+        assertSame(conversation, workspace.selected.value?.conversation)
+        assertEquals("\$a", conversation.state.value.highlight)
+        // One not on screen opens around it, as before.
+        workspace.jumpTo(alpha, "\$old", threadRoot = null)
+        assertNotSame(conversation, workspace.selected.first { it?.at == "\$old" && it.conversation != null }?.conversation)
+        workspace.close()
+    }
+
     // capability: conversation.unread-line
     @Test fun anUnreadConversationOpensWhereItsUnreadMessagesStartUnlessAJumpOrThreadSaysWhere() = runTest {
         val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
