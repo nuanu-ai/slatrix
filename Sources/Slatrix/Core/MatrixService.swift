@@ -152,10 +152,11 @@ enum MatrixMapping {
     }
 
     /// A message summarized as text: mentions read "@Name", never a link or a raw ID, and a spoiler hides it all.
-    static func previewText(_ body: String, formatted: FormattedBody?) -> String {
+    static func previewText(_ body: String, formatted: FormattedBody?, names: [String: String] = [:]) -> String {
         let html = htmlBody(formatted)
         if html?.localizedCaseInsensitiveContains("data-mx-spoiler") == true { return "[Spoiler hidden]" }
-        return MessageBodyRenderer.shared.render(body: body, formattedBody: html).plainText
+        let runs = MessageBodyRenderer.shared.render(body: body, formattedBody: html).runs
+        return MessageBodyRenderer.named(runs) { names[$0] }.map(\.text).joined()
     }
 
     /// A conversation's newest event, for the DMs page; nil when it has none.
@@ -972,6 +973,30 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard sessionGeneration == account else { throw CancellationError() }
     }
 
+    /// The names `roomID` knows `ids` by, for a notification's text. It waits a second at most, then shows IDs.
+    private func memberNames(roomID: String, ids: Set<String>) async -> [String: String] {
+        guard !ids.isEmpty, let room = try? client?.getRoom(roomId: roomID) else { return [:] }
+        // The SDK's lookups don't stop when cancelled, so whichever finishes first wins and the other is ignored.
+        let (first, finished) = AsyncStream.makeStream(of: [String: String].self)
+        Task {
+            var names: [String: String] = [:]
+            for id in ids {
+                guard let member = try? await room.member(userId: id) else { continue }
+                names[id] = DisplayNames.name(id, member: member.displayName, ambiguous: member.isNameAmbiguous)
+            }
+            finished.yield(names)
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            finished.yield([:])
+        }
+        for await names in first {
+            finished.finish()
+            return names
+        }
+        return [:]
+    }
+
     private func start(_ newClient: Client, delegate: SessionPersistence) async throws {
         await stop()
         client = newClient
@@ -996,7 +1021,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             listener: NotificationsObserver { [weak self] notification, roomID in
                 Task { @MainActor [weak self] in
                     guard let self, self.sessionGeneration == generation else { return }
-                    guard let item = self.activity.receive(notification, roomID: roomID, ownUserID: id) else { return }
+                    let names = await self.memberNames(roomID: roomID, ids: ActivityService.mentionedIDs(notification))
+                    guard self.sessionGeneration == generation,
+                        let item = self.activity.receive(notification, roomID: roomID, ownUserID: id, names: names)
+                    else { return }
                     // The feed records notifications received this session, before native preference filters.
                     guard item.allowsNativeNotification else { return }
                     if case .message = item.kind, item.timestamp.timeIntervalSince1970 * 1000 < Double(startedAt) {
