@@ -634,7 +634,12 @@ struct TimelineTable: NSViewRepresentable {
     /// each time it did not.
     private func noteJump(from position: Policy.Position?) {
         guard let position, let moved = Policy.jump(from: position, to: viewport, frame: frame) else { return }
-        Performance.event(.timelineJump, ["px": Int(moved.rounded())])
+        Performance.event(
+            .timelineJump,
+            [
+                "px": Int(moved.rounded()), "bottom": position == .bottom ? 1 : 0,
+                "live": configuration?.live == false ? 0 : 1,
+            ])
     }
 
     private func open() {
@@ -667,15 +672,21 @@ struct TimelineTable: NSViewRepresentable {
         settle(keeping: opening)
         stopLoading()
         // Opening a channel sometimes leaves space under its newest message or cuts it off, and no test reproduces it.
-        let reopened = opening == remembered && opening != .bottom
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.logFit(reopened: reopened) }
+        let start =
+            switch opening {
+            case .bottom: 0
+            case .centered: 3
+            case _ where opening == remembered: 1
+            default: 2
+            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.logFit(opening: start) }
         if !configuration.context.isThread {
             Performance.finishOnScreen(.roomOpen, ["rows": rows.count])
             Performance.finishOnScreen(.launchConversation, ["rows": rows.count])
         }
     }
 
-    private func logFit(reopened: Bool) {
+    private func logFit(opening: Int) {
         guard scrollView.window != nil else { return }
         let shown = Range(table.rows(in: scrollView.contentView.bounds)) ?? 0..<0
         let differences = shown.compactMap { row -> CGFloat? in
@@ -690,7 +701,7 @@ struct TimelineTable: NSViewRepresentable {
             .timelineFit,
             [
                 "misfit": differences.count, "px": Int(largest), "bottom": Int(viewport.distanceFromBottom.rounded()),
-                "remembered": reopened ? 1 : 0,
+                "opening": opening, "live": configuration?.live == false ? 0 : 1,
             ])
     }
 

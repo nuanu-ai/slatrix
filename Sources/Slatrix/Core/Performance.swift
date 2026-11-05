@@ -18,11 +18,13 @@ import os
         case appLoading, sidebarLoading, conversationLoading, timelineLoading, historyLoading, threadLoading
         case threadsLoading, searchLoading, pinsLoading, peopleLoading, profileLoading, replyLoading, linkLoading
         case sheetLoading, attachmentsLoading
-        /// A visible timeline row moved while the reader was not at the newest message.
+        /// A visible timeline row moved while the reader was not at the newest message, or the newest message moved
+        /// while they followed it, and whether the timeline was live.
         case timelineJump
         /// A second after a conversation opens: visible rows whose height is not their content's, the largest
-        /// difference (positive cuts content off, negative leaves space), the distance from the newest message, and
-        /// whether it opened where the reader left it.
+        /// difference (positive cuts content off, negative leaves space), the distance from the newest message, where
+        /// it opened (0 the newest message, 1 where the reader left, 2 the unread line, 3 a linked message), and
+        /// whether it is live.
         case timelineFit
 
         var label: String { String(describing: self).replacing(#/[A-Z]/#) { "." + $0.output.lowercased() } }
