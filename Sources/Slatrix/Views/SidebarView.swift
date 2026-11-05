@@ -66,10 +66,12 @@ struct SidebarView: View {
                 header
                 list
             }
-            footer
         }
         .padding(.horizontal, m(10))
-        .background(colors.sidebar, in: RoundedRectangle(cornerRadius: m.radiusPanel))
+        // The list scrolls on under you, through the bar's material.
+        .safeAreaInset(edge: .bottom, spacing: 0) { footer }
+        .background(colors.sidebar)
+        .clipShape(RoundedRectangle(cornerRadius: m.radiusPanel))
         .elevation(.e1, cornerRadius: m.radiusPanel)
         .foregroundStyle(colors.textBody)
     }
@@ -147,7 +149,9 @@ struct SidebarView: View {
             if let accessory {
                 Button(accessory.title, action: accessory.action).buttonStyle(.primary).controlSize(.small)
             }
-        }.padding(.bottom, m(6))
+        }.padding(.horizontal, m(10)).padding(.vertical, m(6))
+            .background(.bar)
+            .overlay(alignment: .top) { VStack(spacing: 0) { Divider().overlay(colors.border) } }
     }
 
     private func shortcut(_ item: AppRoute, label: String, badge: Int = 0, count: Int = 0) -> some View {
@@ -156,8 +160,9 @@ struct SidebarView: View {
             route = item
         } label: {
             HStack(spacing: m.sp8) {
+                // In the accent, as Mail's mailboxes are.
                 Image(systemName: item.symbol).font(m.font(.body)).frame(width: m.sp16)
-                    .foregroundStyle(selected ? colors.accent : colors.textTertiary)
+                    .foregroundStyle(colors.accent)
                 Text(label).font(m.font(.body))
                 Spacer(minLength: 0)
                 if badge > 0 {
@@ -183,7 +188,7 @@ struct SidebarView: View {
                 onToggle: {
                     if collapsed.contains(title) { collapsed.remove(title) } else { collapsed.insert(title) }
                 }, addLabel: add?.label, onAdd: { add.map { onCreate($0.kind) } }, menu: menu
-            ).padding(.top, m.sp20)
+            ).padding(.top, m.sp12)
             let selectedID = route == .home ? matrix.selectedRoomID : nil
             ForEach(SidebarLayout.sectionRooms(rooms, collapsed: collapsed.contains(title), selectedID: selectedID)) {
                 room in
@@ -334,7 +339,7 @@ private struct SidebarRoomRow: View, Equatable {
                     ).opacity(room.muted && !selected ? 0.5 : 1)
                 } else {
                     Image(systemName: room.channelSymbol).font(m.font(.body)).frame(width: m.sp16)
-                        .foregroundStyle(selected ? colors.accent : colors.textTertiary)
+                        .foregroundStyle(room.muted && !selected ? colors.textTertiary : colors.accent)
                 }
                 Text(room.name).font(m.font(.body, badge != .none ? .semibold : .regular)).lineLimit(1)
                     .truncationMode(.tail)

@@ -141,7 +141,7 @@ struct RootView: View {
     @State private var readHold = ReadStateHold()
     private var colors: AppColors { appearance.colors }
     /// Threads and profiles share one pane width, as in Slack.
-    private static let paneWidth: CGFloat = 380
+    private static let paneWidth: CGFloat = 400
     /// Where the window buttons end, in window points: inset as far as they sit from the top, then AppKit's three
     /// 14-point buttons 20 points apart.
     private var windowButtonsWidth: CGFloat { (m.paneHeader - 14) / 2 + 54 }
@@ -1188,7 +1188,7 @@ struct RootView: View {
                     symbol: "xmark", label: panel == .pins ? "Close pinned" : "Close files", role: .subheadline,
                     round: true
                 ) { channelPanel = nil }.fontWeight(.semibold).foregroundStyle(colors.textSecondary)
-            }.padding(.leading, m.sp20).padding(.trailing, m.sp12).frame(height: m.paneHeader)
+            }.padding(.leading, m.sp16).padding(.trailing, m.sp12).frame(height: m.paneHeader)
                 .background(WindowDragArea())
             switch panel {
             case .pins:
@@ -1215,7 +1215,7 @@ struct RootView: View {
                 IconButton(
                     symbol: "xmark", label: "Close thread", role: .subheadline, round: true, action: closeThread
                 ).fontWeight(.semibold).foregroundStyle(colors.textSecondary)
-            }.padding(.leading, m.sp20).padding(.trailing, m.sp12).frame(height: m.paneHeader)
+            }.padding(.leading, m.sp16).padding(.trailing, m.sp12).frame(height: m.paneHeader)
                 .background(WindowDragArea())
             if let threadLoadError {
                 Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
@@ -1601,7 +1601,7 @@ struct RootView: View {
     private func replyBanner(_ target: MessageReplyTarget) -> some View {
         VStack(alignment: .leading, spacing: m.sp8) {
             HStack(alignment: .top, spacing: m.sp12) {
-                Rectangle().fill(colors.accent).frame(width: 3, height: m.control)
+                Rectangle().fill(colors.accent).frame(width: m(3), height: m.control)
                 VStack(alignment: .leading, spacing: m.sp4) {
                     Text("Replying to \(target.message.senderName)\(target.threadID == nil ? "" : " in thread")").font(
                         m.font(.subheadline, .semibold))

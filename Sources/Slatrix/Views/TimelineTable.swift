@@ -1125,7 +1125,8 @@ struct TimelineRow: View, Equatable {
                     isPinned: row.pinned, sendFailure: row.sendFailure, sendBusy: row.sendBusy, hovered: hovered,
                     timeLabel: row.time,
                     avatar: AvatarView(
-                        name: message.senderName, size: metrics.avatar, matrix: matrix,
+                        name: message.senderName, size: context.isThread ? metrics.avatar : metrics.messageAvatar,
+                        matrix: matrix,
                         source: message.avatarURL),
                     replierAvatar: message.lastReply.map {
                         AvatarView(
@@ -1135,6 +1136,14 @@ struct TimelineRow: View, Equatable {
                         ReplyPreviewView(
                             matrix: matrix, message: message, preview: $0, origin: target, onOpen: context.onShowReply,
                             onOpenThread: context.onThread)
+                    },
+                    reactionFaces: message.reactions.reduce(into: [:]) { faces, reaction in
+                        faces[reaction.key] = reaction.faces(me: matrix.user?.id)?.map { id in
+                            let member = matrix.members.first { $0.id == id }
+                            return AvatarView(
+                                name: member?.name ?? MatrixID.localpart(id), size: metrics.avatarSmall,
+                                matrix: matrix, source: member?.avatarURL)
+                        }
                     },
                     attachment: message.attachment.map {
                         AttachmentView(
@@ -1197,7 +1206,10 @@ private struct TimelineDayDivider: View {
     var body: some View {
         let colors = appearance.colors
         Text(label).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
-            .frame(maxWidth: .infinity).padding(.top, m.sp16).padding(.bottom, m.sp8)
+            .padding(.horizontal, m.sp8 + m.sp2).padding(.vertical, m(3))
+            .overlay(Capsule().strokeBorder(colors.border))
+            // With the rows around it: 24 above the day and 16 below, as the boards space it.
+            .frame(maxWidth: .infinity).padding(.top, m.sp20).padding(.bottom, m.sp4)
             .accessibilityAddTraits(.isHeader)
     }
 }

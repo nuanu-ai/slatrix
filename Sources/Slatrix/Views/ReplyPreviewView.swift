@@ -16,7 +16,7 @@ struct ReplyPreviewView: View {
 
     var body: some View {
         HStack(spacing: m.sp8) {
-            RoundedRectangle(cornerRadius: 2).fill(appearance.colors.textSecondary.opacity(0.4)).frame(width: 3)
+            RoundedRectangle(cornerRadius: m(2)).fill(appearance.colors.textSecondary.opacity(0.4)).frame(width: m(3))
             // Every state takes the loaded preview's two lines, so the row keeps its height when the original lands.
             ZStack(alignment: .leading) {
                 lines(sender: " ", body: " ").hidden()

@@ -23,7 +23,7 @@ struct SectionHeader<MenuItems: View>: View {
         HStack(spacing: m.sp2) {
             Button(action: onToggle) {
                 HStack(spacing: m.sp4) {
-                    Text(title).font(m.font(.subheadline, .semibold)).lineLimit(1)
+                    Text(title).font(m.font(.subheadline, .bold)).lineLimit(1)
                     Image(systemName: collapsed ? "chevron.right" : "chevron.down")
                         .font(m.font(.subheadline, .semibold)).imageScale(.small)
                         .opacity(revealed || collapsed ? 1 : 0)
