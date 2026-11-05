@@ -77,7 +77,7 @@ class LiveHomeScreenTest {
         val open = mutableStateOf(false)
         compose.setContent {
             SlatrixTheme {
-                LiveWorkspace(if (open.value) WorkspaceCover("design", 1) { Text("Conversation") } else null) {
+                LiveWorkspace(listOfNotNull(WorkspaceCover("design") { Text("Conversation") }.takeIf { open.value })) {
                     LiveHomeScreen("@alex:example.org", RoomListState(people, loading = false, spacesKnown = true), { open.value = true }, {}, {})
                 }
             }
@@ -119,19 +119,25 @@ class LiveHomeScreenTest {
 
     private fun SemanticsNodeInteraction.bounds() = fetchSemanticsNode().boundsInRoot
 
+    @Test fun laterComesBeforeActivityInTheTabBar() {
+        showTabBar(1f)
+        val order = listOf("Home", "DMs", "Later", "Activity")
+        assertEquals(order, order.sortedBy { tab(it).bounds().left })
+    }
+
     @Test fun newMessageSitsBesideTheTabBarWhereEveryTabFitsItsLabel() {
         showTabBar(1f)
         val button = compose.onNodeWithContentDescription("New message").bounds()
-        assertTrue(button.left >= tab("Later").bounds().right)
-        assertTrue(button.top < tab("Later").bounds().bottom)
+        assertTrue(button.left >= tab("Activity").bounds().right)
+        assertTrue(button.top < tab("Activity").bounds().bottom)
     }
 
     @Config(qualifiers = "w320dp-h704dp-xxxhdpi")
     @Test fun onANarrowPhoneAtALargeFontNewMessageRisesAboveATabBarAcrossTheWidth() {
         showTabBar(1.15f)
         val button = compose.onNodeWithContentDescription("New message").bounds()
-        assertTrue(button.bottom <= tab("Later").bounds().top)
-        assertTrue(tab("Later").bounds().right > button.left)
+        assertTrue(button.bottom <= tab("Activity").bounds().top)
+        assertTrue(tab("Activity").bounds().right > button.left)
     }
 
     @Config(qualifiers = "w320dp-h704dp-xxxhdpi")

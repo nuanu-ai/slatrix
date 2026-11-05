@@ -20,6 +20,7 @@ struct TimelineView: View {
     var onOpenProfile: ((String, ChatUser?) -> Void)? = nil
     var canPinMessages = false
     var onTogglePin: ((ChatMessage) -> Void)? = nil
+    /// Whether any part of the newest message is on screen, which reads the conversation.
     var onBottomVisibilityChange: ((Bool) -> Void)? = nil
     var onJumpToLatest: (() -> Void)? = nil
     var startsAtUnread = false
@@ -72,11 +73,11 @@ struct TimelineView: View {
             canLoadOlder: hasOlder && !loadingHistory,
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
-            onScroll: { atBottom, showsJump, scrolled in
+            onScroll: { atBottom, showsJump, scrolled, newestSeen in
                 self.atBottom = atBottom
                 jumpVisible = showsJump
                 contentAbove = scrolled
-                onBottomVisibilityChange?(atBottom)
+                onBottomVisibilityChange?(newestSeen)
             }
         )
         .overlay(alignment: .top) {
@@ -364,12 +365,13 @@ struct TimelineView: View {
     }
 }
 
-/// Lays the messages out once per change, and pins the "New messages" line to the first unread event it saw, so
-/// reading does not move the line.
+/// Lays the messages out once per change, and pins the "New messages" line to the first unread event as the
+/// conversation opens, so reading does not move the line and nothing arriving while it's open adds one.
 @MainActor final class TimelineLayoutCache {
     private var input: (messages: [ChatMessage], unread: String?, groups: Bool)?
     private var rows: [TimelineLayout.Row] = []
     private var unreadBoundary: String?
+    private var opened = false
     /// Everything a timeline's entries show besides the rows; the timeline redraws for many changes that touch none.
     struct EntryInputs: Equatable {
         var rows: [TimelineLayout.Row]
@@ -401,9 +403,11 @@ struct TimelineView: View {
     }
 
     func rows(_ messages: [ChatMessage], firstUnreadEventID: String?, groups: Bool) -> [TimelineLayout.Row] {
-        if unreadBoundary == nil, let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID })
-        {
-            unreadBoundary = firstUnreadEventID
+        if !opened, !messages.isEmpty {
+            opened = true
+            if let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID }) {
+                unreadBoundary = firstUnreadEventID
+            }
         }
         if let input, input.groups == groups, input.unread == unreadBoundary, input.messages == messages { return rows }
         rows = TimelineLayout.rows(

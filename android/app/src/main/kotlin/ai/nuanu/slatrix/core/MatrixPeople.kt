@@ -99,10 +99,15 @@ class MatrixPeople(scope: CoroutineScope, private val client: Client) {
         }
     }
 
+    private val profiles = java.util.concurrent.ConcurrentHashMap<String, Person>()
+
     /** [userId]'s profile from the server, or null when it can't be loaded. */
     suspend fun profile(userId: String): Person? = quietly {
-        client.getProfile(userId).let { person(it.userId, it.displayName, it.avatarUrl) }
+        client.getProfile(userId).let { person(it.userId, it.displayName, it.avatarUrl) }.also { profiles[userId] = it }
     }
+
+    /** The profile last loaded for [userId] this session, so it opens again as it was. */
+    fun known(userId: String): Person? = profiles[userId]
 
     /** The other person in the direct message [roomId], for its header. */
     suspend fun counterpart(roomId: String): Person? = quietly {

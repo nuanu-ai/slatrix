@@ -9,9 +9,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlin.math.roundToInt
 import ai.nuanu.slatrix.ui.designsystem.Motion
-import androidx.compose.animation.core.Animatable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.graphicsLayer
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
@@ -48,7 +45,7 @@ import kotlinx.coroutines.CancellationException
  */
 @Composable
 fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
-    onViewProfile: (() -> Unit)? = null, onBack: () -> Unit, avatarUrl: String? = null) {
+    onViewProfile: ((name: String?) -> Unit)? = null, onBack: () -> Unit, avatarUrl: String? = null) {
     val colors = SlatrixTheme.colors
     val localpart = userId.removePrefix("@").substringBefore(':')
     val name by produceState<String?>(null, userId) {
@@ -78,7 +75,7 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
                 }
             }
             onViewProfile?.let { view ->
-                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button, onClick = view)
+                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button) { view(name) }
                     .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
                     Icon(SlackIcons.Person, null, Modifier.size(UiMetrics.Icon))
                     Text("View profile", style = MaterialTheme.typography.bodyLarge)
@@ -99,27 +96,16 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
 }
 
 /** True where a page shows again because the one over it went back, which is instant. */
-internal val LocalReturning = compositionLocalOf { false }
-
 /**
- * A pushed page: a plain bar with Back, its title and maybe an action such as Save, then its rows. It eases in from the
- * side, as Slack's pages do, once; going back to it, or turning the phone, shows it at once.
+ * A pushed page: a plain bar with Back, its title and maybe an action such as Save, then its rows. The workspace slides
+ * it in, as Slack's pages come in from the side.
  */
 @Composable
 internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable () -> Unit = {}, content: LazyListScope.() -> Unit) {
     val back = rememberPredictiveBack(onBack = onBack)
-    val returning = LocalReturning.current
-    var entered by rememberSaveable { mutableStateOf(returning) }
-    val shown = remember { Animatable(if (entered) 1f else 0f) }
-    LaunchedEffect(shown) {
-        shown.animateTo(1f, Motion.pane())
-        entered = true
-    }
     Column(Modifier.fillMaxSize().graphicsLayer {
-        // A back swipe plays the way in backwards under the finger.
-        val now = shown.value * (1 - back.value)
-        alpha = now
-        translationX = (1 - now) * Motion.PushDistance * size.width
+        // A back swipe carries the page off under the finger, over the one it goes back to.
+        translationX = back.value * size.width
     }.background(SlatrixTheme.colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.HeaderRow).padding(horizontal = UiMetrics.GapTiny),
             verticalAlignment = Alignment.CenterVertically) {

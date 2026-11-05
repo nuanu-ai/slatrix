@@ -55,6 +55,14 @@ class MatrixPeopleTest {
         assertTrue(client.created.isEmpty())
     }
 
+    // Going back to a profile showed its initials and ID before the name and photo came back from the server.
+    @Test fun aProfileLoadedOnceIsKnownAtOnceAfter() = runTest {
+        val people = MatrixPeople(backgroundScope, PeopleClient())
+        assertNull(people.known(Alice))
+        people.profile(Alice)
+        assertEquals(Person(Alice, "Alice Moss", "mxc://example.org/alice"), people.known(Alice))
+    }
+
     @Test fun aPlaintextDirectMessageIsEncryptedBeforeItIsReused() = runTest {
         val plaintext = DirectRoom("!a:example.org", encrypted = false)
         assertEquals("!a:example.org", MatrixPeople(backgroundScope, PeopleClient(plaintext)).directRoom(Alice))

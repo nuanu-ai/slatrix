@@ -283,7 +283,6 @@ class MatrixWorkspaceTest {
         workspace.close()
     }
 
-    // capability: conversation.keep-position
     @Test fun aConversationLeftStaysOpenForComingBackToUntilNewerOnesPushItOutOrItHasSomethingNew() = runTest {
         val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
         val rooms = (1..6).map { workspaceRoom("!r$it:example.org", "R$it") }

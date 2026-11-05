@@ -25,6 +25,8 @@ enum UnreadMapping {
         var isReadMarker = false
         /// The remote event a reader would see, if the item is one.
         var shownEventID: String?
+        /// Your own messages never get the line.
+        var isOwn = false
     }
 
     static func mark(virtual: VirtualTimelineItem?, event: EventTimelineItem?, shown: Bool) -> Mark {
@@ -32,7 +34,7 @@ enum UnreadMapping {
         guard shown, let event, event.isRemote, case .eventId(let id) = event.eventOrTransactionId,
             UnreadNavigation.isRemoteEventID(id)
         else { return Mark() }
-        return Mark(shownEventID: id)
+        return Mark(shownEventID: id, isOwn: event.isOwn)
     }
 
     static func firstUnreadEventID(in items: [TimelineItem], roomID: String, ownUserID: String?) -> String? {
@@ -47,7 +49,7 @@ enum UnreadMapping {
 
     static func firstUnreadEventID(in marks: [Mark]) -> String? {
         guard let marker = marks.firstIndex(where: \.isReadMarker) else { return nil }
-        return marks[(marker + 1)...].lazy.compactMap(\.shownEventID).first
+        return marks[(marker + 1)...].lazy.filter { !$0.isOwn }.compactMap(\.shownEventID).first
     }
 }
 

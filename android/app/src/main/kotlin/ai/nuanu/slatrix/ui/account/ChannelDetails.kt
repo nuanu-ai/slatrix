@@ -30,7 +30,6 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.PersonAddAlt
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Workspaces
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -48,7 +47,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -71,17 +69,16 @@ data class ChannelDetailsActions(
     val pins: @Composable () -> PinnedMessages = { PinnedMessages() },
     val files: @Composable () -> SharedFiles = { SharedFiles() },
     /** Adds the channel to a workspace or takes it out. */
-    val setInWorkspace: suspend (spaceId: String, adding: Boolean) -> Unit = { _, _ -> },
 )
 
 /** Every message in a conversation, threads included, to find what was shared, and asking for older ones. */
 data class SharedFiles(val state: ConversationState = ConversationState(), val loadPicture: PictureLoader = { _, _, _, _ -> null },
-    val onOpenFile: suspend (MessageAttachment) -> String? = { null }, val onLoadMore: () -> Unit = {})
+    val onOpenFile: suspend (MessageAttachment) -> String? = { null }, val loadFile: FileLoader? = null, val onLoadMore: () -> Unit = {})
 
 /** A conversation's pinned messages as they load, and unpinning one. */
 data class PinnedMessages(val state: ConversationState = ConversationState(), val onUnpin: (ConversationMessage) -> Unit = {})
 
-private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeople, Pins, Files, Workspaces }
+private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeople, Pins, Files }
 
 /**
  * Slack Android's channel details, opened from the conversation's header: its name and description, notifications,
@@ -99,28 +96,31 @@ fun ChannelDetailsScreen(room: RoomSummary, me: String?, actions: ChannelDetails
     LaunchedEffect(room.id, loads) { notifications = attempt { actions.notifications() } }
     // Outlives the pages, so going back doesn't cancel a change on its way.
     val scope = rememberCoroutineScope()
-    // Whether the page showing came back from one over it, so it shows at once rather than easing in.
-    var returning by remember { mutableStateOf(false) }
-    val open = { next: DetailsPage -> opener = page; page = next; returning = false }
-    val details = { page = DetailsPage.Details; returning = true }
-    CompositionLocalProvider(LocalReturning provides returning) { when (page) {
-        DetailsPage.Details -> DetailsPage(room, notifications?.getOrNull(), actions, scope, onLeft, onBack, open, spaces.isNotEmpty())
-        DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, onPerson, details)
-        DetailsPage.Edit -> EditPage(room, actions, scope, details)
-        DetailsPage.Notifications -> NotificationsPage(notifications, actions, scope, { notifications = Result.success(it) },
-            { loads++ }, details)
-        DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener; returning = true }
-        DetailsPage.Pins -> PinsPage(room, me, actions.pins(), onOpenMessage, details)
-        DetailsPage.Files -> FilesPage(actions.files(), onOpenMessage, details)
-        DetailsPage.Workspaces -> WorkspacesPage(room, spaces, actions, scope, details)
-    } }
+    val open = { next: DetailsPage -> opener = page; page = next }
+    val details = { page = DetailsPage.Details }
+    // Each page pushes over the details, and Add people over the page it was opened from.
+    LiveWorkspace(listOfNotNull(opener.takeIf { page == DetailsPage.AddPeople }, page).filter { it != DetailsPage.Details }.map { each ->
+        WorkspaceCover(each) { when (each) {
+            DetailsPage.Members -> MembersPage(room, me, actions, { open(DetailsPage.AddPeople) }, onPerson, details)
+            DetailsPage.Edit -> EditPage(room, actions, scope, details)
+            DetailsPage.Notifications -> NotificationsPage(notifications, actions, scope, { notifications = Result.success(it) },
+                { loads++ }, details)
+            DetailsPage.AddPeople -> AddPeoplePage(actions, scope) { page = opener }
+            DetailsPage.Pins -> PinsPage(room, me, actions.pins(), onOpenMessage, details)
+            DetailsPage.Files -> FilesPage(actions.files(), onOpenMessage, details)
+            DetailsPage.Details -> Unit
+        } }
+    }) {
+        DetailsPage(room, notifications?.getOrNull(), actions, scope, onLeft, onBack, open,
+            spaces.filter { it.id in room.spaceIds }.map { it.name })
+    }
 }
 
 private fun noun(room: RoomSummary) = if (room.direct) "conversation" else "channel"
 
 @Composable
 private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, actions: ChannelDetailsActions, scope: CoroutineScope,
-    onLeft: () -> Unit, onBack: () -> Unit, onPage: (DetailsPage) -> Unit, hasWorkspaces: Boolean) {
+    onLeft: () -> Unit, onBack: () -> Unit, onPage: (DetailsPage) -> Unit, workspaces: List<String>) {
     val colors = SlatrixTheme.colors
     var confirmLeave by rememberSaveable { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
@@ -150,6 +150,8 @@ private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, 
                         Text(room.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
                             color = colors.textPrimary)
                     }
+                    if (workspaces.isNotEmpty()) Text("In " + if (workspaces.size > 1) workspaces.dropLast(1).joinToString(", ") + " and " + workspaces.last() else workspaces.single(), style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary)
                     Text("Description", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
                         color = colors.textPrimary, modifier = Modifier.padding(top = UiMetrics.GapSmall))
                     Text(room.topic.ifBlank { "No description" }, style = MaterialTheme.typography.bodyLarge,
@@ -169,8 +171,6 @@ private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, 
                     onPage(DetailsPage.Pins)
                 }
                 DetailsRow(Icons.Outlined.Description, "Files") { onPage(DetailsPage.Files) }
-                if (hasWorkspaces && !room.direct) DetailsRow(Icons.Outlined.Workspaces, "Workspaces",
-                    room.spaceIds.size.takeIf { it > 0 }?.toString()) { onPage(DetailsPage.Workspaces) }
                 HorizontalDivider(color = colors.border)
                 DetailsRow(Icons.AutoMirrored.Outlined.Logout, "Leave ${noun(room)}", color = colors.destructive, chevron = false,
                     enabled = !leaving) { confirmLeave = true }
@@ -366,8 +366,11 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
     // Saved, so the viewer stays open on the same image when the phone turns.
     var viewing by rememberSaveable { mutableStateOf<String?>(null) }
     viewing?.let { id ->
-        files.state.rows.find { it.id == id }?.let { (it as? ConversationMessage)?.attachment }
-            ?.let { MediaViewer(it, tile to tile, files.loadPicture) { viewing = null } }
+        (files.state.rows.find { it.id == id } as? ConversationMessage)?.let { message ->
+            message.attachment?.let {
+                MediaViewer(it, tile to tile, files.loadPicture, message.senderName, message.timestamp, files.loadFile) { viewing = null }
+            }
+        }
     }
     val shared = remember(files.state.rows) {
         files.state.rows.asReversed().filterIsInstance<ConversationMessage>().flatMap { message ->
@@ -477,50 +480,6 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
             LaunchedEffect(message) { delay(UiMetrics.NoticeMillis); error = null }
             Snackbar(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(UiMetrics.GapLarge)) { Text(message) }
         }
-    }
-}
-
-/**
- * The workspaces you're in, as the Mac's Manage workspaces lists them: a channel is added to one or taken out where your
- * power level lets you manage its channels, and one it's in only through another can hold it directly too.
- */
-@Composable
-private fun WorkspacesPage(room: RoomSummary, spaces: List<SpaceSummary>, actions: ChannelDetailsActions, scope: CoroutineScope,
-    onBack: () -> Unit) {
-    val colors = SlatrixTheme.colors
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    // A change shows at once and holds until the workspaces read again agree, which can take a sync, as a star does on Home.
-    var changed by remember { mutableStateOf(emptyMap<String, Boolean>()) }
-    LaunchedEffect(room.parentIds) { changed = changed.filter { (id, direct) -> (id in room.parentIds) != direct } }
-    PushedPage("Workspaces", onBack) {
-        items(spaces, key = { it.id }) { space ->
-            val direct = changed[space.id] ?: (space.id in room.parentIds)
-            // A group, so each row's button is read with its workspace.
-            Row(Modifier.fillMaxWidth().semantics { isTraversalGroup = true }.heightIn(min = UiMetrics.WorkspaceRow)
-                .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapSmall),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-                LiveAvatar(space.initials, space.colorIndex, UiMetrics.ListAvatar)
-                Column(Modifier.weight(1f)) {
-                    Text(space.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis)
-                    if (!direct && space.id in room.spaceIds) Text("Through another workspace", style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textSecondary)
-                }
-                TextButton(enabled = space.canManageRooms && !busy, onClick = {
-                    // A second tap before the button disables finds it busy.
-                    if (busy) return@TextButton
-                    busy = true
-                    error = null
-                    scope.launch {
-                        attempt { actions.setInWorkspace(space.id, !direct) }
-                            .onSuccess { changed = changed + (space.id to !direct) }.onFailure { error = it.message }
-                        busy = false
-                    }
-                }) { Text(if (direct) "Remove" else "Add") }
-            }
-        }
-        error?.let { item { NoteLine(it) } }
     }
 }
 

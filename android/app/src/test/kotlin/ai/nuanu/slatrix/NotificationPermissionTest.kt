@@ -37,7 +37,7 @@ class NotificationPermissionTest {
 
         compose.runOnIdle { assertNull(shadowOf(compose.activity).lastRequestedPermission) }
         compose.runOnIdle { signedIn.value = true }
-        compose.waitUntil { shadowOf(compose.activity).lastRequestedPermission != null }
+        // Idle once the sign-in's effect has run, however long a busy machine takes to get there.
         compose.runOnIdle {
             assertArrayEquals(arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                 shadowOf(compose.activity).lastRequestedPermission.requestedPermissions)

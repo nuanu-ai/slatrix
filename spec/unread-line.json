@@ -1,10 +1,12 @@
 {
-  "about": "Where Slack's New line goes and where an unread conversation opens. A timeline is a list of items: \"marker\" is the SDK's read marker, \"hidden\" an item the conversation doesn't show (a day divider, a message still sending, a membership change), and anything else the event ID of a message it shows. The line goes above the first shown message after the marker. An unread conversation opens at its fully-read event, the room's m.fully_read; one only marked unread by hand has nothing to resume. Room fields are as in unread-badge.json, plus fullyRead.",
+  "about": "Where Slack's New line goes and where an unread conversation opens. A timeline is a list of items: \"marker\" is the SDK's read marker, \"hidden\" an item the conversation doesn't show (a day divider, a message still sending, a membership change), \"own:\" before an event ID one of your own messages, and anything else the event ID of a message it shows. The line goes above the first shown message from someone else after the marker; your own messages never get it. An unread conversation opens at its fully-read event, the room's m.fully_read; one only marked unread by hand has nothing to resume. Room fields are as in unread-badge.json, plus fullyRead.",
   "line": [
     { "name": "The line goes above the first shown message after the read marker", "items": ["$read", "marker", "hidden", "hidden", "$first", "$second"], "line": "$first" },
     { "name": "Without a read marker there is no line", "items": ["$message"], "line": null },
     { "name": "With nothing after the marker there is no line", "items": ["$message", "marker"], "line": null },
-    { "name": "With only hidden items after the marker there is no line", "items": ["$message", "marker", "hidden"], "line": null }
+    { "name": "With only hidden items after the marker there is no line", "items": ["$message", "marker", "hidden"], "line": null },
+    { "name": "Your own message after the marker gets no line", "items": ["$read", "marker", "own:$photo"], "line": null },
+    { "name": "The line skips your own messages to the first from someone else", "items": ["$read", "marker", "own:$mine", "$theirs"], "line": "$theirs" }
   ],
   "resume": [
     { "name": "An unread conversation opens at its fully-read event", "room": { "messages": 4, "fullyRead": "$anchor" }, "anchor": "$anchor" },

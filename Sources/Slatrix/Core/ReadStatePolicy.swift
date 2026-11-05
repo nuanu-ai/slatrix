@@ -97,5 +97,11 @@ enum ReadStatePolicy {
         automaticTarget(context, hold: hold) == target
     }
 
+    /// Whether an open conversation's newest message counts as seen: once any part of it is on screen, so one taller
+    /// than the screen reads as soon as it shows. The cases are in spec/read-state.json.
+    static func isSeen(top: CGFloat, bottom: CGFloat, screenTop: CGFloat, screenBottom: CGFloat) -> Bool {
+        top < screenBottom && bottom > screenTop
+    }
+
     private static func valid(_ value: String, prefix: String) -> Bool { MatrixID.isValid(value, sigil: prefix) }
 }

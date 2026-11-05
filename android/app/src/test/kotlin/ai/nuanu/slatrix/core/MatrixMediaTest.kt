@@ -54,6 +54,19 @@ class MatrixMediaTest {
         assertEquals("the photo being sent", media.picture(image(2_000_000), 400, 300)?.decodeToString())
     }
 
+    // capability: message.image
+    @Test fun yourOwnPhotoShowsFromItsUploadInsteadOfWaitingForTheServersThumbnail() = runTest {
+        // The SDK keeps what you sent in its store under the final address; a server thumbnail is a download away.
+        val client = object : Client(NoHandle) {
+            override suspend fun getMediaThumbnail(mediaSource: MediaSource, width: ULong, height: ULong): ByteArray =
+                "the server's thumbnail".toByteArray()
+            override suspend fun getMediaContent(mediaSource: MediaSource): ByteArray = "the photo you sent".toByteArray()
+        }
+        val media = MatrixMedia(client, Files.createTempDirectory("media").toFile())
+        assertEquals("the photo you sent", media.picture(image(2_000_000).copy(own = true), 400, 300)?.decodeToString())
+        assertEquals("the server's thumbnail", media.picture(image(2_000_000), 400, 300)?.decodeToString())
+    }
+
     // capability: message.media-viewer
     @Test fun theViewerShowsTheOriginalWhenItIsSmallEnoughAndTheThumbnailOtherwise() = runTest {
         val media = MatrixMedia(MediaClient(File("unused")), Files.createTempDirectory("media").toFile())

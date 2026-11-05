@@ -30,6 +30,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotEquals
+import androidx.compose.ui.test.onRoot
 import org.junit.Rule
 import ai.nuanu.slatrix.ui.account.LiveWorkspace
 import ai.nuanu.slatrix.ui.account.WorkspaceCover
@@ -50,7 +51,11 @@ class MotionTest {
     @Test fun aPushedPageEasesInAndSettlesWithin150Milliseconds() {
         var shown by mutableStateOf(false)
         compose.setContent {
-            SlatrixTheme { if (shown) LivePreferencesScreen(false, null, false, {}, {}, {}) }
+            SlatrixTheme {
+                LiveWorkspace(listOfNotNull(WorkspaceCover("preferences") { LivePreferencesScreen(false, null, false, {}, {}, {}) }.takeIf { shown })) {
+                    Text("You")
+                }
+            }
         }
         settles("Color mode") { shown = true }
     }
@@ -68,7 +73,7 @@ class MotionTest {
     @Test fun aConversationSlidesInOverHomeAndBackIsInstant() {
         var open by mutableStateOf(false)
         compose.setContent {
-            SlatrixTheme { LiveWorkspace(if (open) WorkspaceCover("design", 1) { Text("Conversation") } else null) { Text("Home") } }
+            SlatrixTheme { LiveWorkspace(listOfNotNull(WorkspaceCover("design") { Text("Conversation") }.takeIf { open })) { Text("Home") } }
         }
         settles("Conversation") { open = true }
         compose.mainClock.autoAdvance = false
@@ -81,7 +86,7 @@ class MotionTest {
     @Test fun whileAConversationSlidesInWhatItCoversStaysUnderIt() {
         var open by mutableStateOf(false)
         compose.setContent {
-            SlatrixTheme { LiveWorkspace(if (open) WorkspaceCover("design", 1) { Text("Conversation") } else null) { Text("Home") } }
+            SlatrixTheme { LiveWorkspace(listOfNotNull(WorkspaceCover("design") { Text("Conversation") }.takeIf { open })) { Text("Home") } }
         }
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
@@ -91,6 +96,21 @@ class MotionTest {
         compose.onNodeWithText("Home").assertExists()
         compose.mainClock.advanceTimeBy(2_000)
         compose.onNodeWithText("Home").assertDoesNotExist()
+    }
+
+    // Pinned messages showed the conversation and its header for a moment, under a page fading in over nothing.
+    @Test fun aPageFromChannelDetailsSlidesInOverTheDetails() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        compose.setContent { SlatrixTheme { ChannelDetailsScreen(room, null, ChannelDetailsActions(), {}, {}) {} } }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithText("Members").performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnUiThread { Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("Channel details").assertExists()
+        compose.mainClock.advanceTimeBy(2_000)
+        compose.onNodeWithText("Channel details").assertDoesNotExist()
     }
 
     @Test fun goingBackToAPageIsInstant() {
@@ -135,6 +155,24 @@ class MotionTest {
             dispatcher.onBackPressed()
         }
         compose.runOnIdle { assertTrue(went) }
+    }
+
+    // A profile's back swipe faded it over the page under it and moved it only a quarter of the way.
+    @Test fun aBackSwipeCarriesThePageWithTheFinger() {
+        lateinit var dispatcher: OnBackPressedDispatcher
+        compose.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            SlatrixTheme { LivePreferencesScreen(false, null, false, {}, {}, {}) }
+        }
+        compose.waitForIdle()
+        val rest = bounds("Color mode")
+        val width = compose.onRoot().fetchSemanticsNode().boundsInRoot.width
+        compose.runOnUiThread {
+            dispatcher.dispatchOnBackStarted(BackEventCompat(0f, 800f, 0f, BackEventCompat.EDGE_LEFT))
+            dispatcher.dispatchOnBackProgressed(BackEventCompat(width / 2, 800f, 0.5f, BackEventCompat.EDGE_LEFT))
+        }
+        compose.waitForIdle()
+        assertEquals("Halfway across, the page is halfway off", rest.left + width / 2, bounds("Color mode").left, 1f)
     }
 
     /** After [show], [text] is still on its way in two frames later, and in place, as it stays, 150 ms after that. */

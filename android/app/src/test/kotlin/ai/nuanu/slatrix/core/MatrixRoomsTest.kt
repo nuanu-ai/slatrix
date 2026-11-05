@@ -223,22 +223,6 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
-    // capability: channel.link-workspace
-    @Test fun aChannelKnowsTheWorkspacesItSitsInDirectlyAndWhichYouMayManage() = runTest {
-        val client = RoomsClient(listOf(
-            TestRoom(roomInfo("!studio:example.org", "Studio", space = true).copy(powerLevels = TestPowers(spaceChild = false))),
-            TestRoom(roomInfo("!design:example.org", "Design", space = true)),
-            TestRoom(roomInfo("!work:example.org", "Operations")),
-        ))
-        client.spaces = RoomsSpaces(mapOf("!work:example.org" to listOf("!design:example.org"),
-            "!design:example.org" to listOf("!studio:example.org")))
-        val rooms = MatrixRooms(backgroundScope, client)
-        val state = rooms.state.first { state -> state.rooms.any { it.spaceIds.size == 2 } }
-        assertEquals(setOf("!design:example.org"), state.rooms.single().parentIds)
-        assertEquals(mapOf("Design" to true, "Studio" to false), state.spaces.associate { it.name to it.canManageRooms })
-        rooms.close()
-    }
-
     // capability: home.star-toggle
     @Test fun starringAConversationTagsItAsAFavourite() = runTest {
         val alpha = TestRoom(roomInfo("!a:example.org", "Alpha"))

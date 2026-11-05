@@ -33,6 +33,7 @@ import androidx.compose.ui.test.isDialog
 import android.graphics.Bitmap
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.awaitCancellation
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -395,26 +396,13 @@ class ChannelDetailsScreenTest {
         compose.runOnIdle { assertTrue(asked) }
     }
 
-    // capability: channel.link-workspace
-    @Test fun workspacesAddOrTakeTheChannelOutWhereYouMayManageThem() {
-        val changes = mutableListOf<Pair<String, Boolean>>()
+    @Test fun detailsSayWhichWorkspacesTheChannelIsInAsPlainText() {
         val spaces = listOf(SpaceSummary("!design:example.org", "Design"), SpaceSummary("!studio:example.org", "Studio"),
-            SpaceSummary("!ops:example.org", "Operations", canManageRooms = false))
-        details(room.copy(spaceIds = setOf("!design:example.org", "!studio:example.org"), parentIds = setOf("!design:example.org")),
-            ChannelDetailsActions(setInWorkspace = { id, add -> changes += id to add }), spaces = spaces)
-        compose.onNodeWithText("Workspaces").performClick()
-        compose.onNodeWithText("Through another workspace").assertIsDisplayed()
-        workspaceButton("Operations", "Add").assertIsNotEnabled()
-        workspaceButton("Design", "Remove").performClick()
-        // Shows the change at once, before the workspaces are read again, so a second tap doesn't send it twice.
-        workspaceButton("Design", "Add").assertIsDisplayed()
-        workspaceButton("Studio", "Add").performClick()
-        workspaceButton("Studio", "Remove").assertIsDisplayed()
-        compose.runOnIdle { assertEquals(listOf("!design:example.org" to false, "!studio:example.org" to true), changes) }
+            SpaceSummary("!ops:example.org", "Operations"))
+        details(room.copy(spaceIds = setOf("!design:example.org", "!studio:example.org")), spaces = spaces)
+        compose.onNodeWithText("In Design and Studio").assertIsDisplayed().assertHasNoClickAction()
+        compose.onNodeWithText("Workspaces").assertDoesNotExist()
     }
-
-    private fun workspaceButton(workspace: String, label: String) =
-        compose.onNode(hasText(label) and hasClickAction() and hasAnySibling(hasText(workspace)))
 
     private fun pinned(body: String) = ConversationMessage(body, "\$$body", "@mira:example.org", "Mira", body, null,
         1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "M", 0)

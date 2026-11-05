@@ -5,6 +5,7 @@ import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationRow
 import ai.nuanu.slatrix.core.caption
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.ReadState
 import ai.nuanu.slatrix.core.DayDivider
 import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
@@ -29,7 +30,6 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
@@ -148,7 +148,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // null at the newest. Kept while the conversation is left, and restored when its rows still hold that row.
     var place by rememberSaveable { mutableStateOf<Pair<String, Int>?>(null) }
     val newLine = remember { object { var at: String? = null; var start: String? = null; var decided = false; var back: Pair<String, Int>? = null } }
-    if (newLine.at == null && state.rows.any { it is ConversationMessage && it.eventId != null && it.eventId == state.firstUnread }) {
+    // Decided as it opens: nothing that arrives while it's open, read as it comes, adds a line.
+    if (!newLine.decided && state.rows.any { it is ConversationMessage && it.eventId != null && it.eventId == state.firstUnread }) {
         newLine.at = state.firstUnread
     }
     if (!newLine.decided && !state.loading && state.rows.isNotEmpty()) {
@@ -160,15 +161,22 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val opensAt = state.highlight ?: newLine.start ?: newLine.back?.first
     fun opens(row: ConversationRow) = row.id == opensAt || (row as? ConversationMessage)?.eventId == opensAt
     var jumped by remember(opensAt) { mutableStateOf(opensAt == null) }
+    // Opened cold, sync holds only the newest message or two, so the messages wait until a page fills the screen under
+    // them or there's no more to load, and the screen never fills in view.
+    val filled by remember { derivedStateOf { list.canScrollForward } }
+    val open = remember { object { var settled = false; var paging = false } }
+    if (state.loadingHistory) open.paging = true
+    if (filled || !state.hasMore || state.error != null || open.paging && !state.loadingHistory) open.settled = true
+    val settled = open.settled
     val latest = state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?
     val read by rememberUpdatedState(onRead)
-    LaunchedEffect(latest?.id, latest?.eventId, resumed, jumped) {
+    LaunchedEffect(latest?.id, latest?.eventId, resumed, jumped, settled) {
         val event = latest?.eventId ?: return@LaunchedEffect
-        if (!resumed || !jumped) return@LaunchedEffect
+        if (!resumed || !jumped || !settled) return@LaunchedEffect
         snapshotFlow {
             list.layoutInfo.visibleItemsInfo.any { item ->
-                item.key == latest.id && item.offset + item.size <= list.layoutInfo.viewportEndOffset &&
-                    item.offset + item.size > list.layoutInfo.viewportStartOffset
+                item.key == latest.id && ReadState.seen(item.offset.toFloat(), (item.offset + item.size).toFloat(),
+                    list.layoutInfo.viewportStartOffset.toFloat(), list.layoutInfo.viewportEndOffset.toFloat())
             }
         }.distinctUntilChanged().collect { visible -> if (visible) read(event) }
     }
@@ -202,11 +210,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             }
             list.scrollToItem(rows.size - 1 - index)
             if (target == newLine.start) {
-                // The line tops the screen with the unread messages under it; fewer than a screenful sit at the bottom.
+                // The line tops the screen with the unread messages under it; fewer than a screenful sit at the bottom, and
+                // one message taller than the screen shows from its start.
                 val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == rows.size - 1 - index }
                 val info = list.layoutInfo
                 val visible = info.viewportSize.height - info.beforeContentPadding - info.afterContentPadding
-                list.scrollBy(-(visible - (item?.size ?: 0)).coerceAtLeast(0).toFloat())
+                list.scrollBy(-(visible - (item?.size ?: 0)).toFloat())
                 return@LaunchedEffect
             }
             // The list is reversed, so the message sits at the bottom; newer ones below lift it a third of the way up.
@@ -255,7 +264,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // The row and its tile's pixels, saved, so the viewer stays open on the same image when the phone turns.
     var viewing by rememberSaveable { mutableStateOf<Pair<String, Pair<Int, Int>>?>(null) }
     viewing?.let { (id, tile) ->
-        (state.rows.find { it.id == id } as? ConversationMessage)?.attachment?.let { MediaViewer(it, tile, loadPicture) { viewing = null } }
+        (state.rows.find { it.id == id } as? ConversationMessage)?.let { message ->
+            message.attachment?.let { MediaViewer(it, tile, loadPicture, message.senderName, message.timestamp, loadFile) { viewing = null } }
+        }
     }
     val files = rememberCoroutineScope()
     // A file opens from the screen, not its row, so scrolling the row away doesn't cancel the download.
@@ -273,9 +284,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val glass = rememberGlass()
     // The header floats over the messages, which start under it; the scaffold measures it first, so they never move.
     Scaffold(Modifier.graphicsLayer {
-        // A back swipe slides the conversation off under the finger, as a pushed page leaves.
-        alpha = 1 - back.value
-        translationX = back.value * Motion.PushDistance * size.width
+        // A back swipe carries the conversation off under the finger, over the page it goes back to.
+        translationX = back.value * size.width
     }, topBar = { ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails) },
         containerColor = colors.canvas, contentWindowInsets = WindowInsets(0)) { bars ->
     val header = bars.calculateTopPadding()
@@ -304,7 +314,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
                 contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = jumpRoom)) {
-                itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row ->
+                itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row -> Box(Modifier.alpha(if (settled) 1f else 0f)) {
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Column(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
@@ -326,7 +336,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             if (root) RepliesBar(replies)
                         }
                     }
-                }
+                } }
                 // The top of the conversation, which also lets an empty one ask for history; a thread tops out at its root.
                 item(key = "top") {
                     when {
@@ -404,9 +414,6 @@ private fun ChatHeader(room: RoomSummary, thread: Boolean, typing: List<String>,
                 else ChannelGlyph(room.isPrivate, colors.textPrimary)
             }
             lines()
-        }
-        if (!thread) IconButton(onClick = onOpenDetails) {
-            Icon(Icons.Outlined.MoreVert, "Conversation details", tint = colors.textSecondary)
         }
     }
 }

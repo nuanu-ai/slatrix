@@ -19,7 +19,9 @@ class MatrixMedia(private val client: Client, private val folder: File) {
         val thumbnail = attachment.thumbnail?.takeIf { small(attachment.thumbnailSize) }
         val source = (if (full) original ?: thumbnail else thumbnail ?: original) ?: return null
         val bytes = try {
-            client.getMediaThumbnail(source, width.toULong(), height.toULong())
+            // Your own photo sits in the store from its upload, so it shows at once instead of waiting on the server.
+            if (attachment.own && source == original) client.getMediaContent(source)
+            else client.getMediaThumbnail(source, width.toULong(), height.toULong())
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

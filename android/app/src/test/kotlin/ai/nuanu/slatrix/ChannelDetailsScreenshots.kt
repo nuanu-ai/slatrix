@@ -45,10 +45,9 @@ class ChannelDetailsScreenshots(private val dark: Boolean, private val fontScale
     @Test fun render() {
         val room = RoomSummary("!design:example.org", "design", false, "Launch reviews and critique, every Thursday.",
             UnreadBadge.None, "D", 0, memberCount = 4, canEditName = true, canEditTopic = true, canPin = true,
-            pinned = listOf("\$a", "\$b"), spaceIds = setOf("!studio:example.org", "!nuanu:example.org"),
-            parentIds = setOf("!studio:example.org"))
+            pinned = listOf("\$a", "\$b"), spaceIds = setOf("!studio:example.org", "!nuanu:example.org"))
         val spaces = listOf(SpaceSummary("!nuanu:example.org", "Nuanu"), SpaceSummary("!studio:example.org", "Studio"),
-            SpaceSummary("!ops:example.org", "Operations", canManageRooms = false))
+            SpaceSummary("!ops:example.org", "Operations"))
         fun message(id: String, sender: String, body: String, minutes: Int) = ConversationMessage(id, "\$$id",
             "@${sender.lowercase()}:example.org", sender, body, null, 1_700_000_000_000L + minutes * 60_000L,
             MessageKind.Text, MessageSendState.Sent, false, sender.take(1), if (sender == "Mira") 2 else 5)
@@ -91,9 +90,6 @@ class ChannelDetailsScreenshots(private val dark: Boolean, private val fontScale
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Files").performClick()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/ChannelDetails-files-$name.png")
-        compose.onNodeWithContentDescription("Back").performClick()
-        compose.onNodeWithText("Workspaces").performClick()
-        compose.onRoot().captureRoboImage("build/outputs/roborazzi/ChannelDetails-workspaces-$name.png")
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Edit").performClick()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/ChannelDetails-edit-$name.png")
