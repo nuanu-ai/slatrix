@@ -16,7 +16,9 @@ private func readPerformanceLog(since date: Date, where match: (String) -> Bool)
     let deadline = ContinuousClock.now + .seconds(20)
     while ContinuousClock.now < deadline {
         let entries = try? store.getEntries(at: store.position(date: date), matching: predicate)
-        if let found = entries?.lazy.compactMap({ ($0 as? OSLogEntryLog)?.composedMessage }).first(where: match) {
+        // The store starts near `date`, not at it, so an earlier test's entries can come first.
+        let since = entries?.lazy.compactMap { $0 as? OSLogEntryLog }.filter { $0.date >= date }
+        if let found = since?.map(\.composedMessage).first(where: match) {
             return found
         }
     }
