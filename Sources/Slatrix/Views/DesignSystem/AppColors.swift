@@ -2,19 +2,23 @@ import AppKit
 import SwiftUI
 
 extension AppearanceStore {
-    var colors: AppColors { AppColors(dark: isDark, accent: accent(dark: isDark)) }
+    var colors: AppColors { AppColors(dark: isDark, accent: accent(dark: isDark), theme: theme) }
 }
 
-/// Every color in the UI, by role. Views pick a role, never a value. A neutral base and one accent, the one picked in
-/// System Settings.
+/// Every color in the UI, by role. Views pick a role, never a value. A theme's neutral base and one accent, the one
+/// picked in System Settings.
 struct AppColors {
     let dark: Bool
     /// The system accent in this theme, in sRGB.
     let accentBase: NSColor
+    let theme: ColorTheme
+    private let neutrals: Neutrals
 
-    init(dark: Bool, accent: NSColor? = nil) {
+    init(dark: Bool, accent: NSColor? = nil, theme: ColorTheme = .standard) {
         self.dark = dark
         accentBase = accent ?? Self.resolve(.controlAccentColor, dark: dark)
+        self.theme = theme
+        neutrals = Neutrals(theme, dark: dark)
     }
 
     /// A dynamic system color as it draws in one theme.
@@ -26,50 +30,93 @@ struct AppColors {
         return resolved
     }
 
+    /// What a theme changes: its surfaces, its text, and the ink its lines, wells and hovers are drawn in.
+    private struct Neutrals {
+        var text, secondary, tertiary, canvas, sidebar, overlay, control: UInt32
+        var ink: UInt32
+        /// How much stronger lines and the selection are than the default theme's.
+        var lines = 1.0
+
+        init(_ theme: ColorTheme, dark: Bool) {
+            switch (theme, dark) {
+            case (.standard, false):
+                (text, secondary, tertiary) = (0x1d1d1f, 0x636368, 0x86868b)
+                (canvas, sidebar, overlay, control, ink) = (0xffffff, 0xf3f3f5, 0xfbfbfd, 0xffffff, 0x000000)
+            case (.standard, true):
+                (text, secondary, tertiary) = (0xf5f5f7, 0x9e9ea5, 0x8e8e94)
+                (canvas, sidebar, overlay, control, ink) = (0x141416, 0x1d1d20, 0x252528, 0x1f1f22, 0xffffff)
+            // Cool blue-gray, like a slate.
+            case (.slate, false):
+                (text, secondary, tertiary) = (0x111827, 0x556070, 0x667085)
+                (canvas, sidebar, overlay, control, ink) = (0xffffff, 0xeef1f7, 0xfafbfd, 0xffffff, 0x101828)
+            case (.slate, true):
+                (text, secondary, tertiary) = (0xe8ecf4, 0x9aa3b5, 0x8b94a7)
+                (canvas, sidebar, overlay, control, ink) = (0x0d1017, 0x151a26, 0x1e2536, 0x1a2030, 0xffffff)
+            // Warm paper.
+            case (.sand, false):
+                (text, secondary, tertiary) = (0x231f1a, 0x655c51, 0x756c61)
+                (canvas, sidebar, overlay, control, ink) = (0xfdfbf7, 0xf2ece2, 0xfffdfa, 0xffffff, 0x3c2814)
+            case (.sand, true):
+                (text, secondary, tertiary) = (0xf2ede6, 0xaaa195, 0x9b9286)
+                (canvas, sidebar, overlay, control, ink) = (0x171512, 0x221f1a, 0x2a2620, 0x26221d, 0xfff0dc)
+            // Black and white text, and lines twice as strong.
+            case (.contrast, false):
+                (text, secondary, tertiary) = (0x000000, 0x3d3d42, 0x55555b)
+                (canvas, sidebar, overlay, control, ink) = (0xffffff, 0xf0f0f2, 0xffffff, 0xffffff, 0x000000)
+                lines = 2
+            case (.contrast, true):
+                (text, secondary, tertiary) = (0xffffff, 0xc7c7cc, 0xaeaeb2)
+                (canvas, sidebar, overlay, control, ink) = (0x000000, 0x141416, 0x1c1c1f, 0x161618, 0xffffff)
+                lines = 2
+            }
+        }
+    }
+    private var ink: Color { Color(hex: neutrals.ink) }
+
     // MARK: Text
 
     /// Names, titles and headings.
-    var textPrimary: Color { Color(hex: dark ? 0xf5f5f7 : 0x1d1d1f) }
+    var textPrimary: Color { Color(hex: neutrals.text) }
     /// Message bodies and running text.
     var textBody: Color { textPrimary }
     /// Times, descriptions, section titles, secondary lines.
-    var textSecondary: Color { Color(hex: dark ? 0x98989f : 0x6a6a6f) }
+    var textSecondary: Color { Color(hex: neutrals.secondary) }
     /// Icons at rest, placeholders, disabled text and hints.
-    var textTertiary: Color { Color(hex: dark ? 0x8e8e94 : 0x86868b) }
+    var textTertiary: Color { Color(hex: neutrals.tertiary) }
 
     // MARK: Surfaces
 
     /// The window: the conversation, panes and modals. Near black in dark mode, as Apple's own apps are.
-    var canvas: Color { Color(hex: dark ? 0x141416 : 0xffffff) }
+    var canvas: Color { Color(hex: neutrals.canvas) }
     /// Cards and tiles that sit on the canvas, in the sidebar's gray.
     var raised: Color { sidebar }
     /// Wells: reserved media boxes, chips, skeletons, filled round buttons.
-    var sunken: Color { dark ? Color.white.opacity(0.07) : Color.black.opacity(0.05) }
+    var sunken: Color { ink.opacity(dark ? 0.07 : 0.05) }
     /// Menus, popovers, the switcher and toasts that float over content.
-    var overlay: Color { Color(hex: dark ? 0x252528 : 0xfbfbfd) }
+    var overlay: Color { Color(hex: neutrals.overlay) }
     /// The toolbar's capsules and the composer, which sit a hair above the canvas.
-    var control: Color { Color(hex: dark ? 0x1f1f22 : 0xffffff) }
+    var control: Color { Color(hex: neutrals.control) }
     /// Tooltips: a dark bubble in both themes, darker than the conversation in dark mode.
     var tooltip: Color { Color(hex: dark ? 0x0b0b0c : 0x1d1d1f) }
     var onTooltip: Color { Color(hex: 0xffffff) }
     /// Dims the window under a modal.
     var scrim: Color { Color.black.opacity(dark ? 0.48 : 0.32) }
     /// The sidebar, a panel inset in the window.
-    var sidebar: Color { Color(hex: dark ? 0x1d1d20 : 0xf3f3f5) }
+    var sidebar: Color { Color(hex: neutrals.sidebar) }
 
     // MARK: Lines
 
     /// Dividers and the hairlines of cards.
-    var border: Color { dark ? Color.white.opacity(0.1) : Color.black.opacity(0.09) }
+    var border: Color { ink.opacity((dark ? 0.1 : 0.09) * neutrals.lines) }
     /// Fields, checkboxes and secondary buttons.
-    var borderStrong: Color { dark ? Color.white.opacity(0.16) : Color.black.opacity(0.15) }
+    var borderStrong: Color { ink.opacity((dark ? 0.16 : 0.15) * neutrals.lines) }
 
     // MARK: Interaction
 
-    var hover: Color { dark ? Color.white.opacity(0.07) : Color.black.opacity(0.05) }
-    var pressed: Color { dark ? Color.white.opacity(0.12) : Color.black.opacity(0.09) }
+    var hover: Color { ink.opacity(dark ? 0.07 : 0.05) }
+    var pressed: Color { ink.opacity(dark ? 0.12 : 0.09) }
     /// What is picked in a list: the open conversation in the sidebar, a search result, a Preferences tab.
-    var selection: Color { dark ? Color.white.opacity(0.1) : Color.black.opacity(0.07) }
+    var selection: Color { ink.opacity((dark ? 0.1 : 0.07) * neutrals.lines) }
     /// Words a search matched, in a result.
     var highlight: Color { Color(hex: 0xffcc00).opacity(dark ? 0.3 : 0.4) }
     /// The keyboard focus ring around buttons, rows and fields: the system's, in the accent.
@@ -99,8 +146,11 @@ struct AppColors {
     /// An @Name pill in a message or the composer.
     var mentionText: Color { accent }
     var mentionFill: Color { .clear }
-    /// The pill of a mention that notifies you, or everyone.
-    var mentionYouText: Color { accent }
+    /// The pill of a mention that notifies you, or everyone. Deeper than the accent in light mode, so it reads on its
+    /// tint.
+    var mentionYouText: Color {
+        dark ? accent : Color(nsColor: accentBase.blended(withFraction: 0.35, of: .black) ?? accentBase)
+    }
     var mentionYouFill: Color { accentTint }
     /// Inline code in a message.
     var code: Color { sunken }

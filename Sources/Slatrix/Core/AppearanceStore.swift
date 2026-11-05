@@ -6,6 +6,19 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var name: String { rawValue.capitalized }
 }
+/// The window's neutrals, in light and dark. Every theme keeps the system accent.
+enum ColorTheme: String, CaseIterable, Identifiable {
+    case standard, slate, sand, contrast
+    var id: String { rawValue }
+    var name: String {
+        switch self {
+        case .standard: "Default"
+        case .slate: "Slate"
+        case .sand: "Sand"
+        case .contrast: "High Contrast"
+        }
+    }
+}
 enum MessageDensity: String, CaseIterable, Identifiable {
     case comfortable, compact
     var id: String { rawValue }
@@ -14,6 +27,9 @@ enum MessageDensity: String, CaseIterable, Identifiable {
 @MainActor final class AppearanceStore: ObservableObject {
     @Published var mode = AppTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.mode") ?? "dark") ?? .dark
     { didSet { save(mode.rawValue, "mode") } }
+    @Published var theme =
+        ColorTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.theme") ?? "") ?? .standard
+    { didSet { save(theme.rawValue, "theme") } }
     @Published var density =
         MessageDensity(rawValue: UserDefaults.standard.string(forKey: "appearance.density") ?? "comfortable")
         ?? .comfortable
