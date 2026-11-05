@@ -70,7 +70,7 @@ struct ChannelHeader: View {
             Button(action: open) {
                 HStack(spacing: m.sp8) {
                     if ConversationHeader.isOneToOne(room) {
-                        AvatarView(name: room.name, size: m.avatar, matrix: matrix, source: room.avatarURL)
+                        AvatarView(name: room.name, size: m.avatarMedium, matrix: matrix, source: room.avatarURL)
                     }
                     VStack(alignment: .leading, spacing: m(1)) {
                         HStack(spacing: m(3)) {
@@ -80,10 +80,10 @@ struct ChannelHeader: View {
                             }
                             Text(room.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
                         }
-                        // Always a line under the name, so the name sits at one height in every conversation; who
-                        // is typing shows there, as Telegram shows it.
-                        Text(typing ?? room.topic).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                            .frame(height: m.lineHeight(.subheadline))
+                        // Who is typing shows under the name, as Telegram shows it, in place of the topic.
+                        if let line = typing ?? (room.topic.isEmpty ? nil : room.topic) {
+                            Text(line).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                        }
                     }.lineLimit(1).truncationMode(.tail).animation(Motion.content, value: typing)
                 }
             }.buttonStyle(.row).help(room.isDirect ? room.name : "Open channel details")
