@@ -87,9 +87,7 @@ struct Snapshots {
         for editor in textViews(in: hosting) where editor.isEditable {
             editor.insertText("Drafting a reply with **bold** text", replacementRange: editor.selectedRange())
         }
-        matrix.typingUsers = ["Alex"]
         try write(await settledImage(hosting), "channel-\(name)")
-        matrix.typingUsers = []
 
         // A file dragged over the conversation, then over the thread once it opens: the rightmost pane takes it.
         let drag = FakeDrag(files: [URL(fileURLWithPath: #filePath)], over: window)
