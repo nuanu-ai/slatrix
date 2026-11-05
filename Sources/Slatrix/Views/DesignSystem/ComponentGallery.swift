@@ -187,13 +187,13 @@ struct ComponentGallery: View {
             }
             HStack(spacing: m.sp12) {
                 caption("toolbar").frame(width: m(84), alignment: .leading)
-                ToolbarCapsule(padding: m.sp2) {
-                    IconButton(symbol: "chevron.left", label: "Back", role: .body, side: 30) {}
-                    IconButton(symbol: "chevron.right", label: "Forward", role: .body, side: 30) {}
+                ToolbarCapsule {
+                    IconButton(symbol: "chevron.left", label: "Back", role: .body) {}
+                    IconButton(symbol: "chevron.right", label: "Forward", role: .body) {}
                 }
-                ToolbarCapsule(padding: m.sp4) {
-                    IconButton(symbol: "pin", label: "Pinned", role: .body, side: 32) {}
-                    IconButton(symbol: "ellipsis", label: "More", role: .body, side: 32) {}
+                ToolbarCapsule {
+                    IconButton(symbol: "pin", label: "Pinned", role: .body) {}
+                    IconButton(symbol: "ellipsis", label: "More", role: .body) {}
                 }
             }
             HStack(spacing: m.sp12) {

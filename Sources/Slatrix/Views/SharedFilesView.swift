@@ -30,6 +30,8 @@ struct SharedFilesView: View {
         let preview: Bool
     }
     private var colors: AppColors { appearance.colors }
+    /// The page's margin, or a side pane's.
+    private var inset: CGFloat { channelID == nil ? m.sp20 : m.sp16 }
     private var rooms: [ChatRoom] {
         matrix.rooms.filter {
             !$0.isSpace && $0.membership == "join"
@@ -68,7 +70,7 @@ struct SharedFilesView: View {
             if let error = service.errorMessage {
                 HStack {
                     InlineErrorView(message: error)
-                    Button("Retry") { Task { await service.retry() } }.buttonStyle(.textLink).padding(.trailing, m.sp20)
+                    Button("Retry") { Task { await service.retry() } }.buttonStyle(.textLink).padding(.trailing, inset)
                         .disabled(service.state == "loading" || service.isLoadingMore)
                 }
             }
@@ -80,8 +82,10 @@ struct SharedFilesView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         if items.isEmpty {
-                            Text(query.isEmpty ? "Nothing shared yet" : "No matches").font(m.font(.body))
-                                .foregroundStyle(colors.textSecondary).frame(minHeight: m(Self.emptyMinHeight))
+                            EmptyStateView(
+                                symbol: "doc.on.doc", title: query.isEmpty ? "Nothing shared yet" : "No matches"
+                            )
+                            .frame(minHeight: m(Self.emptyMinHeight))
                         } else {
                             let shown = items
                             ForEach(shown) { item in
@@ -104,17 +108,17 @@ struct SharedFilesView: View {
                             } label: {
                                 HStack(spacing: m.sp8) {
                                     if service.isLoadingMore { DelayedProgress() }
-                                    Text("Load more")
+                                    Text("Show more")
                                 }.font(m.font(.subheadline, .medium)).padding(m.sp12)
                             }.buttonStyle(.textLink).disabled(service.isLoadingMore || service.state == "loading")
                         }
-                    }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
+                    }.padding(.horizontal, inset - m.sp12).padding(.vertical, m.sp8)
                 }
                 if service.unavailableEncryptedCount > 0 {
                     HStack {
                         Label("\(service.unavailableEncryptedCount) locked", systemImage: "lock")
                         Spacer(minLength: 0)
-                    }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp24)
+                    }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).padding(.horizontal, inset)
                         .padding(
                             .vertical, m.sp12
                         )
@@ -150,7 +154,7 @@ struct SharedFilesView: View {
             }.padding(.vertical, m.sp12)
             TabBar(tabs: ContentFilter.allCases.map { .init(value: $0, title: $0.rawValue) }, selection: $filter)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(.horizontal, m.sp24)
+        }.padding(.horizontal, inset)
     }
 
     /// Slack's "In: #design" filter: which conversation's files the list shows.

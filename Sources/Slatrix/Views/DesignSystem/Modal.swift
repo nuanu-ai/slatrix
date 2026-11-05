@@ -176,7 +176,7 @@ struct Modal<Content: View>: View {
                 Text(title).font(m.font(.title1, .bold)).foregroundStyle(colors.textPrimary).lineLimit(2)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
-                IconButton(symbol: "xmark", label: "Close", action: onClose).keyboardShortcut(.cancelAction)
+                CloseButton(action: onClose).keyboardShortcut(.cancelAction)
                     .disabled(busy)
             }
             .padding(.leading, m.sp24).padding(.trailing, m.sp16).padding(.vertical, m.sp16)
@@ -247,7 +247,7 @@ struct ConfirmModal: View {
             title: title, size: .small, onClose: onCancel, secondary: ModalAction(cancel, action: onCancel),
             primary: ModalAction(action, kind: kind, action: onConfirm)
         ) {
-            Text(message).font(m.font(.reading)).fixedSize(horizontal: false, vertical: true)
+            Text(message).font(m.font(.body)).fixedSize(horizontal: false, vertical: true)
         }
     }
 }

@@ -52,10 +52,10 @@ private struct SavedMessageRow: View {
         Button(action: onOpen) {
             HStack(alignment: .top, spacing: m.sp12) {
                 AvatarView(name: message?.senderName ?? "", size: m.avatar, matrix: matrix, source: message?.avatarURL)
-                    .padding(.top, m(18))
+                    .padding(.top, m.sp16 + m.sp2)
                 VStack(alignment: .leading, spacing: m.sp2) {
                     Text(location).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
-                        .lineLimit(1).frame(height: m(16))
+                        .lineLimit(1).frame(height: m.sp16)
                     HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                         Text(message?.senderName ?? "Placeholder name").font(m.font(.reading, .semibold))
                             .foregroundStyle(colors.textPrimary)
@@ -71,16 +71,16 @@ private struct SavedMessageRow: View {
             }
             // Until the message arrives, its outline holds the row's place.
             .redacted(reason: message == nil && error == nil ? .placeholder : [])
-            .padding(.horizontal, m.sp12).padding(.top, m(10)).padding(.bottom, m.sp12)
-            .background(hovered ? colors.hover : .clear, in: RoundedRectangle(cornerRadius: m(10)))
+            .padding(m.sp12)
+            .background(hovered ? colors.hover : .clear, in: RoundedRectangle(cornerRadius: m.radius))
             .contentShape(Rectangle())
         }.buttonStyle(.row).disabled(room?.membership != "join")
             .onHover { hovered = $0 }
             .overlay(alignment: .topTrailing) {
                 if hovered {
-                    ToolbarCapsule(padding: m.sp2) {
+                    ToolbarCapsule {
                         IconButton(symbol: "checkmark", label: "Remove from Later", role: .body, action: onRemove)
-                    }.padding(.trailing, m.sp12).padding(.top, m(10))
+                    }.padding(.trailing, m.sp12).padding(.top, m.sp12)
                 }
             }
             .accessibilityAction(named: "Remove from Later", onRemove)

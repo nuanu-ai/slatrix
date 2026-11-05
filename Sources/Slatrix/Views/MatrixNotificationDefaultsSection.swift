@@ -40,7 +40,7 @@ struct MatrixNotificationDefaultsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: m.sp20) {
             HStack(alignment: .top, spacing: m.sp12) {
-                Text("Notify me about").font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
+                Text("Notify me about").font(m.font(.body, .bold)).foregroundStyle(colors.textPrimary)
                 Spacer(minLength: 0)
                 if current {
                     Button("Reload") { Task { await load() } }.buttonStyle(.textLink).font(m.font(.subheadline))

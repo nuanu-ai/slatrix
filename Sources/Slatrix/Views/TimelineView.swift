@@ -101,7 +101,7 @@ struct TimelineView: View {
                         .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
                         .background(colors.raised, in: Capsule()).overlay(Capsule().stroke(colors.border))
                         .elevation(.e2, cornerRadius: m.sp20)
-                }.buttonStyle(.row).padding(m.sp16).transition(.opacity)
+                }.buttonStyle(.row).padding(m.sp20).transition(.opacity)
             }
         }
         .animation(Motion.overlay, value: jumpVisible)
@@ -586,7 +586,7 @@ struct MessageRow: View {
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(.horizontal, isThread ? m.sp16 : m.sp24)
+        }.padding(.horizontal, isThread ? m.sp16 : m.sp20)
             // The boards' rhythm: 16 between senders, 4 between one sender's messages.
             .padding(.top, grouped ? 0 : compact ? m.sp2 : m.sp12)
             .padding(.bottom, m.sp4)

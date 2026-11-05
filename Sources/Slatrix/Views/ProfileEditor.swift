@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Slack's Edit your profile: fields on the left, the photo on the right, all saved by Save Changes. A Matrix profile
+/// Slack's Edit your profile: fields on the left, the photo on the right, all saved by Save changes. A Matrix profile
 /// holds a display name and a photo, so every client shows what is set here.
 struct ProfileEditor: View {
     let matrix: MatrixService
@@ -18,7 +18,7 @@ struct ProfileEditor: View {
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
-    /// What Save Changes does to the photo; nil keeps it.
+    /// What Save changes does to the photo; nil keeps it.
     private enum PhotoChange {
         /// The square of the picked photo to upload, in its pixels.
         case upload(CGImage, crop: CGRect)
@@ -56,7 +56,7 @@ struct ProfileEditor: View {
         Modal(
             title: "Edit your profile", size: .large, busy: saving, onClose: onClose,
             secondary: ModalAction("Cancel", action: onClose),
-            primary: ModalAction("Save Changes", disabled: !canSave, action: save)
+            primary: ModalAction("Save changes", disabled: !canSave, action: save)
         ) {
             HStack(alignment: .top, spacing: m.sp24) {
                 VStack(alignment: .leading, spacing: m.sp8) {

@@ -29,16 +29,17 @@ struct QuickSwitcherView: View {
         let colors = appearance.colors
         let results = results
         VStack(spacing: 0) {
-            HStack(spacing: m(10)) {
+            // The magnifier over the rows' icons, the query over their names.
+            HStack(spacing: m.sp8) {
                 Image(systemName: "magnifyingglass").font(m.font(.title3)).foregroundStyle(colors.textSecondary)
-                    .accessibilityHidden(true)
+                    .frame(width: m.avatarSmall).accessibilityHidden(true)
                 TextField("Jump to…", text: $query).textFieldStyle(.plain).font(m.font(.title3))
                     .foregroundStyle(colors.textPrimary).focused($focused)
                     .onSubmit(openSelected)
                     .onKeyPress(.upArrow) { move(-1) }
                     .onKeyPress(.downArrow) { move(1) }
                     .onExitCommand(perform: onClose)
-            }.padding(.horizontal, m(18)).frame(height: m.paneHeader)
+            }.padding(.horizontal, m.sp16).frame(height: m.paneHeader)
             Divider().overlay(colors.border)
             ScrollViewReader { proxy in
                 ScrollView {
@@ -71,7 +72,7 @@ struct QuickSwitcherView: View {
                                 }.id(room.id)
                             }
                         }
-                    }.padding(m(6))
+                    }.padding(m.sp8)
                 }
                 .overlay {
                     if results.isEmpty && matrixLink == nil {

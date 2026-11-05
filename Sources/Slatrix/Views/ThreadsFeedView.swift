@@ -17,9 +17,9 @@ struct ThreadsFeedView: View {
             HStack(spacing: m.sp12) {
                 Spacer()
                 FeedWorkspacePicker(matrix: matrix, workspaceID: $workspaceID)
-                IconButton(symbol: "arrow.clockwise", label: "Refresh threads", role: .reading) { refresh() }.disabled(
+                IconButton(symbol: "arrow.clockwise", label: "Refresh threads", role: .body) { refresh() }.disabled(
                     feed.isLoading)
-            }.padding(.horizontal, m.sp24).frame(height: m.control + m.sp16)
+            }.padding(.horizontal, m.sp20).frame(height: m.control + m.sp16)
             Divider().overlay(colors.border)
             if let error = feed.errorMessage {
                 HStack {
@@ -47,7 +47,7 @@ struct ThreadsFeedView: View {
                                         ? nil : feed.preview(roomID: item.roomID, eventID: $0.eventID)
                                 }, matrix: matrix, onOpen: onOpen,
                                 hydrate: { [feed] in await feed.hydratePreview(item, retry: $0) })
-                            Divider().overlay(colors.border).padding(.leading, m.sp24 + m.avatar + m.sp12)
+                            Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)
                         }
                         if feed.isLoading {
                             DelayedProgress().padding(m.sp20).accessibilityLabel(
@@ -105,7 +105,7 @@ struct ThreadsFeedView: View {
                 Text("\(feed.checkedRoomCount) of \(feed.totalRoomCount) conversations").font(m.font(.subheadline))
                     .foregroundStyle(colors.textSecondary)
             }
-        }.padding(.horizontal, m.sp24).padding(.vertical, m.sp12).background(colors.raised)
+        }.padding(.horizontal, m.sp20).padding(.vertical, m.sp12).background(colors.raised)
     }
 
     private func refresh() { Task { await matrix.openThreads(workspaceID: workspaceID) } }
@@ -199,7 +199,7 @@ private struct ThreadFeedRow: View {
                         .padding(.leading, m.avatar + m.sp12).help(
                             root.error ?? latest?.error ?? "Right-click to retry")
                 }
-            }.padding(.horizontal, m.sp24).padding(.vertical, m.sp20).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(.horizontal, m.sp20).padding(.vertical, m.sp20).frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .accessibilityElement(children: .combine).accessibilityLabel(
                     "Thread in \(item.roomName), \(rootMessage.senderName), \(Self.preview(rootMessage)), \(item.replyCount) replies"

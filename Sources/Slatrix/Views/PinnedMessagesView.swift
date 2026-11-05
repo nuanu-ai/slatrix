@@ -19,16 +19,15 @@ struct PinnedMessagesView: View {
             if let error = service.errorMessage {
                 HStack {
                     InlineErrorView(message: error)
-                    Button("Retry") { Task { await service.retry() } }.buttonStyle(.textLink).padding(.trailing, m.sp20)
+                    Button("Retry") { Task { await service.retry() } }.buttonStyle(.textLink).padding(.trailing, m.sp16)
                 }
             }
             if service.messages.isEmpty {
                 if service.state == "loading" {
                     SkeletonRows(interval: .pinsLoading)
                 } else if service.state != "error" {
-                    Text(service.totalPinned == 0 ? "No pinned messages" : "Couldn’t load pins")
-                        .font(m.font(.body)).foregroundStyle(colors.textSecondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    EmptyStateView(
+                        symbol: "pin", title: service.totalPinned == 0 ? "No pinned messages" : "Couldn’t load pins")
                 } else {
                     Spacer()
                 }
@@ -109,13 +108,12 @@ struct PinnedMessagesView: View {
                 } label: {
                     HStack(spacing: m.sp8) {
                         Text("Open")
-                        Image(systemName: "arrow.up.right").font(m.font(.subheadline, .semibold))
+                        Image(systemName: "chevron.right").font(m.font(.subheadline, .semibold))
                     }.font(m.font(.subheadline, .semibold)).foregroundStyle(colors.accent)
                 }.buttonStyle(.row)
             }
-        }.padding(m.sp20).frame(maxWidth: .infinity, alignment: .leading).background(
-            colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge)
-        ).overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
+        }.padding(m.sp16).frame(maxWidth: .infinity, alignment: .leading).background(
+            colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
     }
     private func profile(_ message: ChatMessage) {
         onOpenProfile(

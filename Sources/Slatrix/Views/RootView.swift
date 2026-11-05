@@ -746,6 +746,7 @@ struct RootView: View {
         }
         .coordinateSpace(.named(SearchBar.space))
         .focusedSceneValue(\.sidebarShown, !sidebarCollapsed || sidebarDrawer)
+        .focusedSceneValue(\.rightPaneShown, paneOpen)
         .overlay(alignment: .topLeading) {
             SearchMenu(
                 bar: searchBar, matrix: matrix, recents: recentSearches, visited: history,
@@ -1005,10 +1006,10 @@ struct RootView: View {
     ) -> some View {
         HStack(spacing: m.sp12) {
             if sidebarCollapsed { SidebarToggle(matrix: matrix) { handleMenu("toggle-sidebar") } }
-            ToolbarCapsule(padding: m.sp2) {
-                IconButton(symbol: "chevron.left", label: "Back", role: .body, side: 30) { navigateHistory(-1) }
+            ToolbarCapsule {
+                IconButton(symbol: "chevron.left", label: "Back", role: .body) { navigateHistory(-1) }
                     .disabled(historyIndex <= 0)
-                IconButton(symbol: "chevron.right", label: "Forward", role: .body, side: 30) { navigateHistory(1) }
+                IconButton(symbol: "chevron.right", label: "Forward", role: .body) { navigateHistory(1) }
                     .disabled(historyIndex >= history.count - 1)
             }
             .contextMenu {
@@ -1030,7 +1031,7 @@ struct RootView: View {
             }.disabled(matrix.user == nil)
         }
         // The window buttons are AppKit chrome and do not zoom.
-        .padding(.leading, sidebarCollapsed ? windowButtonsWidth + m.sp16 : m.sp20).padding(.trailing, m.sp16)
+        .padding(.leading, sidebarCollapsed ? windowButtonsWidth + m.sp16 : m.sp20).padding(.trailing, m.sp20)
         .frame(height: m.paneHeader).background(WindowDragArea())
         .foregroundStyle(colors.textSecondary)
     }
@@ -1062,7 +1063,7 @@ struct RootView: View {
                 ).id("\(room.id):\(matrix.timelineSelectionID)")
                 VStack(spacing: 0) {
                     if room.canPostMessages == false {
-                        ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp16).padding(.top, m.sp4)
+                        ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp20).padding(.top, m.sp4)
                             .padding(.bottom, m.sp16)
                     } else if let target = editTarget, target.surface == .conversation,
                         target.message.roomID == room.id
@@ -1112,7 +1113,7 @@ struct RootView: View {
                         .disabled(!localReady || !attachmentDrafts.ready).id(
                             "composer-\(composerGeneration)-\(room.id)"
                         )
-                        .padding(.horizontal, m.sp16).padding(.top, m.sp4).padding(.bottom, m.sp16)
+                        .padding(.horizontal, m.sp20).padding(.top, m.sp4).padding(.bottom, m.sp16)
                     }
                 }
                 // Floats above the composer, so a toast, reply or attachment notice never resizes it or moves the
@@ -1126,7 +1127,7 @@ struct RootView: View {
                                     && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
                             },
                             drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil)
-                    }.padding(.horizontal, m.sp16).alignmentGuide(.top) { $0[.bottom] }
+                    }.padding(.horizontal, m.sp20).alignmentGuide(.top) { $0[.bottom] }
                 }
             }
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
@@ -1224,7 +1225,8 @@ struct RootView: View {
                 } else if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
                 {
-                    editComposer(target, room: room).padding(m.sp12)
+                    editComposer(target, room: room).padding(.horizontal, m.sp16).padding(.top, m.sp4)
+                        .padding(.bottom, m.sp16)
                 } else {
                     BindingScope({ threadDraftBinding(root.eventID, roomID: room.id) }) { text in
                         MessageComposer(
@@ -1294,8 +1296,8 @@ struct RootView: View {
                             )
                         }
                     }.toggleStyle(.checkbox).font(m.font(.body)).foregroundStyle(colors.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, m(28))
-                        .padding(.top, m(10)).padding(.bottom, m(14))
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, m.sp16 + m.sp12)
+                        .padding(.top, m.sp8).padding(.bottom, m.sp16)
                         .disabled(threadReadyID != root.eventID || withFiles)
                 }
             }
@@ -2833,12 +2835,18 @@ private struct RoomListWatcher: View {
 
 /// The title bar's button for the collapsed sidebar. Reads the room list itself, so unread changes redraw only it.
 private struct SidebarShownKey: FocusedValueKey { typealias Value = Bool }
+private struct RightPaneShownKey: FocusedValueKey { typealias Value = Bool }
 
 extension FocusedValues {
     /// Whether the window shows its sidebar, inline or as the drawer, for the View menu's Show or Hide Sidebar.
     var sidebarShown: Bool? {
         get { self[SidebarShownKey.self] }
         set { self[SidebarShownKey.self] = newValue }
+    }
+    /// Whether a thread, list or profile shows beside the conversation, for the View menu's Hide Right Pane.
+    var rightPaneShown: Bool? {
+        get { self[RightPaneShownKey.self] }
+        set { self[RightPaneShownKey.self] = newValue }
     }
 }
 
@@ -2851,7 +2859,7 @@ private struct SidebarToggle: View {
         let badge = UnreadBadge.combined(matrix.rooms)
         let colors = appearance.colors
         ToolbarCapsule {
-            IconButton(symbol: "sidebar.left", label: "Show sidebar", role: .body, side: 32, action: action)
+            IconButton(symbol: "sidebar.left", label: "Show sidebar", role: .body, action: action)
         }
         // A count for mentions and direct messages, a dot for the rest.
         .overlay(alignment: .topTrailing) {
@@ -2890,7 +2898,7 @@ private struct TitleSearch<Field: View>: View {
                 // Opened from the button, ⌘G or ⌘F: the field was not there to take the cursor, so it takes it now.
                 field().onAppear { if open { bar.focus() } }
             } else {
-                IconButton(symbol: "magnifyingglass", label: "Search", role: .title3) { open = true }
+                IconButton(symbol: "magnifyingglass", label: "Search", role: .body) { open = true }
             }
         }
         .onChange(of: bar.focusRequests) { _, _ in if !fits { open = true } }

@@ -20,9 +20,20 @@ struct PaneHeader: View {
                 }
             }.lineLimit(1)
             Spacer()
-            IconButton(symbol: "xmark", label: closeLabel, role: .subheadline, round: true, action: onClose)
-                .fontWeight(.semibold).foregroundStyle(colors.textSecondary)
+            CloseButton(label: closeLabel, action: onClose)
         }.padding(.leading, m.sp16).padding(.trailing, m.sp12).frame(height: m.paneHeader)
             .background(WindowDragArea())
+    }
+}
+
+/// The round close button of panes, modals and dismissible errors.
+struct CloseButton: View {
+    var label = "Close"
+    let action: () -> Void
+    @EnvironmentObject private var appearance: AppearanceStore
+
+    var body: some View {
+        IconButton(symbol: "xmark", label: label, role: .body, round: true, action: action)
+            .fontWeight(.semibold).foregroundStyle(appearance.colors.textSecondary)
     }
 }
