@@ -7,10 +7,13 @@ import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.content.ActivityNotFoundException
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import androidx.core.graphics.scale
 import android.graphics.BitmapFactory
+import android.os.Environment
+import android.provider.MediaStore
 import android.text.format.Formatter
 import android.util.LruCache
 import androidx.compose.foundation.Image
@@ -28,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
@@ -58,6 +62,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.Share
+import java.io.File
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -96,6 +105,39 @@ internal suspend fun openAttachment(context: Context, media: MatrixMedia, attach
         null
     } catch (_: ActivityNotFoundException) {
         "No app on this phone opens ${attachment.name}."
+    }
+}
+
+/** Hands the downloaded file to an app the reader picks from the phone's share sheet. */
+internal fun shareFile(context: Context, file: File, attachment: MessageAttachment) {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+    val send = Intent(Intent.ACTION_SEND).setType(attachment.mimeType ?: context.contentResolver.getType(uri) ?: "*/*")
+        .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+/** Copies the downloaded file into the phone's Pictures, or Movies for a video, where its gallery finds it. */
+internal suspend fun saveFile(context: Context, file: File, attachment: MessageAttachment): String = withContext(Dispatchers.IO) {
+    val video = attachment.kind == MessageAttachment.Kind.Video
+    val folder = if (video) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
+    val collection = if (video) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    val resolver = context.contentResolver
+    val values = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, attachment.name)
+        attachment.mimeType?.let { put(MediaStore.MediaColumns.MIME_TYPE, it) }
+        put(MediaStore.MediaColumns.RELATIVE_PATH, "$folder/Slatrix")
+        put(MediaStore.MediaColumns.IS_PENDING, 1)
+    }
+    val uri = resolver.insert(collection, values) ?: return@withContext "Couldn’t save ${attachment.name}."
+    try {
+        resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
+        resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+        "Saved to ${if (video) "Movies" else "Pictures"}"
+    } catch (_: Exception) {
+        // A half-written copy would show in the gallery broken.
+        resolver.delete(uri, null, null)
+        "Couldn’t save ${attachment.name}."
     }
 }
 
@@ -231,12 +273,25 @@ internal fun FileTile(kind: FileKind) {
 private val OffsetSaver = Saver<Offset, List<Float>>({ listOf(it.x, it.y) }, { Offset(it[0], it[1]) })
 
 /**
- * An image full screen on black, as in Slack: pinch or double-tap to zoom, drag to look around, Close to leave. Until the
- * image loads, the picture its [tile] showed holds the image's box; one already loaded shows at once.
+ * An image full screen on black, as in Slack: pinch or double-tap to zoom, drag to look around, Close to leave, with who
+ * sent it and when, and Share and Save to device once [loadFile] can download it. Until the image loads, the picture its
+ * [tile] showed holds the image's box; one already loaded shows at once.
  */
 @Composable
-internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, load: PictureLoader, onDismiss: () -> Unit) {
+internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, load: PictureLoader, sender: String, timestamp: Long,
+    loadFile: FileLoader?, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var notice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(notice) { if (notice != null) { delay(UiMetrics.NoticeMillis); notice = null } }
+    fun withFile(action: suspend (File) -> String?) {
+        val files = loadFile ?: return
+        scope.launch {
+            val file = try { files(attachment) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+            notice = if (file == null) "Couldn’t download ${attachment.name}." else action(file)
+        }
+    }
     // Saved with the screen rather than in the dialog, whose window keeps its saved state apart.
     var scale by rememberSaveable { mutableFloatStateOf(1f) }
     var offset by rememberSaveable(stateSaver = OffsetSaver) { mutableStateOf(Offset.Zero) }
@@ -272,11 +327,28 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
                         Image(placeholder, attachment.name, Modifier.size(fit * w, fit * h), contentScale = ContentScale.Crop)
                 }
             }
-            Row(Modifier.fillMaxWidth().statusBarsPadding().background(colors.mediaShade).padding(end = UiMetrics.GapLarge),
-                verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().background(colors.mediaShade).statusBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, "Close", tint = colors.onMedia) }
-                Text(attachment.name, style = MaterialTheme.typography.titleSmall, color = colors.onMedia, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis)
+                Column(Modifier.weight(1f)) {
+                    Text(sender, style = MaterialTheme.typography.titleSmall, color = colors.onMedia, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                    Text("${dayLabel(timestamp)} at ${timeLabel(timestamp)}", style = MaterialTheme.typography.bodySmall,
+                        color = colors.onMedia, maxLines = 1)
+                }
+                if (loadFile != null) {
+                    IconButton(onClick = { withFile { shareFile(context, it, attachment); null } }) {
+                        Icon(Icons.Outlined.Share, "Share", tint = colors.onMedia)
+                    }
+                    IconButton(onClick = { withFile { saveFile(context, it, attachment) } }) {
+                        Icon(Icons.Outlined.FileDownload, "Save to device", tint = colors.onMedia)
+                    }
+                }
+            }
+            notice?.let {
+                Text(it, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(UiMetrics.GapLarge)
+                    .background(colors.mediaShade, MaterialTheme.shapes.extraLarge)
+                    .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
+                    style = MaterialTheme.typography.bodyMedium, color = colors.onMedia)
             }
         }
     }

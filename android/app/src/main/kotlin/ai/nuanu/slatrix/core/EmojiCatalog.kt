@@ -52,7 +52,9 @@ class EmojiCatalog private constructor(val all: List<Emoji>) {
         private val TONES = 0x1F3FB..0x1F3FF
         /** A Swift string's line continuation, which joins a long name to its next line. */
         private val continuation = Regex("""\\\n\s*""")
-        @Volatile private var loaded: EmojiCatalog? = null
+        /** Read once already, so the picker can open full; null until [load] has run. */
+        @Volatile var loaded: EmojiCatalog? = null
+            private set
 
         /** Reads the asset once, without the emoji this device can't draw; call it off the main thread. */
         fun load(context: Context): EmojiCatalog = loaded ?: synchronized(this) {

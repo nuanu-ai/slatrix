@@ -10,6 +10,7 @@ import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.core.WorkspaceMembership
 import ai.nuanu.slatrix.core.WorkspaceRail
+import ai.nuanu.slatrix.ui.designsystem.ListHeading
 import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
@@ -59,7 +60,17 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
@@ -80,44 +91,74 @@ import java.util.Locale
 private enum class HomeTab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
     Home("Home", SlackIcons.Home, SlackIcons.HomeFilled),
     Dms("DMs", SlackIcons.Messages, SlackIcons.MessagesFilled),
-    Activity("Activity", SlackIcons.Bell, SlackIcons.BellFilled),
     Later("Later", SlackIcons.Bookmark, SlackIcons.BookmarkFilled),
+    Activity("Activity", SlackIcons.Bell, SlackIcons.BellFilled),
 }
 
-/**
- * What covers Home, such as a conversation. A cover deeper than the one before slides in over it; one at depth 0 eases
- * itself in, as a pushed page does.
- */
-class WorkspaceCover(val key: Any, val depth: Int, val content: @Composable () -> Unit)
+/** A page over Home, such as a conversation, kept by [key] while it stays in the stack. */
+class WorkspaceCover(val key: Any, val content: @Composable () -> Unit)
+
+private const val Home = "home"
 
 /**
- * Shows [cover] in Home's place, and gives Home back its tab, search and scroll position after. Going deeper slides the
- * new page in over 140 ms with the page it covers still drawn under it, so nothing blank shows; going back is instant,
- * since predictive back has already played the way out under the finger.
+ * Home with [covers] over it, bottom to top. A page pushed over the one on top slides in over 140 ms with that page
+ * drawn under it, so nothing blank shows; one that leaves goes at once, since predictive back has already played the
+ * way out under the finger. Pages under the top stay composed, so going back finds one as it was, Home's tab, search
+ * and scroll included, and the one right under the top draws, for a back swipe to show. Covered pages stop at
+ * CREATED, as a backgrounded app's do, so they read no messages and take no Back. A page that leaves loses its state,
+ * so a conversation opened again starts at its New line or its newest message, as Slack's does.
  */
 @Composable
-fun LiveWorkspace(cover: WorkspaceCover?, home: @Composable () -> Unit) {
+fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
     val saved = rememberSaveableStateHolder()
-    val page = cover ?: WorkspaceCover(Unit, 0) { saved.SaveableStateProvider("home", home) }
-    val shown = remember { object { var page = page; var under: WorkspaceCover? = null } }
-    if (shown.page.key != page.key) shown.under = shown.page.takeIf { page.depth > it.depth }
-    shown.page = page
-    val slide = remember(page.key) { Animatable(if (shown.under == null) 1f else 0f) }
-    var settled by remember(page.key) { mutableStateOf(shown.under == null) }
-    LaunchedEffect(slide) {
-        slide.animateTo(1f, Motion.pane())
-        shown.under = null
-        settled = true
-    }
+    val pages = listOf(WorkspaceCover(Home, home)) + covers
+    val top = pages.last().key
+    val shown = remember { object { var top: Any = Home; var keys = setOf<Any>(Home) } }
+    // Pushed when the page that was on top stays, under it.
+    val pushed = shown.top != top && pages.any { it.key == shown.top }
+    val keys = pages.map { it.key }.toSet()
+    (shown.keys - keys).forEach { saved.removeState(it.toString()) }
+    shown.top = top
+    shown.keys = keys
+    val slide = remember(top) { Animatable(if (pushed) 0f else 1f) }
+    LaunchedEffect(slide) { slide.animateTo(1f, Motion.pane()) }
     Box(Modifier.fillMaxSize()) {
-        // One keyed loop, so the page under keeps its composition as it moves from on top to underneath.
-        for (each in listOfNotNull(shown.under.takeUnless { settled }, page)) key(each.key) {
-            Box(if (each === page) Modifier.fillMaxSize().graphicsLayer {
-                alpha = slide.value
-                translationX = (1 - slide.value) * Motion.PushDistance * size.width
-            } else Modifier.fillMaxSize()) { each.content() }
-        }
+        pages.forEachIndexed { index, page -> key(page.key) {
+            val depth = pages.lastIndex - index
+            val settled = slide.value == 1f
+            Box(Modifier.fillMaxSize().then(when {
+                depth == 0 -> Modifier.graphicsLayer {
+                    alpha = slide.value
+                    translationX = (1 - slide.value) * Motion.PushDistance * size.width
+                }
+                depth == 1 && !settled -> Modifier
+                // Out of the accessibility tree, and drawn only right under the top.
+                else -> Modifier.clearAndSetSemantics {}.graphicsLayer { if (depth > 1) alpha = 0f }
+            // The top takes every touch, so none reaches a page under it.
+            }).pointerInput(Unit) {}) {
+                Covered(depth > 0) { saved.SaveableStateProvider(page.key.toString(), page.content) }
+            }
+        } }
     }
+}
+
+/** Holds [content]'s lifecycle at CREATED while [covered], and otherwise follows the screen's. */
+@Composable
+private fun Covered(covered: Boolean, content: @Composable () -> Unit) {
+    val parent = LocalLifecycleOwner.current
+    val cap = if (covered) Lifecycle.State.CREATED else Lifecycle.State.RESUMED
+    val owner = remember(parent) { object : LifecycleOwner {
+        override val lifecycle = LifecycleRegistry(this).apply { currentState = minOf(parent.lifecycle.currentState, cap) }
+    } }
+    DisposableEffect(parent, cap) {
+        val follow = LifecycleEventObserver { _, _ -> owner.lifecycle.currentState = minOf(parent.lifecycle.currentState, cap) }
+        parent.lifecycle.addObserver(follow)
+        onDispose { parent.lifecycle.removeObserver(follow) }
+    }
+    DisposableEffect(owner) {
+        onDispose { if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED)) owner.lifecycle.currentState = Lifecycle.State.DESTROYED }
+    }
+    CompositionLocalProvider(LocalLifecycleOwner provides owner, content = content)
 }
 
 @Composable
@@ -190,22 +231,24 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
         // The lists scroll on under the tab capsule, and end clear of it and of New message above it.
         val clearance = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + UiMetrics.TabBar + UiMetrics.GapSmall * 2 +
             (UiMetrics.Fab + UiMetrics.GapLarge) * (if (beside) 0 else 1)
-        Column(Modifier.fillMaxSize().glassSource(glass)) {
-            HomeHeader(tab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                HorizontalPager(pager, Modifier.fillMaxSize(), key = { HomeTab.entries[it] }) { page ->
-                when (HomeTab.entries[page]) {
-                    HomeTab.Home -> Column {
-                        HomeSearchBar(state.spaces.firstOrNull { it.id == selectedSpaceId }?.name) { searching = true }
-                        HomeList(homeList, shown, selectedSpaceId, onRoom, (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } },
-                            onInvitation, clearance, collapsedSections, onCollapsedSections) { actions = it.id }
+        // Each tab owns its title, which slides with it under the finger rather than swap halfway.
+        HorizontalPager(pager, Modifier.fillMaxSize().glassSource(glass), key = { HomeTab.entries[it] }) { page ->
+            val pageTab = HomeTab.entries[page]
+            Column(Modifier.fillMaxSize()) {
+                HomeHeader(pageTab, userId, userAvatarUrl, state, selectedSpaceId, onSpace, onYou)
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    when (pageTab) {
+                        HomeTab.Home -> HomeList(homeList, shown, selectedSpaceId, onRoom,
+                            (onBrowseChannels ?: onCreateChannel)?.let { { adding = true } }, onInvitation, clearance, collapsedSections,
+                            onCollapsedSections, { actions = it.id }) {
+                            HomeSearchBar(state.spaces.firstOrNull { it.id == selectedSpaceId }?.name) { searching = true }
+                        }
+                        HomeTab.Dms -> DirectList(directList, shown, onRoom, clearance) { actions = it.id }
+                        HomeTab.Activity -> Box(Modifier.padding(bottom = clearance)) { activity() }
+                        HomeTab.Later -> Box(Modifier.padding(bottom = clearance)) { later() }
                     }
-                    HomeTab.Dms -> DirectList(directList, shown, onRoom, clearance) { actions = it.id }
-                    HomeTab.Activity -> Box(Modifier.padding(bottom = clearance)) { activity() }
-                    HomeTab.Later -> Box(Modifier.padding(bottom = clearance)) { later() }
+                    OfflineBanner()
                 }
-                }
-                OfflineBanner()
             }
         }
         val newMessage = @Composable {
@@ -379,8 +422,8 @@ private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, on
 @Composable
 private fun WorkspaceIcon(space: SpaceSummary?, size: Dp, loading: Boolean = false) {
     val colors = SlatrixTheme.colors
-    Box(Modifier.size(size).clip(MaterialTheme.shapes.medium)
-        .background(if (space != null) DesignTokens.avatarColors[space.colorIndex] else colors.accentTint), contentAlignment = Alignment.Center) {
+    val fill = if (space != null) AvatarStyle.fill(DesignTokens.avatarColors[space.colorIndex]) else SolidColor(colors.accentTint)
+    Box(Modifier.size(size).clip(MaterialTheme.shapes.medium).background(fill), contentAlignment = Alignment.Center) {
         if (space == null && !loading) Icon(SlackIcons.Tray, null, Modifier.size(UiMetrics.Icon), tint = colors.accent)
         else if (space != null) Text(space.initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label,
             color = colors.onAvatar, maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
@@ -402,7 +445,7 @@ private enum class HomeSection(val label: String) {
 @Composable
 private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId: String?, onRoom: (String) -> Unit,
     onAddChannel: (() -> Unit)?, onInvitation: (String) -> Unit, bottom: Dp, saved: Set<String>, onSaved: (Set<String>) -> Unit,
-    onActions: (RoomSummary) -> Unit) {
+    onActions: (RoomSummary) -> Unit, search: @Composable () -> Unit) {
     // A saved workspace's channels are known only with its spaces, so its list waits for them rather than filling in.
     val waiting = state.loading || (selectedSpaceId != null && !state.spacesKnown)
     val sections = remember(state.rooms, selectedSpaceId) {
@@ -416,6 +459,8 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
     }
     var collapsed by remember(saved) { mutableStateOf(saved) }
     LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = bottom)) {
+        // The first row, so it scrolls away under the header with the list, as Telegram's does.
+        item(key = "search") { search() }
         if (waiting) {
             item { ConnectionIndicator(true, null) }
         } else {
@@ -442,18 +487,20 @@ private fun HomeList(list: LazyListState, state: RoomListState, selectedSpaceId:
     }
 }
 
-/** A section's title after its arrow, in the column the rows' marks take, so titles line up with names; it opens and closes. */
+/**
+ * Slack's section header: its title in semibold at the list's edge, ahead of the rows' marks, then a chevron, with room
+ * above, so it reads as a heading over its rows rather than one of them. It opens and closes.
+ */
 @Composable
 private fun SectionHeader(section: HomeSection, open: Boolean, onToggle: () -> Unit) {
     val colors = SlatrixTheme.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.SectionHeader)
+    Row(Modifier.padding(top = UiMetrics.GapMedium).fillMaxWidth().heightIn(min = UiMetrics.SectionHeader)
         .clickable(role = Role.Button, onClickLabel = if (open) "Collapse" else "Expand", onClick = onToggle)
         .semantics(mergeDescendants = true) { stateDescription = if (open) "Expanded" else "Collapsed" }
         .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-        Lead { Icon(if (open) SlackIcons.ChevronDown else SlackIcons.ChevronRight, null, Modifier.size(glyph()), tint = colors.textSecondary) }
-        Text(section.label, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = colors.textSecondary,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
+        ListHeading(section.label, Modifier.weight(1f, fill = false))
+        Icon(if (open) SlackIcons.ChevronDown else SlackIcons.ChevronRight, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.textSecondary)
     }
 }
 
@@ -550,8 +597,7 @@ private fun ConversationRow(room: RoomSummary, onRoom: (String) -> Unit, onActio
                 Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
                     fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 room.latest?.let {
-                    Text(latestTime(it.timestamp), style = MaterialTheme.typography.labelMedium,
-                        color = if (room.unread is UnreadBadge.Count) colors.accent else colors.textSecondary, maxLines = 1)
+                    Text(latestTime(it.timestamp), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, maxLines = 1)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
@@ -652,7 +698,7 @@ internal fun latestTime(timestamp: Long): String {
 @Composable
 internal fun LiveAvatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.Avatar, url: String? = null) {
     // People are round, as in every messenger; workspaces and channels are rounded squares.
-    Box(Modifier.size(size).clip(CircleShape).background(DesignTokens.avatarColors[colorIndex]), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(size).clip(CircleShape).background(AvatarStyle.fill(DesignTokens.avatarColors[colorIndex])), contentAlignment = Alignment.Center) {
         // Two letters shrink to fit, so every avatar in a list has the same width.
         Text(initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label, color = SlatrixTheme.colors.onAvatar,
             maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)

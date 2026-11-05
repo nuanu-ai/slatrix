@@ -68,27 +68,37 @@ struct ChannelHeader: View {
         var body: some View {
             let colors = appearance.colors
             Button(action: open) {
-                VStack(alignment: .leading, spacing: m(1)) {
-                    HStack(spacing: m(3)) {
-                        if ConversationHeader.isOneToOne(room) {
-                            AvatarView(
-                                name: room.name, size: m.avatarSmall, matrix: matrix, source: room.avatarURL
-                            ).padding(.trailing, m.sp4)
-                        } else if !room.isDirect {
-                            Image(systemName: room.channelSymbol).font(m.font(.body, .medium))
-                                .foregroundStyle(colors.textSecondary)
+                HStack(spacing: m.sp8) {
+                    if ConversationHeader.isOneToOne(room) {
+                        AvatarView(name: room.name, size: m.avatarMedium, matrix: matrix, source: room.avatarURL)
+                    }
+                    VStack(alignment: .leading, spacing: m(1)) {
+                        HStack(spacing: m(3)) {
+                            if !room.isDirect {
+                                Image(systemName: room.channelSymbol).font(m.font(.body, .medium))
+                                    .foregroundStyle(colors.textSecondary)
+                            }
+                            Text(room.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
                         }
-                        Text(room.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
-                    }
-                    if !room.topic.isEmpty {
-                        Text(room.topic).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                    }
-                }.lineLimit(1).truncationMode(.tail)
+                        // Who is typing shows under the name, as Telegram shows it, in place of the topic.
+                        if let line = typing ?? (room.topic.isEmpty ? nil : room.topic) {
+                            Text(line).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                        }
+                    }.lineLimit(1).truncationMode(.tail).animation(Motion.content, value: typing)
+                }
             }.buttonStyle(.row).help(room.isDirect ? room.name : "Open channel details")
                 .contextMenu {
                     NativeMessageMenuCommands(
                         commands: ChannelHeader.menu(for: room, isPreview: matrix.isPreview, perform: perform))
                 }
+        }
+
+        private var typing: String? {
+            let names = matrix.typingUsers
+            if names.isEmpty { return nil }
+            if names.count == 1 { return names[0] + " is typing…" }
+            if names.count == 2 { return names.joined(separator: " and ") + " are typing…" }
+            return "Several people are typing…"
         }
 
         private func open() {

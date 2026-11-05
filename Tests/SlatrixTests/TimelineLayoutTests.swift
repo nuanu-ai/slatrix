@@ -106,6 +106,18 @@ struct TimelineLayoutTests {
         #expect(rows == ["day Today", "a 11:58 AM", "unread", "txn 11:59 AM"])
     }
 
+    @MainActor @Test("A message that arrives while the conversation is open adds no unread line")
+    func noLineForLiveArrivals() {
+        let cache = TimelineLayoutCache()
+        var first = message("a", "@alice", at: 2)
+        first.timelineEventID = "$a"
+        var later = message("b", "@bob", at: 1)
+        later.timelineEventID = "$b"
+        _ = cache.rows([first], firstUnreadEventID: nil, groups: true)
+        let rows = cache.rows([first, later], firstUnreadEventID: "$b", groups: true)
+        #expect(!rows.contains { if case .unread = $0.kind { true } else { false } })
+    }
+
     @Test("Row identities survive older messages arriving above them")
     func stableIdentities() {
         let recent = [message("b", "@alice", at: 10)]

@@ -4,10 +4,10 @@ import ai.nuanu.slatrix.core.Invitation
 import ai.nuanu.slatrix.core.Invitations
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.ui.designsystem.ListHeading
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,8 +57,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  * [responding] holds both buttons while one is at work.
  */
 @Composable
-fun InvitationScreen(invitation: Invitation, responding: Boolean, error: String?, onJoin: () -> Unit, onDecline: () -> Unit,
+fun InvitationScreen(invitation: Invitation?, responding: Boolean, error: String?, onJoin: () -> Unit, onDecline: () -> Unit,
     onBack: () -> Unit) {
+    // Until the list loads, as after the app was away, the page waits empty rather than close or show what's under it.
+    if (invitation == null) return PushedPage("", onBack) {}
     val colors = SlatrixTheme.colors
     val title = if (invitation.direct || invitation.space) invitation.name else "#${invitation.name}"
     Box(Modifier.fillMaxSize()) {
@@ -116,11 +118,7 @@ fun LiveInvitation(id: String, rooms: MatrixRooms?, onJoined: (RoomSummary) -> U
     state.invitations.firstOrNull { it.id == id }?.let { seen[0] = it }
     val gone = !state.loading && state.invitations.none { it.id == id } && !responding
     val invitation = seen[0]
-    // Until the list loads, as after the app was away, the page waits blank rather than close.
-    if (invitation == null && state.loading) {
-        BackHandler(onBack = onBack)
-        return
-    }
+    if (invitation == null && state.loading) return InvitationScreen(null, false, null, {}, {}, onBack)
     if (invitation == null || gone) {
         LaunchedEffect(Unit) { onBack() }
         return
@@ -155,9 +153,9 @@ fun LiveInvitation(id: String, rooms: MatrixRooms?, onJoined: (RoomSummary) -> U
 /** Home's Invitations header: Slack's section look, with nothing to collapse, since every invitation stays in view. */
 @Composable
 internal fun InvitationsHeader() {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.SectionHeader).padding(horizontal = UiMetrics.GapLarge),
-        verticalAlignment = Alignment.CenterVertically) {
-        Text("Invitations", style = MaterialTheme.typography.labelLarge, color = SlatrixTheme.colors.textSecondary, maxLines = 1)
+    Row(Modifier.padding(top = UiMetrics.GapMedium).fillMaxWidth().heightIn(min = UiMetrics.SectionHeader)
+        .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+        ListHeading("Invitations")
     }
 }
 

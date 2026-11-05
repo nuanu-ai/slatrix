@@ -469,6 +469,21 @@ struct WindowHostedTests {
         #expect(still())
     }
 
+    @Test("The composer sits a margin above the window's bottom edge, with no room held for typing names")
+    func composerMargin() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let views = Harness.views(in: harness.hosting).filter { $0.window != nil }
+        let field = try #require(views.first { ($0 as? NSTextView)?.isEditable == true })
+        let composer = field.convert(field.bounds, to: nil)
+        let scroll = try #require(views.first { $0 is TimelineScrollView })
+        let timeline = scroll.convert(scroll.bounds, to: nil)
+        // The space under the composer's text is what is above it in its card, plus the card's margin.
+        let above = timeline.minY - composer.maxY
+        #expect(composer.minY - above <= Metrics(zoom: 1).sp16)
+    }
+
     @Test("A conversation opened at an older message keeps its composer")
     func composerStaysAtOlderMessage() async {
         let harness = Harness()

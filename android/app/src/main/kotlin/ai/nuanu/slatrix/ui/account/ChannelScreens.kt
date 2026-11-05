@@ -186,8 +186,7 @@ fun CreateChannelScreen(workspace: String?, creating: Boolean, error: String?, o
     var topic by rememberSaveable { mutableStateOf("") }
     val back = rememberPredictiveBack(onBack = onBack)
     Box(Modifier.fillMaxSize().graphicsLayer {
-        alpha = 1 - back.value
-        translationX = back.value * Motion.PushDistance * size.width
+        translationX = back.value * size.width
     }.background(colors.canvas)) {
         Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight),

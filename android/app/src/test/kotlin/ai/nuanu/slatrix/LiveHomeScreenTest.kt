@@ -2,6 +2,7 @@ package ai.nuanu.slatrix
 
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.platform.LocalDensity
@@ -59,6 +60,8 @@ import org.junit.Assert.assertTrue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.onNodeWithTag
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -77,7 +80,7 @@ class LiveHomeScreenTest {
         val open = mutableStateOf(false)
         compose.setContent {
             SlatrixTheme {
-                LiveWorkspace(if (open.value) WorkspaceCover("design", 1) { Text("Conversation") } else null) {
+                LiveWorkspace(listOfNotNull(WorkspaceCover("design") { Text("Conversation") }.takeIf { open.value })) {
                     LiveHomeScreen("@alex:example.org", RoomListState(people, loading = false, spacesKnown = true), { open.value = true }, {}, {})
                 }
             }
@@ -107,6 +110,40 @@ class LiveHomeScreenTest {
         compose.waitUntil { tab("Home").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false } }
     }
 
+    @Test fun aTabsTitleSlidesWithItsPageUnderTheFinger() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(listOf(channel("!general:example.org", "general")), loading = false,
+                    spacesKnown = true), {}, {}, {})
+            }
+        }
+        // Its right edge, since a node's bounds stop at the screen's.
+        val rest = compose.onNodeWithText("All conversations").bounds().right
+        val pages = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.HorizontalScrollAxisRange))
+        val width = pages.bounds().width
+        pages.performTouchInput { down(center); repeat(8) { moveBy(androidx.compose.ui.geometry.Offset(-width * 0.05f, 0f)) } }
+        compose.waitForIdle()
+        val moved = compose.onNodeWithText("All conversations").bounds().right
+        assertTrue("from $rest to $moved of $width", moved < rest - width * 0.25f)
+    }
+
+    @Test fun theSearchBarScrollsAwayUnderTheTopBarWithTheList() {
+        val rooms = (0 until 40).map { channel("!c$it:example.org", "channel $it") }
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {}) } }
+        compose.onNodeWithText("Search").assertIsDisplayed()
+        compose.onNode(hasScrollToIndexAction() and SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
+            .performScrollToIndex(10)
+        compose.onNodeWithText("Search").assertDoesNotExist()
+    }
+
+    @Test fun aSectionHeaderStandsOutFromItsRowsAtTheirMarksEdge() {
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(listOf(channel("!general:example.org", "general")), loading = false, spacesKnown = true), {}, {}, {}) } }
+        compose.onNodeWithText("Channels").assert(isHeading())
+        val label = compose.onNodeWithText("Channels", useUnmergedTree = true).bounds()
+        val name = compose.onNodeWithText("general", useUnmergedTree = true).bounds()
+        assertTrue("label at ${label.left}, name at ${name.left}", label.left < name.left - with(compose.density) { UiMetrics.GapLarge.toPx() })
+    }
+
     private fun showTabBar(fontScale: Float) {
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
@@ -119,19 +156,25 @@ class LiveHomeScreenTest {
 
     private fun SemanticsNodeInteraction.bounds() = fetchSemanticsNode().boundsInRoot
 
+    @Test fun laterComesBeforeActivityInTheTabBar() {
+        showTabBar(1f)
+        val order = listOf("Home", "DMs", "Later", "Activity")
+        assertEquals(order, order.sortedBy { tab(it).bounds().left })
+    }
+
     @Test fun newMessageSitsBesideTheTabBarWhereEveryTabFitsItsLabel() {
         showTabBar(1f)
         val button = compose.onNodeWithContentDescription("New message").bounds()
-        assertTrue(button.left >= tab("Later").bounds().right)
-        assertTrue(button.top < tab("Later").bounds().bottom)
+        assertTrue(button.left >= tab("Activity").bounds().right)
+        assertTrue(button.top < tab("Activity").bounds().bottom)
     }
 
     @Config(qualifiers = "w320dp-h704dp-xxxhdpi")
     @Test fun onANarrowPhoneAtALargeFontNewMessageRisesAboveATabBarAcrossTheWidth() {
         showTabBar(1.15f)
         val button = compose.onNodeWithContentDescription("New message").bounds()
-        assertTrue(button.bottom <= tab("Later").bounds().top)
-        assertTrue(tab("Later").bounds().right > button.left)
+        assertTrue(button.bottom <= tab("Activity").bounds().top)
+        assertTrue(tab("Activity").bounds().right > button.left)
     }
 
     @Config(qualifiers = "w320dp-h704dp-xxxhdpi")
@@ -384,6 +427,35 @@ class LiveHomeScreenTest {
         assertTrue("The newest conversation leads", blake.top < avery.top)
     }
 
+    @Test fun aDirectMessagesTimeIsSmallAndQuietEvenWhileUnread() {
+        val rooms = listOf(direct("!sam:example.org", "Sam", unread = UnreadBadge.Count("2"), latest = LatestMessage("See you", 1_000, own = false)))
+        var expected: androidx.compose.ui.text.TextStyle? = null
+        compose.setContent {
+            SlatrixTheme {
+                expected = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(color = SlatrixTheme.colors.textSecondary)
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {})
+            }
+        }
+        tab("DMs").performClick()
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(1_000)), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val style = layouts.single().layoutInput.style
+        assertEquals(expected!!.fontSize, style.fontSize)
+        assertEquals(expected!!.color, style.color)
+    }
+
+    @Test fun anAvatarWithoutAPictureShadesItsColorDownward() {
+        compose.setContent { SlatrixTheme { androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.testTag("avatar")) { ai.nuanu.slatrix.ui.account.LiveAvatar("", 0, UiMetrics.RowAvatar) } } }
+        val avatar = compose.onNodeWithTag("avatar").fetchSemanticsNode().boundsInWindow
+        compose.runOnIdle {
+            val window = compose.activity.window.decorView
+            val image = Bitmap.createBitmap(window.width, window.height, Bitmap.Config.ARGB_8888).also { window.draw(Canvas(it)) }
+            fun lightness(y: Float) = Color(image.getPixel(avatar.center.x.toInt(), y.toInt())).let { it.red + it.green + it.blue }
+            assertTrue(lightness(avatar.top + avatar.height / 8) > lightness(avatar.bottom - avatar.height / 8))
+        }
+    }
+
     @Test fun directMessageNamesLineUpWhateverTheirInitials() {
         val rooms = listOf(direct("!wm:example.org", "Wanda Moss"), direct("!n:example.org", "Nina"))
         compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {}) } }
@@ -422,7 +494,7 @@ class LiveHomeScreenTest {
         var signedOut = false
         var back = false
         compose.setContent {
-            SlatrixTheme { LiveYouScreen("@alex:example.org", { null }, { preferences = true }, { signedOut = true }, onBack = { back = true }) }
+            SlatrixTheme { LiveYouScreen("@alex:example.org", null, { preferences = true }, { signedOut = true }, onBack = { back = true }) }
         }
         compose.onNodeWithText("@alex:example.org").assertIsDisplayed()
         compose.onNodeWithText("Preferences").performClick()
@@ -439,7 +511,7 @@ class LiveHomeScreenTest {
 
     // capability: profile.own
     @Test fun youShowsTheNameOnTheAccountsProfile() {
-        compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", { "Alex Doe" }, {}, {}, onBack = {}) } }
+        compose.setContent { SlatrixTheme { LiveYouScreen("@alex:example.org", "Alex Doe", {}, {}, onBack = {}) } }
         compose.onNodeWithText("Alex Doe").assertIsDisplayed()
         compose.onNodeWithText("@alex:example.org").assertIsDisplayed()
     }

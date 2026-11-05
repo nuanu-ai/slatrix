@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.EmojiCatalog
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
@@ -66,6 +67,21 @@ class MessageActionSheetTest {
         assertTrue(bounds(compose.onNodeWithContentDescription("React with 🎉")).bottom <= bounds(compose.onNodeWithText("Reply in thread")).top)
     }
 
+    @Config(qualifiers = "w320dp-h690dp-xhdpi", fontScale = 1.15f)
+    @Test fun onANarrowPhoneTheReactionsSitWithinThumbReachOverEvenlySpacedActions() {
+        show(MessageActions(quick = listOf("🎉", "👍", "🙂", "❤️", "💯"), onReact = { _, _ -> }, link = { "" }, onQuote = {},
+            onForward = {}, onSave = { _, _ -> }, onMarkUnread = {}, onPin = { _, _ -> }, onDelete = {}))
+        open("On it")
+        fun bounds(node: SemanticsNodeInteraction) = node.fetchSemanticsNode().boundsInWindow
+        val screen = compose.onAllNodes(androidx.compose.ui.test.isRoot())[0].fetchSemanticsNode().boundsInWindow
+        val reaction = bounds(compose.onNodeWithContentDescription("React with 🎉"))
+        assertTrue("reactions at ${reaction.top} of ${screen.height}", reaction.top >= screen.height * 0.4f)
+        val tops = listOf("Reply in thread", "Quote", "Forward", "Save for later", "Copy text").map { bounds(compose.onNodeWithText(it)).top }
+        assertTrue(reaction.bottom <= tops.first())
+        val steps = tops.zipWithNext { above, below -> below - above }
+        assertTrue("steps $steps", steps.all { kotlin.math.abs(it - steps.first()) < 1f })
+    }
+
     // capability: message.react.quick
     @Test fun aQuickReactionReactsAtOnceAndClosesTheSheet() {
         show(MessageActions(quick = listOf("🎉", "👍"), onReact = { message, emoji -> reactions += message.body to emoji }))
@@ -84,6 +100,16 @@ class MessageActionSheetTest {
         compose.waitUntil { compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("thumbs up sign")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithContentDescription("thumbs up sign").performClick()
         compose.runOnIdle { assertEquals(listOf("Ship it" to "👍"), reactions) }
+    }
+
+    @Test fun theEmojiPickerOpensFullOnceItsEmojiWereRead() {
+        val first = EmojiCatalog.load(ApplicationProvider.getApplicationContext()).all.first()
+        show(MessageActions(onReact = { _, _ -> }))
+        open("Ship it")
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithContentDescription("Add reaction").performClick()
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithContentDescription(first.name).assertExists()
     }
 
     // capability: conversation.mark-unread

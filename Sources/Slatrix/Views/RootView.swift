@@ -1067,7 +1067,8 @@ struct RootView: View {
                     } else if let target = editTarget, target.surface == .conversation,
                         target.message.roomID == room.id
                     {
-                        editComposer(target, room: room).padding(.horizontal, m.sp20).padding(.vertical, m.sp4)
+                        editComposer(target, room: room).padding(.horizontal, m.sp20).padding(.top, m.sp4)
+                            .padding(.bottom, m.sp16)
                     } else {
                         BindingScope({ draftBinding(room.id) }) { text in
                             MessageComposer(
@@ -1127,7 +1128,6 @@ struct RootView: View {
                             drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil)
                     }.padding(.horizontal, m.sp16).alignmentGuide(.top) { $0[.bottom] }
                 }
-                TypingLine(matrix: matrix)
             }
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
             .dropToUpload("Upload to \(room.writtenName)")
@@ -2957,25 +2957,6 @@ private struct ErrorBanner: View {
 }
 
 /// Who is typing in the open conversation, on a line of its own so typing redraws nothing else.
-private struct TypingLine: View {
-    let matrix: MatrixService
-    @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
-    private var label: String {
-        let names = matrix.typingUsers
-        if names.count == 1 { return names[0] + " is typing…" }
-        if names.count == 2 { return names.joined(separator: " and ") + " are typing…" }
-        return "Several people are typing…"
-    }
-    var body: some View {
-        HStack {
-            if !matrix.typingUsers.isEmpty { Text(label) }
-            Spacer()
-        }.font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary).padding(.horizontal, m.sp24)
-            .layoutIsolated().frame(height: m.sp24)
-    }
-}
-
 private struct RoomName: View {
     let matrix: MatrixService
     let roomID: String

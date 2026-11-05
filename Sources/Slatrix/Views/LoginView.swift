@@ -2,7 +2,6 @@ import SwiftUI
 
 struct LoginView: View {
     private static let heroTile: CGFloat = 88
-    private static let heroRadius: CGFloat = 24
     private static let formWidth: CGFloat = 360
     private static let fieldHeight: CGFloat = 40
     @Environment(\.metrics) private var m
@@ -22,11 +21,8 @@ struct LoginView: View {
         VStack(spacing: 0) {
             Spacer()
             VStack(spacing: m.sp24) {
-                Image(systemName: "circle.hexagongrid.fill").font(m.font(.hero)).foregroundStyle(
-                    colors.accent
-                )
-                .frame(width: m(Self.heroTile), height: m(Self.heroTile)).background(
-                    colors.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: m(Self.heroRadius)))
+                Image(nsImage: NSApplication.shared.applicationIconImage).resizable()
+                    .frame(width: m(Self.heroTile), height: m(Self.heroTile))
                 Text("Sign in to Slatrix").font(m.font(.largeTitle, .bold)).foregroundStyle(colors.textPrimary)
                 VStack(alignment: .leading, spacing: m.sp16) {
                     field("Homeserver") {

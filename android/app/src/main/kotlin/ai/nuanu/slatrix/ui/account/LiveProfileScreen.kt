@@ -1,5 +1,8 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.BuildConfig
+import androidx.compose.ui.platform.LocalUriHandler
+
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.ui.designsystem.bubble
@@ -9,9 +12,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlin.math.roundToInt
 import ai.nuanu.slatrix.ui.designsystem.Motion
-import androidx.compose.animation.core.Animatable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.graphicsLayer
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
@@ -32,7 +32,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,20 +39,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import kotlinx.coroutines.CancellationException
 
 /**
- * You, pushed from Home's avatar as Slack does: who is signed in, Preferences, and signing out. The profile's name
- * replaces the ID's localpart once [loadName] returns it.
+ * You, pushed from Home's avatar as Slack does: who is signed in, Preferences, and signing out. Without a profile
+ * [name], the ID's localpart stands in.
  */
 @Composable
-fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
-    onViewProfile: (() -> Unit)? = null, onBack: () -> Unit, avatarUrl: String? = null) {
+fun LiveYouScreen(userId: String, name: String?, onPreferences: () -> Unit, onSignOut: () -> Unit,
+    onViewProfile: ((name: String?) -> Unit)? = null, onBack: () -> Unit, avatarUrl: String? = null) {
     val colors = SlatrixTheme.colors
     val localpart = userId.removePrefix("@").substringBefore(':')
-    val name by produceState<String?>(null, userId) {
-        value = try { loadName()?.takeIf { it.isNotBlank() } } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
-    }
     var confirming by rememberSaveable { mutableStateOf(false) }
     if (confirming) {
         AlertDialog(
@@ -78,7 +73,7 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
                 }
             }
             onViewProfile?.let { view ->
-                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button, onClick = view)
+                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button) { view(name) }
                     .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
                     Icon(SlackIcons.Person, null, Modifier.size(UiMetrics.Icon))
                     Text("View profile", style = MaterialTheme.typography.bodyLarge)
@@ -99,27 +94,16 @@ fun LiveYouScreen(userId: String, loadName: suspend () -> String?, onPreferences
 }
 
 /** True where a page shows again because the one over it went back, which is instant. */
-internal val LocalReturning = compositionLocalOf { false }
-
 /**
- * A pushed page: a plain bar with Back, its title and maybe an action such as Save, then its rows. It eases in from the
- * side, as Slack's pages do, once; going back to it, or turning the phone, shows it at once.
+ * A pushed page: a plain bar with Back, its title and maybe an action such as Save, then its rows. The workspace slides
+ * it in, as Slack's pages come in from the side.
  */
 @Composable
 internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable () -> Unit = {}, content: LazyListScope.() -> Unit) {
     val back = rememberPredictiveBack(onBack = onBack)
-    val returning = LocalReturning.current
-    var entered by rememberSaveable { mutableStateOf(returning) }
-    val shown = remember { Animatable(if (entered) 1f else 0f) }
-    LaunchedEffect(shown) {
-        shown.animateTo(1f, Motion.pane())
-        entered = true
-    }
     Column(Modifier.fillMaxSize().graphicsLayer {
-        // A back swipe plays the way in backwards under the finger.
-        val now = shown.value * (1 - back.value)
-        alpha = now
-        translationX = (1 - now) * Motion.PushDistance * size.width
+        // A back swipe carries the page off under the finger, over the one it goes back to.
+        translationX = back.value * size.width
     }.background(SlatrixTheme.colors.canvas).navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.HeaderRow).padding(horizontal = UiMetrics.GapTiny),
             verticalAlignment = Alignment.CenterVertically) {
@@ -190,8 +174,26 @@ fun LivePreferencesScreen(
                         }
                     }
                 }
+                PreferenceHeading("About")
+                AboutRow("Version", BuildConfig.VERSION_NAME)
+                AboutRow("Copyright", "© 2026 Nuanu AI Lab", "https://nuanu.ai")
+                AboutRow("Source code", "GitHub", "https://github.com/nuanu-ai/slatrix")
             }
         }
+}
+
+/** One of About's lines: what it is, and its value, a link when [url] is given, as on the Mac. */
+@Composable
+private fun AboutRow(label: String, value: String, url: String? = null) {
+    val colors = SlatrixTheme.colors
+    val uris = LocalUriHandler.current
+    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
+        .then(if (url != null) Modifier.clickable(role = Role.Button) { uris.openUri(url) } else Modifier)
+        .padding(start = PreferenceInset, end = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = if (url != null) colors.accent else colors.textSecondary, maxLines = 1)
+    }
 }
 
 /** What the message text size preview says. */
@@ -202,7 +204,7 @@ internal const val MessagePreview = "Morning! The new onboarding copy is in the 
 private fun MessageTextSize(scale: Float, onScale: (Float) -> Unit) {
     val colors = SlatrixTheme.colors
     val scales = AppearancePreferences.MessageScales
-    val shape = remember { bubbleShape(own = false, grouped = false) }
+    val shape = remember { bubbleShape(own = false, grouped = false, last = true) }
     // Laid out as an incoming message is, keeping its gutter on the far side.
     Text(MessagePreview, Modifier.padding(start = PreferenceInset, end = UiMetrics.GapLarge + UiMetrics.IncomingGutterNarrow)
         .wrapContentWidth(Alignment.Start).bubble(shape, colors.bubbleIn, colors.bubbleEdge).padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall),

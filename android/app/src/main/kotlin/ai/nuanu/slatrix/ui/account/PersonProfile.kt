@@ -107,13 +107,14 @@ fun PersonProfileScreen(person: Person, own: Boolean, opening: Boolean, error: S
 }
 
 /**
- * The profile of [userId], shown at once with what is known of them, [known], and filled in from the server. Message
- * opens your direct message with them, made if there is none, in [onOpen].
+ * The profile of [userId], shown at once with what is known of them, their [known] name and [knownAvatarUrl] or the
+ * profile loaded last time, and filled in from the server. Message opens your direct message with them, made if there
+ * is none, in [onOpen].
  */
 @Composable
 fun LivePersonProfile(userId: String, known: String?, me: String, people: MatrixPeople?, rooms: Flow<RoomListState>?,
-    onOpen: (RoomSummary) -> Unit, onEdit: (() -> Unit)? = null, onBack: () -> Unit) {
-    val person by produceState(Person(userId, known ?: userId), userId, people) {
+    onOpen: (RoomSummary) -> Unit, onEdit: (() -> Unit)? = null, knownAvatarUrl: String? = null, onBack: () -> Unit) {
+    val person by produceState(people?.known(userId) ?: Person(userId, known ?: userId, knownAvatarUrl), userId, people) {
         people?.profile(userId)?.let { value = it }
     }
     val scope = rememberCoroutineScope()

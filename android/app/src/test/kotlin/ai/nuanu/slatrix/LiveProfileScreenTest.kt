@@ -35,6 +35,20 @@ class LiveProfileScreenTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     // capability: app.appearance
+    @Test fun aboutShowsTheVersionAndOpensTheLabAndTheSource() {
+        val opened = mutableListOf<String>()
+        compose.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides
+                object : androidx.compose.ui.platform.UriHandler { override fun openUri(uri: String) { opened += uri } }) {
+                SlatrixTheme { LivePreferencesScreen(false, null, false, {}, {}, {}) }
+            }
+        }
+        compose.onNodeWithText(ai.nuanu.slatrix.BuildConfig.VERSION_NAME).performScrollTo()
+        compose.onNodeWithText("© 2026 Nuanu AI Lab").performScrollTo().performClick()
+        compose.onNodeWithText("Source code").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(listOf("https://nuanu.ai", "https://github.com/nuanu-ai/slatrix"), opened) }
+    }
+
     @Test fun anAccountCanChooseDarkModeFromPreferences() {
         val mode = mutableStateOf<Boolean?>(null)
         compose.setContent {

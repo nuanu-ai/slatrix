@@ -118,9 +118,10 @@ struct TimelineTable: NSViewRepresentable {
     var scroller: TimelineScroller
     var onLoadOlder: () -> Void
     var onLoadNewer: () -> Void
-    /// Whether the newest message is on screen, whether to offer "Jump to recent", and whether messages sit above the
-    /// top edge, nil until the table shows its rows.
-    var onScroll: (Bool, Bool, Bool?) -> Void
+    /// Whether the newest message is on screen, whether to offer "Jump to recent", whether messages sit above the
+    /// top edge (nil until the table shows its rows), and whether any part of the newest message shows, which reads
+    /// it.
+    var onScroll: (Bool, Bool, Bool?, Bool) -> Void
 
     func makeCoordinator() -> TimelineTableCoordinator { TimelineTableCoordinator() }
 
@@ -204,7 +205,7 @@ struct TimelineTable: NSViewRepresentable {
     /// Whether the reader moved the view since the table last put it somewhere.
     private var scrolledByReader = false
     private var atOlderMessage = false
-    private var reported: (Bool, Bool, Bool?)?
+    private var reported: (Bool, Bool, Bool?, Bool)?
     /// Where the reader was before the scroll view laid out its clip, which a new size has already moved.
     private var tiling: Policy.Position?
     /// While the table waits for its first rows.
@@ -585,6 +586,14 @@ struct TimelineTable: NSViewRepresentable {
             contentHeight: rows.isEmpty ? 0 : table.rect(ofRow: rows.count - 1).maxY)
     }
 
+    private var newestSeen: Bool {
+        guard let row = rows.lastIndex(where: { $0.messageEventID != nil }) else { return false }
+        let rect = table.rect(ofRow: row)
+        let bounds = scrollView.contentView.bounds
+        return ReadStatePolicy.isSeen(
+            top: rect.minY, bottom: rect.maxY, screenTop: bounds.minY, screenBottom: bounds.maxY)
+    }
+
     private func frame(_ id: String) -> Policy.RowFrame? {
         guard let row = index[id] else { return nil }
         let rect = table.rect(ofRow: row)
@@ -697,11 +706,13 @@ struct TimelineTable: NSViewRepresentable {
             return abs(difference) >= 1 ? difference : nil
         }
         let largest = differences.max { abs($0) < abs($1) } ?? 0
+        let newest = rows.lastIndex { if case .message = $0.kind { true } else { false } }
+        let below = newest.map { viewport.contentHeight - table.rect(ofRow: $0).maxY } ?? 0
         Performance.event(
             .timelineFit,
             [
                 "misfit": differences.count, "px": Int(largest), "bottom": Int(viewport.distanceFromBottom.rounded()),
-                "opening": opening, "live": configuration?.live == false ? 0 : 1,
+                "opening": opening, "live": configuration?.live == false ? 0 : 1, "below": Int(below.rounded()),
             ])
     }
 
@@ -805,12 +816,13 @@ struct TimelineTable: NSViewRepresentable {
             viewport.isAtBottom,
             opened
                 && Policy.showsJumpToLatest(viewport, live: configuration.live, scrolledByReader: scrolledByReader),
-            opened ? scrollView.contentView.bounds.minY > 0.5 : nil
+            opened ? scrollView.contentView.bounds.minY > 0.5 : nil,
+            newestSeen
         )
         if reported.map({ $0 != state }) ?? true {
             reported = state
             // SwiftUI state; never changed from inside its own update or layout.
-            DispatchQueue.main.async { configuration.onScroll(state.0, state.1, state.2) }
+            DispatchQueue.main.async { configuration.onScroll(state.0, state.1, state.2, state.3) }
         }
         checkHistory()
     }

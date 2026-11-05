@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.waiting
 import ai.nuanu.slatrix.core.SavedPreview
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.mutableStateMapOf
@@ -57,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.CancellationException
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -67,7 +69,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
 import ai.nuanu.slatrix.core.OpenChannel
 import ai.nuanu.slatrix.core.ConversationMessage
@@ -78,7 +79,6 @@ import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.ThreadFeedState
 import ai.nuanu.slatrix.core.WorkspaceMembership
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -107,7 +107,6 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
     var preferences by rememberSaveable { mutableStateOf(false) }
-    var returning by remember { mutableStateOf(false) }
     // An invitation opened from Home, pushed over it.
     var invitation by rememberSaveable { mutableStateOf<String?>(null) }
     // Someone's profile, pushed over whatever is open, and the name to show until theirs loads.
@@ -155,8 +154,13 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
-                val avatars = remember(client) { SessionAvatars(MatrixAvatars(client)) }
+                val avatars = remember(client) { SessionAvatars(MatrixAvatars(client)::thumbnail) }
                 val userAvatarUrl by remember(client) { MatrixProfile(client).photo() }.collectAsState(null)
+                // Kept across visits and asked again on each, so You opens on your name rather than swapping it in.
+                val ownName by produceState<String?>(null, client, you) {
+                    value = try { client.displayName().takeIf { it.isNotBlank() } } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { value }
+                }
                 // Read inside derivedStateOf, so room list updates recompose the app only when the workspace changes.
                 // Only a pick is saved: a fallback while spaces still load must not replace what the person chose.
                 val roomList = rooms?.state?.collectAsState()
@@ -172,7 +176,11 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                     (id ?: WorkspaceRail.AllToken).let { remembered = it; workspacePreferences.selectedSpaceId = it }
                 }
                 val thread = threads?.selected?.collectAsState()?.value
-                val covered = rememberSaveableStateHolder()
+                // A thread's root follows the channel under it, which alone sees the root's edits.
+                LaunchedEffect(thread?.conversation, selected?.conversation) {
+                    val channel = selected?.conversation?.takeIf { selected.room.id == thread?.room?.id } ?: return@LaunchedEffect
+                    thread?.conversation?.followRoot(channel.state)
+                }
                 // Opens a message highlighted in its conversation and a thread reply in its thread too: for notifications
                 // and Activity, and next for search results and reply quotes.
                 val jump: (RoomSummary, String, String?) -> Unit = remember(workspace, threads) {
@@ -210,53 +218,56 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         { identity?.requestVerification() }, { identity?.acceptVerification() },
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {
-                        LiveWorkspace(when {
-                            preferences -> { val client = (state as AccountState.Connected).client; WorkspaceCover("preferences", 0) { LivePreferencesScreen(dark, darkOverride, wallpaperColors,
-                                { darkOverride = it; appearance.darkMode = it },
-                                { wallpaperColors = it; appearance.wallpaperColors = it }, { preferences = false; returning = true },
-                                messageScale, { messageScale = it; appearance.messageScale = it }) {
-                                    LiveNotificationSettings(userId) { client.getNotificationSettings() }
-                                } } }
-                            invitation != null -> WorkspaceCover("invitation", 0) { invitation?.let { id ->
-                                LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
-                                    { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
-                            } }
-                            editingProfile -> WorkspaceCover("edit profile", 0) { LiveEditProfile((state as? AccountState.Connected)?.client, userId) { editingProfile = false } }
-                            newMessage -> WorkspaceCover("new message", 0) { LiveNewMessage(userId, people, rooms, { room -> newMessage = false; workspace?.open(room) }) { newMessage = false } }
-                            person != null -> WorkspaceCover("person", 0) { person?.let { (id, name) ->
+                        // Bottom to top: each page is pushed over the ones before it in this order.
+                        LiveWorkspace(listOfNotNull(
+                            selected?.let { WorkspaceCover(it.room.id) {
+                                LiveConversation(it, workspace, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name }) { root, row ->
+                                    threads?.open(it.room, root, root = row)
+                                }
+                            } },
+                            thread?.let { WorkspaceCover("${it.room.id} ${it.threadRoot}") {
+                                LiveConversation(it, threads, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name })
+                            } },
+                            WorkspaceCover("you") {
+                                LiveYouScreen(userId, ownName,
+                                    { preferences = true }, account::signOut, onViewProfile = { name -> person = userId to name },
+                                    onBack = { you = false }, avatarUrl = userAvatarUrl)
+                            }.takeIf { you },
+                            channels?.let { page -> WorkspaceCover("channels") {
+                                val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
+                                if (page == ChannelPage.Browse) LiveBrowseChannels(rooms, selectedSpaceId, openChannel) { channels = null }
+                                else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
+                                    openChannel, { notice = it }) { channels = null }
+                            } },
+                            person?.let { (id, name) -> WorkspaceCover("person $id") {
                                 LivePersonProfile(id, name, userId, people, rooms?.state, { room ->
                                     person = null
                                     you = false
                                     threads?.back()
                                     // Message from the conversation already open just goes back to it, where you were.
                                     if (selected?.room?.id != room.id) workspace?.open(room)
-                                }, onEdit = { editingProfile = true }) { person = null }
-                            } }
-                            channels != null -> WorkspaceCover("channels", 0) {
-                                val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
-                                if (channels == ChannelPage.Browse) LiveBrowseChannels(rooms, selectedSpaceId, openChannel) { channels = null }
-                                else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
-                                    openChannel, { notice = it }) { channels = null }
-                            }
-                            // Back from Preferences shows You at once.
-                            you -> WorkspaceCover("you", 0) { CompositionLocalProvider(LocalReturning provides returning) {
-                                LiveYouScreen(userId, { (state as? AccountState.Connected)?.client?.displayName() },
-                                    { preferences = true; returning = false }, account::signOut, onViewProfile = { person = userId to null },
-                                    onBack = { you = false }, avatarUrl = userAvatarUrl)
-                            } }
-                            // A conversation slides in over Home, and a thread over its conversation.
-                            thread != null -> WorkspaceCover("${thread.room.id} ${thread.threadRoot}", 2) {
-                                covered.SaveableStateProvider("${thread.room.id} ${thread.threadRoot}") { key(thread.room.id, thread.threadRoot) {
-                                LiveConversation(thread, threads, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name })
-                            } } }
-                            // Kept while a thread or a profile covers it, so Back returns to the same place.
-                            selected != null -> WorkspaceCover(selected.room.id, 1) { covered.SaveableStateProvider(selected.room.id) { key(selected.room.id) {
-                                LiveConversation(selected, workspace, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name }) { root, row ->
-                                    threads?.open(selected.room, root, root = row)
+                                }, onEdit = { editingProfile = true }, knownAvatarUrl = userAvatarUrl.takeIf { id == userId }) { person = null }
+                            } },
+                            WorkspaceCover("new message") {
+                                LiveNewMessage(userId, people, rooms, { room -> newMessage = false; workspace?.open(room) }) { newMessage = false }
+                            }.takeIf { newMessage },
+                            WorkspaceCover("edit profile") {
+                                LiveEditProfile((state as? AccountState.Connected)?.client, userId, people?.known(userId)?.takeIf { it.name != it.id }) { editingProfile = false }
+                            }.takeIf { editingProfile },
+                            invitation?.let { id -> WorkspaceCover("invitation") {
+                                LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
+                                    { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
+                            } },
+                            WorkspaceCover("preferences") {
+                                val client = (state as AccountState.Connected).client
+                                LivePreferencesScreen(dark, darkOverride, wallpaperColors,
+                                    { darkOverride = it; appearance.darkMode = it },
+                                    { wallpaperColors = it; appearance.wallpaperColors = it }, { preferences = false },
+                                    messageScale, { messageScale = it; appearance.messageScale = it }) {
+                                    LiveNotificationSettings(userId) { client.getNotificationSettings() }
                                 }
-                            } } }
-                            else -> null
-                        }) {
+                            }.takeIf { preferences },
+                        )) {
                             LiveHome(userId, userAvatarUrl, rooms, workspace, search, people, jump, { you = true }, selectedSpaceId, chooseSpace,
                                 { channels = it }, { invitation = it }, { newMessage = true }, { id, name -> person = id to name }, later = {
                                     LaterScreen(saved, roomList?.value?.rooms.orEmpty(), { item -> rooms?.client?.let { MatrixSaved(it).preview(item) } },
@@ -317,7 +328,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     }
     val conversation = open.conversation
     val composer = open.composer
-    val timeline = conversation?.state?.collectAsState()?.value ?: ConversationState(error = open.error)
+    val timeline = conversation?.state?.collectAsState()?.value ?: open.waiting()
     val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
     val scope = rememberCoroutineScope()
     var details by rememberSaveable(open.room.id) { mutableStateOf(false) }
@@ -330,7 +341,35 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     var forwarding by remember { mutableStateOf<Pair<ConversationMessage, MessageType>?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
+    val actions = remember(rooms, open.room.id, conversation) {
+        rooms?.client?.let { client ->
+            val channel = MatrixChannel(client, open.room.id)
+            ChannelDetailsActions(channel::members, channel::save, channel::leave, channel::invite, channel::notifications,
+                channel::setNotifications, pins = {
+                val pins = rememberConversation(client, open.room.id, ConversationView.Pins)
+                // Unpins through the conversation, which outlives the page, so going back doesn't cancel it.
+                PinnedMessages(pins?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load pins")) {
+                    conversation?.pin(it, false)
+                }
+            }, files = {
+                val files = rememberConversation(client, open.room.id, ConversationView.Files)
+                val state = files?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load files")
+                // Asks for the next page, which after a failed one is that page again.
+                SharedFiles(state, { attachment, width, height, full -> media.picture(attachment, width, height, full) },
+                    { openAttachment(context, media, it) }, { media.file(it) }) { files?.loadOlder() }
+            })
+        }
+    }
     Box(Modifier.fillMaxSize()) {
+        // Details push over the conversation, which stays under them as it was.
+        LiveWorkspace(listOfNotNull(actions?.takeIf { details }?.let { actions -> WorkspaceCover("details") {
+            val spaces by remember(roomList) { derivedStateOf { roomList?.value?.spaces.orEmpty() } }
+            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }, onOpenMessage = { id ->
+                details = false
+                // A pin doesn't know its thread, so it asks before jumping.
+                scope.launch { jump(open.room, id, main?.threadRootOf(open.room.id, id)) }
+            }, spaces, onPerson = profile) { details = false }
+        } })) {
         // A Matrix link in a message opens here; a message in a thread opens in its thread, so it is looked up first.
         ProvideMatrixLinks({ roomList?.value?.rooms.orEmpty() }, { alias -> rooms?.client?.let { MatrixLinks.roomIdOf(it, alias) } },
             { target, event ->
@@ -372,36 +411,6 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty(), onPerson = profile,
             loadThreadOrigin = { conversation?.threadOrigin(it) })
         }
-        val actions = remember(rooms, open.room.id, conversation) {
-            rooms?.client?.let { client ->
-                val channel = MatrixChannel(client, open.room.id)
-                ChannelDetailsActions(channel::members, channel::save, channel::leave, channel::invite, channel::notifications,
-                    channel::setNotifications, setInWorkspace = { id, adding ->
-                        channel.setInWorkspace(id, adding)
-                        rooms.reloadSpaces()
-                    }, pins = {
-                    val pins = rememberConversation(client, open.room.id, ConversationView.Pins)
-                    // Unpins through the conversation, which outlives the page, so going back doesn't cancel it.
-                    PinnedMessages(pins?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load pins")) {
-                        conversation?.pin(it, false)
-                    }
-                }, files = {
-                    val files = rememberConversation(client, open.room.id, ConversationView.Files)
-                    val state = files?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load files")
-                    // Asks for the next page, which after a failed one is that page again.
-                    SharedFiles(state, { attachment, width, height, full -> media.picture(attachment, width, height, full) },
-                        { openAttachment(context, media, it) }) { files?.loadOlder() }
-                })
-            }
-        }
-        // Over the conversation, so Back finds it where it was.
-        if (details && actions != null) {
-            val spaces by remember(roomList) { derivedStateOf { roomList?.value?.spaces.orEmpty() } }
-            ChannelDetailsScreen(room, timeline.ownUserId, actions, onLeft = { details = false; owner?.back() }, onOpenMessage = { id ->
-                details = false
-                // A pin doesn't know its thread, so it asks before jumping.
-                scope.launch { jump(open.room, id, main?.threadRootOf(open.room.id, id)) }
-            }, spaces, onPerson = profile) { details = false }
         }
         forwarding?.let { (message, content) ->
             ForwardScreen(message, room, roomList?.value?.rooms.orEmpty().filter { it.canPost }, { destination ->

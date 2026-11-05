@@ -18,6 +18,12 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.semantics.SemanticsProperties
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import androidx.compose.ui.semantics.SemanticsActions
@@ -106,4 +112,26 @@ class LaterScreenTest {
         compose.onNodeWithText("Later").performClick()
         compose.onNodeWithText("Saved list").assertIsDisplayed()
     }
+
+    @Test fun inLaterASwipeLeftOnARowRemovesItAndASwipeRightStillGoesToDms() {
+        val saved = listOf(SavedMessage("!design:example.org", "\$one", 1_000))
+        val removed = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {},
+                    later = { LaterScreen(saved, rooms, { SavedPreview("@sam:example.org", "Sam", "Ship the draft", 1_000) }, {}, { removed += it.eventId }) })
+            }
+        }
+        tab("Later").performClick()
+        compose.onNodeWithText("Ship the draft").performTouchInput { swipeLeft() }
+        compose.waitUntil { removed.isNotEmpty() }
+        assertEquals(listOf("\$one"), removed)
+        assertTrue(tab("Later").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false })
+
+        compose.onNodeWithText("Ship the draft").performTouchInput { swipeRight() }
+        compose.waitUntil { tab("DMs").fetchSemanticsNode().config.getOrElse(SemanticsProperties.Selected) { false } }
+    }
+
+    private fun tab(label: String) =
+        compose.onNode(hasText(label) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected))
 }

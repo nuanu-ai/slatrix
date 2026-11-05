@@ -180,6 +180,19 @@ class MatrixWorkspaceTest {
     }
 
     // capability: thread.open
+    @Test fun aThreadShowsItsRootWhileItOpensInTheRowItThenKeeps() = runTest {
+        val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
+        val root = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", "Plan?", null,
+            1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0)
+
+        workspace.open(workspaceRoom("!alpha:example.org", "Alpha"), threadRoot = "\$root", root = root)
+        val opening = requireNotNull(workspace.selected.value).waiting()
+        assertEquals(listOf("Plan?"), opening.rows.map { (it as ConversationMessage).body })
+        runCurrent()
+        val opened = requireNotNull(workspace.selected.value?.conversation).state.value
+        assertEquals("The root keeps its row, so it never redraws", opening.rows.map { it.id }, opened.rows.map { it.id })
+    }
+
     @Test fun aThreadOpensOnItsRootWithADraftApartFromItsChannel() = runTest {
         val client = WorkspaceClient()
         val workspace = MatrixWorkspace(backgroundScope, client)
@@ -283,7 +296,6 @@ class MatrixWorkspaceTest {
         workspace.close()
     }
 
-    // capability: conversation.keep-position
     @Test fun aConversationLeftStaysOpenForComingBackToUntilNewerOnesPushItOutOrItHasSomethingNew() = runTest {
         val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
         val rooms = (1..6).map { workspaceRoom("!r$it:example.org", "R$it") }

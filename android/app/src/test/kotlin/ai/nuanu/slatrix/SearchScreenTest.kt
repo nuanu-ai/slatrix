@@ -13,6 +13,7 @@ import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
@@ -78,6 +79,7 @@ class SearchScreenTest {
         val opened = mutableListOf<String>()
         compose.setContent { SlatrixTheme { SearchScreen(active, "@alex:example.org", MessageSearchState(), {}, {}, {}) { opened += it } } }
         assertTrue(top("Desmond Fry") < top("design"))
+        compose.onNodeWithText("Recent conversations").assert(isHeading())
         compose.onNodeWithText("general").assertDoesNotExist()
         compose.onNodeWithText("design").performClick()
         compose.runOnIdle { assertEquals(listOf("!design:example.org"), opened) }

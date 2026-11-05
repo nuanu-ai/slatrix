@@ -29,6 +29,14 @@ import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.CompositionLocalProvider
 import org.junit.Assert.assertEquals
+import ai.nuanu.slatrix.ui.account.LiveWorkspace
+import ai.nuanu.slatrix.ui.account.WorkspaceCover
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import org.junit.Assert.assertFalse
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.snapshots.Snapshot
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -86,6 +94,59 @@ class LiveWorkspaceTest {
         compose.runOnIdle { assertEquals("First message", submitted) }
         compose.onNodeWithContentDescription("Message #Team").performTextReplacement("Another thought")
         compose.runOnIdle { assertEquals("Another thought", draft.value.text) }
+    }
+
+    // Back to a profile redrew it from nothing: its photo from an empty circle, its name small and then full size.
+    @Test fun aPageUnderAnotherIsAsItWasWhenItShowsAgain() {
+        val editing = mutableStateOf(false)
+        compose.setContent {
+            SlatrixTheme {
+                LiveWorkspace(listOfNotNull(
+                    WorkspaceCover("profile") {
+                        val name by produceState("…") { value = "Mira Chen" }
+                        Text("Profile of $name")
+                    },
+                    WorkspaceCover("edit") { Text("Edit profile") }.takeIf { editing.value },
+                )) { Text("Home") }
+            }
+        }
+        compose.onNodeWithText("Profile of Mira Chen").assertIsDisplayed()
+        compose.runOnIdle { editing.value = true }
+        compose.onNodeWithText("Edit profile").assertIsDisplayed()
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread { editing.value = false; Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("Profile of Mira Chen").assertIsDisplayed()
+    }
+
+    @Test fun aConversationUnderAnotherPageReadsNothingAndTakesNoBack() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        fun message(id: String) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", id, null,
+            0, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val timeline = mutableStateOf(ConversationState(listOf(message("First")), loading = false, hasMore = false))
+        val profile = mutableStateOf(false)
+        var read: String? = null
+        var left = false
+        compose.setContent {
+            SlatrixTheme {
+                LiveWorkspace(listOfNotNull(
+                    WorkspaceCover("team") {
+                        LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, { left = true }, {}, { read = it }, {}, {}, {})
+                    },
+                    WorkspaceCover("profile") { BackHandler { profile.value = false }; Text("Profile") }.takeIf { profile.value },
+                )) { Text("Home") }
+            }
+        }
+        compose.waitUntil { read == "\$First" }
+        compose.runOnIdle { profile.value = true }
+        compose.onNodeWithText("Profile").assertIsDisplayed()
+        compose.runOnIdle { timeline.value = timeline.value.copy(rows = timeline.value.rows + message("Next")) }
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals("\$First", read) }
+        compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.onNodeWithText("Next").assertIsDisplayed()
+        compose.runOnIdle { assertFalse("Back closed the page on top, not the conversation under it", left) }
+        compose.waitUntil { read == "\$Next" }
     }
 
     // capability: conversation.read

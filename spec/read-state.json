@@ -1,0 +1,12 @@
+{
+  "about": "When an open conversation's newest message counts as seen, which reads the conversation. Edges are in points down the conversation's screen: the message's top and bottom, and the screen's. A message is seen once any part of it is on screen, so a message taller than the screen reads as soon as it shows, not when its end scrolls into view.",
+  "seen": [
+    { "name": "A message wholly on screen is seen", "message": [100, 200], "screen": [0, 800], "seen": true },
+    { "name": "A message taller than the screen is seen once its top shows", "message": [600, 2400], "screen": [0, 800], "seen": true },
+    { "name": "A message whose end alone shows is seen", "message": [-900, 40], "screen": [0, 800], "seen": true },
+    { "name": "A message reaching past both edges is seen", "message": [-100, 900], "screen": [0, 800], "seen": true },
+    { "name": "A message below the screen is not seen", "message": [820, 900], "screen": [0, 800], "seen": false },
+    { "name": "A message starting at the screen's bottom edge is not seen", "message": [800, 900], "screen": [0, 800], "seen": false },
+    { "name": "A message ending at the screen's top edge is not seen", "message": [-300, 0], "screen": [0, 800], "seen": false }
+  ]
+}

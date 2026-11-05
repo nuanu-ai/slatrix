@@ -280,6 +280,8 @@ struct PreferencesView: View {
             VStack(alignment: .leading, spacing: m.sp12) {
                 sectionTitle("About Slatrix")
                 detailRow("Version", value: PlatformIntegration.shared.version)
+                linkRow("Copyright", title: "© 2026 Nuanu AI Lab", url: "https://nuanu.ai")
+                linkRow("Source code", title: "github.com/nuanu-ai/slatrix", url: "https://github.com/nuanu-ai/slatrix")
             }
         }
     }
@@ -293,6 +295,14 @@ struct PreferencesView: View {
             Text(title).foregroundStyle(colors.textSecondary)
             Spacer()
             Text(value).textSelection(.enabled)
+        }.font(m.font(.body))
+    }
+
+    private func linkRow(_ title: String, title link: String, url: String) -> some View {
+        HStack {
+            Text(title).foregroundStyle(colors.textSecondary)
+            Spacer()
+            Link(link, destination: URL(string: url)!).buttonStyle(.textLink)
         }.font(m.font(.body))
     }
 
