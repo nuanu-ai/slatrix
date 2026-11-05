@@ -69,6 +69,31 @@ struct ComposerHostedTests {
         #expect(editor.string == "Hi  there" && !draft.text.contains("<a"))
     }
 
+    @Test("The caret stays where the edit was beside a mention, in a code block, and when paragraphs join")
+    func caretStaysAtEdit() throws {
+        let typed = NSRange(location: NSNotFound, length: 0)
+        let mention = "<a href=\"https://matrix.to/#/@alice:example.org\">Alice</a>"
+        for (draft, at, edit, caret) in [
+            ("Fix this<br>Hi \(mention)", 0, "x", 1), ("<pre><code>abc def</code></pre>", 1, "x", 2),
+            ("<ul><li>one</li></ul>plain", 4, "", 3),
+        ] {
+            let draft = Draft(draft)
+            let (hosting, window) = host(
+                MessageComposer(
+                    text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #team",
+                    members: [], onSend: { _, _ in }, onTyping: { _ in }
+                ).frame(width: 360))
+            defer {
+                window.contentView = nil
+                window.close()
+            }
+            let editor = try editor(in: hosting)
+            editor.setSelectedRange(NSRange(location: at, length: 0))
+            if edit.isEmpty { editor.deleteBackward(nil) } else { editor.insertText(edit, replacementRange: typed) }
+            #expect(editor.selectedRange() == NSRange(location: caret, length: 0), "\(draft.text)")
+        }
+    }
+
     // MARK: Formatting
 
     /// What the composer last wrote to its binding, and how often it asked to send.

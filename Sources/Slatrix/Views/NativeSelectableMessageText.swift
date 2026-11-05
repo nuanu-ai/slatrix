@@ -22,9 +22,11 @@ extension NSMutableAttributedString {
         enumerateAttribute(.mentionPill, in: NSRange(location: 0, length: length)) { value, range, _ in
             guard value != nil, let font = attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
             else { return }
-            addAttribute(
-                .kern, value: 2 * PillLayoutManager.padding(font),
-                range: NSRange(location: NSMaxRange(range) - 1, length: 1))
+            let last = NSMaxRange(range) - 1
+            let kern = 2 * PillLayoutManager.padding(font)
+            // Setting an equal value still counts as an edit, and a text view puts the caret after its last edit.
+            guard attribute(.kern, at: last, effectiveRange: nil) as? CGFloat != kern else { return }
+            addAttribute(.kern, value: kern, range: NSRange(location: last, length: 1))
         }
     }
 }
