@@ -453,6 +453,23 @@ struct WindowHostedTests {
         #expect(lineShown(pane, from: pane.minY))
     }
 
+    @Test("Each divider takes the pointer a few points to either side of its line")
+    func dividerHitArea() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        try harness.openThread()
+        #expect(await eventually { harness.dividers == 2 })
+        let content = try #require(harness.window.contentView)
+        for divider in harness.shown().filter({ String(describing: type(of: $0)) == "ResizePointerView" }) {
+            let line = divider.convert(divider.bounds, to: nil).midX
+            for x in [line - 5, line + 5] {
+                let hit = content.hitTest(content.convert(NSPoint(x: x, y: 450), from: nil))
+                #expect(hit === divider, "\(x) of \(line): \(hit.map { String(describing: type(of: $0)) } ?? "nil")")
+            }
+        }
+    }
+
     @Test("At 150% zoom an open thread stays inside the panel")
     func paneFitsAtZoom() async throws {
         let harness = Harness(zoom: 1.5)

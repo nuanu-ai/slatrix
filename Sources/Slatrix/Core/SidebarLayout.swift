@@ -24,6 +24,8 @@ enum SidebarLayout {
     /// about 60 characters of message, near where Slack moves a thread over the conversation.
     static let readableWidth: CGFloat = 480
     static let handleWidth: CGFloat = 6
+    /// Where a divider takes the pointer, centered on it.
+    static let handleHitWidth: CGFloat = 14
     static let minimumPaneWidth: CGFloat = 280
     static let maximumPaneWidth: CGFloat = 720
     /// The margin the sidebar floats in, left of it.
