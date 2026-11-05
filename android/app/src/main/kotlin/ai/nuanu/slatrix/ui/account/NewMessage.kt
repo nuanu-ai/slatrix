@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.PeopleSearchState
 import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.ui.designsystem.ListHeading
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.foundation.clickable
@@ -74,9 +75,9 @@ fun NewMessageScreen(state: PeopleSearchState, recent: List<RoomSummary>, openin
                         person.id.takeIf { it != person.name }, opening == person.id, opening == null) { onPerson(person) }
                 }
                 when {
-                    state.error != null -> item { Section(state.error) }
+                    state.error != null -> item { Note(state.error) }
                     state.loading && state.people.isEmpty() -> item { ConnectionIndicator(true, null) }
-                    !state.loading && state.people.isEmpty() -> item { Section("No one found. A full ID looks like @name:example.org.") }
+                    !state.loading && state.people.isEmpty() -> item { Note("No one found. A full ID looks like @name:example.org.") }
                 }
             }
         }
@@ -106,8 +107,12 @@ private fun PersonRow(initials: String, colorIndex: Int, url: String?, name: Str
 
 @Composable
 private fun Section(text: String) {
-    Text(text, Modifier.padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapTiny),
-        style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = SlatrixTheme.colors.textSecondary)
+    ListHeading(text, Modifier.padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapTiny))
+}
+
+@Composable
+private fun Note(text: String) {
+    Text(text, Modifier.padding(UiMetrics.GapLarge), style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textSecondary)
 }
 
 /** New message, live: the directory's answers as you type, and the conversation once picked. */

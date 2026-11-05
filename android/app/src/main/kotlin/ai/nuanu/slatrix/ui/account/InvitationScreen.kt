@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.Invitation
 import ai.nuanu.slatrix.core.Invitations
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.ui.designsystem.ListHeading
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -155,9 +156,9 @@ fun LiveInvitation(id: String, rooms: MatrixRooms?, onJoined: (RoomSummary) -> U
 /** Home's Invitations header: Slack's section look, with nothing to collapse, since every invitation stays in view. */
 @Composable
 internal fun InvitationsHeader() {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.SectionHeader).padding(horizontal = UiMetrics.GapLarge),
-        verticalAlignment = Alignment.CenterVertically) {
-        Text("Invitations", style = MaterialTheme.typography.labelLarge, color = SlatrixTheme.colors.textSecondary, maxLines = 1)
+    Row(Modifier.padding(top = UiMetrics.GapMedium).fillMaxWidth().heightIn(min = UiMetrics.SectionHeader)
+        .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+        ListHeading("Invitations")
     }
 }
 

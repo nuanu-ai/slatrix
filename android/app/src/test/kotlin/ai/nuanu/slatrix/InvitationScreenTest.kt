@@ -6,6 +6,8 @@ import ai.nuanu.slatrix.ui.account.InvitationScreen
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -37,7 +39,7 @@ class InvitationScreenTest {
                     onInvitation = { opened += it })
             }
         }
-        compose.onNodeWithText("Invitations").assertIsDisplayed()
+        compose.onNodeWithText("Invitations").assert(isHeading())
         compose.onNodeWithText("Harbor").assertIsDisplayed()
         compose.onNodeWithText("design").performClick()
         compose.runOnIdle { assertEquals(listOf(design.id), opened) }

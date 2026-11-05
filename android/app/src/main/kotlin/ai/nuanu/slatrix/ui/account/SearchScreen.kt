@@ -14,6 +14,7 @@ import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.core.RecentSearches
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SearchHit
+import ai.nuanu.slatrix.ui.designsystem.ListHeading
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -278,8 +279,7 @@ private fun RowScope.RowTitle(name: String) {
 
 @Composable
 private fun SearchSection(label: String) {
-    Text(label, Modifier.padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapTiny),
-        style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = SlatrixTheme.colors.textSecondary)
+    ListHeading(label, Modifier.padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapTiny))
 }
 
 @Composable

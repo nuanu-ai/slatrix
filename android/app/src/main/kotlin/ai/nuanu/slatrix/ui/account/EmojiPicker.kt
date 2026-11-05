@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.EmojiCatalog
+import ai.nuanu.slatrix.ui.designsystem.ListHeading
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -89,9 +90,8 @@ internal fun EmojiPickerSheet(recent: List<String>, onPick: (String) -> Unit, on
                 items(items, span = { if (it is PickerItem.Header) GridItemSpan(maxLineSpan) else GridItemSpan(1) },
                     contentType = { it::class }) { item ->
                     when (item) {
-                        is PickerItem.Header -> Text(item.title, Modifier.padding(horizontal = UiMetrics.GapSmall,
-                            vertical = UiMetrics.GapSmall), style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold, color = colors.textSecondary)
+                        is PickerItem.Header -> ListHeading(item.title, Modifier.padding(start = UiMetrics.GapSmall,
+                            end = UiMetrics.GapSmall, top = UiMetrics.GapMedium, bottom = UiMetrics.GapSmall))
                         is PickerItem.Glyph -> Box(Modifier.size(UiMetrics.Touch)
                             .clickable(role = Role.Button) { onPick(item.value) }.semantics { contentDescription = item.name },
                             contentAlignment = Alignment.Center) {

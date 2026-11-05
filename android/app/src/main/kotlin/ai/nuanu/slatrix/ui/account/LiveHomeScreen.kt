@@ -10,6 +10,7 @@ import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.core.WorkspaceMembership
 import ai.nuanu.slatrix.core.WorkspaceRail
+import ai.nuanu.slatrix.ui.designsystem.ListHeading
 import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
@@ -498,8 +499,7 @@ private fun SectionHeader(section: HomeSection, open: Boolean, onToggle: () -> U
         .semantics(mergeDescendants = true) { stateDescription = if (open) "Expanded" else "Collapsed" }
         .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
-        Text(section.label, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
-            color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        ListHeading(section.label, Modifier.weight(1f, fill = false))
         Icon(if (open) SlackIcons.ChevronDown else SlackIcons.ChevronRight, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.textSecondary)
     }
 }
