@@ -51,3 +51,35 @@ The boards also show two things that need their own pull requests:
 ## Checking the result
 
 Render the screen with the same kind of content, using `SLATRIX_SNAPSHOTS=1 scripts/test.sh --filter Snapshots`. Put each snapshot beside `after-dark.png` and `after-light.png`, in dark and light. A difference counts as unfinished work, not a matter of taste.
+
+## What else is unfinished
+
+Everything below is outside the redesign. It was open on `main` at `827cdef6` on November 6, 2026.
+
+### Before anything else
+
+- **Main's CI is red after #212.** The `mac (test)` job hit its 30-minute limit. The watchdog's list of running suites was empty, and #212 changed nothing on the Mac except `spec/capabilities.json`, so it looks like a hang outside any test. The failed jobs were started again. If they fail again, find what hangs before merging anything else.
+- **Nothing ships until the owner says so.** Main has had no release since 0.2.23. When the owner lifts the hold, the first release carries #203 through #212: the guard against space under the newest message, the Activity badge, names in mentions and notifications, Android reaction faces, Mac themes, and Later's tabs and reminders.
+
+### Unverified
+
+- **Space under the newest message** (#203). `closeGap()` in `TimelineTable.swift` scrolls back when the table ends up taller than its rows, and logs `timeline.gap` each time. The owner hasn't run a build with it yet. After the next release, `scripts/perf-report.sh` counts how often it fired.
+- **Later reminders** (#211, #212). Tests cover scheduling. Nobody has watched a reminder arrive after a real wait on a signed Mac build or a phone, or measured how late Android delivers one under Doze.
+- **Switching themes by hand.** Nobody has checked whether the Mac window flickers when the theme changes.
+
+### Bugs
+
+- **Verification hangs** on "exchanging verification codes" and never shows the emoji.
+- **A message jumps when someone reacts to it** on the Mac. Not reproduced yet. Start from `timeline.jump` in the performance log.
+- **Gaps inside the feed after a day divider.** Probably the same kind of problem as the space under the newest message: rows whose measured height is wrong.
+- **The High Contrast tile in Preferences looks like the Default one.** Make the four tiles tell their themes apart.
+
+### Missing features
+
+- **Online status and read receipts** on both apps: presence dots that reflect the server, and who has read up to where.
+- **Themes on Android.** `app.themes` is `missing` there; the Mac has Slate, Sand and High Contrast in `design/tokens.json` (`mac.themes`).
+- **Mac polish beyond these boards:** a focus ring that follows the system, and Preferences as a grouped form in the style of System Settings.
+
+### Housekeeping
+
+- The worktree `.claude/worktrees/agent-ad2bd0ab444c44faf` and its local branch `later-workflow-android` on the old machine were locked by the harness. #212 has already merged their work, so remove both once they unlock.
