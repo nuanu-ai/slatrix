@@ -475,7 +475,7 @@ struct TimelineTable: NSViewRepresentable {
         switch entry.kind {
         case .spacer, .end, .loading: return m.sp40
         case .welcome: return m(220)
-        case .day: return m(38)
+        case .day: return m(36)
         case .unread: return m(40)
         case .message(let row):
             let line = m.lineHeight(.reading)
@@ -493,7 +493,7 @@ struct TimelineTable: NSViewRepresentable {
                 }
             }
             lines += max(1, ceil(characters / perLine))
-            var height = (row.grouped ? m.sp8 : m(40)) + lines * line
+            var height = (row.grouped ? m.sp4 : m(29)) + lines * line
             if !row.message.reactions.isEmpty { height += m(30) }
             if row.message.attachment != nil { height += m(300) }
             if row.message.replyPreview != nil { height += m(48) }
@@ -1193,9 +1193,7 @@ struct TimelineRow: View, Equatable {
                     isPinned: row.pinned, sendFailure: row.sendFailure, sendBusy: row.sendBusy, hovered: hovered,
                     timeLabel: row.time,
                     avatar: AvatarView(
-                        name: message.senderName, size: context.isThread ? metrics.avatar : metrics.messageAvatar,
-                        matrix: matrix,
-                        source: message.avatarURL),
+                        name: message.senderName, size: metrics.avatar, matrix: matrix, source: message.avatarURL),
                     replierAvatar: message.lastReply.map {
                         AvatarView(
                             name: $0.senderName, size: metrics.avatarSmall, matrix: matrix, source: $0.avatarURL)
@@ -1209,7 +1207,7 @@ struct TimelineRow: View, Equatable {
                         faces[reaction.key] = reaction.faces(me: matrix.user?.id)?.map { id in
                             let member = matrix.members.first { $0.id == id }
                             return AvatarView(
-                                name: member?.name ?? MatrixID.localpart(id), size: metrics.avatarSmall,
+                                name: member?.name ?? MatrixID.localpart(id), size: metrics(18),
                                 matrix: matrix, source: member?.avatarURL)
                         }
                     },
@@ -1280,12 +1278,14 @@ private struct TimelineDayDivider: View {
     let label: String
     var body: some View {
         let colors = appearance.colors
-        Text(label).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
-            .padding(.horizontal, m.sp8 + m.sp2).padding(.vertical, m(3))
-            .overlay(Capsule().strokeBorder(colors.border))
-            // With the rows around it: 24 above the day and 16 below, as the boards space it.
-            .frame(maxWidth: .infinity).padding(.top, m.sp20).padding(.bottom, m.sp4)
-            .accessibilityAddTraits(.isHeader)
+        HStack(spacing: m.sp12) {
+            Rectangle().fill(colors.border).frame(height: 1)
+            Text(label).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
+            Rectangle().fill(colors.border).frame(height: 1)
+        }
+        // 20 above the day; the next sender's own 12 below it.
+        .frame(height: m.sp16).padding(.horizontal, m.sp20).padding(.top, m.sp20)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

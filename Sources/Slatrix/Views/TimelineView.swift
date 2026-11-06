@@ -476,7 +476,7 @@ struct MessageRow: View {
     private var pendingSend: Bool { own && message.sendState != "sent" }
     private var sending: Bool { pendingSend && sendFailure == nil }
     private var compact: Bool { appearance.density == .compact }
-    private var avatarSide: CGFloat { isThread ? m.avatar : m.messageAvatar }
+    private var avatarSide: CGFloat { m.avatar }
     private var time: String { timeLabel ?? message.timestamp.formatted(.dateTime.hour().minute()) }
     var body: some View {
         layout
@@ -502,14 +502,15 @@ struct MessageRow: View {
                     Text(hovered ? time : "").font(m.font(.subheadline)).lineLimit(1).fixedSize()
                         .foregroundStyle(colors.textSecondary).frame(width: avatarSide, alignment: .trailing)
                         .overlay(alignment: .trailing) { if grouped && sending && !hovered { clock } }
-                        .padding(.top, m.sp4)
+                        .padding(.top, m.sp2)
                 } else {
                     Button {
                         actions.openProfile?()
                     } label: {
                         avatar ?? AvatarView(name: message.senderName, size: avatarSide)
                     }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help(
-                        "View \(message.senderName)’s profile")
+                        "View \(message.senderName)’s profile"
+                    ).padding(.top, m.sp2)
                 }
             }
             VStack(alignment: .leading, spacing: m.sp2) {
@@ -518,7 +519,7 @@ struct MessageRow: View {
                         .foregroundStyle(colors.textSecondary)
                 }
                 if !grouped || compact {
-                    HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
+                    HStack(alignment: .firstTextBaseline, spacing: m(6)) {
                         if compact {
                             Text(time).font(m.font(.subheadline))
                                 .foregroundStyle(colors.textSecondary)
@@ -526,7 +527,7 @@ struct MessageRow: View {
                         Button {
                             actions.openProfile?()
                         } label: {
-                            Text(message.senderName).font(m.font(.reading, .semibold))
+                            Text(message.senderName).font(m.font(.body, .semibold))
                                 .foregroundStyle(colors.textPrimary)
                         }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
                         if !compact {
@@ -563,7 +564,7 @@ struct MessageRow: View {
                     }
                     // A reused cell shows another message: a download or preview in flight must not carry over.
                     if let attachment { attachment.padding(.top, m(6)).id(message.id) }
-                    if !message.reactions.isEmpty { reactions.padding(.top, m(6)) }
+                    if !message.reactions.isEmpty { reactions.padding(.top, m(3)) }
                     if !isThread && message.replyCount > 0 {
                         ThreadRepliesBar(
                             count: message.replyCount, lastReply: message.lastReply, avatar: replierAvatar,
@@ -593,9 +594,10 @@ struct MessageRow: View {
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.padding(.horizontal, isThread ? m.sp16 : m.sp20)
-            // The boards' rhythm: 16 between senders, 4 between one sender's messages.
-            .padding(.top, grouped ? 0 : compact ? m.sp2 : m.sp12)
-            .padding(.bottom, m.sp4)
+            // The boards' rhythm: 12 between senders and 2 between one sender's messages, plus the point of leading a
+            // 20 pt line would have on each side of a last line, which has none of its own.
+            .padding(.top, compact ? (grouped ? 0 : m.sp2) : grouped ? m(3) : m.sp12)
+            .padding(.bottom, compact ? m.sp4 : grouped ? m(3) : m(1))
     }
     private var clock: some View { SendingClock(since: message.timestamp) }
 
@@ -605,7 +607,7 @@ struct MessageRow: View {
                 Button {
                     actions.react?(reaction.key)
                 } label: {
-                    ReactionChip(mine: reaction.mine) {
+                    ReactionChip(mine: reaction.mine, faces: reactionFaces[reaction.key] != nil) {
                         Text(reaction.key).font(m.font(.body))
                         if let faces = reactionFaces[reaction.key] {
                             // Overlapping, each ringed in the canvas so the one beneath shows where it ends.
@@ -680,16 +682,18 @@ private struct SendingClock: View {
 /// A reaction's pill: 24 pt, gray at rest; yours are tinted, with an accent edge.
 private struct ReactionChip<Content: View>: View {
     let mine: Bool
+    /// Faces end the pill, close to its round end.
+    var faces = false
     @ViewBuilder let content: Content
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
         let colors = appearance.colors
         // The emoji and its count on one baseline: centered frames put the count low, as an emoji's line is taller.
-        HStack(alignment: .firstTextBaseline, spacing: m.sp4) { content }.padding(.horizontal, m.sp8)
+        HStack(alignment: .firstTextBaseline, spacing: m.sp4) { content }.padding(.leading, m.sp8)
+            .padding(.trailing, faces ? m(3) : m.sp8)
             .frame(height: m.sp24)
             .background(mine ? colors.accentTint : colors.sunken, in: Capsule())
-            .overlay(Capsule().strokeBorder(mine ? colors.accentLine : .clear))
     }
 }
 

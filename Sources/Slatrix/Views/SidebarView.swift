@@ -67,7 +67,7 @@ struct SidebarView: View {
             }
         }
         .padding(.horizontal, m.sp8)
-        // The list scrolls on under you, through the bar's material.
+        // The list scrolls on under you, fading out above you.
         .safeAreaInset(edge: .bottom, spacing: 0) { footer }
         .background(colors.sidebar)
         .clipShape(RoundedRectangle(cornerRadius: m.radiusPanel))
@@ -100,7 +100,7 @@ struct SidebarView: View {
                     Button("New message…") { onCreate(.directMessage) }
                     Button("Browse people…") { route = .directory }
                 }
-            }.padding(.top, m.sp8).padding(.bottom, m.sp20)
+            }.padding(.top, m.sp8).padding(.bottom, footerFade)
         }.scrollIndicators(.hidden)
             .loadingInterval(.sidebarLoading, while: !matrix.roomsLoaded)
             .onChange(of: matrix.rooms.isEmpty, initial: true) { _, empty in
@@ -137,38 +137,28 @@ struct SidebarView: View {
             } label: {
                 HStack(spacing: m.sp8) {
                     AvatarView(
-                        name: matrix.user?.name ?? "You", size: m.avatarMedium, presence: .active,
+                        name: matrix.user?.name ?? "You", size: m(22), presence: .active,
                         surface: colors.sidebar, matrix: matrix, source: matrix.user?.avatarURL)
                     Text(matrix.user?.name ?? "You").font(m.font(.body)).foregroundStyle(colors.textPrimary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                }.padding(.leading, m.sp8).frame(height: m.controlLarge).modifier(SidebarRowFill(selected: false))
+                }.padding(.leading, m.sp8).frame(height: m(36)).modifier(SidebarRowFill(selected: false))
             }.menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden)
                 .accessibilityLabel("Your profile and status")
             if let accessory {
                 Button(accessory.title, action: accessory.action).buttonStyle(.primary).controlSize(.small)
             }
-        }.padding(.horizontal, m.sp8).padding(.vertical, m.sp8)
-            .modifier(FooterPlate())
+        }.padding(.horizontal, m.sp8).padding(.bottom, m.sp8)
+            .background(colors.sidebar)
+            .overlay(alignment: .top) {
+                LinearGradient(
+                    colors: [colors.sidebar.opacity(0), colors.sidebar], startPoint: .top, endPoint: .bottom
+                ).frame(height: footerFade).allowsHitTesting(false).alignmentGuide(.top) { $0[.bottom] }
+            }
     }
 
-    /// You, on a glass plate the list scrolls under, as macOS 26 floats its chrome; a bar with a hairline before it.
-    private struct FooterPlate: ViewModifier {
-        @Environment(\.metrics) private var m
-        @EnvironmentObject private var appearance: AppearanceStore
-        func body(content: Content) -> some View {
-            if #available(macOS 26, *) {
-                content.glass(
-                    appearance.colors.sidebar, in: RoundedRectangle(cornerRadius: m.radiusLarge),
-                    cornerRadius: m.radiusLarge
-                ).padding(m.sp8).scrollEdge(.bottom, appearance.colors.sidebar)
-            } else {
-                content.background(.bar).overlay(alignment: .top) {
-                    VStack(spacing: 0) { Divider().overlay(appearance.colors.border) }
-                }
-            }
-        }
-    }
+    /// Where the list fades into the sidebar above you. Its end stops above this too, so its last row stays clear.
+    private var footerFade: CGFloat { m(36) }
 
     private func shortcut(_ item: AppRoute, label: String, badge: Int = 0, count: Int = 0) -> some View {
         let selected = route == item
@@ -355,7 +345,7 @@ private struct SidebarRoomRow: View, Equatable {
                     ).opacity(room.muted && !selected ? 0.5 : 1)
                 } else {
                     Image(systemName: room.channelSymbol).font(m.font(.body)).frame(width: m.sp16)
-                        .foregroundStyle(room.muted && !selected ? colors.textTertiary : colors.accent)
+                        .foregroundStyle(colors.textTertiary)
                 }
                 Text(room.name).font(m.font(.body, badge != .none ? .semibold : .regular)).lineLimit(1)
                     .truncationMode(.tail)

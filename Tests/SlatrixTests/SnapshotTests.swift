@@ -321,11 +321,18 @@ struct Snapshots {
         try write(await settledImage(hosting), "toast-\(theme.rawValue)")
     }
 
-    @Test("Sidebar", arguments: Theme.allCases)
-    func sidebar(theme: Theme) async throws {
+    @Test(
+        "Sidebar, with a short list, and a long one at its top and at its end", arguments: Theme.allCases,
+        [false, true])
+    func sidebar(theme: Theme, long: Bool) async throws {
         _ = NSApplication.shared
         let matrix = MatrixService()
         matrix.enterPreview()
+        if long {
+            matrix.rooms += (0..<30).map {
+                ChatRoom(id: "long.\($0)", name: "Channel \($0)", spaceIDs: ["preview.workspace"])
+            }
+        }
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
         defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
@@ -350,7 +357,13 @@ struct Snapshots {
             window.contentView = nil
             window.close()
         }
-        try write(await settledImage(hosting), "sidebar-\(theme.rawValue)")
+        let name = "sidebar-\(long ? "long-" : "")\(theme.rawValue)"
+        try write(await settledImage(hosting), name)
+        guard long else { return }
+        let list = try #require(Self.views(in: hosting).compactMap { $0 as? NSScrollView }.first)
+        // Past the end: the list stops scrolling where a reader's would.
+        try #require(list.documentView).scroll(NSPoint(x: 0, y: 100_000))
+        try write(await settledImage(hosting), "\(name)-end")
     }
 
     @Test("Component gallery", arguments: Theme.allCases)
@@ -793,9 +806,72 @@ struct Snapshots {
             RootView(matrix: matrix).environment(\.metrics, Metrics()), theme: theme, name: "real-life")
     }
 
-    /// The window at 1440 × 900 and 100% with `view` as its content, after `prepare`.
+    @Test(
+        "A direct conversation of short messages and one long one, hovered, as the boards draw it",
+        arguments: Theme.allCases)
+    func shortMessages(theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        matrix.user = ChatUser(id: "preview.you", name: "Dmitry Ukhanov")
+        let channels = [
+            "Design", "Marketing and Growth", "Planning and Demos", "Platform and Tools", "Releases", "Support",
+            "Welcome",
+        ]
+        let starred = ["Agents", "Team", "Infra PR Reviews"]
+        matrix.rooms =
+            starred.map { ChatRoom(id: "short.\($0)", name: $0, favorite: true, spaceIDs: ["preview.workspace"]) }
+            + channels.map { ChatRoom(id: "short.\($0)", name: $0, spaceIDs: ["preview.workspace"]) }
+            + ["deploy agent", "Анна Белова", "Игорь Соколов"].map {
+                ChatRoom(id: "short.\($0)", name: $0, isDirect: true, memberCount: 2)
+            }
+        let room = "short.Анна Белова"
+        matrix.selectedRoomID = room
+        let you = "preview.you"
+        let anna = "preview.anna"
+        var serial = 0
+        func message(_ sender: String, days: Double, _ hour: Double, _ body: String, reaction: String? = nil)
+            -> ChatMessage
+        {
+            serial += 1
+            let day = Calendar.current.startOfDay(for: Date()).addingTimeInterval(-days * 86_400)
+            var message = ChatMessage(
+                id: "short.\(serial)", roomID: room, senderID: sender,
+                senderName: sender == you ? "Dmitry Ukhanov" : "Анна Белова", body: body,
+                timestamp: day.addingTimeInterval(hour * 3_600))
+            if let reaction {
+                message.reactions = [MessageReaction(key: reaction, count: 1, mine: true, senders: [you])]
+            }
+            return message
+        }
+        matrix.messages = [
+            message(anna, days: 9, 13.25, "Готово", reaction: "🙏"),
+            message(anna, days: 8, 10.8, "агент сам ловит PR или нужно создать ему тред?"),
+            message(anna, days: 8, 10.81, "Привет!"),
+            message(
+                you, days: 8, 10.85, "Привет! Сам ловит и PR, и изменения, но сейчас я его переделываю, может глючить"),
+            message(
+                anna, days: 8, 10.86, "поняла, там 402-й срочный, если получится его протолкнуть, будет супер",
+                reaction: "👀"),
+            message(
+                you, days: 8, 11.07,
+                "Я сейчас сделал ручной запуск плана после инцидента безопасности. План запускается в боевой среде, поэтому сначала хочу посмотреть, кто автор PR и что он делает. Как закончу проверку, напишу сюда и в канал Infra PR Reviews."
+            ),
+            message(anna, days: 8, 11.08, "Принято"),
+            message(
+                you, days: 1, 10.05, "Привет! А встреча по бюджету когда? Помню, ты говорила, но в календаре не вижу"),
+            message(anna, days: 1, 10.33, "в четверг в 15:00, сейчас пришлю приглашение"),
+            message(you, days: 0, 9.2, "спасибо!"),
+        ]
+        try await render(
+            RootView(matrix: matrix).environment(\.metrics, Metrics()), theme: theme, name: "short-messages",
+            size: NSSize(width: 1_280, height: 800), hovering: "Привет!")
+    }
+
+    /// The window at 100% with `view` as its content, after `prepare`, with the pointer over a message starting `hovering`.
     private func render(
-        _ view: some View, theme: Theme, name: String, prepare: () -> Void = {}
+        _ view: some View, theme: Theme, name: String, size: NSSize = NSSize(width: 1440, height: 900),
+        hovering: String? = nil, prepare: () -> Void = {}
     ) async throws {
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
@@ -803,7 +879,7 @@ struct Snapshots {
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
         let hosting = NSHostingView(rootView: view.environmentObject(appearance))
-        let window = offscreenWindow(NSSize(width: 1440, height: 900))
+        let window = offscreenWindow(size)
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
         window.orderFrontRegardless()
@@ -813,6 +889,13 @@ struct Snapshots {
         }
         _ = try await settledImage(hosting)
         prepare()
+        if let hovering {
+            let scroll = try #require(Self.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
+            let text = try #require(
+                Self.views(in: hosting).compactMap { $0 as? MessageTextView }.first { $0.string.hasPrefix(hovering) })
+            let frame = text.convert(text.bounds, to: nil)
+            scroll.onPointer?(NSPoint(x: frame.midX, y: frame.midY))
+        }
         try write(await settledImage(hosting), "\(name)-\(theme.rawValue)")
     }
 

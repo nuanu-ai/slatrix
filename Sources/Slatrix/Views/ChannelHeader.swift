@@ -32,7 +32,7 @@ struct ChannelHeader: View {
             }
             toggle(.pins, symbol: "pin", label: "Pinned", count: room.pinnedEventIDs.count)
                 .disabled(matrix.isPreview || room.membership != "join")
-            toggle(.files, symbol: "doc.on.doc", label: "Files and links")
+            toggle(.files, symbol: "paperclip", label: "Files and links")
             Menu {
                 NativeMessageMenuCommands(commands: Self.menu(for: room, isPreview: matrix.isPreview, perform: perform))
             } label: {
