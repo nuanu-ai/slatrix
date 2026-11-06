@@ -590,6 +590,19 @@ struct WindowHostedTests {
         #expect(abs(newest.convert(newest.bounds, to: nil).minY - before.minY) < 1)
     }
 
+    @Test("The composer keeps to the conversation's column, centered over the messages")
+    func composerInColumn() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let timeline = try #require(harness.shown().first { $0 is TimelineScrollView })
+        let pane = timeline.convert(timeline.bounds, to: nil)
+        let editor = try #require(harness.shown().first { ($0 as? NSTextView)?.isEditable == true })
+        let field = editor.convert(editor.bounds, to: nil)
+        // The boards' composer is 720 wide; its text field sits inside, between its buttons.
+        #expect(field.minX >= pane.midX - 360 && field.maxX <= pane.midX + 360, "\(field) in \(pane)")
+    }
+
     @Test("A thread left open in a channel is open again on coming back to the channel")
     func threadSurvivesLeaving() async throws {
         let harness = Harness()

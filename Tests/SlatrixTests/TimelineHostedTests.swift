@@ -69,8 +69,8 @@ struct TimelineHostedTests {
 
         /// With `opening`, the conversation opens the way the app opens it, its timelines built by that room.
         init(
-            messages: [ChatMessage] = [], room: ChatRoom = TimelineHostedTests.room, height: CGFloat = 400,
-            opening: FakeOpenRoom? = nil
+            messages: [ChatMessage] = [], room: ChatRoom = TimelineHostedTests.room, width: CGFloat = 620,
+            height: CGFloat = 400, opening: FakeOpenRoom? = nil
         ) {
             client = FakeClient(rooms: [opening ?? FakeRoom(roomInfo(id: room.id))])
             let user = ChatUser(id: TimelineHostedTests.user, name: "Reader")
@@ -85,7 +85,7 @@ struct TimelineHostedTests {
                     rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
                 service.messages = messages
             }
-            window = offscreenWindow(NSSize(width: 620, height: height))
+            window = offscreenWindow(NSSize(width: width, height: height))
             hosting = NSHostingView(
                 rootView: Fixture(
                     service: service, room: room, appearance: appearance, popovers: popovers, atBottom: { _ in }))
@@ -817,6 +817,29 @@ extension TimelineHostedTests {
         // Leaving the timeline takes the toolbar with it.
         harness.scrollView?.onPointer?(nil)
         #expect(toolbar(harness) == nil)
+    }
+
+    @Test("In a wide pane the toolbar sits at the column's right edge, and widening the pane changes no row's height")
+    func toolbarAtColumnEdge() async throws {
+        let harness = Harness(messages: Self.actionable(0..<30), width: 1_200, height: 560)
+        defer { harness.close() }
+        await settle(harness) { harness.top(of: "Message 29") != nil }
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        func heights() -> [CGFloat] { (0..<table.numberOfRows).map { table.rect(ofRow: $0).height } }
+        // The boards center 704 pt of content, so its right edge is 352 from the pane's middle.
+        func barEdge() throws -> CGFloat {
+            _ = try hover(harness, "Message 29")
+            let bar = try #require(toolbar(harness))
+            return bar.convert(bar.bounds, to: nil).maxX
+        }
+        #expect(abs(try barEdge() - (600 + 352)) < 1)
+        let before = heights()
+        harness.window.setContentSize(NSSize(width: 1_500, height: 560))
+        harness.layout()
+        await drainMainActor()
+        harness.layout()
+        #expect(heights() == before)
+        #expect(abs(try barEdge() - (750 + 352)) < 1)
     }
 
     @Test("A message passing under the header shows its toolbar below the header, and the header itself hovers none")
