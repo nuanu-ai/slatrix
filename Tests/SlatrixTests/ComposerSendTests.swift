@@ -115,8 +115,11 @@ struct ComposerSendTests {
     @Test("An uploaded video carries its upright size, its length and a poster from a second in, as Slack's do")
     func uploadedVideo() async throws {
         let scratch = try TemporaryDirectory()
-        // Stored on its side and turned a quarter by its track, as a phone records upright.
-        let clip = try await scratch.video("clip.mov", width: 320, height: 180, rotation: 90, seconds: 2)
+        // Two seconds of 320×180 frames, red on the left and blue on the right, stored on their side and turned a
+        // quarter by the track, as a phone records upright. A copy, since the upload takes the file it's given.
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/phone-video.mov")
+        let clip = try scratch.file("clip.mov", Data(contentsOf: fixture))
         try await service.uploadFile(clip, roomID: roomID)
         guard case .video(let info, .file(let path)?) = try #require(main.attachments.all.first) else {
             Issue.record("not sent as a video with a poster")
