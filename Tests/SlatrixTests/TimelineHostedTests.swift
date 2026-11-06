@@ -836,6 +836,23 @@ extension TimelineHostedTests {
         #expect(abs(try barEdge() - (750 + 352)) < 1)
     }
 
+    @Test("A one-sender row shorter than the toolbar has the toolbar centered on it")
+    func toolbarCentersOnShortRow() async throws {
+        var messages = Self.actionable(0..<30)
+        messages[29].timestamp = messages[28].timestamp.addingTimeInterval(5)
+        #expect(messages[29].senderID == messages[28].senderID)
+        let harness = Harness(messages: messages, height: 560)
+        defer { harness.close() }
+        await settle(harness) { harness.top(of: "Message 29") != nil }
+        var cell: NSView? = try hover(harness, "Message 29")
+        while let view = cell, !(view is TimelineCell) { cell = view.superview }
+        let row = try #require(cell).convert(try #require(cell).bounds, to: nil)
+        let shown = try #require(toolbar(harness))
+        let bar = shown.convert(shown.bounds, to: nil)
+        #expect(bar.height > row.height, "\(bar) over \(row)")
+        #expect(abs(bar.midY - row.midY) <= 1, "\(bar) over \(row)")
+    }
+
     @Test("A message passing under the header shows its toolbar below the header, and the header itself hovers none")
     func toolbarBelowHeader() async throws {
         let harness = Harness(messages: Self.actionable(0..<30), height: 560)
