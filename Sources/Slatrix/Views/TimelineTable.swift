@@ -1181,7 +1181,8 @@ struct TimelineRow: View, Equatable {
         case .welcome(let welcome):
             TimelineWelcomeRow(welcome: welcome).conversationRow(metrics, isThread: context.isThread)
         case .day(let label):
-            TimelineDayDivider(label: label).conversationRow(metrics, isThread: context.isThread)
+            TimelineDayDivider(label: label, isThread: context.isThread).conversationRow(
+                metrics, isThread: context.isThread)
         case .unread: TimelineUnreadDivider().conversationRow(metrics, isThread: context.isThread)
         case .message(let row):
             if let matrix = context.matrix {
@@ -1272,10 +1273,11 @@ private struct TimelineWelcomeRow: View {
     }
 }
 
-private struct TimelineDayDivider: View {
+struct TimelineDayDivider: View {
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     let label: String
+    let isThread: Bool
     var body: some View {
         let colors = appearance.colors
         HStack(spacing: m.sp12) {

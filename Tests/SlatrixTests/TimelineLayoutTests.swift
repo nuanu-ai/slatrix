@@ -14,6 +14,15 @@ struct TimelineLayoutTests {
     /// Thursday 23 October 2025, 12:00 at UTC+8.
     private static let now = Date(timeIntervalSince1970: 1_761_192_000)
 
+    @Test("A hovered message's time in the gutter leaves out AM and PM, which don't fit there")
+    func gutterTime() {
+        func time(_ date: Date) -> String {
+            TimelineLayout.gutterTime(date, calendar: Self.calendar, locale: Self.locale)
+        }
+        #expect(time(Self.now) == "12:00")
+        #expect(time(Self.now.addingTimeInterval(65 * 60)) == "1:05")
+    }
+
     private func message(_ id: String, _ sender: String, at minutesBeforeNow: Double) -> ChatMessage {
         ChatMessage(
             id: id, roomID: "!room:example.org", senderID: sender, senderName: sender, body: id,

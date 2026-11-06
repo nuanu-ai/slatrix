@@ -346,12 +346,12 @@ struct TimelineHostedTests {
         let before = edges().top
         #expect(before < 0)
         // Its lines wrap more and it grows, from the top edge it keeps.
-        harness.window.setContentSize(NSSize(width: 736, height: 800))
+        harness.window.setContentSize(NSSize(width: 500, height: 800))
         harness.layout()
-        #expect(edges().top == before && edges().bottom >= 100)
+        #expect(edges().top == before && edges().bottom > 100)
         await drainMainActor()
         await settle(harness)
-        #expect(edges().top == before && edges().bottom >= 100)
+        #expect(edges().top == before && edges().bottom > 100)
     }
 
     @Test("Sending files brings the conversation to them, from wherever you were reading")
@@ -824,7 +824,7 @@ extension TimelineHostedTests {
         let harness = Harness(messages: Self.actionable(0..<30), width: 1_200, height: 560)
         defer { harness.close() }
         await settle(harness) { harness.top(of: "Message 29") != nil }
-        // The boards center 704 pt of content, so its right edge is 352 from the pane's middle.
+        // The column centers 704 pt of content, so its right edge is 352 from the pane's middle.
         func barEdge() throws -> CGFloat {
             _ = try hover(harness, "Message 29")
             let bar = try #require(toolbar(harness))
@@ -1224,7 +1224,7 @@ extension TimelineHostedTests {
 /// Rows on their own: no window needed.
 @MainActor
 struct MessageRowLayoutTests {
-    @Test("A long message wraps at the boards' 704 pt of content however wide the pane is")
+    @Test("A long message wraps at the column's 704 pt of content however wide the pane is")
     func wrapsAtTheColumn() {
         let message = ChatMessage(
             id: "$long", roomID: "!timeline:example.org", senderID: "@a:example.org", senderName: "Avery",
@@ -1237,6 +1237,38 @@ struct MessageRowLayoutTests {
         // 704 of text and the row's 20 pt padding on each side.
         #expect(height(pane: 2_000) == height(pane: 744))
         #expect(height(pane: 700) > height(pane: 744))
+    }
+
+    @Test("A sender's one-line message takes 49 pt with the gap above it, and each one under it 24")
+    func rhythm() {
+        let appearance = AppearanceStore()
+        let saved = appearance.density
+        defer { appearance.density = saved }
+        appearance.density = .comfortable
+        let message = ChatMessage(
+            id: "$one", roomID: "!timeline:example.org", senderID: "@a:example.org", senderName: "Avery",
+            body: "One line", timestamp: Date(timeIntervalSince1970: 0))
+        func height(grouped: Bool) -> CGFloat {
+            let row = MessageRow(message: message, grouped: grouped, own: false, hovered: false)
+                .environmentObject(appearance)
+            return NSHostingController(rootView: row).sizeThatFits(in: CGSize(width: 744, height: 10_000)).height
+        }
+        #expect(abs(height(grouped: false) - 49) <= 0.5, "\(height(grouped: false))")
+        #expect(abs(height(grouped: true) - 24) <= 0.5, "\(height(grouped: true))")
+    }
+
+    @Test("A day takes 20 pt above its 16 pt line, and adds 2 below it where a compact row brings only 2 of its own")
+    func dayDivider() {
+        let appearance = AppearanceStore()
+        let saved = appearance.density
+        defer { appearance.density = saved }
+        func height(_ density: MessageDensity) -> CGFloat {
+            appearance.density = density
+            let day = TimelineDayDivider(label: "Today", isThread: false).environmentObject(appearance)
+            return NSHostingController(rootView: day).sizeThatFits(in: CGSize(width: 744, height: 10_000)).height
+        }
+        #expect(height(.comfortable) == 36)
+        #expect(height(.compact) == 38)
     }
 
     @Test(
