@@ -1172,9 +1172,11 @@ struct TimelineRow: View, Equatable {
         case .spacer, .end: Color.clear
         case .loading(let loading):
             TimelineLoadingRow(loading: loading, offline: context.matrix?.connectionState == .offline)
-        case .welcome(let welcome): TimelineWelcomeRow(welcome: welcome)
-        case .day(let label): TimelineDayDivider(label: label)
-        case .unread: TimelineUnreadDivider()
+        case .welcome(let welcome):
+            TimelineWelcomeRow(welcome: welcome).conversationRow(metrics, isThread: context.isThread)
+        case .day(let label):
+            TimelineDayDivider(label: label).conversationRow(metrics, isThread: context.isThread)
+        case .unread: TimelineUnreadDivider().conversationRow(metrics, isThread: context.isThread)
         case .message(let row):
             if let matrix = context.matrix {
                 let message = row.message
@@ -1214,6 +1216,13 @@ struct TimelineRow: View, Equatable {
                     reactionFrame: { context.onReactionFrame(entry.id, $0, $1) })
             }
         }
+    }
+}
+
+extension View {
+    /// Keeps a conversation's row to its column, centered in a wider pane. A thread's pane is narrower: its rows fill it.
+    func conversationRow(_ m: Metrics, isThread: Bool) -> some View {
+        frame(maxWidth: isThread ? .infinity : m.conversationRow).frame(maxWidth: .infinity)
     }
 }
 

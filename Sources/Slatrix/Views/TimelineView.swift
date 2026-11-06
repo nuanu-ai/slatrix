@@ -483,8 +483,9 @@ struct MessageRow: View {
             // Inset and rounded, as Mail marks the row under the pointer.
             .background {
                 RoundedRectangle(cornerRadius: m.radius).fill(hovered ? colors.hover : .clear)
-                    .padding(.horizontal, m.sp8)
+                    .padding(.horizontal, isThread ? m.sp8 : m.sp12)
             }
+            .conversationRow(m, isThread: isThread)
             .background {
                 // A cell shows another message after a scroll; that one's highlight starts afresh, never fading in.
                 colors.highlight.opacity(highlighted ? 1 : 0)

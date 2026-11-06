@@ -89,8 +89,12 @@ struct Metrics: Equatable {
     var avatarSmall: CGFloat { 20 * zoom }
     var avatarMedium: CGFloat { 24 * zoom }
     var avatar: CGFloat { 32 * zoom }
-    /// A sender beside their messages, at Mail's size.
-    var messageAvatar: CGFloat { 36 * zoom }
+    /// A sender beside their messages.
+    var messageAvatar: CGFloat { 32 * zoom }
+    /// The conversation's centered column: the composer, and what a hovered row fills.
+    var conversationColumn: CGFloat { 720 * zoom }
+    /// A row of that column, with the margin it keeps from the pane on each side.
+    var conversationRow: CGFloat { conversationColumn + 2 * sp12 }
     var avatarLarge: CGFloat { 72 * zoom }
     /// The photo at the top of a profile.
     var profilePhoto: CGFloat { 240 * zoom }
