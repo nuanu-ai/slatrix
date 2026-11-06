@@ -981,7 +981,7 @@ struct TimelineTable: NSViewRepresentable {
             x: clip.minX, y: clip.minY + insets.top, width: clip.width,
             height: clip.height - insets.top - insets.bottom)
         // A row too short for the gap above it centers the toolbar instead.
-        let inset = max(0, min(m.sp4, (rect.height - size.height) / 2))
+        let inset = min(m.sp4, (rect.height - size.height) / 2)
         let y = min(max(top.y + inset, visible.minY + m.sp4), visible.maxY - size.height)
         toolbar.frame.origin = NSPoint(x: top.x - (context.isThread ? m.sp16 : m.sp20) - size.width, y: y)
         toolbar.isHidden = false
