@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Переписка в Slatrix для Mac</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+button{font:inherit}
+input::placeholder{color:inherit;opacity:1}
+</style>
+</helmet>
+<div style="width: 1280px; height: 800px; position: relative; overflow: hidden; background: {{t.canvas}}; color: {{t.text}}; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; -webkit-font-smoothing: antialiased">
+
+  <aside style="position: absolute; left: 8px; top: 8px; bottom: 8px; width: 260px; box-sizing: border-box; background: {{t.sidebar}}; border: 0.5px solid {{t.border}}; border-radius: 16px; display: flex; flex-direction: column">
+    <div style="height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 14px; flex: none">
+      <div style="display: flex; gap: 8px">
+        <span style="width: 12px; height: 12px; border-radius: 6px; background: #ff5f57"></span>
+        <span style="width: 12px; height: 12px; border-radius: 6px; background: #febc2e"></span>
+        <span style="width: 12px; height: 12px; border-radius: 6px; background: #28c840"></span>
+      </div>
+      <button aria-label="Hide sidebar" style="width: 28px; height: 28px; border: 0; padding: 0; background: transparent; color: {{t.secondary}}; display: flex; align-items: center; justify-content: center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="3"></rect><path d="M9 4.5v15"></path></svg>
+      </button>
+    </div>
+    <div style="height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 16px; flex: none">
+      <button style="border: 0; padding: 0; background: transparent; color: {{t.text}}; display: flex; align-items: center; gap: 4px; font-size: 15px; font-weight: 600">Nuanu AI Lab
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="{{t.secondary}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+      </button>
+      <button aria-label="New message" style="width: 28px; height: 28px; border: 0; padding: 0; background: transparent; color: {{t.secondary}}; display: flex; align-items: center; justify-content: center">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5V12"></path><path d="M17.5 3.5l3 3L12 15l-4 1 1-4z"></path></svg>
+      </button>
+    </div>
+
+    <sc-for list="{{sections}}" as="section" hint-placeholder-count="3">
+      <div style="margin-top: 14px; flex: none">
+        <div style="height: 24px; display: flex; align-items: center; padding: 0 16px; font-size: 11px; font-weight: 600; color: {{t.secondary}}">{{section.title}}</div>
+        <sc-for list="{{section.rows}}" as="row" hint-placeholder-count="4">
+          <button style="width: calc(100% - 16px); margin: 0 8px; height: 28px; border: 0; border-radius: 8px; padding: 0 8px; background: {{row.bg}}; color: {{t.text}}; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: {{row.weight}}; text-align: left">
+            <sc-if value="{{row.channel}}" hint-placeholder-val="{{true}}">
+              <span style="width: 18px; text-align: center; font-size: 15px; font-weight: 500; color: {{t.hash}}">#</span>
+            </sc-if>
+            <sc-if value="{{row.person}}" hint-placeholder-val="{{false}}">
+              <span style="width: 18px; height: 18px; border-radius: 9px; background: {{row.fill}}; color: #ffffff; font-size: 7.5px; font-weight: 700; display: flex; align-items: center; justify-content: center">{{row.initials}}</span>
+            </sc-if>
+            {{row.name}}
+          </button>
+        </sc-for>
+      </div>
+    </sc-for>
+
+    <div style="margin-top: auto; flex: none">
+      <sc-if value="{{t.before}}" hint-placeholder-val="{{true}}">
+        <div style="margin: 8px; height: 60px; box-sizing: border-box; border: 1px solid {{t.border}}; background: {{t.card}}; border-radius: 12px; display: flex; align-items: center; gap: 10px; padding: 0 14px">
+          <span style="position: relative; width: 30px; height: 30px; border-radius: 15px; background: {{me.fill}}; color: #ffffff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center">{{me.initials}}
+            <span style="position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; border-radius: 50%; background: #30d158; border: 2px solid {{t.sidebar}}"></span>
+          </span>
+          <span style="font-size: 14px">{{me.name}}</span>
+        </div>
+      </sc-if>
+      <sc-if value="{{t.after}}" hint-placeholder-val="{{false}}">
+        <button style="width: calc(100% - 16px); margin: 0 8px 8px; height: 36px; border: 0; border-radius: 8px; padding: 0 8px; background: transparent; color: {{t.text}}; display: flex; align-items: center; gap: 8px; font-size: 13px; text-align: left">
+          <span style="position: relative; width: 22px; height: 22px; border-radius: 11px; background: {{me.fill}}; color: #ffffff; font-size: 8.5px; font-weight: 700; display: flex; align-items: center; justify-content: center">{{me.initials}}
+            <span style="position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border-radius: 50%; background: #30d158; border: 2px solid {{t.sidebar}}"></span>
+          </span>
+          {{me.name}}
+        </button>
+      </sc-if>
+    </div>
+  </aside>
+
+  <section style="position: absolute; left: 276px; right: 0; top: 0; bottom: 0">
+    <div style="position: absolute; top: 0; left: 16px; right: 16px; height: 52px; display: flex; align-items: center; gap: 12px">
+      <div style="height: 32px; display: flex; align-items: center; padding: 0 4px; border-radius: 16px; background: {{t.capsule}}; border: 0.5px solid {{t.border}}">
+        <button aria-label="Back" style="width: 28px; height: 28px; border: 0; padding: 0; background: transparent; color: {{t.secondary}}; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg></button>
+        <button aria-label="Forward" style="width: 28px; height: 28px; border: 0; padding: 0; background: transparent; color: {{t.tertiary}}; display: flex; align-items: center; justify-content: center; opacity: 0.6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-left: 4px">
+        <span style="width: 24px; height: 24px; border-radius: 12px; background: {{peer.fill}}; color: #ffffff; font-size: 9.5px; font-weight: 700; display: flex; align-items: center; justify-content: center">{{peer.initials}}</span>
+        <span style="font-size: 15px; font-weight: 600">{{peer.name}}</span>
+      </div>
+      <div style="flex: 1"></div>
+      <div style="height: 32px; display: flex; align-items: center; padding: 0 4px; border-radius: 16px; background: {{t.capsule}}; border: 0.5px solid {{t.border}}; color: {{t.secondary}}">
+        <button aria-label="Pinned" style="width: 30px; height: 28px; border: 0; padding: 0; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3.5h6l-1 5.5 3 3H7l3-3z"></path><path d="M12 12v8.5"></path></svg></button>
+        <sc-if value="{{t.before}}" hint-placeholder-val="{{true}}">
+          <button aria-label="Files and links" style="width: 30px; height: 28px; border: 0; padding: 0; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="11" height="14" rx="2"></rect><path d="M5 7.5V19a2 2 0 0 0 2 2h8.5"></path></svg></button>
+        </sc-if>
+        <sc-if value="{{t.after}}" hint-placeholder-val="{{false}}">
+          <button aria-label="Files and links" style="width: 30px; height: 28px; border: 0; padding: 0; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15 7"></path></svg></button>
+        </sc-if>
+        <button aria-label="More actions" style="width: 30px; height: 28px; border: 0; padding: 0; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="18" cy="12" r="1.6"></circle></svg></button>
+      </div>
+      <label style="width: 210px; height: 32px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-radius: 16px; background: {{t.capsule}}; border: 0.5px solid {{t.border}}; color: {{t.secondary}}">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M20 20l-4.3-4.3"></path></svg>
+        <input aria-label="Search Nuanu AI Lab" placeholder="Search Nuanu AI Lab" style="border: 0; outline: 0; background: transparent; color: {{t.secondary}}; font: inherit; font-size: 13px; width: 100%; padding: 0">
+      </label>
+    </div>
+
+    <div style="position: absolute; top: 52px; bottom: 64px; left: 0; right: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end">
+      <div style="width: 100%; max-width: {{t.colMax}}; margin: 0 auto; box-sizing: border-box; padding: {{t.colPad}}; padding-bottom: 14px">
+        <sc-for list="{{items}}" as="item" hint-placeholder-count="12">
+          <sc-if value="{{item.isDay}}" hint-placeholder-val="{{false}}">
+            <sc-if value="{{t.before}}" hint-placeholder-val="{{true}}">
+              <div style="display: flex; justify-content: center; margin: 24px 0 8px">
+                <span style="height: 26px; box-sizing: border-box; padding: 0 12px; border: 1px solid {{t.border}}; border-radius: 13px; font-size: 12px; font-weight: 600; color: {{t.secondary}}; display: flex; align-items: center">{{item.label}}</span>
+              </div>
+            </sc-if>
+            <sc-if value="{{t.after}}" hint-placeholder-val="{{false}}">
+              <div style="display: flex; align-items: center; gap: 12px; margin: 20px 8px 4px; height: 16px">
+                <span style="flex: 1; height: 1px; background: {{t.border}}"></span>
+                <span style="font-size: 11px; font-weight: 600; color: {{t.secondary}}">{{item.label}}</span>
+                <span style="flex: 1; height: 1px; background: {{t.border}}"></span>
+              </div>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{item.isMsg}}" hint-placeholder-val="{{true}}">
+            <div style="position: relative; display: flex; gap: 12px; margin-top: {{item.mt}}px; padding: {{item.pad}}; border-radius: 8px; background: {{item.bg}}">
+              <div style="width: {{t.avatar}}px; flex: none; display: flex; justify-content: flex-end">
+                <sc-if value="{{item.head}}" hint-placeholder-val="{{true}}">
+                  <span style="width: {{t.avatar}}px; height: {{t.avatar}}px; margin-top: 2px; border-radius: 50%; background: {{item.fill}}; color: #ffffff; font-size: {{t.avatarFont}}px; font-weight: 700; display: flex; align-items: center; justify-content: center">{{item.initials}}</span>
+                </sc-if>
+                <sc-if value="{{item.gutterTime}}" hint-placeholder-val="{{false}}">
+                  <span style="font-size: 11px; line-height: 20px; color: {{t.secondary}}; font-variant-numeric: tabular-nums">{{item.time}}</span>
+                </sc-if>
+              </div>
+              <div style="flex: 1; min-width: 0">
+                <sc-if value="{{item.head}}" hint-placeholder-val="{{true}}">
+                  <div style="display: flex; align-items: baseline; gap: 6px; line-height: {{t.nameLine}}px">
+                    <span style="font-size: {{t.nameSize}}px; font-weight: 600; color: {{t.text}}">{{item.name}}</span>
+                    <span style="font-size: 11px; color: {{t.secondary}}; font-variant-numeric: tabular-nums">{{item.time}}</span>
+                  </div>
+                </sc-if>
+                <div style="font-size: 14px; line-height: 20px; color: {{t.text}}">{{item.body}}</div>
+                <sc-if value="{{item.reaction}}" hint-placeholder-val="{{false}}">
+                  <sc-if value="{{t.before}}" hint-placeholder-val="{{true}}">
+                    <div style="margin-top: 6px; display: flex">
+                      <button style="height: 30px; box-sizing: border-box; border: 1.5px solid {{t.accentLine}}; background: {{t.accentTint}}; border-radius: 15px; padding: 0 5px 0 9px; display: flex; align-items: center; gap: 6px; color: {{t.text}}">
+                        <span style="font-size: 16px">{{item.emoji}}</span>
+                        <span style="width: 20px; height: 20px; border-radius: 10px; background: {{me.fill}}; color: #ffffff; font-size: 7.5px; font-weight: 700; display: flex; align-items: center; justify-content: center">{{me.initials}}</span>
+                      </button>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{t.after}}" hint-placeholder-val="{{false}}">
+                    <div style="margin-top: 4px; display: flex">
+                      <button style="height: 24px; border: 0; background: {{t.accentTint}}; border-radius: 12px; padding: 0 3px 0 8px; display: flex; align-items: center; gap: 4px; color: {{t.accent}}">
+                        <span style="font-size: 14px">{{item.emoji}}</span>
+                        <span style="width: 18px; height: 18px; border-radius: 9px; background: {{me.fill}}; color: #ffffff; font-size: 7px; font-weight: 700; display: flex; align-items: center; justify-content: center">{{me.initials}}</span>
+                      </button>
+                    </div>
+                  </sc-if>
+                </sc-if>
+              </div>
+              <sc-if value="{{item.hover}}" hint-placeholder-val="{{false}}">
+                <div style="position: absolute; right: 8px; top: {{t.barTop}}px; height: 32px; display: flex; align-items: center; gap: 2px; padding: 0 3px; background: {{t.overlay}}; border: 0.5px solid {{t.border}}; border-radius: 10px; box-shadow: 0 8px 24px {{t.shadow}}; color: {{t.secondary}}">
+                  <button aria-label="React with check mark" style="width: 28px; height: 26px; border: 0; padding: 0; background: transparent; font-size: 15px">✅</button>
+                  <button aria-label="React with eyes" style="width: 28px; height: 26px; border: 0; padding: 0; background: transparent; font-size: 15px">👀</button>
+                  <button aria-label="React with raised hands" style="width: 28px; height: 26px; border: 0; padding: 0; background: transparent; font-size: 15px">🙌</button>
+                  <button aria-label="Add reaction" style="width: 28px; height: 26px; border: 0; padding: 0; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M8.5 14.5a4 4 0 0 0 7 0"></path><path d="M9.5 10h.01M14.5 10h.01" stroke-width="2.4"></path></svg></button>
+                  <button aria-label="Reply in thread" style="width: 28px; height: 26px; border: 0; padding: 0; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10.5H9.5L5 19.5V16H4z"></path><path d="M8 9.5h8M8 12.5h5"></path></svg></button>
+                  <button aria-label="Save for later" style="width: 28px; height: 26px; border: 0; padding: 0; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v16l-5-3.5L7 20z"></path></svg></button>
+                  <button aria-label="More actions" style="width: 28px; height: 26px; border: 0; padding: 0; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="18" cy="12" r="1.6"></circle></svg></button>
+                </div>
+              </sc-if>
+            </div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </div>
+
+    <sc-if value="{{t.after}}" hint-placeholder-val="{{false}}">
+      <div style="position: absolute; top: 60px; left: 0; right: 0; display: flex; justify-content: center">
+        <span style="height: 24px; box-sizing: border-box; padding: 0 11px; border-radius: 12px; background: {{t.glass}}; border: 0.5px solid {{t.border}}; box-shadow: 0 4px 14px {{t.shadow}}; font-size: 11px; font-weight: 600; color: {{t.secondary}}; display: flex; align-items: center">Tuesday, October 27</span>
+      </div>
+    </sc-if>
+
+    <div style="position: absolute; left: 16px; right: 16px; bottom: 12px">
+      <label style="max-width: {{t.composerMax}}; margin: 0 auto; height: 40px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-radius: 20px; background: {{t.control}}; border: 0.5px solid {{t.border}}; box-shadow: 0 1px 2px {{t.shadow}}; color: {{t.secondary}}">
+        <span style="width: 28px; height: 28px; border-radius: 14px; background: {{t.sunken}}; display: flex; align-items: center; justify-content: center; flex: none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></span>
+        <input aria-label="Message Анна Белова" placeholder="Message Анна Белова" style="flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: {{t.secondary}}; font: inherit; font-size: 14px; padding: 0 4px">
+        <span style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"></path></svg></span>
+        <span style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M8.5 14.5a4 4 0 0 0 7 0"></path><path d="M9.5 10h.01M14.5 10h.01" stroke-width="2.4"></path></svg></span>
+        <span style="width: 28px; height: 28px; border-radius: 14px; background: {{t.sunken}}; display: flex; align-items: center; justify-content: center; flex: none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></span>
+      </label>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"variant":{"editor":"enum","options":["before","after"],"default":"before"},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const after = (this.props.variant ?? 'before') === 'after';
+    const dark = (this.props.theme ?? 'dark') === 'dark';
+    const c = dark ? {
+      canvas: '#141416', sidebar: '#1d1d20', text: '#f5f5f7', secondary: '#98989f', tertiary: '#8e8e94',
+      border: 'rgba(255,255,255,0.1)', hover: 'rgba(255,255,255,0.055)', selection: 'rgba(255,255,255,0.1)',
+      accent: '#4f9eff', accentTint: 'rgba(10,132,255,0.2)', accentLine: 'rgba(10,132,255,0.6)',
+      overlay: '#252528', control: '#1f1f22', capsule: 'rgba(255,255,255,0.05)', sunken: 'rgba(255,255,255,0.08)',
+      glass: 'rgba(37,37,40,0.8)', card: 'rgba(255,255,255,0.03)', shadow: 'rgba(0,0,0,0.45)'
+    } : {
+      canvas: '#ffffff', sidebar: '#f3f3f5', text: '#1d1d1f', secondary: '#6a6a6f', tertiary: '#86868b',
+      border: 'rgba(0,0,0,0.09)', hover: 'rgba(0,0,0,0.04)', selection: 'rgba(0,0,0,0.07)',
+      accent: '#0065d6', accentTint: 'rgba(0,122,255,0.1)', accentLine: 'rgba(0,122,255,0.35)',
+      overlay: '#fbfbfd', control: '#ffffff', capsule: 'rgba(0,0,0,0.035)', sunken: 'rgba(0,0,0,0.05)',
+      glass: 'rgba(255,255,255,0.86)', card: 'rgba(0,0,0,0.02)', shadow: 'rgba(0,0,0,0.12)'
+    };
+    const t = Object.assign({}, c, {
+      after: after, before: !after,
+      hash: after ? c.tertiary : c.accent,
+      avatar: after ? 32 : 36, avatarFont: after ? 12 : 13,
+      nameSize: after ? 13 : 14, nameLine: after ? 16 : 20,
+      colMax: after ? '720px' : 'none', colPad: after ? '0 0' : '0 16px',
+      composerMax: after ? '720px' : 'none', barTop: -4
+    });
+    const fill = (now, next) => after ? next : now;
+    const people = {
+      a: { name: 'Анна Белова', initials: 'АБ', fill: fill('#447389', 'linear-gradient(#c3773e, #ad5c15)') },
+      d: { name: 'Dmitry Ukhanov', initials: 'DU', fill: fill('#9a6d4c', 'linear-gradient(#8c7ed0, #7565bb)') },
+      g: { name: 'deploy agent', initials: 'DA', fill: fill('#5d78a0', 'linear-gradient(#00a2a3, #008b8c)') },
+      i: { name: 'Игорь Соколов', initials: 'ИС', fill: fill('#5d7f5a', 'linear-gradient(#5a9f5d, #3b8841)') }
+    };
+    const channel = (name, unread) => ({ channel: true, person: false, name: name, bg: 'transparent', weight: unread ? 600 : 400 });
+    const person = (key, selected) => ({ channel: false, person: true, name: people[key].name, initials: people[key].initials,
+      fill: people[key].fill, bg: selected ? c.selection : 'transparent', weight: 400 });
+    const sections = [
+      { title: 'Starred', rows: [channel('Agents'), channel('Team'), channel('Infra PR Reviews')] },
+      { title: 'Channels', rows: [channel('Design'), channel('Marketing and Growth'), channel('Planning and Demos', true),
+        channel('Platform and Tools'), channel('Releases'), channel('Support'), channel('Welcome')] },
+      { title: 'Direct messages', rows: [person('g'), person('a', true), person('i')] }
+    ];
+    const raw = [
+      { day: 'Tuesday, October 27' },
+      { p: 'd', time: '13:03', body: 'посмотри агента деплоя' },
+      { p: 'a', time: '13:03', body: 'второй PR апрувлю и добавляю, как ты просил' },
+      { p: 'd', time: '13:03', body: 'да' },
+      { p: 'a', time: '13:15', body: 'Готово', reaction: '🙏' },
+      { day: 'Wednesday, October 28' },
+      { p: 'a', time: '10:48', body: 'агент сам ловит PR или нужно создать ему тред?' },
+      { p: 'a', time: '10:48', body: 'Привет!', grouped: true, hover: true },
+      { p: 'd', time: '10:51', body: 'Привет! Сам ловит и PR, и изменения, но сейчас я его переделываю, может глючить' },
+      { p: 'a', time: '10:51', body: 'поняла, там 402-й срочный, если получится его протолкнуть, будет супер', reaction: '👀' },
+      { p: 'd', time: '11:04', body: 'Я сейчас сделал ручной запуск плана после инцидента безопасности. План запускается в боевой среде, поэтому сначала хочу посмотреть, кто автор PR и что он делает. Как закончу проверку, напишу сюда и в канал Infra PR Reviews.' },
+      { p: 'a', time: '11:04', body: 'Принято' },
+      { day: 'Yesterday' },
+      { p: 'd', time: '10:03', body: 'Привет! А встреча по бюджету когда? Помню, ты говорила, но в календаре не вижу' },
+      { p: 'a', time: '10:20', body: 'в четверг в 15:00, сейчас пришлю приглашение' },
+      { day: 'Today' },
+      { p: 'd', time: '09:12', body: 'спасибо!' }
+    ];
+    const items = raw.map((r) => {
+      if (r.day) return { isDay: true, isMsg: false, label: r.day };
+      const who = people[r.p];
+      const grouped = !!r.grouped;
+      return {
+        isDay: false, isMsg: true, head: !grouped, gutterTime: grouped && !!r.hover,
+        name: who.name, initials: who.initials, fill: who.fill, time: r.time, body: r.body,
+        reaction: !!r.reaction, emoji: r.reaction || '', hover: !!r.hover,
+        bg: r.hover ? c.hover : 'transparent',
+        mt: grouped ? 0 : (after ? 12 : 16),
+        pad: grouped ? '2px 8px' : '0 8px'
+      };
+    });
+    return { t: t, sections: sections, items: items, me: people.d, peer: people.a };
+  }
+}
+</script>
+</body>
+</html>
