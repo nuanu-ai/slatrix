@@ -557,7 +557,7 @@ struct TimelineHostedTests {
         let fit = await firstPerformanceMessage(since: since) { $0.hasPrefix("event=timeline.fit ") }
         #expect(
             fit
-                == "event=timeline.fit misfit=0 px=0 bottom=0 opening=0 live=1 below=8 past=0 inset=100")
+                == "event=timeline.fit misfit=0 px=0 bottom=0 opening=0 live=1 below=22 past=0 inset=100")
     }
 
     @Test("A conversation at its newest message shows no space under it, however the view got past it")
