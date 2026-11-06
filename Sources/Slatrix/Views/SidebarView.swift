@@ -100,7 +100,7 @@ struct SidebarView: View {
                     Button("New message…") { onCreate(.directMessage) }
                     Button("Browse people…") { route = .directory }
                 }
-            }.padding(.top, m.sp8).padding(.bottom, footerFade)
+            }.padding(.top, m.sp8).padding(.bottom, m.sidebarFade)
         }.scrollIndicators(.hidden)
             .loadingInterval(.sidebarLoading, while: !matrix.roomsLoaded)
             .onChange(of: matrix.rooms.isEmpty, initial: true) { _, empty in
@@ -137,7 +137,7 @@ struct SidebarView: View {
             } label: {
                 HStack(spacing: m.sp8) {
                     AvatarView(
-                        name: matrix.user?.name ?? "You", size: m(22), presence: .active,
+                        name: matrix.user?.name ?? "You", size: m.avatarFooter, presence: .active,
                         surface: colors.sidebar, matrix: matrix, source: matrix.user?.avatarURL)
                     Text(matrix.user?.name ?? "You").font(m.font(.body)).foregroundStyle(colors.textPrimary)
                         .lineLimit(1)
@@ -150,15 +150,8 @@ struct SidebarView: View {
             }
         }.padding(.horizontal, m.sp8).padding(.bottom, m.sp8)
             .background(colors.sidebar)
-            .overlay(alignment: .top) {
-                LinearGradient(
-                    colors: [colors.sidebar.opacity(0), colors.sidebar], startPoint: .top, endPoint: .bottom
-                ).frame(height: footerFade).allowsHitTesting(false).alignmentGuide(.top) { $0[.bottom] }
-            }
+            .fadeAbove(colors.sidebar, height: m.sidebarFade)
     }
-
-    /// Where the list fades into the sidebar above you. Its end stops above this too, so its last row stays clear.
-    private var footerFade: CGFloat { m(36) }
 
     private func shortcut(_ item: AppRoute, label: String, badge: Int = 0, count: Int = 0) -> some View {
         let selected = route == item

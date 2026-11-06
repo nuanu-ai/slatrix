@@ -5,9 +5,9 @@ import SwiftUI
 enum TextRole: CaseIterable {
     /// 11/14: times, section titles, day dividers, badges, captions.
     case subheadline
-    /// 13/16: the sidebar, lists, buttons and fields. Unread is semibold.
+    /// 13/16: the sidebar, lists, buttons, fields and messages' authors. Unread is semibold.
     case body
-    /// 14/20: messages, their authors, and the composer. The one size off the macOS scale.
+    /// 14/20: messages and the composer. The one size off the macOS scale.
     case reading
     /// 15/20: window, thread and sheet titles; the space name.
     case title3
@@ -89,6 +89,15 @@ struct Metrics: Equatable {
     var avatarSmall: CGFloat { 20 * zoom }
     var avatarMedium: CGFloat { 24 * zoom }
     var avatar: CGFloat { 32 * zoom }
+    /// The faces that end a reaction's pill.
+    var avatarReaction: CGFloat { 18 * zoom }
+    /// You, at the foot of the sidebar.
+    var avatarFooter: CGFloat { 22 * zoom }
+    /// Where a sidebar list fades into the row above its foot. A list's end stops above this too, so its last row
+    /// stays clear.
+    var sidebarFade: CGFloat { 36 * zoom }
+    /// The air under a conversation's newest message, above the composer's own margin.
+    var conversationEnd: CGFloat { 22 * zoom }
     /// The conversation's centered column: the composer, and what a hovered row fills.
     var conversationColumn: CGFloat { 720 * zoom }
     /// A row of that column, with the margin it keeps from the pane on each side.

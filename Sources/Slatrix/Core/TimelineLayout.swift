@@ -18,9 +18,14 @@ enum TimelineLayout {
 
     /// A hovered message's time in the gutter, which has room for the hour and minute only, as Slack writes it there.
     static func gutterTime(_ date: Date, calendar: Calendar, locale: Locale) -> String {
-        date.formatted(
+        // Asking the format style to omit AM and PM pads the hour: "01:05".
+        var time = date.formatted(
             Date.FormatStyle(
-                date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone))
+                date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone
+            )
+            .attributed)
+        for (field, range) in time.runs[\.dateField] where field == .amPM { time.removeSubrange(range) }
+        return String(time.characters).trimmingCharacters(in: .whitespaces)
     }
 
     /// `unreadBoundaryEventID` is the event the "New messages" line goes above; `groups` is false in compact density.

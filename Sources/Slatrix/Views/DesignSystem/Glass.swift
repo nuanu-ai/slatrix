@@ -36,4 +36,12 @@ extension View {
             background(canvas)
         }
     }
+
+    /// What scrolls on under this view fades into `canvas` over `height` above it, with no line between them.
+    func fadeAbove(_ canvas: Color, height: CGFloat) -> some View {
+        overlay(alignment: .top) {
+            LinearGradient(colors: [canvas.opacity(0), canvas], startPoint: .top, endPoint: .bottom)
+                .frame(height: height).allowsHitTesting(false).alignmentGuide(.top) { $0[.bottom] }
+        }
+    }
 }

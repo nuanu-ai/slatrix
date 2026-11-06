@@ -1104,11 +1104,11 @@ struct RootView: View {
                 } footer: {
                     VStack(spacing: 0) {
                         if room.canPostMessages == false {
-                            ComposerNotice(text: Self.cannotPost).padding(.top, m.sp4).padding(.bottom, m.sp16)
+                            ComposerNotice(text: Self.cannotPost).padding(.top, m.sp4).padding(.bottom, m.sp12)
                         } else if let target = editTarget, target.surface == .conversation,
                             target.message.roomID == room.id
                         {
-                            editComposer(target, room: room).padding(.top, m.sp4).padding(.bottom, m.sp16)
+                            editComposer(target, room: room).padding(.top, m.sp4).padding(.bottom, m.sp12)
                         } else {
                             BindingScope({ draftBinding(room.id) }) { text in
                                 MessageComposer(
@@ -1153,10 +1153,9 @@ struct RootView: View {
                             .disabled(!localReady || !attachmentDrafts.ready).id(
                                 "composer-\(composerGeneration)-\(room.id)"
                             )
-                            .padding(.top, m.sp4).padding(.bottom, m.sp16)
+                            .padding(.top, m.sp4).padding(.bottom, m.sp12)
                         }
                     }
-                    .frame(maxWidth: m.conversationColumn).frame(maxWidth: .infinity).padding(.horizontal, m.sp12)
                     // Floats above the composer, so a toast, reply or attachment notice never resizes it or moves the
                     // timeline.
                     .overlay(alignment: .top) {
@@ -1168,8 +1167,9 @@ struct RootView: View {
                                         && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
                                 },
                                 drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil)
-                        }.frame(maxWidth: m.conversationColumn).alignmentGuide(.top) { $0[.bottom] }
+                        }.alignmentGuide(.top) { $0[.bottom] }
                     }
+                    .frame(maxWidth: m.conversationColumn).frame(maxWidth: .infinity).padding(.horizontal, m.sp12)
                     .scrollEdge(.bottom, colors.canvas)
                 }
             }

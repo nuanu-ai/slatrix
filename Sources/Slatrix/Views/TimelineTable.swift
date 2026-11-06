@@ -408,7 +408,9 @@ struct TimelineTable: NSViewRepresentable {
         let entry = rows[row]
         switch entry.kind {
         case .spacer: return max(1, spacerHeight)
-        case .end: return configuration?.context.metrics.sp8 ?? 8
+        case .end:
+            guard let context = configuration?.context else { return 8 }
+            return context.isThread ? context.metrics.sp8 : context.metrics.conversationEnd
         default: break
         }
         if let height = known[entry.id] {
@@ -956,7 +958,7 @@ struct TimelineTable: NSViewRepresentable {
         placeToolbar()
     }
 
-    /// The one hover toolbar, at the hovered row's top right and inside the row, so it covers no other message, and
+    /// The one hover toolbar, at the hovered row's top right and inside the row, centered on a row shorter than it, and
     /// kept inside the viewport.
     private func placeToolbar() {
         guard let id = hoveredID, let row = index[id], case .message(let entry) = rows[row].kind,
@@ -1208,7 +1210,7 @@ struct TimelineRow: View, Equatable {
                         faces[reaction.key] = reaction.faces(me: matrix.user?.id)?.map { id in
                             let member = matrix.members.first { $0.id == id }
                             return AvatarView(
-                                name: member?.name ?? MatrixID.localpart(id), size: metrics(18),
+                                name: member?.name ?? MatrixID.localpart(id), size: metrics.avatarReaction,
                                 matrix: matrix, source: member?.avatarURL)
                         }
                     },
@@ -1285,8 +1287,9 @@ struct TimelineDayDivider: View {
             Text(label).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
             Rectangle().fill(colors.border).frame(height: 1)
         }
-        // 20 above the day; the next sender's own 12 below it.
-        .frame(height: m.sp16).padding(.horizontal, m.sp20).padding(.top, m.sp20)
+        // 20 above the day and 4 below: a sender's own 12 clears that, a compact row's 2 needs 2 more.
+        .frame(height: m.sp16).padding(.horizontal, isThread ? m.sp16 : m.sp20).padding(.top, m.sp20)
+        .padding(.bottom, appearance.density == .compact ? m.sp2 : 0)
         .accessibilityAddTraits(.isHeader)
     }
 }

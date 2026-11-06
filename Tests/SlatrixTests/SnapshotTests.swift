@@ -807,7 +807,7 @@ struct Snapshots {
     }
 
     @Test(
-        "A direct conversation of short messages and one long one, hovered, as the boards draw it",
+        "A direct conversation of short messages and one long one, with one row hovered",
         arguments: Theme.allCases)
     func shortMessages(theme: Theme) async throws {
         _ = NSApplication.shared
