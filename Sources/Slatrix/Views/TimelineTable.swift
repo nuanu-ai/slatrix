@@ -408,7 +408,9 @@ struct TimelineTable: NSViewRepresentable {
         let entry = rows[row]
         switch entry.kind {
         case .spacer: return max(1, spacerHeight)
-        case .end: return configuration?.context.metrics.sp8 ?? 8
+        case .end:
+            guard let context = configuration?.context else { return 8 }
+            return context.isThread ? context.metrics.sp8 : context.metrics.conversationEnd
         default: break
         }
         if let height = known[entry.id] {
@@ -429,8 +431,14 @@ struct TimelineTable: NSViewRepresentable {
 
     // MARK: Heights
 
+    /// The width a row lays out at: a thread fills its pane, and a conversation's rows stop at its column.
+    private var rowWidth: CGFloat {
+        guard let context = configuration?.context, !context.isThread else { return width }
+        return min(width, context.metrics.conversationRow)
+    }
+
     private func key(_ entry: TimelineEntry) -> HeightKey? {
-        settings.map { HeightKey(entry: entry.layoutKey, width: width, settings: $0) }
+        settings.map { HeightKey(entry: entry.layoutKey, width: rowWidth, settings: $0) }
     }
 
     /// Builds the row's cell off screen and measures it there, so showing it later costs no SwiftUI work. Returns
@@ -469,11 +477,11 @@ struct TimelineTable: NSViewRepresentable {
         switch entry.kind {
         case .spacer, .end, .loading: return m.sp40
         case .welcome: return m(220)
-        case .day: return m(38)
+        case .day: return m(36)
         case .unread: return m(40)
         case .message(let row):
             let line = m.lineHeight(.reading)
-            let perLine = max(20, (width - m(100)) / (m.size(.reading) * 0.5))
+            let perLine = max(20, (rowWidth - m(100)) / (m.size(.reading) * 0.5))
             // Characters counted as UTF-8 lead bytes: a whole room is estimated at once, and grapheme breaking costs
             // more than this guess is worth.
             var lines: CGFloat = 0
@@ -487,7 +495,7 @@ struct TimelineTable: NSViewRepresentable {
                 }
             }
             lines += max(1, ceil(characters / perLine))
-            var height = (row.grouped ? m.sp8 : m(40)) + lines * line
+            var height = (row.grouped ? m.sp4 : m(29)) + lines * line
             if !row.message.reactions.isEmpty { height += m(30) }
             if row.message.attachment != nil { height += m(300) }
             if row.message.replyPreview != nil { height += m(48) }
@@ -818,13 +826,13 @@ struct TimelineTable: NSViewRepresentable {
     private func viewportResized() {
         let size = visible.size
         guard size.width > 0, size != NSSize(width: width, height: viewportHeight) else { return }
-        let widthChanged = size.width != width
+        let previousRowWidth = rowWidth
         let first = width == 0
         width = size.width
         viewportHeight = size.height
         table.tableColumns.first?.width = width
         if first, let configuration { return apply(configuration.entries) }
-        if widthChanged {
+        if rowWidth != previousRowWidth {
             remeasure()
         } else {
             preservingPosition(keeping: tiling) {}
@@ -950,7 +958,7 @@ struct TimelineTable: NSViewRepresentable {
         placeToolbar()
     }
 
-    /// The one hover toolbar, at the hovered row's top right and inside the row, so it covers no other message, and
+    /// The one hover toolbar, at the hovered row's top right and inside the row, centered on a row shorter than it, and
     /// kept inside the viewport.
     private func placeToolbar() {
         guard let id = hoveredID, let row = index[id], case .message(let entry) = rows[row].kind,
@@ -968,14 +976,14 @@ struct TimelineTable: NSViewRepresentable {
         let m = context.metrics
         let size = toolbar.frame.size
         let rect = table.rect(ofRow: row)
-        let top = scrollView.convert(NSPoint(x: rect.maxX, y: rect.minY), from: table)
+        let top = scrollView.convert(NSPoint(x: rect.midX + rowWidth / 2, y: rect.minY), from: table)
         // In the scroll view's flipped coordinates, from the viewport's top down, between the header and composer.
         let clip = scrollView.contentView.frame
         let visible = NSRect(
             x: clip.minX, y: clip.minY + insets.top, width: clip.width,
             height: clip.height - insets.top - insets.bottom)
         // A row too short for the gap above it centers the toolbar instead.
-        let inset = max(0, min(m.sp4, (rect.height - size.height) / 2))
+        let inset = min(m.sp4, (rect.height - size.height) / 2)
         let y = min(max(top.y + inset, visible.minY + m.sp4), visible.maxY - size.height)
         toolbar.frame.origin = NSPoint(x: top.x - (context.isThread ? m.sp16 : m.sp20) - size.width, y: y)
         toolbar.isHidden = false
@@ -1172,9 +1180,12 @@ struct TimelineRow: View, Equatable {
         case .spacer, .end: Color.clear
         case .loading(let loading):
             TimelineLoadingRow(loading: loading, offline: context.matrix?.connectionState == .offline)
-        case .welcome(let welcome): TimelineWelcomeRow(welcome: welcome)
-        case .day(let label): TimelineDayDivider(label: label)
-        case .unread: TimelineUnreadDivider()
+        case .welcome(let welcome):
+            TimelineWelcomeRow(welcome: welcome).conversationRow(metrics, isThread: context.isThread)
+        case .day(let label):
+            TimelineDayDivider(label: label, isThread: context.isThread).conversationRow(
+                metrics, isThread: context.isThread)
+        case .unread: TimelineUnreadDivider().conversationRow(metrics, isThread: context.isThread)
         case .message(let row):
             if let matrix = context.matrix {
                 let message = row.message
@@ -1185,9 +1196,7 @@ struct TimelineRow: View, Equatable {
                     isPinned: row.pinned, sendFailure: row.sendFailure, sendBusy: row.sendBusy, hovered: hovered,
                     timeLabel: row.time,
                     avatar: AvatarView(
-                        name: message.senderName, size: context.isThread ? metrics.avatar : metrics.messageAvatar,
-                        matrix: matrix,
-                        source: message.avatarURL),
+                        name: message.senderName, size: metrics.avatar, matrix: matrix, source: message.avatarURL),
                     replierAvatar: message.lastReply.map {
                         AvatarView(
                             name: $0.senderName, size: metrics.avatarSmall, matrix: matrix, source: $0.avatarURL)
@@ -1201,7 +1210,7 @@ struct TimelineRow: View, Equatable {
                         faces[reaction.key] = reaction.faces(me: matrix.user?.id)?.map { id in
                             let member = matrix.members.first { $0.id == id }
                             return AvatarView(
-                                name: member?.name ?? MatrixID.localpart(id), size: metrics.avatarSmall,
+                                name: member?.name ?? MatrixID.localpart(id), size: metrics.avatarReaction,
                                 matrix: matrix, source: member?.avatarURL)
                         }
                     },
@@ -1214,6 +1223,13 @@ struct TimelineRow: View, Equatable {
                     reactionFrame: { context.onReactionFrame(entry.id, $0, $1) })
             }
         }
+    }
+}
+
+extension View {
+    /// Keeps a conversation's row to its column, centered in a wider pane. A thread's pane is narrower: its rows fill it.
+    func conversationRow(_ m: Metrics, isThread: Bool) -> some View {
+        frame(maxWidth: isThread ? .infinity : m.conversationRow).frame(maxWidth: .infinity)
     }
 }
 
@@ -1259,18 +1275,22 @@ private struct TimelineWelcomeRow: View {
     }
 }
 
-private struct TimelineDayDivider: View {
+struct TimelineDayDivider: View {
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     let label: String
+    let isThread: Bool
     var body: some View {
         let colors = appearance.colors
-        Text(label).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
-            .padding(.horizontal, m.sp8 + m.sp2).padding(.vertical, m(3))
-            .overlay(Capsule().strokeBorder(colors.border))
-            // With the rows around it: 24 above the day and 16 below, as the boards space it.
-            .frame(maxWidth: .infinity).padding(.top, m.sp20).padding(.bottom, m.sp4)
-            .accessibilityAddTraits(.isHeader)
+        HStack(spacing: m.sp12) {
+            Rectangle().fill(colors.border).frame(height: 1)
+            Text(label).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
+            Rectangle().fill(colors.border).frame(height: 1)
+        }
+        // 20 above the day and 4 below: a sender's own 12 clears that, a compact row's 2 needs 2 more.
+        .frame(height: m.sp16).padding(.horizontal, isThread ? m.sp16 : m.sp20).padding(.top, m.sp20)
+        .padding(.bottom, appearance.density == .compact ? m.sp2 : 0)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

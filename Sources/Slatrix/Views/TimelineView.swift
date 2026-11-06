@@ -476,15 +476,18 @@ struct MessageRow: View {
     private var pendingSend: Bool { own && message.sendState != "sent" }
     private var sending: Bool { pendingSend && sendFailure == nil }
     private var compact: Bool { appearance.density == .compact }
-    private var avatarSide: CGFloat { isThread ? m.avatar : m.messageAvatar }
     private var time: String { timeLabel ?? message.timestamp.formatted(.dateTime.hour().minute()) }
+    private var gutterTime: String {
+        TimelineLayout.gutterTime(message.timestamp, calendar: .autoupdatingCurrent, locale: .autoupdatingCurrent)
+    }
     var body: some View {
         layout
             // Inset and rounded, as Mail marks the row under the pointer.
             .background {
                 RoundedRectangle(cornerRadius: m.radius).fill(hovered ? colors.hover : .clear)
-                    .padding(.horizontal, m.sp8)
+                    .padding(.horizontal, isThread ? m.sp8 : m.sp12)
             }
+            .conversationRow(m, isThread: isThread)
             .background {
                 // A cell shows another message after a scroll; that one's highlight starts afresh, never fading in.
                 colors.highlight.opacity(highlighted ? 1 : 0)
@@ -497,18 +500,20 @@ struct MessageRow: View {
         HStack(alignment: .top, spacing: isThread ? m.sp8 : m.sp12) {
             if !compact {
                 if grouped || !appearance.showAvatars {
-                    // One line: "12:00 AM" is wider than the gutter, and a wrap would grow the row on hover.
-                    Text(hovered ? time : "").font(m.font(.subheadline)).lineLimit(1).fixedSize()
-                        .foregroundStyle(colors.textSecondary).frame(width: avatarSide, alignment: .trailing)
+                    // One line: a wrap would grow the row on hover.
+                    Text(hovered ? gutterTime : "").font(m.font(.subheadline)).monospacedDigit().lineLimit(1)
+                        .fixedSize()
+                        .foregroundStyle(colors.textSecondary).frame(width: m.avatar, alignment: .trailing)
                         .overlay(alignment: .trailing) { if grouped && sending && !hovered { clock } }
-                        .padding(.top, m.sp4)
+                        .padding(.top, m.sp2)
                 } else {
                     Button {
                         actions.openProfile?()
                     } label: {
-                        avatar ?? AvatarView(name: message.senderName, size: avatarSide)
+                        avatar ?? AvatarView(name: message.senderName, size: m.avatar)
                     }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help(
-                        "View \(message.senderName)’s profile")
+                        "View \(message.senderName)’s profile"
+                    ).padding(.top, m.sp2)
                 }
             }
             VStack(alignment: .leading, spacing: m.sp2) {
@@ -517,19 +522,19 @@ struct MessageRow: View {
                         .foregroundStyle(colors.textSecondary)
                 }
                 if !grouped || compact {
-                    HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
+                    HStack(alignment: .firstTextBaseline, spacing: m(6)) {
                         if compact {
-                            Text(time).font(m.font(.subheadline))
+                            Text(time).font(m.font(.subheadline)).monospacedDigit()
                                 .foregroundStyle(colors.textSecondary)
                         }
                         Button {
                             actions.openProfile?()
                         } label: {
-                            Text(message.senderName).font(m.font(.reading, .semibold))
+                            Text(message.senderName).font(m.font(.body, .semibold))
                                 .foregroundStyle(colors.textPrimary)
                         }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
                         if !compact {
-                            Text(time).font(m.font(.subheadline))
+                            Text(time).font(m.font(.subheadline)).monospacedDigit()
                                 .foregroundStyle(colors.textSecondary)
                         }
                         if isSaved {
@@ -562,7 +567,7 @@ struct MessageRow: View {
                     }
                     // A reused cell shows another message: a download or preview in flight must not carry over.
                     if let attachment { attachment.padding(.top, m(6)).id(message.id) }
-                    if !message.reactions.isEmpty { reactions.padding(.top, m(6)) }
+                    if !message.reactions.isEmpty { reactions.padding(.top, m(3)) }
                     if !isThread && message.replyCount > 0 {
                         ThreadRepliesBar(
                             count: message.replyCount, lastReply: message.lastReply, avatar: replierAvatar,
@@ -592,9 +597,11 @@ struct MessageRow: View {
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.padding(.horizontal, isThread ? m.sp16 : m.sp20)
-            // The boards' rhythm: 16 between senders, 4 between one sender's messages.
-            .padding(.top, grouped ? 0 : compact ? m.sp2 : m.sp12)
-            .padding(.bottom, m.sp4)
+            // 12 above a sender and 2 around a message under them, counted from 20 pt lines: a one-line row has none of
+            // that leading of its own, so it comes on top of them. Two grouped rows share both their 2s, so a sender's
+            // first gap is the tightest.
+            .padding(.top, compact ? (grouped ? 0 : m.sp2) : grouped ? m(3) : m.sp12)
+            .padding(.bottom, compact ? m.sp4 : grouped ? m.sp4 : m.sp2)
     }
     private var clock: some View { SendingClock(since: message.timestamp) }
 
@@ -604,13 +611,15 @@ struct MessageRow: View {
                 Button {
                     actions.react?(reaction.key)
                 } label: {
-                    ReactionChip(mine: reaction.mine) {
-                        Text(reaction.key).font(m.font(.body))
+                    ReactionChip(mine: reaction.mine, hasFaces: reactionFaces[reaction.key] != nil) {
+                        Text(reaction.key).font(m.font(.subheadline))
                         if let faces = reactionFaces[reaction.key] {
                             // Overlapping, each ringed in the canvas so the one beneath shows where it ends.
                             HStack(spacing: -m.sp4) {
                                 ForEach(faces.indices, id: \.self) { index in
-                                    faces[index].overlay(Circle().strokeBorder(colors.canvas, lineWidth: m(1.5)))
+                                    faces[index].overlay {
+                                        if faces.count > 1 { Circle().strokeBorder(colors.canvas, lineWidth: m(1.5)) }
+                                    }
                                 }
                             }.alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + m.sp4 }
                         } else {
@@ -676,19 +685,21 @@ private struct SendingClock: View {
     }
 }
 
-/// A reaction's pill: 24 pt, gray at rest; yours are tinted, with an accent edge.
+/// A reaction's pill: 24 pt, gray at rest; yours are tinted.
 private struct ReactionChip<Content: View>: View {
     let mine: Bool
+    /// Faces end the pill, close to its round end.
+    var hasFaces = false
     @ViewBuilder let content: Content
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
         let colors = appearance.colors
         // The emoji and its count on one baseline: centered frames put the count low, as an emoji's line is taller.
-        HStack(alignment: .firstTextBaseline, spacing: m.sp4) { content }.padding(.horizontal, m.sp8)
+        HStack(alignment: .firstTextBaseline, spacing: m.sp4) { content }.padding(.leading, m.sp8)
+            .padding(.trailing, hasFaces ? m(3) : m.sp8)
             .frame(height: m.sp24)
             .background(mine ? colors.accentTint : colors.sunken, in: Capsule())
-            .overlay(Capsule().strokeBorder(mine ? colors.accentLine : .clear))
     }
 }
 

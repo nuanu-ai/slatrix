@@ -590,6 +590,44 @@ struct WindowHostedTests {
         #expect(abs(newest.convert(newest.bounds, to: nil).minY - before.minY) < 1)
     }
 
+    @Test("The composer keeps to the conversation's column, centered over the messages")
+    func composerInColumn() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        func measured() throws -> (pane: CGRect, field: CGRect) {
+            let timeline = try #require(harness.shown().first { $0 is TimelineScrollView })
+            let editor = try #require(harness.shown().first { ($0 as? NSTextView)?.isEditable == true })
+            return (timeline.convert(timeline.bounds, to: nil), editor.convert(editor.bounds, to: nil))
+        }
+        let (pane, field) = try measured()
+        // The composer is 720 wide; its text field sits inside, between its buttons.
+        #expect(field.minX >= pane.midX - 360 && field.maxX <= pane.midX + 360, "\(field) in \(pane)")
+        // It stays over the middle of a wider pane.
+        harness.window.setContentSize(NSSize(width: harness.window.frame.width + 300, height: 800))
+        #expect(await harness.settle())
+        let (widerPane, widerField) = try measured()
+        #expect(widerPane.width > pane.width)
+        #expect(abs((widerField.minX - widerPane.midX) - (field.minX - pane.midX)) < 1)
+    }
+
+    @Test("The composer sits 12 pt above the window's edge, with air between it and the newest message")
+    func composerMargins() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let editor = try #require(harness.shown().first { ($0 as? NSTextView)?.isEditable == true })
+        let field = editor.convert(editor.bounds, to: nil)
+        // A window's own coordinates start at its bottom. The composer is 40 tall, around its one line of text.
+        #expect(abs(field.midY - (12 + 20)) <= 1, "\(field)")
+        let messages = harness.shown().compactMap { $0 as? TimelineCell }.filter {
+            if case .message = $0.entry?.kind { return true }
+            return false
+        }
+        let newest = try #require(messages.map { $0.convert($0.bounds, to: nil).minY }.min())
+        #expect(abs(newest - (field.midY + 20) - 26) <= 1, "\(newest) over \(field)")
+    }
+
     @Test("A thread left open in a channel is open again on coming back to the channel")
     func threadSurvivesLeaving() async throws {
         let harness = Harness()
