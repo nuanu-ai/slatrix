@@ -1190,6 +1190,21 @@ extension TimelineHostedTests {
 /// Rows on their own: no window needed.
 @MainActor
 struct MessageRowLayoutTests {
+    @Test("A long message wraps at the boards' 704 pt of content however wide the pane is")
+    func wrapsAtTheColumn() {
+        let message = ChatMessage(
+            id: "$long", roomID: "!timeline:example.org", senderID: "@a:example.org", senderName: "Avery",
+            body: String(repeating: "word ", count: 600), timestamp: Date(timeIntervalSince1970: 0))
+        func height(pane: CGFloat) -> CGFloat {
+            let row = MessageRow(message: message, grouped: false, own: false, hovered: false)
+                .environmentObject(AppearanceStore())
+            return NSHostingController(rootView: row).sizeThatFits(in: CGSize(width: pane, height: 10_000)).height
+        }
+        // 704 of text and the row's 20 pt padding on each side.
+        #expect(height(pane: 2_000) == height(pane: 744))
+        #expect(height(pane: 700) > height(pane: 744))
+    }
+
     @Test(
         "Hovering a message shows its time and add-reaction chip without changing its height",
         arguments: [CGFloat(360), 800], [MessageDensity.comfortable, .compact])
