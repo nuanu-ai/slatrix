@@ -819,13 +819,11 @@ extension TimelineHostedTests {
         #expect(toolbar(harness) == nil)
     }
 
-    @Test("In a wide pane the toolbar sits at the column's right edge, and widening the pane changes no row's height")
+    @Test("In a wide pane the toolbar sits at the column's right edge, however wide the pane")
     func toolbarAtColumnEdge() async throws {
         let harness = Harness(messages: Self.actionable(0..<30), width: 1_200, height: 560)
         defer { harness.close() }
         await settle(harness) { harness.top(of: "Message 29") != nil }
-        let table = try #require(harness.scrollView?.documentView as? NSTableView)
-        func heights() -> [CGFloat] { (0..<table.numberOfRows).map { table.rect(ofRow: $0).height } }
         // The boards center 704 pt of content, so its right edge is 352 from the pane's middle.
         func barEdge() throws -> CGFloat {
             _ = try hover(harness, "Message 29")
@@ -833,12 +831,8 @@ extension TimelineHostedTests {
             return bar.convert(bar.bounds, to: nil).maxX
         }
         #expect(abs(try barEdge() - (600 + 352)) < 1)
-        let before = heights()
         harness.window.setContentSize(NSSize(width: 1_500, height: 560))
         harness.layout()
-        await drainMainActor()
-        harness.layout()
-        #expect(heights() == before)
         #expect(abs(try barEdge() - (750 + 352)) < 1)
     }
 

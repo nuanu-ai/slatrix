@@ -429,8 +429,14 @@ struct TimelineTable: NSViewRepresentable {
 
     // MARK: Heights
 
+    /// The width a row lays out at: a thread fills its pane, and a conversation's rows stop at its column.
+    private var rowWidth: CGFloat {
+        guard let context = configuration?.context, !context.isThread else { return width }
+        return min(width, context.metrics.conversationRow)
+    }
+
     private func key(_ entry: TimelineEntry) -> HeightKey? {
-        settings.map { HeightKey(entry: entry.layoutKey, width: width, settings: $0) }
+        settings.map { HeightKey(entry: entry.layoutKey, width: rowWidth, settings: $0) }
     }
 
     /// Builds the row's cell off screen and measures it there, so showing it later costs no SwiftUI work. Returns
@@ -473,7 +479,7 @@ struct TimelineTable: NSViewRepresentable {
         case .unread: return m(40)
         case .message(let row):
             let line = m.lineHeight(.reading)
-            let perLine = max(20, (width - m(100)) / (m.size(.reading) * 0.5))
+            let perLine = max(20, (rowWidth - m(100)) / (m.size(.reading) * 0.5))
             // Characters counted as UTF-8 lead bytes: a whole room is estimated at once, and grapheme breaking costs
             // more than this guess is worth.
             var lines: CGFloat = 0
@@ -818,13 +824,13 @@ struct TimelineTable: NSViewRepresentable {
     private func viewportResized() {
         let size = visible.size
         guard size.width > 0, size != NSSize(width: width, height: viewportHeight) else { return }
-        let widthChanged = size.width != width
+        let previousRowWidth = rowWidth
         let first = width == 0
         width = size.width
         viewportHeight = size.height
         table.tableColumns.first?.width = width
         if first, let configuration { return apply(configuration.entries) }
-        if widthChanged {
+        if rowWidth != previousRowWidth {
             remeasure()
         } else {
             preservingPosition(keeping: tiling) {}
@@ -968,7 +974,7 @@ struct TimelineTable: NSViewRepresentable {
         let m = context.metrics
         let size = toolbar.frame.size
         let rect = table.rect(ofRow: row)
-        let top = scrollView.convert(NSPoint(x: rect.maxX, y: rect.minY), from: table)
+        let top = scrollView.convert(NSPoint(x: rect.midX + rowWidth / 2, y: rect.minY), from: table)
         // In the scroll view's flipped coordinates, from the viewport's top down, between the header and composer.
         let clip = scrollView.contentView.frame
         let visible = NSRect(
