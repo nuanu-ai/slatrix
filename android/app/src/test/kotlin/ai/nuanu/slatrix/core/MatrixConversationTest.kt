@@ -329,9 +329,10 @@ class MatrixConversationTest {
             ReplyPreview("\$old", ReplyPreview.State.Loading),
             ReplyPreview("\$old", ReplyPreview.State.Loading),
         ), messages.map { it.replyTo })
-        assertEquals("\$old", timeline.fetched.receive())
+        // The SDK finds the reply in the timeline and fetches what it quotes, so it is asked by each reply's own ID.
+        assertEquals(setOf("\$b", "\$c"), setOf(timeline.fetched.receive(), timeline.fetched.receive()))
         conversation.close()
-        assertTrue("Asked once for a parent two replies quote", timeline.fetched.tryReceive().isFailure)
+        assertTrue("Asked once for each reply", timeline.fetched.tryReceive().isFailure)
     }
 
     // capability: thread.send-to-channel

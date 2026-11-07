@@ -873,7 +873,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val ULong.long get() = coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
     private val ULong.int get() = coerceAtMost(Int.MAX_VALUE.toULong()).toInt()
 
-    /** Parents asked for once each, since the SDK updates every reply that quotes one when it arrives. */
+    /** Replies whose parent was asked for, once each. */
     private val askedFor = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** A message's text on one line, as a quote shows it. */
@@ -884,7 +884,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return text.replace('\n', ' ')
     }
 
-    private fun replyPreview(reply: InReplyToDetails): ReplyPreview {
+    /** [replyId] is the reply's own event: the SDK finds it in the timeline and fetches what it quotes. */
+    private fun replyPreview(reply: InReplyToDetails, replyId: String?): ReplyPreview {
         val id = reply.eventId()
         return when (val parent = reply.event()) {
             is EmbeddedEventDetails.Ready -> {
@@ -897,10 +898,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             is EmbeddedEventDetails.Unavailable -> {
                 // The SDK answers with the parent or an error in a later update of the reply. A request that failed, say
                 // offline, is made again the next time the reply updates.
-                if (askedFor.add(id)) operations.launch {
-                    runCatching { timeline().fetchDetailsForEvent(id) }.onFailure {
+                if (replyId != null && askedFor.add(replyId)) operations.launch {
+                    runCatching { timeline().fetchDetailsForEvent(replyId) }.onFailure {
                         if (it is CancellationException) throw it
-                        askedFor.remove(id)
+                        askedFor.remove(replyId)
                     }
                 }
                 ReplyPreview(id, ReplyPreview.State.Loading)
@@ -958,7 +959,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong(),
                     (latest?.senderProfile as? ProfileDetails.Ready)?.avatarUrl)
             }?.takeIf { it.replies > 0 },
-            replyTo = content.inReplyTo?.let(::replyPreview),
+            replyTo = content.inReplyTo?.let { replyPreview(it, (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId) },
             repliedToThread = content.threadRoot == null && content.inReplyTo?.let { quotesOwnWords(event.sender, content.kind, it) } == true,
             attachment = shown.attachment?.let { if (event.isOwn) it.copy(own = true) else it },
             avatarUrl = (event.senderProfile as? ProfileDetails.Ready)?.avatarUrl,
