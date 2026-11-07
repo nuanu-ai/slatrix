@@ -36,7 +36,6 @@ import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlin.math.roundToInt
-import kotlin.math.tan
 
 /** What a [glass] surface blurs: mark it with [glassSource], and keep the glass outside it. */
 @Composable
@@ -112,15 +111,13 @@ private class BubbleNode(var shape: Shape, var fill: Color, var edge: Color) : M
     }
 }
 
-/** The chat wallpaper: a wash from top to bottom, turned a little as the canvas's is, under a grid of faint dots. */
+/** The chat wallpaper: a wash from top to bottom under a grid of faint dots. */
 @Composable
 fun Modifier.wallpaper(): Modifier {
     val colors = SlatrixTheme.colors
     // Remembered, so recomposing the conversation keeps the drawing cache instead of building the wash and dots again.
     return this then remember(colors) { Modifier.drawWithCache {
-        val slant = size.height * tan(Math.toRadians(WashTurn)).toFloat() / 2
-        val wash = Brush.linearGradient(0f to colors.wallpaperTop, WashMiddle to colors.wallpaperMiddle, 1f to colors.wallpaperBottom,
-            start = Offset(size.width / 2 - slant, 0f), end = Offset(size.width / 2 + slant, size.height))
+        val wash = Brush.verticalGradient(listOf(colors.wallpaperTop, colors.wallpaperBottom))
         val step = UiMetrics.WallpaperGrid.toPx().roundToInt().coerceAtLeast(1)
         val tile = ImageBitmap(step, step).also {
             Canvas(it).drawCircle(Offset(step / 2f, step / 2f), UiMetrics.WallpaperDot.toPx(), Paint().apply { color = colors.wallpaperDot })
@@ -132,9 +129,6 @@ fun Modifier.wallpaper(): Modifier {
         }
     } }
 }
-
-private const val WashTurn = 15.0
-private const val WashMiddle = 0.55f
 
 /**
  * A chat bubble, rounded all round except toward its author: a corner that meets the same author's bubble above or
