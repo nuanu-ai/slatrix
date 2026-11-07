@@ -1,6 +1,5 @@
 package ai.nuanu.slatrix.ui.account
 
-import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.DisplayNames
 import ai.nuanu.slatrix.core.MatrixPeople
 import ai.nuanu.slatrix.core.Person
@@ -61,8 +60,7 @@ fun PersonProfileScreen(person: Person, own: Boolean, opening: Boolean, error: S
         PushedPage("Profile", onBack) {
             item {
                 Column(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-                    // Colored by the ID, so the tile keeps its color when the profile's name replaces the room's.
-                    LiveAvatar(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), UiMetrics.ProfilePhoto, person.avatarUrl)
+                    LiveAvatar(person.name, UiMetrics.ProfilePhoto, person.avatarUrl)
                     Text(person.name, style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Black, color = colors.textPrimary)
                     if (!own) OutlinedButton(onMessage, Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch), enabled = !opening,

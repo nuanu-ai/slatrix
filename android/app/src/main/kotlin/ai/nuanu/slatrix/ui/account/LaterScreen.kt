@@ -1,6 +1,5 @@
 package ai.nuanu.slatrix.ui.account
 
-import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.LaterState
 import ai.nuanu.slatrix.core.ReminderPreset
 import ai.nuanu.slatrix.core.RoomSummary
@@ -320,7 +319,7 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         // The picture's place is kept while the message loads, so the text never shifts when it lands.
         Box(Modifier.padding(top = UiMetrics.GapTiny).size(UiMetrics.Avatar)) {
-            preview?.let { LiveAvatar(AvatarPlaceholder.initials(it.senderName), AvatarPlaceholder.colorIndex(it.senderName), url = it.avatarUrl) }
+            preview?.let { LiveAvatar(it.senderName, url = it.avatarUrl) }
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.Hairline * 4)) {
             // The reminder shares the conversation's line, so setting one never changes the card's height.

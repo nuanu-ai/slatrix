@@ -7,7 +7,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
-import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.DisplayNames
 import ai.nuanu.slatrix.core.MessageReaction
 import ai.nuanu.slatrix.core.MessageThread
@@ -72,7 +71,7 @@ internal fun Reactions(reactions: List<MessageReaction>, me: String?, names: Map
                     for (id in faces) {
                         val name = names[id] ?: DisplayNames.localpart(id)
                         Box(Modifier.border(UiMetrics.FaceRing, fill, CircleShape)) {
-                            LiveAvatar(AvatarPlaceholder.initials(name), AvatarPlaceholder.colorIndex(name), UiMetrics.Facepile, avatars[id])
+                            LiveAvatar(name, UiMetrics.Facepile, avatars[id])
                         }
                     }
                 } else Text("${reaction.count}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium,
@@ -92,7 +91,7 @@ internal fun ThreadReplies(thread: MessageThread, onOpen: (() -> Unit)?) {
             .then(if (onOpen != null) Modifier.clickable(onClickLabel = "View thread", onClick = onOpen) else Modifier),
             horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
             thread.lastReplier?.let {
-                LiveAvatar(AvatarPlaceholder.initials(it), AvatarPlaceholder.colorIndex(it), UiMetrics.Facepile, thread.lastReplierAvatarUrl)
+                LiveAvatar(it, UiMetrics.Facepile, thread.lastReplierAvatarUrl)
             }
             Text("${thread.replies} ${if (thread.replies == 1) "reply" else "replies"}", style = MaterialTheme.typography.labelLarge,
                 color = colors.accent, maxLines = 1)

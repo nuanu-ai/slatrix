@@ -1,6 +1,5 @@
 package ai.nuanu.slatrix.ui.account
 
-import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ComposerStyle
 import ai.nuanu.slatrix.core.ComposerStyles
@@ -304,7 +303,7 @@ private fun MentionList(candidates: List<MentionCandidate>, onPick: (MentionCand
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
                     when (candidate) {
                         is MentionCandidate.Member -> {
-                            LiveAvatar(AvatarPlaceholder.initials(candidate.person.name), AvatarPlaceholder.colorIndex(candidate.person.name),
+                            LiveAvatar(candidate.person.name,
                                 UiMetrics.CompactAvatar, candidate.person.avatarUrl)
                             Text(candidate.person.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -1,6 +1,5 @@
 package ai.nuanu.slatrix.ui.account
 
-import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.MatrixPeople
 import ai.nuanu.slatrix.core.MatrixRooms
 import ai.nuanu.slatrix.core.PeopleSearchState
@@ -67,11 +66,11 @@ fun NewMessageScreen(state: PeopleSearchState, recent: List<RoomSummary>, openin
             if (query.isBlank()) {
                 if (recent.isNotEmpty()) item { Section("Direct messages") }
                 items(recent, key = { it.id }) { room ->
-                    PersonRow(room.initials, room.colorIndex, room.avatarUrl, room.name, null, false, opening == null) { onRoom(room.id) }
+                    PersonRow(room.avatarUrl, room.name, null, false, opening == null) { onRoom(room.id) }
                 }
             } else {
                 items(state.people, key = { it.id }) { person ->
-                    PersonRow(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), person.avatarUrl, person.name,
+                    PersonRow(person.avatarUrl, person.name,
                         person.id.takeIf { it != person.name }, opening == person.id, opening == null) { onPerson(person) }
                 }
                 when {
@@ -89,12 +88,12 @@ fun NewMessageScreen(state: PeopleSearchState, recent: List<RoomSummary>, openin
 }
 
 @Composable
-private fun PersonRow(initials: String, colorIndex: Int, url: String?, name: String, id: String?, opening: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun PersonRow(url: String?, name: String, id: String?, opening: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val colors = SlatrixTheme.colors
     Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow).clickable(enabled, role = Role.Button, onClick = onClick)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-        LiveAvatar(initials, colorIndex, UiMetrics.ListAvatar, url)
+        LiveAvatar(name, UiMetrics.ListAvatar, url)
         Column(Modifier.weight(1f)) {
             Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)

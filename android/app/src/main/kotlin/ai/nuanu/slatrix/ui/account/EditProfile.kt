@@ -1,6 +1,5 @@
 package ai.nuanu.slatrix.ui.account
 
-import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.CropSquare
 import ai.nuanu.slatrix.core.MatrixProfile
 import ai.nuanu.slatrix.core.PhotoChange
@@ -101,7 +100,7 @@ fun EditProfileScreen(userId: String, name: String, photo: ImageBitmap?, hasPhot
                     val shown = text.ifBlank { name }.ifBlank { userId }
                     // The new photo shows as it will look; until then, the photo you have, or your initials.
                     if (photo != null) Image(photo, null, Modifier.size(UiMetrics.ProfilePhoto).clip(MaterialTheme.shapes.large))
-                    else LiveAvatar(AvatarPlaceholder.initials(shown), AvatarPlaceholder.colorIndex(userId), UiMetrics.ProfilePhoto, photoUrl)
+                    else LiveAvatar(shown, UiMetrics.ProfilePhoto, photoUrl)
                     OutlinedButton(onPickPhoto, Modifier.heightIn(min = UiMetrics.Touch), enabled = !saving, shape = MaterialTheme.shapes.small) {
                         Text("Upload photo", color = colors.textPrimary)
                     }

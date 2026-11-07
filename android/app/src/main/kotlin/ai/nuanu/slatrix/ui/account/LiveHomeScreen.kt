@@ -707,6 +707,11 @@ internal fun latestTime(timestamp: Long): String {
     }
 }
 
+/** A person, in the initials and color their [name] gives them on every screen. */
+@Composable
+internal fun LiveAvatar(name: String, size: Dp = UiMetrics.Avatar, url: String? = null) =
+    LiveAvatar(AvatarPlaceholder.initials(name), AvatarPlaceholder.colorIndex(name), size, url)
+
 @Composable
 internal fun LiveAvatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.Avatar, url: String? = null) {
     // People are round, as in every messenger; workspaces and channels are rounded squares.
