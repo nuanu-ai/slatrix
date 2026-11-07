@@ -40,6 +40,13 @@ import org.junit.Assert.assertFalse
 import org.junit.Rule
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import android.view.View
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import ai.nuanu.slatrix.ui.designsystem.AppColors
+import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import kotlin.math.abs
 import androidx.compose.ui.platform.LocalView
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -201,6 +208,40 @@ class LaterScreenTest {
         compose.waitUntil(10_000) { moved.isNotEmpty() }
         assertEquals(listOf("\$one" to LaterState.COMPLETED), moved)
         compose.onNodeWithText("Marked as complete").assertDoesNotExist()
+    }
+
+    // capability: later.complete
+    @Test fun swipingACardShowsWhereItsCheckAppearsAndWhenLettingGoCompletesIt() {
+        lateinit var view: View
+        lateinit var colors: AppColors
+        compose.setContent {
+            view = LocalView.current
+            SlatrixTheme {
+                colors = SlatrixTheme.colors
+                LaterScreen(SavedList(listOf(SavedMessage("!design:example.org", "\$one", 1_000))), rooms,
+                    { SavedPreview("@sam:example.org", "Sam", "Ship the draft", 1_000) }, LaterActions({}))
+            }
+        }
+        val card = compose.onNodeWithText("Ship the draft").fetchSemanticsNode().boundsInRoot
+        fun behind(): Color {
+            compose.waitForIdle()
+            val picture = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(Canvas(it)) }
+            return Color(picture.getPixel(view.width - 2, card.center.y.toInt()))
+        }
+        val reach = with(compose.density) { UiMetrics.Swipe.toPx() }
+        compose.onNodeWithText("Ship the draft").performTouchInput {
+            down(Offset(width - 2f, height / 2f))
+            // The first move only gets past the touch slop.
+            repeat(2) { moveBy(Offset(-reach / 2, 0f)) }
+        }
+        // Seen over the screen's own color, as on a phone; the picture alone is translucent where the tint is.
+        fun near(expected: Color, shown: Color): Boolean {
+            val (want, got) = expected.compositeOver(colors.canvas) to shown.compositeOver(colors.canvas)
+            return listOf(want.red - got.red, want.green - got.green, want.blue - got.blue).all { abs(it) < 0.02f }
+        }
+        assertTrue("Under the card while it moves", near(colors.accentTint, behind()))
+        compose.onNodeWithText("Ship the draft").performTouchInput { moveBy(Offset(-reach, 0f)) }
+        assertTrue("Under the card once letting go completes it", near(colors.accent, behind()))
     }
 
     // capability: home.swipe-tabs

@@ -302,13 +302,16 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
             }
         }
     })) {
+    // Tinted from the first move, so it's clear where the check comes in; full accent once letting go completes the card.
+    val completes = drag.value <= -reach
+    if (swipes) Box(Modifier.matchParentSize().background(if (completes) colors.accent else colors.accentTint))
     if (swipes) Icon(SlackIcons.Check, null, Modifier.align(Alignment.CenterEnd).padding(end = UiMetrics.GapLarge).size(UiMetrics.Icon)
         .graphicsLayer {
             val shown = (-drag.value / reach).coerceIn(0f, 1f)
             alpha = shown
             scaleX = 0.6f + 0.4f * shown
             scaleY = scaleX
-        }, tint = colors.textSecondary)
+        }, tint = if (completes) colors.onAccent else colors.accent)
     Row(Modifier.fillMaxWidth().graphicsLayer { translationX = drag.value }.background(colors.canvas)
         .combinedClickable(role = Role.Button, onLongClickLabel = "More actions", onLongClick = {
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
