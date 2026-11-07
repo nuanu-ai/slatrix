@@ -59,7 +59,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -146,6 +148,20 @@ class MessageContentTest {
         val tokens = DesignTokens.colors(false)
         assertEquals(tokens.getValue("mentionYouFill"), fill("@Me"))
         assertEquals(tokens.getValue("mentionFill"), fill("@Sam"))
+    }
+
+    // capability: message.mention-pills
+    @Test fun aMentionNeverBreaksAcrossLinesAndMentionsSideBySideStayApart() {
+        show(message("three", html = "<a href=\"https://matrix.to/#/@sam:example.org\">Sam Okafor</a>" +
+            "<a href=\"https://matrix.to/#/@wanda:example.org\">wanda-moss</a><a href=\"https://matrix.to/#/@lee:example.org\">Lee</a> hi"))
+        val text = compose.onNodeWithText("Okafor", substring = true, useUnmergedTree = true).text()
+        val pills = text.spanStyles.filter { it.item.background != Color.Unspecified }.sortedBy { it.start }
+        assertEquals(3, pills.size)
+        for (pill in pills) {
+            val name = text.substring(pill.start, pill.end)
+            assertFalse("\"$name\" can break at a space or hyphen", name.any { it == ' ' || it == '-' })
+        }
+        pills.zipWithNext { first, next -> assertTrue("Two mentions touch", first.end < next.start) }
     }
 
     // capability: message.reactions.show
