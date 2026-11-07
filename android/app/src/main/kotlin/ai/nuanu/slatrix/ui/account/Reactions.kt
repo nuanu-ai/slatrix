@@ -61,7 +61,7 @@ internal fun Reactions(reactions: List<MessageReaction>, me: String?, names: Map
                     else Modifier)
                 .semantics { selected = reaction.mine }
                 .combinedClickable(onLongClickLabel = "See who reacted", onLongClick = onShowWho) { onToggle?.invoke(reaction.key) }
-                .padding(horizontal = UiMetrics.GapMedium),
+                .padding(horizontal = UiMetrics.GapSmall),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
                 Text(reaction.key, style = MaterialTheme.typography.bodyLarge)
                 val faces = reaction.faces(me)

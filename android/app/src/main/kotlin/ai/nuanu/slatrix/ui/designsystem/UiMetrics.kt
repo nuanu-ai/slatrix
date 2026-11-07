@@ -93,8 +93,8 @@ object UiMetrics {
     val QuoteBar = 3.dp
     /** About five @ suggestions before the list scrolls. */
     val MentionListHeight = 240.dp
-    /** Reaction chips and the thread replies line, as tall as Slack Android's. */
-    val ChipHeight = 32.dp
+    /** Reaction chips, snug around the emoji and faces, as Slack Android's. */
+    val ChipHeight = 28.dp
     /** The tallest an inline image gets; wider ones fill the row. */
     val MediaMaxHeight = 320.dp
     val FileTile = 40.dp

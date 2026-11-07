@@ -131,7 +131,11 @@ private fun AnnotatedString.Builder.append(lines: List<Line>, colors: AppColors,
     onMention: ((String) -> Unit)?) {
     lines.forEachIndexed { index, line ->
         if (index > 0) append('\n')
+        var previous: String? = null
         for (run in line.runs) {
+            // Mentions side by side keep a thin gap, where the line may break, so each reads as its own pill.
+            if (run.mention != null && previous != null && previous != run.mention) append('\u2009')
+            previous = run.mention
             val code = MessageTextStyle.Code in run.styles
             // A mention of you or of everyone stands out, as on the Mac.
             val yours = run.mention == me || run.mention == "@room"
@@ -159,9 +163,11 @@ private fun AnnotatedString.Builder.append(lines: List<Line>, colors: AppColors,
             )
             val link = run.link
             val person = run.mention?.takeIf { it != "@room" }
-            if (link != null && run.mention == null) withLink(LinkAnnotation.Url(link, TextLinkStyles(style))) { append(run.text) }
-            else if (person != null && onMention != null) withLink(LinkAnnotation.Clickable(person, TextLinkStyles(style)) { onMention(person) }) { append(run.text) }
-            else withStyle(style) { append(run.text) }
+            // A name never breaks across lines, as a pill doesn't on the Mac.
+            val text = if (run.mention == null) run.text else run.text.replace(' ', '\u00A0').replace('-', '\u2011')
+            if (link != null && run.mention == null) withLink(LinkAnnotation.Url(link, TextLinkStyles(style))) { append(text) }
+            else if (person != null && onMention != null) withLink(LinkAnnotation.Clickable(person, TextLinkStyles(style)) { onMention(person) }) { append(text) }
+            else withStyle(style) { append(text) }
         }
     }
 }

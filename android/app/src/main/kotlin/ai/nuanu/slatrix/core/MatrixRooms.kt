@@ -13,10 +13,12 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
@@ -104,7 +106,9 @@ data class RoomListState(
     val invitations: List<Invitation> = emptyList(),
 )
 
-class MatrixRooms(scope: CoroutineScope, internal val client: Client, private val foreground: StateFlow<Boolean> = MutableStateFlow(true)) {
+class MatrixRooms(scope: CoroutineScope, internal val client: Client, private val foreground: StateFlow<Boolean> = MutableStateFlow(true),
+    /** Each time the phone has a working network again. */
+    private val networkBack: Flow<Unit> = emptyFlow()) {
     private val syncLock = Mutex()
     private val activeSync = MutableStateFlow<SyncService?>(null)
     private val mutableState = MutableStateFlow(RoomListState())
@@ -477,7 +481,10 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                             }
                         }
                     }
+                    // Offline, the SDK polls the server with pauses that grow to minutes; a start skips them, as the Mac does on wake.
+                    val network = launch { networkBack.collect { if (foreground.value && mutableOffline.value) current.start() } }
                     retries.receive()
+                    network.cancel()
                     visibility.cancel()
                 }
             } catch (cancelled: CancellationException) {
