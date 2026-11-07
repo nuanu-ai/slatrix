@@ -15,6 +15,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Test
 import com.google.gson.JsonObject
@@ -510,6 +511,24 @@ class MatrixRoomsTest {
         rooms.offline.first { it }
         assertNull("The banner says it, so Home's notice doesn't", rooms.state.value.error)
         sync.emitState(SyncServiceState.RUNNING)
+        rooms.offline.first { !it }
+        rooms.close()
+    }
+
+    // capability: app.offline-banner
+    @Test fun aNetworkThatComesBackEndsOfflineAtOnce() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val network = MutableSharedFlow<Unit>(replay = 1)
+        val rooms = MatrixRooms(backgroundScope, client, networkBack = network)
+        sync.running.first { it }
+
+        // Offline, the SDK polls the server with pauses that grow to minutes; the phone knows sooner.
+        sync.end(SyncServiceState.OFFLINE)
+        rooms.offline.first { it }
+        network.tryEmit(Unit)
+        sync.running.first { it }
         rooms.offline.first { !it }
         rooms.close()
     }
