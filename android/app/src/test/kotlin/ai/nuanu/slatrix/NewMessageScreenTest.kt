@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix
 
+import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.MessageSearchState
 import ai.nuanu.slatrix.core.PeopleSearchState
 import ai.nuanu.slatrix.core.Person
@@ -11,6 +12,8 @@ import ai.nuanu.slatrix.ui.account.NewMessageScreen
 import ai.nuanu.slatrix.ui.account.SearchScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
+import android.view.View
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.isHeading
@@ -113,5 +116,19 @@ class NewMessageScreenTest {
             assertEquals("sa", asked.last())
             assertEquals(listOf(sam), opened)
         }
+    }
+
+    // capability: people.start-dm
+    @Test fun aPersonHasTheColorTheirNameGivesThemEverywhereElse() {
+        lateinit var view: View
+        compose.setContent {
+            view = LocalView.current
+            SlatrixTheme {
+                NewMessageScreen(PeopleSearchState("sam", listOf(sam)), emptyList(), opening = null, error = null,
+                    onQuery = {}, onPerson = {}, onRoom = {}, onBack = {})
+            }
+        }
+        compose.onNode(hasSetTextAction()).performTextInput("sam")
+        assertEquals(AvatarPlaceholder.colorIndex(sam.name), compose.avatarColorBehind("SL", view))
     }
 }

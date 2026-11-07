@@ -5,7 +5,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.shape.CircleShape
-import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.ConversationSearch
 import ai.nuanu.slatrix.core.MessageSearchQuery
 import ai.nuanu.slatrix.core.MessageSearchState
@@ -177,7 +176,7 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<St
         items(people, key = { it.id }) { RoomSuggestion(it, onRoom) }
         items(others, key = { "person ${it.id}" }) { person ->
             SearchRow({ onPerson(person) }) {
-                Lead { LiveAvatar(AvatarPlaceholder.initials(person.name), AvatarPlaceholder.colorIndex(person.id), leadSize(), person.avatarUrl) }
+                Lead { LiveAvatar(person.name, leadSize(), person.avatarUrl) }
                 Spacer(Modifier.width(UiMetrics.GapMedium))
                 // The Matrix ID tells namesakes apart, and someone you have a conversation with from their profile.
                 Text(buildAnnotatedString {
@@ -226,7 +225,7 @@ private fun MessageHit(hit: SearchHit, room: RoomSummary?, query: MessageSearchQ
     Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
-        LiveAvatar(AvatarPlaceholder.initials(hit.senderName), AvatarPlaceholder.colorIndex(hit.senderName), UiMetrics.ListAvatar,
+        LiveAvatar(hit.senderName, UiMetrics.ListAvatar,
             hit.senderAvatarUrl)
         Column(Modifier.weight(1f)) {
             Text(room?.let { if (it.direct) it.name else "#${it.name}" }.orEmpty(), style = MaterialTheme.typography.bodySmall,
