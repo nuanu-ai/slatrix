@@ -3,10 +3,8 @@ package ai.nuanu.slatrix.ui.designsystem
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.translate
@@ -18,15 +16,8 @@ import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.ImageShader
-import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.ShaderBrush
-import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
@@ -34,7 +25,6 @@ import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
-import kotlin.math.roundToInt
 
 /** What a [glass] surface blurs: mark it with [glassSource], and keep the glass outside it. */
 @Composable
@@ -96,25 +86,6 @@ private class BubbleNode(var shape: Shape, var fill: Color, var edge: Color) : M
         drawOutline(outline, fill)
         drawContent()
     }
-}
-
-/** The chat wallpaper: a wash from top to bottom under a grid of faint dots. */
-@Composable
-fun Modifier.wallpaper(): Modifier {
-    val colors = SlatrixTheme.colors
-    // Remembered, so recomposing the conversation keeps the drawing cache instead of building the wash and dots again.
-    return this then remember(colors) { Modifier.drawWithCache {
-        val wash = Brush.verticalGradient(listOf(colors.wallpaperTop, colors.wallpaperBottom))
-        val step = UiMetrics.WallpaperGrid.toPx().roundToInt().coerceAtLeast(1)
-        val tile = ImageBitmap(step, step).also {
-            Canvas(it).drawCircle(Offset(step / 2f, step / 2f), UiMetrics.WallpaperDot.toPx(), Paint().apply { color = colors.wallpaperDot })
-        }
-        val dots = ShaderBrush(ImageShader(tile, TileMode.Repeated, TileMode.Repeated))
-        onDrawBehind {
-            drawRect(wash)
-            drawRect(dots)
-        }
-    } }
 }
 
 /**

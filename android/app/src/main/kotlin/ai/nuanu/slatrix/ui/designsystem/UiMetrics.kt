@@ -64,8 +64,8 @@ object UiMetrics {
     /** The most of the screen a message sheet's actions take before they scroll, so its reactions stay within thumb reach. */
     const val MessageSheetShare = 0.45f
     val GlassLift = 12.dp
-    val WallpaperGrid = 20.dp
-    val WallpaperDot = 1.dp
+    /** The chat wallpaper repeats every this much, large enough that its doodles show no rows on a phone. */
+    val WallpaperTile = 240.dp
     /** The grab handle atop a bottom sheet. */
     val SheetHandleWidth = 32.dp
     val SheetHandleHeight = 4.dp
