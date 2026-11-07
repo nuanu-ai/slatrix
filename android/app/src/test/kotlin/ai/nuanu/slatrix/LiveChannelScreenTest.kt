@@ -72,6 +72,9 @@ import ai.nuanu.slatrix.ui.account.timeLabel
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
 import androidx.compose.ui.unit.dp
 import org.junit.Rule
+import ai.nuanu.slatrix.core.MessageReaction
+import androidx.compose.ui.semantics.SemanticsProperties
+import kotlin.math.abs
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -139,6 +142,33 @@ class LiveChannelScreenTest {
     private var bubble = 0
 
     /** Whether the message's bubble reaches the screen: its fill is the color drawn most inside its bounds. */
+    // capability: message.reactions.toggle
+    // As on the Mac: a solid accent chip on someone else's white bubble shouts louder than the message.
+    @Test fun yourReactionOnSomeoneElsesMessageIsALightTintNotTheAccentsFill() {
+        var accent = 0
+        compose.setContent {
+            screen = LocalView.current
+            SlatrixTheme {
+                bubble = SlatrixTheme.colors.bubbleIn.toArgb()
+                accent = SlatrixTheme.colors.accentFill.toArgb()
+                LiveChannelScreen(room, ConversationState(listOf(message("Hello", 0).copy(reactions = listOf(
+                    MessageReaction("👀", 5, true, listOf("@jordan:example.org"))))), "@jordan:example.org", loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        val chip = compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true)).fetchSemanticsNode().boundsInRoot
+        val image = compose.runOnIdle {
+            val view = checkNotNull(screen).rootView
+            Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(android.graphics.Canvas(it)) }
+        }
+        val fill = (chip.left.toInt() until chip.right.toInt()).flatMap { x ->
+            (chip.top.toInt() until chip.bottom.toInt()).map { y -> image.getPixel(x, y) }
+        }.groupingBy { it }.eachCount().maxBy { it.value }.key
+        fun distance(a: Int, b: Int) = listOf(16, 8, 0).sumOf { abs((a shr it and 0xff) - (b shr it and 0xff)) }
+        assertTrue("The chip is closer to the bubble than to the accent", distance(fill, bubble) < distance(fill, accent))
+        assertNotEquals("The chip still reads as yours", bubble, fill)
+    }
+
     private fun drawn(text: String): Boolean {
         val bounds = compose.onNodeWithText(text).fetchSemanticsNode().boundsInRoot
         val image = compose.runOnIdle {

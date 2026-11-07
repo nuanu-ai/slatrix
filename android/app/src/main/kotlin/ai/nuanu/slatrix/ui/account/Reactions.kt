@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.compositeOver
 
 /**
  * Slack's reaction chips under a message: a tap adds or takes back yours, a long press shows who reacted. A chip shows
@@ -52,11 +53,13 @@ internal fun Reactions(reactions: List<MessageReaction>, me: String?, names: Map
     FlowRow(Modifier.padding(top = UiMetrics.GapSmall), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall),
         verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
         for (reaction in reactions) {
-            val fill = if (reaction.mine) colors.accentFill else colors.reaction
+            // Yours is tinted with the accent, as on the Mac; opaque, so the faces' rings match the chip.
+            val fill = (if (reaction.mine) colors.accentTint else colors.reaction).compositeOver(colors.bubbleIn)
             Row(Modifier.height(UiMetrics.ChipHeight)
                 .background(fill, CircleShape)
-                // Your own bubble tints every chip alike, so yours also wears an edge in the accent, white there.
-                .then(if (reaction.mine) Modifier.border(UiMetrics.Divider, colors.accent, CircleShape) else Modifier)
+                // Your own bubble tints every chip alike, so there yours also wears an edge in the accent, white there.
+                .then(if (reaction.mine && colors.accentTint == colors.reaction) Modifier.border(UiMetrics.Divider, colors.accent, CircleShape)
+                    else Modifier)
                 .semantics { selected = reaction.mine }
                 .combinedClickable(onLongClickLabel = "See who reacted", onLongClick = onShowWho) { onToggle?.invoke(reaction.key) }
                 .padding(horizontal = UiMetrics.GapMedium),
@@ -73,7 +76,7 @@ internal fun Reactions(reactions: List<MessageReaction>, me: String?, names: Map
                         }
                     }
                 } else Text("${reaction.count}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium,
-                    color = if (reaction.mine) colors.onAccent else colors.textPrimary)
+                    color = if (reaction.mine) colors.accent else colors.textPrimary)
             }
         }
     }
