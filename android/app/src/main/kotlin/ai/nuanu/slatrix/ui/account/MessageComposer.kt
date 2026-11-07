@@ -12,7 +12,6 @@ import ai.nuanu.slatrix.core.MentionSearch
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
-import ai.nuanu.slatrix.ui.designsystem.bubble
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -43,7 +42,6 @@ import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PhotoLibrary
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
@@ -157,7 +155,7 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         }) { linking = null }
     }
     var height by remember { mutableIntStateOf(0) }
-    // The field floats over the wallpaper as a capsule, as a messenger's does.
+    // The field is a capsule on the glass panel under it.
     Column(Modifier.fillMaxWidth().onSizeChanged { height = it.height }.padding(horizontal = UiMetrics.GapTiny, vertical = UiMetrics.GapSmall)) {
         if (suggestions != null && !editing) Popup(Alignment.BottomStart, IntOffset(0, -height),
             properties = PopupProperties(focusable = false)) {
@@ -191,7 +189,7 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (!expanded) attach?.let { Box(Modifier.padding(start = UiMetrics.GapTiny)) { AttachButton { attaching = true } } }
             Box(Modifier.weight(1f).padding(horizontal = UiMetrics.GapTiny)
-                .bubble(MaterialTheme.shapes.extraLarge, colors.field, colors.bubbleEdge)) { ReceiveKeyboardMedia(attach) {
+                .background(colors.raised, MaterialTheme.shapes.extraLarge)) { ReceiveKeyboardMedia(attach) {
                 BasicTextField(shown, { next ->
                     val left = ComposerStyles.blockLeft(composer.styles, composer.typing, shown.text, next.text, shown.selection.min)
                         .takeIf { shown.selection.collapsed && onFormat != null }
@@ -236,14 +234,14 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                 }
             } else {
                 IconButton(onClick = { picking = true }, enabled = !composer.loading) {
-                    Icon(Icons.Outlined.EmojiEmotions, "Emoji", tint = colors.textPrimary)
+                    Icon(Icons.Outlined.EmojiEmotions, "Emoji", tint = colors.textSecondary)
                 }
                 IconButton(onClick = {
                     val selection = shown.selection
                     val before = shown.text.substring(0, selection.min)
                     replace(selection.min, selection.max, if (before.isEmpty() || before.last().isWhitespace()) "@" else " @")
                 }, enabled = !composer.loading) {
-                    Icon(Icons.Outlined.AlternateEmail, "Mention someone", tint = colors.textPrimary)
+                    Icon(Icons.Outlined.AlternateEmail, "Mention someone", tint = colors.textSecondary)
                 }
                 Spacer(Modifier.weight(1f))
             }
@@ -256,12 +254,11 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
     }
 }
 
-/** Slack's "+": a circle that opens the attach sheet. */
+/** Slack's "+", which opens the attach sheet. */
 @Composable
 private fun AttachButton(onClick: () -> Unit) {
-    val colors = SlatrixTheme.colors
-    IconButton(onClick = onClick, colors = IconButtonDefaults.iconButtonColors(containerColor = colors.raised)) {
-        Icon(Icons.Outlined.Add, "Attachments", tint = colors.textPrimary)
+    IconButton(onClick = onClick) {
+        Icon(Icons.Outlined.Add, "Attachments", tint = SlatrixTheme.colors.textSecondary)
     }
 }
 
@@ -337,8 +334,7 @@ private fun TargetBar(target: ComposerTarget, onCancel: () -> Unit) {
         Box(Modifier.width(UiMetrics.QuoteBar).fillMaxHeight().background(colors.accent, MaterialTheme.shapes.small))
         Column(Modifier.weight(1f)) {
             Text(if (reply != null) "Replying to ${reply.senderName}" else "Editing message",
-                style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                style = MaterialTheme.typography.labelLarge, color = colors.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (reply != null) Text(reply.body, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

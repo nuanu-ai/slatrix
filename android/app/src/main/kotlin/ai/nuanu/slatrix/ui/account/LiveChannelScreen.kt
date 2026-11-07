@@ -17,7 +17,6 @@ import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.OnAccentFill
 import ai.nuanu.slatrix.ui.designsystem.bubble
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
-import ai.nuanu.slatrix.ui.designsystem.glassFoot
 import ai.nuanu.slatrix.ui.designsystem.glassBar
 import ai.nuanu.slatrix.ui.designsystem.glassSource
 import ai.nuanu.slatrix.ui.designsystem.rememberGlass
@@ -288,8 +287,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         translationX = back.value * size.width
     }, topBar = { ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails) },
         bottomBar = {
-            // On the header's glass, fading in without an edge, so the capsule floats over the messages.
-            Column(Modifier.imePadding().glassFoot(glass).navigationBarsPadding()) {
+            // One glass panel, like the header's, holding the reply, the field and its toolbar.
+            Column(Modifier.imePadding().glassBar(glass, atFoot = true).navigationBarsPadding()) {
                 val placeholder = when {
                     threadRoot != null -> "Add a reply"
                     room.direct || room.isPrivate -> "Message ${room.name}"
@@ -462,7 +461,7 @@ private fun NewLine() {
 private fun CannotPost() {
     val colors = SlatrixTheme.colors
     Text("You don’t have permission to post in this channel.", Modifier.fillMaxWidth().padding(UiMetrics.GapSmall)
-        .clip(MaterialTheme.shapes.extraLarge).background(colors.field)
+        .clip(MaterialTheme.shapes.extraLarge).background(colors.raised)
         .heightIn(min = UiMetrics.Touch).wrapContentHeight().padding(horizontal = UiMetrics.GapLarge),
         style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, textAlign = TextAlign.Center)
 }

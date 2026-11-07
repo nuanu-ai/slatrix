@@ -35,8 +35,6 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     val sunken = roles.getValue("sunken")
     /** Sheets and dialogs. */
     val overlay = roles.getValue("overlay")
-    /** The composer's field, floating over the wallpaper. */
-    val field = roles.getValue("field")
     val tooltip = roles.getValue("tooltip")
     val onTooltip = roles.getValue("onTooltip")
     val scrim = roles.getValue("scrim")
