@@ -317,6 +317,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             val firstReply = remember(rows, threadRoot) {
                 rows.getOrNull(rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot } + 1)?.id.takeIf { threadRoot != null }
             }
+            // With one other person, the header already says who wrote what isn't yours.
+            val named = !room.direct || room.memberCount > 2
             // A row that starts a run again: after the replies bar or the New line, so it shows its sender.
             fun restarts(row: ConversationMessage) = row.id == firstReply || line != null && row.eventId == line
             // Slack's way back to the newest message, once the reader scrolls up or opened an older one.
@@ -340,7 +342,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val next = rows.getOrNull(rows.size - index) as? ConversationMessage
                             val last = next == null || !next.grouped || restarts(next)
                             val root = threadRoot != null && row.eventId == threadRoot
-                            LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId, state.names, state.avatars,
+                            LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, named, state.ownUserId, state.names, state.avatars,
                                 actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
                                 loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
                                 loadThreadOrigin, actions.onQuote) { menu = it }
@@ -543,11 +545,11 @@ private fun HistoryProgress(loading: Boolean) {
 internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(timestamp))
 
 /**
- * A message as a bubble: others' on the left in white, their picture by the last of a run and their name, in their
- * color, atop the first; yours on the right in the accent. The time sits inside, after the last line when it fits.
+ * A message as a bubble: others' on the left in white, [named] with their picture by the last of a run and their name,
+ * in their color, atop the first; yours on the right in the accent. The time sits inside, after the last line when it fits.
  */
 @Composable
-private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me: String?, names: Map<String, String>, avatars: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
+private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, named: Boolean, me: String?, names: Map<String, String>, avatars: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?, onReply: ((ConversationMessage) -> Unit)?,
@@ -595,7 +597,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             .semantics(mergeDescendants = true) { onLongClick("Message actions") { menu(); true } })
         .padding(top = if (message.grouped) UiMetrics.Hairline * 4 else UiMetrics.GapSmall)
         .layout { measurable, constraints ->
-            val gutter = if (own) (constraints.maxWidth * UiMetrics.BubbleGutter).roundToInt()
+            val gutter = if (own || !named) (constraints.maxWidth * UiMetrics.BubbleGutter).roundToInt()
             else lerp(UiMetrics.IncomingGutterNarrow, UiMetrics.IncomingGutterWide,
                 ((constraints.maxWidth.toDp() - UiMetrics.NarrowPhone) / (UiMetrics.WidePhone - UiMetrics.NarrowPhone)).coerceIn(0f, 1f)).roundToPx()
             val width = (constraints.maxWidth - gutter).coerceAtLeast(0)
@@ -609,7 +611,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
         if (own && failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.padding(bottom = UiMetrics.GapSmall).size(UiMetrics.Icon),
             tint = colors.destructive)
         // Every one of a run keeps the picture's room, so their bubbles line up.
-        if (!own) Box(Modifier.size(UiMetrics.FeedAvatar)) {
+        if (!own && named) Box(Modifier.size(UiMetrics.FeedAvatar)) {
             if (lastOfRun) Box(Modifier.clip(CircleShape).clickable(role = Role.Button) { onPerson(message.senderId) }
                 .semantics(mergeDescendants = true) { contentDescription = "${message.senderName}’s profile" }) {
                 LiveAvatar(message.initials, message.colorIndex, UiMetrics.FeedAvatar, message.avatarUrl)
@@ -637,7 +639,8 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             val timeColor = if (failed && !own) fill.destructive else fill.textSecondary
             Column(Modifier.padding(if (media) PaddingValues(UiMetrics.GapTiny)
                 else PaddingValues(horizontal = UiMetrics.BubbleInset, vertical = UiMetrics.BubbleInsetVertical))) {
-                if (!own && !message.grouped) Text(message.senderName, inset.clickable(role = Role.Button) { onPerson(message.senderId) },
+                val header = !own && !message.grouped && named
+                if (header) Text(message.senderName, inset.clickable(role = Role.Button) { onPerson(message.senderId) },
                     style = MaterialTheme.typography.labelLarge, color = fill.person(message.colorIndex), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 message.replyTo?.let { reply -> Box(inset) {
                     // A copy of a thread reply names its thread, and turns out an ordinary quote if its reply isn't in one.
@@ -650,10 +653,9 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
                     if (message.repliedToThread && !notInThread) ThreadCopyQuote(origin, onOpenThread)
                     else ReplyQuote(reply) { onOpenReply(reply.eventId) }
                 } }
-                val header = (!own && !message.grouped) || message.replyTo != null
                 attachment?.let { Box(when {
                     !media -> Modifier.padding(vertical = UiMetrics.GapTiny)
-                    header -> Modifier.padding(top = UiMetrics.GapTiny)
+                    header || message.replyTo != null -> Modifier.padding(top = UiMetrics.GapTiny)
                     else -> Modifier
                 }) {
                     Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, ::menu, onView)

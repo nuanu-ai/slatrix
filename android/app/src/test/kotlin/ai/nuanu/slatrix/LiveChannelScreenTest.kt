@@ -539,6 +539,24 @@ class LiveChannelScreenTest {
         compose.runOnIdle { assertEquals(1, opened) }
     }
 
+    // A direct message with one person names them in its header, so their bubbles leave out the name and the picture.
+    @Test fun aDirectMessageWithOnePersonShowsNoSenderAndAGroupOneDoes() {
+        val shown = mutableStateOf(room.copy(name = "Mira Chen", direct = true, memberCount = 2))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(shown.value, ConversationState(listOf(message("Hello", 0)), loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("Hello").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Mira’s profile").assertDoesNotExist()
+        compose.onAllNodesWithText("Mira").assertCountEquals(0)
+
+        compose.runOnIdle { shown.value = shown.value.copy(memberCount = 3) }
+        compose.onNodeWithContentDescription("Mira’s profile").assertIsDisplayed()
+        compose.onAllNodesWithText("Mira").assertCountEquals(1)
+    }
+
     // capability: conversation.read
     @Test fun aLongUnreadMessageReadsOnceItShowsNotWhenItsEndScrollsIn() {
         val long = (1..120).joinToString(" ") { "Line $it of the release notes." }
