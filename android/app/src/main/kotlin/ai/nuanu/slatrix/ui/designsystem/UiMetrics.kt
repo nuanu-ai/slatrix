@@ -64,8 +64,8 @@ object UiMetrics {
     /** The most of the screen a message sheet's actions take before they scroll, so its reactions stay within thumb reach. */
     const val MessageSheetShare = 0.45f
     val GlassLift = 12.dp
-    val WallpaperGrid = 20.dp
-    val WallpaperDot = 1.dp
+    /** The chat wallpaper repeats every this much, large enough that its doodles show no rows on a phone. */
+    val WallpaperTile = 240.dp
     /** The grab handle atop a bottom sheet. */
     val SheetHandleWidth = 32.dp
     val SheetHandleHeight = 4.dp
@@ -73,6 +73,8 @@ object UiMetrics {
     const val SheetDismissShare = 0.25f
     /** How fast a flick down closes a sheet, per second. */
     val SheetDismissVelocity = 1_000.dp
+    /** How much a message sheet blurs the conversation behind the message it brings forward. */
+    val SheetBlur = 3.dp
     val CompactAvatar = 24.dp
     val ListAvatar = 36.dp
     val HeaderAvatar = 32.dp

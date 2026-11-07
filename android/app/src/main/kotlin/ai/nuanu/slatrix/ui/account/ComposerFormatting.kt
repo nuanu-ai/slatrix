@@ -62,7 +62,7 @@ import androidx.compose.ui.text.style.TextDecoration
 fun FormattingToggle(on: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val colors = SlatrixTheme.colors
     IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.semantics { contentDescription = "Formatting" }) {
-        Text("Aa", style = MaterialTheme.typography.titleMedium, color = if (on) colors.accent else colors.textPrimary)
+        Text("Aa", style = MaterialTheme.typography.titleMedium, color = if (on) colors.accent else colors.textSecondary)
     }
 }
 
@@ -73,7 +73,7 @@ fun RowScope.FormattingBar(active: Set<Kind>, enabled: Boolean, onFormat: (Kind)
     @Composable
     fun button(icon: ImageVector, label: String, kind: Kind?) = IconButton(onClick = { if (kind == null) onLink() else onFormat(kind) },
         enabled = enabled) {
-        Icon(icon, label, tint = if (kind in active) colors.accent else colors.textPrimary)
+        Icon(icon, label, tint = if (kind in active) colors.accent else colors.textSecondary)
     }
     Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
         button(Icons.Outlined.FormatBold, "Bold", Kind.Bold)

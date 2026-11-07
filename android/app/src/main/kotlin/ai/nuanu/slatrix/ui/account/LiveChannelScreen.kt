@@ -17,11 +17,15 @@ import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.OnAccentFill
 import ai.nuanu.slatrix.ui.designsystem.bubble
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
-import ai.nuanu.slatrix.ui.designsystem.glassFoot
 import ai.nuanu.slatrix.ui.designsystem.glassBar
 import ai.nuanu.slatrix.ui.designsystem.glassSource
 import ai.nuanu.slatrix.ui.designsystem.rememberGlass
 import ai.nuanu.slatrix.ui.designsystem.wallpaper
+import ai.nuanu.slatrix.ui.designsystem.lift
+import ai.nuanu.slatrix.ui.designsystem.recede
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import dev.chrisbanes.haze.HazeState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.layout.AlignmentLine
@@ -254,10 +258,15 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         loadOlder()
     }
     val back = rememberPredictiveBack(onBack = onBack)
-    var menu by remember { mutableStateOf<ConversationMessage?>(null) }
+    var menu by remember { mutableStateOf<Pressed?>(null) }
+    // Where the message sheet's top rests, in the window, while it's up; the pressed message comes forward above it.
+    var sheetTop by remember { mutableStateOf<Float?>(null) }
+    val focus = remember { Animatable(0f) }
+    LaunchedEffect(sheetTop != null) { if (sheetTop != null) focus.animateTo(1f, Motion.pane()) else focus.snapTo(0f) }
     // Inside a thread, Reply has nowhere further to go.
-    menu?.let { message ->
-        MessageActionsHost(message, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent) { menu = null }
+    menu?.let { pressed ->
+        MessageActionsHost(pressed.message, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent,
+            { sheetTop = it }) { menu = null }
     }
     var reacted by remember { mutableStateOf<ConversationMessage?>(null) }
     // The row and its tile's pixels, saved, so the viewer stays open on the same image when the phone turns.
@@ -281,15 +290,24 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     reacted?.let { ReactionsSheet(it.reactions, state.names, state.ownUserId) { reacted = null } }
     val glass = rememberGlass()
+    // With one other person, the header already says who wrote what isn't yours.
+    val named = !room.direct || room.memberCount > 2
+    @Composable
+    fun messageRow(row: ConversationMessage, last: Boolean, lifted: Boolean = false) = LiveMessageRow(row, last, named,
+        state.ownUserId, state.names, state.avatars, actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null },
+        onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
+        loadThreadOrigin, actions.onQuote, lifted) { y -> menu = Pressed(row, last, y) }
+    var origin by remember { mutableFloatStateOf(0f) }
+    Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow().y }) {
     // The header and the composer float over the messages, which pass under both; the scaffold measures them first, so
     // the messages never move.
     Scaffold(Modifier.graphicsLayer {
         // A back swipe carries the conversation off under the finger, over the page it goes back to.
         translationX = back.value * size.width
-    }, topBar = { ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails) },
+    }.recede { focus.value }, topBar = { ChatHeader(room, threadRoot != null, typing, glass, onBack, onOpenDetails) },
         bottomBar = {
-            // On the header's glass, fading in without an edge, so the capsule floats over the messages.
-            Column(Modifier.imePadding().glassFoot(glass).navigationBarsPadding()) {
+            // One glass panel, like the header's, holding the reply, the field and its toolbar.
+            Column(Modifier.imePadding().glassBar(glass, atFoot = true).navigationBarsPadding()) {
                 val placeholder = when {
                     threadRoot != null -> "Add a reply"
                     room.direct || room.isPrivate -> "Message ${room.name}"
@@ -330,7 +348,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
                 contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = footer + jumpRoom)) {
-                itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row -> Box(Modifier.alpha(if (settled) 1f else 0f)) {
+                // The pressed message hides while its copy stands forward over the sheet.
+                val forward = menu?.message?.id.takeIf { sheetTop != null }
+                itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row -> Box(Modifier.alpha(if (settled && row.id != forward) 1f else 0f)) {
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Column(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
@@ -340,10 +360,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val next = rows.getOrNull(rows.size - index) as? ConversationMessage
                             val last = next == null || !next.grouped || restarts(next)
                             val root = threadRoot != null && row.eventId == threadRoot
-                            LiveMessageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last, state.ownUserId, state.names, state.avatars,
-                                actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null }, onOpenMessage,
-                                loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
-                                loadThreadOrigin, actions.onQuote) { menu = it }
+                            messageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last)
                             // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
                             if (root) RepliesBar(replies)
                         }
@@ -380,7 +397,22 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
     }
     }
+    // As in Slack, the pressed message stands sharp just above the sheet, over the conversation receding behind it.
+    val pressed = menu
+    val top = sheetTop
+    if (pressed != null && top != null) {
+        var height by remember(pressed) { mutableIntStateOf(0) }
+        val gap = with(LocalDensity.current) { UiMetrics.GapMedium.toPx() }
+        Box(Modifier.fillMaxWidth().onSizeChanged { height = it.height }.graphicsLayer {
+            val from = pressed.y - origin
+            translationY = from + (top - gap - height - origin - from) * focus.value
+        }.clearAndSetSemantics {}) { messageRow(pressed.message, pressed.last, lifted = true) }
+    }
+    }
 }
+
+/** A long-pressed message, as its row showed it, and where its top was in the window. */
+private data class Pressed(val message: ConversationMessage, val last: Boolean, val y: Float)
 
 /** The glass header over a conversation: back, who or what it is, and who's typing or how many are in it. */
 @Composable
@@ -460,7 +492,7 @@ private fun NewLine() {
 private fun CannotPost() {
     val colors = SlatrixTheme.colors
     Text("You don’t have permission to post in this channel.", Modifier.fillMaxWidth().padding(UiMetrics.GapSmall)
-        .clip(MaterialTheme.shapes.extraLarge).background(colors.field)
+        .clip(MaterialTheme.shapes.extraLarge).background(colors.raised)
         .heightIn(min = UiMetrics.Touch).wrapContentHeight().padding(horizontal = UiMetrics.GapLarge),
         style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, textAlign = TextAlign.Center)
 }
@@ -543,19 +575,24 @@ private fun HistoryProgress(loading: Boolean) {
 internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(timestamp))
 
 /**
- * A message as a bubble: others' on the left in white, their picture by the last of a run and their name, in their
- * color, atop the first; yours on the right in the accent. The time sits inside, after the last line when it fits.
+ * A message as a bubble: others' on the left in white, [named] with their picture by the last of a run and their name,
+ * in their color, atop the first; yours on the right in the accent. The time sits inside, after the last line when it fits.
  */
 @Composable
-private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me: String?, names: Map<String, String>, avatars: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
+private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, named: Boolean, me: String?, names: Map<String, String>, avatars: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?, onReply: ((ConversationMessage) -> Unit)?,
-    onMenu: (ConversationMessage) -> Unit) {
+    /** Brought forward over the message sheet, on a shadow. */
+    lifted: Boolean,
+    /** Opens the message sheet, with where the row's top is in the window. */
+    onMenu: (y: Float) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
     val own = message.own
-    fun menu() = onMenu(message)
+    // Kept out of state, so moving never recomposes the row.
+    val place = remember { object { var y = 0f } }
+    fun menu() = onMenu(place.y)
     val haptics = LocalHapticFeedback.current
     // A swipe right replies, as in a messenger: the bubble follows the finger, the reply sign fades in behind it, and
     // crossing the threshold ticks once; read while drawing, so the drag never recomposes the row.
@@ -563,7 +600,8 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
     val reach = with(LocalDensity.current) { UiMetrics.Swipe.toPx() }
     val swipes = rememberCoroutineScope()
     val reply = onReply?.takeIf { message.eventId != null && !failed }
-    Box(Modifier.fillMaxWidth().then(if (reply == null) Modifier else Modifier.pointerInput(message, reply) {
+    Box(Modifier.fillMaxWidth().onGloballyPositioned { place.y = it.positionInWindow().y }
+        .then(if (reply == null) Modifier else Modifier.pointerInput(message, reply) {
         var past = false
         fun settle() { swipes.launch { drag.animateTo(0f, Motion.pane()) } }
         detectHorizontalDragGestures(onDragStart = { past = false }, onDragCancel = ::settle, onDragEnd = {
@@ -595,7 +633,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             .semantics(mergeDescendants = true) { onLongClick("Message actions") { menu(); true } })
         .padding(top = if (message.grouped) UiMetrics.Hairline * 4 else UiMetrics.GapSmall)
         .layout { measurable, constraints ->
-            val gutter = if (own) (constraints.maxWidth * UiMetrics.BubbleGutter).roundToInt()
+            val gutter = if (own || !named) (constraints.maxWidth * UiMetrics.BubbleGutter).roundToInt()
             else lerp(UiMetrics.IncomingGutterNarrow, UiMetrics.IncomingGutterWide,
                 ((constraints.maxWidth.toDp() - UiMetrics.NarrowPhone) / (UiMetrics.WidePhone - UiMetrics.NarrowPhone)).coerceIn(0f, 1f)).roundToPx()
             val width = (constraints.maxWidth - gutter).coerceAtLeast(0)
@@ -609,7 +647,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
         if (own && failed) Icon(Icons.Outlined.ErrorOutline, "Not sent", Modifier.padding(bottom = UiMetrics.GapSmall).size(UiMetrics.Icon),
             tint = colors.destructive)
         // Every one of a run keeps the picture's room, so their bubbles line up.
-        if (!own) Box(Modifier.size(UiMetrics.FeedAvatar)) {
+        if (!own && named) Box(Modifier.size(UiMetrics.FeedAvatar)) {
             if (lastOfRun) Box(Modifier.clip(CircleShape).clickable(role = Role.Button) { onPerson(message.senderId) }
                 .semantics(mergeDescendants = true) { contentDescription = "${message.senderName}’s profile" }) {
                 LiveAvatar(message.initials, message.colorIndex, UiMetrics.FeedAvatar, message.avatarUrl)
@@ -618,7 +656,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
         val shape = remember(own, message.grouped, lastOfRun) { bubbleShape(own, message.grouped, lastOfRun) }
         val bubble = @Composable {
             val fill = SlatrixTheme.colors
-            Box(Modifier.weight(1f, fill = false).bubble(shape, fill.bubbleIn, if (own) fill.bubbleIn.copy(alpha = 0f) else fill.bubbleEdge)) {
+            Box(Modifier.weight(1f, fill = false).then(if (lifted) Modifier.lift(shape) else Modifier).bubble(shape, fill.bubbleIn, if (own) fill.bubbleIn.copy(alpha = 0f) else fill.bubbleEdge)) {
             val attachment = message.attachment
             // A picture or video runs to the bubble's edge with its time on it, as in a messenger; the rest keeps the text's inset.
             val media = attachment?.kind == MessageAttachment.Kind.Image || attachment?.kind == MessageAttachment.Kind.Video
@@ -637,7 +675,8 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
             val timeColor = if (failed && !own) fill.destructive else fill.textSecondary
             Column(Modifier.padding(if (media) PaddingValues(UiMetrics.GapTiny)
                 else PaddingValues(horizontal = UiMetrics.BubbleInset, vertical = UiMetrics.BubbleInsetVertical))) {
-                if (!own && !message.grouped) Text(message.senderName, inset.clickable(role = Role.Button) { onPerson(message.senderId) },
+                val header = !own && !message.grouped && named
+                if (header) Text(message.senderName, inset.clickable(role = Role.Button) { onPerson(message.senderId) },
                     style = MaterialTheme.typography.labelLarge, color = fill.person(message.colorIndex), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 message.replyTo?.let { reply -> Box(inset) {
                     // A copy of a thread reply names its thread, and turns out an ordinary quote if its reply isn't in one.
@@ -650,10 +689,9 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, me:
                     if (message.repliedToThread && !notInThread) ThreadCopyQuote(origin, onOpenThread)
                     else ReplyQuote(reply) { onOpenReply(reply.eventId) }
                 } }
-                val header = (!own && !message.grouped) || message.replyTo != null
                 attachment?.let { Box(when {
                     !media -> Modifier.padding(vertical = UiMetrics.GapTiny)
-                    header -> Modifier.padding(top = UiMetrics.GapTiny)
+                    header || message.replyTo != null -> Modifier.padding(top = UiMetrics.GapTiny)
                     else -> Modifier
                 }) {
                     Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, ::menu, onView)

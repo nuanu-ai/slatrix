@@ -38,6 +38,14 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
 import org.junit.Assert.assertFalse
 import org.junit.Rule
+import ai.nuanu.slatrix.core.AvatarPlaceholder
+import ai.nuanu.slatrix.ui.designsystem.DesignTokens
+import androidx.compose.ui.graphics.Color
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.View
+import androidx.compose.ui.platform.LocalView
+import kotlin.math.abs
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -227,4 +235,23 @@ class LaterScreenTest {
 
     private fun tab(label: String) =
         compose.onNode(hasText(label) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected))
+
+    // capability: message.save
+    @Test fun aSendersPictureHasTheColorTheirNameGivesThemEverywhereElse() {
+        val name = "Sam Okafor"
+        lateinit var view: View
+        compose.setContent {
+            view = LocalView.current
+            SlatrixTheme {
+                LaterScreen(SavedList(listOf(SavedMessage("!design:example.org", "\$one", 1_000))), rooms,
+                    { SavedPreview("@sam:example.org", name, "Ship it on Thursday", 1_000) }, LaterActions({}))
+            }
+        }
+        // Below the initials, where the tile's shading has reached the color itself.
+        val initials = compose.onNodeWithText("SO", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val picture = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(Canvas(it)) }
+        val shown = Color(picture.getPixel(initials.center.x.toInt(), (initials.bottom + (initials.bottom - initials.top) / 4).toInt()))
+        fun distance(color: Color) = abs(color.red - shown.red) + abs(color.green - shown.green) + abs(color.blue - shown.blue)
+        assertEquals(AvatarPlaceholder.colorIndex(name), DesignTokens.avatarColors.indices.minBy { distance(DesignTokens.avatarColors[it]) })
+    }
 }

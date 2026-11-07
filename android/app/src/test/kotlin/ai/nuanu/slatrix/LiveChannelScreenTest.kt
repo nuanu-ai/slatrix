@@ -70,8 +70,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotEquals
 import ai.nuanu.slatrix.ui.account.timeLabel
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
+import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.ui.unit.dp
 import org.junit.Rule
+import ai.nuanu.slatrix.core.MessageReaction
+import androidx.compose.ui.semantics.SemanticsProperties
+import kotlin.math.abs
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -139,8 +143,65 @@ class LiveChannelScreenTest {
     private var bubble = 0
 
     /** Whether the message's bubble reaches the screen: its fill is the color drawn most inside its bounds. */
+    // capability: message.reactions.toggle
+    // As on the Mac: a solid accent chip on someone else's white bubble shouts louder than the message.
+    @Test fun yourReactionOnSomeoneElsesMessageIsALightTintNotTheAccentsFill() {
+        var accent = 0
+        compose.setContent {
+            screen = LocalView.current
+            SlatrixTheme {
+                bubble = SlatrixTheme.colors.bubbleIn.toArgb()
+                accent = SlatrixTheme.colors.accentFill.toArgb()
+                LiveChannelScreen(room, ConversationState(listOf(message("Hello", 0).copy(reactions = listOf(
+                    MessageReaction("👀", 5, true, listOf("@jordan:example.org"))))), "@jordan:example.org", loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        val chip = compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true)).fetchSemanticsNode().boundsInRoot
+        val image = compose.runOnIdle {
+            val view = checkNotNull(screen).rootView
+            Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(android.graphics.Canvas(it)) }
+        }
+        val fill = (chip.left.toInt() until chip.right.toInt()).flatMap { x ->
+            (chip.top.toInt() until chip.bottom.toInt()).map { y -> image.getPixel(x, y) }
+        }.groupingBy { it }.eachCount().maxBy { it.value }.key
+        fun distance(a: Int, b: Int) = listOf(16, 8, 0).sumOf { abs((a shr it and 0xff) - (b shr it and 0xff)) }
+        assertTrue("The chip is closer to the bubble than to the accent", distance(fill, bubble) < distance(fill, accent))
+        assertNotEquals("The chip still reads as yours", bubble, fill)
+    }
+
+    // As in Slack: the pressed message comes up to sit sharp just above the sheet, and the rest of the conversation recedes.
+    @Test fun aLongPressedMessageStandsJustAboveItsSheet() {
+        compose.setContent {
+            screen = LocalView.current
+            SlatrixTheme {
+                bubble = SlatrixTheme.colors.bubbleIn.toArgb()
+                LiveChannelScreen(room, ConversationState(listOf(message("First", 0)) + (1..8).map { message("Reply $it", it) },
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    actions = MessageActions(onQuote = {}))
+            }
+        }
+        val first = compose.onNodeWithText("First", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithText("First").performTouchInput { longClick() }
+        val sheet = compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "Message from Mira")).fetchSemanticsNode()
+            .boundsInRoot.top
+        compose.waitForIdle()
+        val image = compose.runOnIdle {
+            val view = checkNotNull(screen).rootView
+            Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(android.graphics.Canvas(it)) }
+        }
+        // Inside the bubble's inset, left of its text: only a bubble that hasn't receded keeps the bubble's own color.
+        val x = (first.left - with(compose.density) { UiMetrics.GapTiny.toPx() }).toInt()
+        val sharp = (0 until image.height).filter { image.getPixel(x, it) == bubble }
+        assertTrue("Nothing in the conversation stays sharp", sharp.isNotEmpty())
+        assertTrue("The message ends just above the sheet, not at ${sharp.last()} of $sheet",
+            sharp.last() < sheet && sharp.last() > sheet - with(compose.density) { (UiMetrics.Touch * 2).toPx() })
+        assertTrue("The message left its place: $first ${sharp.first()}..${sharp.last()} $sheet", first.bottom.toInt() !in sharp)
+    }
+
     private fun drawn(text: String): Boolean {
-        val bounds = compose.onNodeWithText(text).fetchSemanticsNode().boundsInRoot
+        // The text alone, inside its bubble: a plain wallpaper can outnumber a short bubble across its whole row.
+        val bounds = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val image = compose.runOnIdle {
             val view = checkNotNull(screen).rootView
             Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(android.graphics.Canvas(it)) }
@@ -537,6 +598,24 @@ class LiveChannelScreenTest {
         compose.onNodeWithContentDescription("Conversation details").assertDoesNotExist()
         compose.onNodeWithText("Wanda Moss").performClick()
         compose.runOnIdle { assertEquals(1, opened) }
+    }
+
+    // A direct message with one person names them in its header, so their bubbles leave out the name and the picture.
+    @Test fun aDirectMessageWithOnePersonShowsNoSenderAndAGroupOneDoes() {
+        val shown = mutableStateOf(room.copy(name = "Mira Chen", direct = true, memberCount = 2))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(shown.value, ConversationState(listOf(message("Hello", 0)), loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("Hello").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Mira’s profile").assertDoesNotExist()
+        compose.onAllNodesWithText("Mira").assertCountEquals(0)
+
+        compose.runOnIdle { shown.value = shown.value.copy(memberCount = 3) }
+        compose.onNodeWithContentDescription("Mira’s profile").assertIsDisplayed()
+        compose.onAllNodesWithText("Mira").assertCountEquals(1)
     }
 
     // capability: conversation.read

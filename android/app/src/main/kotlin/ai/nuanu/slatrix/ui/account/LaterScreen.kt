@@ -320,7 +320,7 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         // The picture's place is kept while the message loads, so the text never shifts when it lands.
         Box(Modifier.padding(top = UiMetrics.GapTiny).size(UiMetrics.Avatar)) {
-            preview?.let { LiveAvatar(AvatarPlaceholder.initials(it.senderName), AvatarPlaceholder.colorIndex(it.senderId), url = it.avatarUrl) }
+            preview?.let { LiveAvatar(AvatarPlaceholder.initials(it.senderName), AvatarPlaceholder.colorIndex(it.senderName), url = it.avatarUrl) }
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.Hairline * 4)) {
             // The reminder shares the conversation's line, so setting one never changes the card's height.

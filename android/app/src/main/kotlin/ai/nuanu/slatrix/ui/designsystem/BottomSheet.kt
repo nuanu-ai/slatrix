@@ -48,6 +48,12 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
@@ -64,9 +70,12 @@ import kotlinx.coroutines.launch
  * Slack's bottom sheet: it eases in from the bottom over the pane time, over a scrim that fades in with it, and closes at
  * once on a tap outside, Back, or a swipe or flick down, including one that starts on its scrolled-up content. Material's
  * sheet takes its motion from a scheme this Material version keeps internal, so the sheet is the design system's own.
+ * With [onTop] it draws no scrim and says where its top comes to rest in the window, so the screen behind can recede
+ * itself and bring something forward above it.
  */
 @Composable
-fun BottomSheet(onDismissRequest: () -> Unit, containerColor: Color, content: @Composable ColumnScope.() -> Unit) {
+fun BottomSheet(onDismissRequest: () -> Unit, containerColor: Color, onTop: ((Float) -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit) {
     Dialog(onDismissRequest, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         // The scrim below fades in with the sheet, in place of the window's own dim and animation.
         val view = LocalView.current
@@ -103,13 +112,16 @@ fun BottomSheet(onDismissRequest: () -> Unit, containerColor: Color, content: @C
         }
         Box(Modifier.fillMaxSize()) {
             // A sibling of the sheet, so a tap in the sheet never reaches it.
-            Box(Modifier.fillMaxSize().graphicsLayer { alpha = shown.value }.background(SlatrixTheme.colors.scrim)
+            Box(Modifier.fillMaxSize().then(if (onTop != null) Modifier
+                else Modifier.graphicsLayer { alpha = shown.value }.background(SlatrixTheme.colors.scrim))
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismissRequest)
                 .semantics { contentDescription = "Close" })
             // Never under the status bar; the space above the sheet is the scrim's, and takes no touches of its own.
             Box(Modifier.fillMaxSize().statusBarsPadding().padding(top = UiMetrics.GapSection)) {
                 Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .onSizeChanged { height = it.height }
+                    // Before the slide, so it is where the sheet rests.
+                    .then(if (onTop != null) Modifier.onGloballyPositioned { onTop(it.positionInWindow().y) } else Modifier)
                     .graphicsLayer { translationY = (1 - shown.value) * size.height + dragged.value }
                     .nestedScroll(handOff)
                     .draggable(rememberDraggableState(::drag), Orientation.Vertical, onDragStopped = { settle(it) })
@@ -137,4 +149,24 @@ fun MenuItem(icon: ImageVector, label: String, color: Color = SlatrixTheme.color
         Icon(icon, null, Modifier.size(UiMetrics.SheetIcon), tint = if (color == colors.textPrimary) colors.textSecondary else color)
         Text(label, style = MaterialTheme.typography.bodyLarge, color = color)
     }
+}
+
+/** What stays behind a sheet that brings something forward: blurred and dimmed as far as [shown] says, from 0 to 1. */
+@Composable
+fun Modifier.recede(shown: () -> Float): Modifier {
+    val scrim = SlatrixTheme.colors.scrim
+    return graphicsLayer {
+        val radius = UiMetrics.SheetBlur.toPx() * shown()
+        renderEffect = if (radius > 0f) BlurEffect(radius, radius) else null
+    }.drawWithContent {
+        drawContent()
+        drawRect(scrim, alpha = shown())
+    }
+}
+
+/** Lifts what a sheet brings forward off the screen receded behind it, on the tab capsule's soft shadow. */
+@Composable
+fun Modifier.lift(shape: Shape): Modifier {
+    val colors = SlatrixTheme.colors
+    return shadow(UiMetrics.GlassLift, shape, ambientColor = colors.glassShadow, spotColor = colors.glassShadow)
 }

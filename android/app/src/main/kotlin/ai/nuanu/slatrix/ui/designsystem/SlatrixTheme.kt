@@ -35,8 +35,6 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     val sunken = roles.getValue("sunken")
     /** Sheets and dialogs. */
     val overlay = roles.getValue("overlay")
-    /** The composer's field, floating over the wallpaper. */
-    val field = roles.getValue("field")
     val tooltip = roles.getValue("tooltip")
     val onTooltip = roles.getValue("onTooltip")
     val scrim = roles.getValue("scrim")
@@ -58,11 +56,9 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     val mentionFill = roles.getValue("mentionFill")
     val mentionYouText = roles.getValue("mentionYouText")
     val mentionYouFill = roles.getValue("mentionYouFill")
-    /** The chat wallpaper: a diagonal wash through three colors under a grid of faint dots. */
-    val wallpaperTop = roles.getValue("wallpaperTop")
-    val wallpaperMiddle = roles.getValue("wallpaperMiddle")
-    val wallpaperBottom = roles.getValue("wallpaperBottom")
-    val wallpaperDot = roles.getValue("wallpaperDot")
+    /** The chat wallpaper: a calm cool gray under faint doodles of the app's own icons. */
+    val wallpaper = roles.getValue("wallpaper")
+    val wallpaperDoodle = roles.getValue("wallpaperDoodle")
     /** Others' bubbles, lifted off the wallpaper by a hairline [bubbleEdge]; your own are [accentFill] under [onAccent]. */
     val bubbleIn = roles.getValue("bubbleIn")
     val bubbleEdge = roles.getValue("bubbleEdge")
@@ -116,23 +112,23 @@ fun OnAccentFill(content: @Composable () -> Unit) {
 
 private val LocalColors = staticCompositionLocalOf { AppColors(DesignTokens.colors(false), false) }
 
-/** Material You: the theme's surfaces and accent from the wallpaper, keeping the wallpaper wash pale under the bubbles. */
+/** Material You: the theme's surfaces and accent from the wallpaper, with the chat's gray washed in that accent. */
 private fun wallpaperRoles(dark: Boolean, scheme: ColorScheme): Map<String, Color> {
-    val wash = { color: Color -> lerp(scheme.surface, color, if (dark) 0.35f else 0.6f) }
     return DesignTokens.colors(dark) + mapOf(
         "textPrimary" to scheme.onSurface, "textBody" to scheme.onSurface, "textSecondary" to scheme.onSurfaceVariant,
         "canvas" to scheme.surface, "raised" to scheme.surfaceContainerHigh, "sunken" to scheme.surfaceContainerHighest,
         "overlay" to scheme.surfaceContainerLow, "border" to scheme.outlineVariant, "borderStrong" to scheme.outline,
         "accent" to scheme.primary, "accentTint" to scheme.primary.copy(alpha = 0.12f), "accentFill" to scheme.primary,
         "onAccent" to scheme.onPrimary, "mention" to scheme.primary, "mentionText" to scheme.primary,
-        "mentionFill" to scheme.primary.copy(alpha = 0.12f), "wallpaperTop" to wash(scheme.primaryContainer),
-        "wallpaperMiddle" to wash(scheme.secondaryContainer), "wallpaperBottom" to wash(scheme.tertiaryContainer),
-        "wallpaperDot" to scheme.primary.copy(alpha = 0.08f),
+        "mentionFill" to scheme.primary.copy(alpha = 0.12f), "wallpaper" to lerp(scheme.surfaceContainer, scheme.primary, WashAccent),
+        "wallpaperDoodle" to if (dark) scheme.onSurface.copy(alpha = 0.06f) else scheme.primary.copy(alpha = 0.1f),
         "bubbleOutMeta" to scheme.onPrimary.copy(alpha = 0.8f), "bubbleOutRule" to scheme.onPrimary.copy(alpha = 0.22f),
         "bubbleIn" to if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLowest,
         "reaction" to scheme.surfaceContainerHighest,
     )
 }
+
+private const val WashAccent = 0.05f
 
 object SlatrixTheme {
     val topPanelShape @Composable get() = MaterialTheme.shapes.extraLarge.copy(bottomStart = ZeroCornerSize, bottomEnd = ZeroCornerSize)

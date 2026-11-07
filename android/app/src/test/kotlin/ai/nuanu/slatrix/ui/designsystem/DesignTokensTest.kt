@@ -27,7 +27,7 @@ class DesignTokensTest {
 
     @Test fun `in dark theirs stand off every stop of the wallpaper`() {
         val colors = DesignTokens.colors(true)
-        for (stop in listOf("wallpaperTop", "wallpaperMiddle", "wallpaperBottom")) {
+        for (stop in listOf("wallpaper")) {
             val (a, b) = listOf(colors.getValue("bubbleIn").luminance(), colors.getValue(stop).luminance()).sorted()
             assertTrue(stop, (b + 0.05f) / (a + 0.05f) >= 1.25f)
         }
