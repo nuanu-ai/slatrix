@@ -46,6 +46,7 @@ import ai.nuanu.slatrix.core.EmojiCatalog
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -105,16 +106,24 @@ private val textKinds = setOf(MessageKind.Text, MessageKind.Notice, MessageKind.
 /** What a forward can copy: text, and any attachment, which goes as the same media. */
 private val forwardKinds = textKinds + MessageKind.Attachment
 
-/** The long-press sheet, the emoji picker it opens and the delete confirmation, one after another. */
+/**
+ * The long-press sheet, the emoji picker it opens and the delete confirmation, one after another. While the sheet is up
+ * it tells [onSheetTop] where its top rests, in the window, so the screen can bring the message forward above it; null once
+ * it's gone.
+ */
 @Composable
 internal fun MessageActionsHost(message: ConversationMessage, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
-    onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit, onDismiss: () -> Unit) {
+    onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit, onSheetTop: (Float?) -> Unit,
+    onDismiss: () -> Unit) {
     var step by remember(message.id) { mutableStateOf(Step.Sheet) }
     // Read while the sheet is up, so Add reaction opens on every emoji at once.
     val context = LocalContext.current
     LaunchedEffect(Unit) { withContext(Dispatchers.IO) { EmojiCatalog.load(context) } }
     when (step) {
-        Step.Sheet -> MessageSheet(message, actions, onOpenThread, onRetrySend, onDeleteUnsent, { step = it }, onDismiss)
+        Step.Sheet -> {
+            DisposableEffect(Unit) { onDispose { onSheetTop(null) } }
+            MessageSheet(message, actions, onOpenThread, onRetrySend, onDeleteUnsent, onSheetTop, { step = it }, onDismiss)
+        }
         Step.Picker -> EmojiPickerSheet(actions.recent, { emoji -> actions.onReact?.invoke(message, emoji); onDismiss() }, onDismiss)
         Step.ConfirmDelete -> AlertDialog(onDismissRequest = onDismiss,
             title = { Text("Delete message") },
@@ -141,7 +150,7 @@ private enum class Step { Sheet, Picker, ConfirmDelete, Caption }
  */
 @Composable
 private fun MessageSheet(message: ConversationMessage, actions: MessageActions, onOpenThread: ((String) -> Unit)?,
-    onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit,
+    onRetrySend: (ConversationMessage) -> Unit, onDeleteUnsent: (ConversationMessage) -> Unit, onTop: (Float) -> Unit,
     onStep: (Step) -> Unit, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
     val clipboard = LocalClipboard.current
@@ -152,7 +161,7 @@ private fun MessageSheet(message: ConversationMessage, actions: MessageActions, 
         onDismiss()
     }
     val react = actions.onReact.takeIf { eventId != null }
-    BottomSheet(onDismiss, colors.overlay) {
+    BottomSheet(onDismiss, colors.overlay, onTop) {
         BoxWithConstraints(Modifier.semantics { paneTitle = "Message from ${message.senderName}" }) {
             val most = maxHeight * UiMetrics.MessageSheetShare
             Column {

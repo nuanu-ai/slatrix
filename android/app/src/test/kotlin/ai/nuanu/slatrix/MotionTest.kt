@@ -65,7 +65,7 @@ class MotionTest {
             MessageKind.Text, MessageSendState.Sent, false, "M", 0)
         var shown by mutableStateOf(false)
         compose.setContent {
-            SlatrixTheme { if (shown) MessageActionsHost(message, MessageActions(), null, {}, {}) {} }
+            SlatrixTheme { if (shown) MessageActionsHost(message, MessageActions(), null, {}, {}, {}) {} }
         }
         settles("Copy text") { shown = true }
     }

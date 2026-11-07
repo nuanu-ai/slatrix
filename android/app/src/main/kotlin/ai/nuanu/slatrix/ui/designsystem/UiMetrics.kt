@@ -73,6 +73,8 @@ object UiMetrics {
     const val SheetDismissShare = 0.25f
     /** How fast a flick down closes a sheet, per second. */
     val SheetDismissVelocity = 1_000.dp
+    /** How much a message sheet blurs the conversation behind the message it brings forward. */
+    val SheetBlur = 3.dp
     val CompactAvatar = 24.dp
     val ListAvatar = 36.dp
     val HeaderAvatar = 32.dp

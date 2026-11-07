@@ -70,6 +70,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotEquals
 import ai.nuanu.slatrix.ui.account.timeLabel
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
+import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.ui.unit.dp
 import org.junit.Rule
 import ai.nuanu.slatrix.core.MessageReaction
@@ -169,8 +170,38 @@ class LiveChannelScreenTest {
         assertNotEquals("The chip still reads as yours", bubble, fill)
     }
 
+    // As in Slack: the pressed message comes up to sit sharp just above the sheet, and the rest of the conversation recedes.
+    @Test fun aLongPressedMessageStandsJustAboveItsSheet() {
+        compose.setContent {
+            screen = LocalView.current
+            SlatrixTheme {
+                bubble = SlatrixTheme.colors.bubbleIn.toArgb()
+                LiveChannelScreen(room, ConversationState(listOf(message("First", 0)) + (1..8).map { message("Reply $it", it) },
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    actions = MessageActions(onQuote = {}))
+            }
+        }
+        val first = compose.onNodeWithText("First", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithText("First").performTouchInput { longClick() }
+        val sheet = compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "Message from Mira")).fetchSemanticsNode()
+            .boundsInRoot.top
+        compose.waitForIdle()
+        val image = compose.runOnIdle {
+            val view = checkNotNull(screen).rootView
+            Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(android.graphics.Canvas(it)) }
+        }
+        // Inside the bubble's inset, left of its text: only a bubble that hasn't receded keeps the bubble's own color.
+        val x = (first.left - with(compose.density) { UiMetrics.GapTiny.toPx() }).toInt()
+        val sharp = (0 until image.height).filter { image.getPixel(x, it) == bubble }
+        assertTrue("Nothing in the conversation stays sharp", sharp.isNotEmpty())
+        assertTrue("The message ends just above the sheet, not at ${sharp.last()} of $sheet",
+            sharp.last() < sheet && sharp.last() > sheet - with(compose.density) { (UiMetrics.Touch * 2).toPx() })
+        assertTrue("The message left its place: $first ${sharp.first()}..${sharp.last()} $sheet", first.bottom.toInt() !in sharp)
+    }
+
     private fun drawn(text: String): Boolean {
-        val bounds = compose.onNodeWithText(text).fetchSemanticsNode().boundsInRoot
+        // The text alone, inside its bubble: a plain wallpaper can outnumber a short bubble across its whole row.
+        val bounds = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val image = compose.runOnIdle {
             val view = checkNotNull(screen).rootView
             Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(android.graphics.Canvas(it)) }
