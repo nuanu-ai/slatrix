@@ -9,7 +9,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -51,12 +50,11 @@ class ActivityScreenTest {
     }
 
     // capability: activity.feed
-    @Test fun aReactionShowsTheMessageItReactedToWithItsReaction() {
+    @Test fun aReactionNamesItsEmojiAboveTheMessageItReactedTo() {
         val liked = item("\$r", ActivityKind.Reaction, "👍").copy(reactedTo = "Ship it on Friday?")
         compose.setContent { SlatrixTheme { ActivityScreen(listOf(liked), {}, { _, _ -> }) } }
-        compose.onNodeWithText("Reacted in #design").assertExists()
+        compose.onNodeWithText("Reacted 👍 in #design").assertExists()
         compose.onNodeWithText("Ship it on Friday?").assertExists()
-        compose.onNodeWithContentDescription("👍 reaction").assertExists()
     }
 
     // capability: activity.feed
