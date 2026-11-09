@@ -1,5 +1,7 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.ConnectionState
+
 import ai.nuanu.slatrix.core.waiting
 import ai.nuanu.slatrix.core.SavedPreview
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -150,7 +152,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 // and the Later page read it here. Once sync is back it reads the account again and writes what waited.
                 val laterSync = remember(client, userId, rooms) {
                     MatrixLater(laterScope, client, SavedMessageStore(context, userId),
-                        rooms?.offline?.map { !it } ?: flowOf(true))
+                        rooms?.connection?.map { it == ConnectionState.Connected } ?: flowOf(false))
                 }
                 DisposableEffect(laterSync) { onDispose { laterSync.close() } }
                 val later = laterSync.list.collectAsState().value
@@ -235,7 +237,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                     }
                 }
                 CompositionLocalProvider(LocalAvatarLoader provides avatars) { Box(Modifier.fillMaxSize()) {
-                    ProvideOffline(rooms?.offline) { ConnectedAccountScreen(identityState,
+                    ProvideConnection(rooms?.connection, rooms?.let { it::retry }) { ConnectedAccountScreen(identityState,
                         { identity?.requestVerification() }, { identity?.acceptVerification() },
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },
                         { identity?.cancel() }, { identity?.retry() }) {

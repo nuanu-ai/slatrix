@@ -499,7 +499,7 @@ class MatrixRoomsTest {
     }
 
     // capability: app.offline-banner
-    @Test fun aDroppedConnectionSaysOfflineUntilSyncRunsAgainWithoutAnError() = runTest {
+    @Test fun aDroppedServerConnectionSaysReconnectingUntilSyncAnswersWithoutAnError() = runTest {
         val client = RoomsClient(emptyList())
         val sync = RoomsSync()
         client.services.trySend(sync)
@@ -508,10 +508,10 @@ class MatrixRoomsTest {
         client.sendQueuesEnabled.first { it }
 
         sync.emitState(SyncServiceState.OFFLINE)
-        rooms.offline.first { it }
+        rooms.connection.first { it == ConnectionState.Reconnecting }
         assertNull("The banner says it, so Home's notice doesn't", rooms.state.value.error)
         sync.emitState(SyncServiceState.RUNNING)
-        rooms.offline.first { !it }
+        rooms.connection.first { it == ConnectionState.Connected }
         rooms.close()
     }
 
@@ -520,16 +520,16 @@ class MatrixRoomsTest {
         val client = RoomsClient(emptyList())
         val sync = RoomsSync()
         client.services.trySend(sync)
-        val network = MutableSharedFlow<Unit>(replay = 1)
-        val rooms = MatrixRooms(backgroundScope, client, networkBack = network)
+        val network = MutableSharedFlow<Boolean>(replay = 1)
+        val rooms = MatrixRooms(backgroundScope, client, network = network)
         sync.running.first { it }
 
         // Offline, the SDK polls the server with pauses that grow to minutes; the phone knows sooner.
         sync.end(SyncServiceState.OFFLINE)
-        rooms.offline.first { it }
-        network.tryEmit(Unit)
+        rooms.connection.first { it == ConnectionState.Reconnecting }
+        network.tryEmit(true)
         sync.running.first { it }
-        rooms.offline.first { !it }
+        rooms.connection.first { it == ConnectionState.Connected }
         rooms.close()
     }
 
@@ -540,13 +540,13 @@ class MatrixRoomsTest {
         val release = CompletableDeferred<Unit>()
         client.resumeSending = { resuming.complete(Unit); release.await() }
         client.services.trySend(sync)
-        val network = MutableSharedFlow<Unit>()
-        val rooms = MatrixRooms(backgroundScope, client, networkBack = network)
+        val network = MutableSharedFlow<Boolean>()
+        val rooms = MatrixRooms(backgroundScope, client, network = network)
         try {
             resuming.await()
             network.subscriptionCount.first { it > 0 }
             sync.end(SyncServiceState.OFFLINE)
-            network.emit(Unit)
+            network.emit(true)
             release.complete(Unit)
             withContext(Dispatchers.Default) { withTimeout(5_000) { sync.running.first { it } } }
         } finally {
@@ -574,6 +574,57 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    @Test fun aNetworkRestartCannotLeaveSyncRunningAfterTheAppIsHidden() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val foreground = MutableStateFlow(true)
+        val network = MutableSharedFlow<Boolean>()
+        val rooms = MatrixRooms(backgroundScope, client, foreground, network)
+        val starting = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        try {
+            rooms.connection.first { it == ConnectionState.Connected }
+            network.subscriptionCount.first { it > 0 }
+            sync.beforeStart = { withContext(NonCancellable) { starting.complete(Unit); release.await() } }
+            network.emit(true)
+            starting.await()
+            foreground.value = false
+            rooms.connection.first { it == ConnectionState.Paused }
+            release.complete(Unit)
+            network.emit(true)
+            sync.stopped.await()
+            assertFalse("The app is hidden, so its live sync must stay stopped", sync.running.value)
+        } finally {
+            release.complete(Unit)
+            rooms.close()
+        }
+    }
+
+    @Test fun returningToTheAppWaitsForANewServerResponse() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val foreground = MutableStateFlow(true)
+        val rooms = MatrixRooms(backgroundScope, client, foreground)
+        try {
+            rooms.connection.first { it == ConnectionState.Connected }
+            foreground.value = false
+            rooms.connection.first { it == ConnectionState.Paused }
+            sync.stopped.await()
+            sync.confirmsSync = false
+            foreground.value = true
+            sync.running.first { it }
+            sync.emitEntries(listOf(RoomListEntriesUpdate.Reset(listOf(TestRoom(roomInfo("!team:example.org", "Team"))))))
+            rooms.state.first { it.rooms.any { room -> room.name == "Team" } }
+            assertEquals(ConnectionState.Reconnecting, rooms.connection.value)
+            sync.emitRoomState(RoomListServiceState.RUNNING)
+            rooms.connection.first { it == ConnectionState.Connected }
+        } finally {
+            rooms.close()
+        }
+    }
+
     @Test fun aSyncThatEndsWhileTheAppIsOpenRunsAgain() = runTest {
         val client = RoomsClient(emptyList())
         val sync = RoomsSync()
@@ -589,6 +640,26 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    @Test fun successfulRecoveriesDoNotAccumulateRetryDelays() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        try {
+            sync.running.first { it }
+            withContext(Dispatchers.Default) {
+                withTimeout(5_000) {
+                    repeat(8) {
+                        sync.end(SyncServiceState.ERROR)
+                        sync.running.first { it }
+                    }
+                }
+            }
+        } finally {
+            rooms.close()
+        }
+    }
+
     @Test fun aTemporaryFailurePreparingSyncRecoversWithoutAClick() = runTest {
         val client = RoomsClient(emptyList())
         val sync = RoomsSync()
@@ -602,6 +673,44 @@ class MatrixRoomsTest {
         try {
             withContext(Dispatchers.Default) { withTimeout(5_000) { sync.running.first { it } } }
             assertNull(rooms.state.first { it.error == null }.error)
+        } finally {
+            rooms.close()
+        }
+    }
+
+    @Test fun startingSyncDoesNotClaimConnectedBeforeTheServerAnswers() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync().apply { confirmsSync = false }
+        client.services.trySend(sync)
+        val rooms = MatrixRooms(backgroundScope, client)
+        try {
+            sync.started.await()
+            sync.emitEntries(listOf(RoomListEntriesUpdate.Reset(listOf(TestRoom(roomInfo("!team:example.org", "Team"))))))
+            rooms.state.first { it.rooms.any { room -> room.name == "Team" } }
+            assertEquals(ConnectionState.Connecting, rooms.connection.value)
+            sync.emitRoomState(RoomListServiceState.RUNNING)
+            rooms.connection.first { it == ConnectionState.Connected }
+        } finally {
+            rooms.close()
+        }
+    }
+
+    @Test fun losingTheNetworkIsDistinctFromWaitingForTheServer() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val network = MutableStateFlow(true)
+        val rooms = MatrixRooms(backgroundScope, client, network = network)
+        try {
+            rooms.connection.first { it == ConnectionState.Connected }
+            network.value = false
+            withContext(Dispatchers.Default) { withTimeout(5_000) { rooms.connection.first { it == ConnectionState.Offline } } }
+            sync.confirmsSync = false
+            sync.end(SyncServiceState.OFFLINE)
+            network.value = true
+            rooms.connection.first { it == ConnectionState.Reconnecting }
+            sync.emitRoomState(RoomListServiceState.RUNNING)
+            rooms.connection.first { it == ConnectionState.Connected }
         } finally {
             rooms.close()
         }
@@ -668,6 +777,9 @@ private class TestRoom(var info: RoomInfo, var latest: LatestEventValue = Latest
 }
 
 private class RoomsSync : SyncService(NoHandle) {
+    var beforeStart: suspend () -> Unit = {}
+    var confirmsSync = true
+    private var roomStateListener: RoomListServiceStateListener? = null
     val started = CompletableDeferred<Unit>()
     val stopped = CompletableDeferred<Unit>()
     val teardownStarted = CompletableDeferred<Unit>()
@@ -675,6 +787,11 @@ private class RoomsSync : SyncService(NoHandle) {
     private var entriesListener: RoomListEntriesListener? = null
     private var activeFilter = false
     override fun roomListService(): RoomListService = object : RoomListService(NoHandle) {
+        override fun state(listener: RoomListServiceStateListener): TaskHandle {
+            roomStateListener = listener
+            listener.onUpdate(RoomListServiceState.INITIAL)
+            return RoomsHandle()
+        }
         override suspend fun allRooms(): RoomList = object : RoomList(NoHandle) {
             override fun close() { super.close(); teardownStarted.complete(Unit) }
             override fun entriesWithDynamicAdapters(pageSize: UInt, listener: RoomListEntriesListener): RoomListEntriesWithDynamicAdaptersResult {
@@ -697,6 +814,7 @@ private class RoomsSync : SyncService(NoHandle) {
     }
     val running = MutableStateFlow(false)
     override suspend fun start() {
+        beforeStart()
         running.value = true
         emitState(SyncServiceState.RUNNING)
         // Only once its RUNNING is queued, so a state the test emits next lands after it rather than being cleared by it.
@@ -706,7 +824,11 @@ private class RoomsSync : SyncService(NoHandle) {
         running.value = false
         stopped.complete(Unit)
     }
-    fun emitState(state: SyncServiceState) { stateListener?.onUpdate(state) }
+    fun emitState(state: SyncServiceState) {
+        stateListener?.onUpdate(state)
+        if (confirmsSync && state == SyncServiceState.RUNNING) emitRoomState(RoomListServiceState.RUNNING)
+    }
+    fun emitRoomState(state: RoomListServiceState) { roomStateListener?.onUpdate(state) }
     fun end(state: SyncServiceState) {
         running.value = false
         emitState(state)

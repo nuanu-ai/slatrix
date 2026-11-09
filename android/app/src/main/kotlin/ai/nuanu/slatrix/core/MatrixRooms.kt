@@ -1,6 +1,8 @@
 package ai.nuanu.slatrix.core
 
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +46,8 @@ import org.matrix.rustcomponents.sdk.RoomListEntriesDynamicFilterKind
 import org.matrix.rustcomponents.sdk.RoomListEntriesListener
 import org.matrix.rustcomponents.sdk.RoomListEntriesUpdate
 import org.matrix.rustcomponents.sdk.RoomListEntriesWithDynamicAdaptersResult
+import org.matrix.rustcomponents.sdk.RoomListServiceState
+import org.matrix.rustcomponents.sdk.RoomListServiceStateListener
 import org.matrix.rustcomponents.sdk.RoomNotificationMode
 import org.matrix.rustcomponents.sdk.SpaceService
 import org.matrix.rustcomponents.sdk.SyncService
@@ -108,14 +112,13 @@ data class RoomListState(
 
 class MatrixRooms(scope: CoroutineScope, internal val client: Client, private val foreground: StateFlow<Boolean> = MutableStateFlow(true),
     /** Each time the phone has a working network again. */
-    private val networkBack: Flow<Unit> = emptyFlow()) {
+    private val network: Flow<Boolean> = emptyFlow()) {
     private val syncLock = Mutex()
     private val activeSync = MutableStateFlow<SyncService?>(null)
     private val mutableState = MutableStateFlow(RoomListState())
     val state: StateFlow<RoomListState> = mutableState.asStateFlow()
-    private val mutableOffline = MutableStateFlow(false)
-    /** The SDK lost the server and is waiting for the network, which the offline banner says. */
-    val offline: StateFlow<Boolean> = mutableOffline.asStateFlow()
+    private val mutableConnection = MutableStateFlow(ConnectionState.Connecting)
+    val connection: StateFlow<ConnectionState> = mutableConnection.asStateFlow()
     private val events = Channel<Event>(Channel.UNLIMITED)
     private val retries = Channel<Unit>(Channel.CONFLATED)
     private val summaries = mutableMapOf<String, RoomSummary>()
@@ -127,6 +130,10 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private val syncGeneration = AtomicLong()
     private var error: String? = null
     private var isOffline = false
+    private var syncRunning = false
+    private var syncResponded = false
+    private var hasConnected = false
+    private var networkAvailable: Boolean? = null
     // Room calls block on the SDK, so the list never builds on the main thread.
     private val worker = scope.launch(Dispatchers.Default) {
         try {
@@ -245,9 +252,37 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             is Event.Connection -> if (event.generation == syncGeneration.get()) {
                 error = event.error
                 isOffline = event.offline
-                // A network error pauses a room's send queue; what waited there goes out once sync is back.
-                if (event.running) runCatching { client.enableAllSendQueues(true) }
+                syncRunning = event.running
+                if (!event.running) syncResponded = false
+                updateConnection()
             }
+            is Event.SyncResponse -> if (event.generation == syncGeneration.get()) {
+                syncResponded = event.state.hasResponse
+                updateConnection()
+            }
+            is Event.Network -> if (event.generation == syncGeneration.get()) {
+                networkAvailable = event.available
+                if (!event.available) syncResponded = false
+                updateConnection()
+            }
+            is Event.Visibility -> if (event.generation == syncGeneration.get()) {
+                if (!event.visible) syncResponded = false
+                updateConnection()
+            }
+        }
+    }
+
+    private suspend fun updateConnection() {
+        val next = ConnectionState.resolve(networkAvailable, foreground.value, syncRunning, syncResponded,
+            isOffline || error != null, hasConnected)
+        val wasConnected = mutableConnection.value == ConnectionState.Connected
+        if (mutableConnection.value != next) connectionLog.info(
+            "event=connection state=$next network=$networkAvailable foreground=${foreground.value} running=$syncRunning responded=$syncResponded")
+        mutableConnection.value = next
+        if (next == ConnectionState.Connected) {
+            hasConnected = true
+            // A network error pauses send queues; resume only after the server answers again.
+            if (!wasConnected) runCatching { client.enableAllSendQueues(true) }
         }
     }
 
@@ -371,7 +406,6 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             spacesKnown = parents != null,
             invitations = invitations.values.sortedWith(compareBy<Invitation, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.id }),
         )
-        mutableOffline.value = isOffline
     }
 
     private fun topLevel(id: String): Boolean = parents?.get(id).isNullOrEmpty()
@@ -435,18 +469,21 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         while (currentCoroutineContext().isActive) {
             val generation = syncGeneration.incrementAndGet()
             val ended = Channel<Unit>(Channel.CONFLATED)
+            val failureStreak = AtomicInteger()
             var service: SyncService? = null
             var list: RoomList? = null
             var entries: RoomListEntriesWithDynamicAdaptersResult? = null
             var controller: RoomListDynamicEntriesController? = null
             var stream: TaskHandle? = null
             var stateHandle: TaskHandle? = null
+            var responseHandle: TaskHandle? = null
             try {
                 val current = client.syncService().withOfflineMode().finish()
                 service = current
                 currentCoroutineContext().ensureActive()
                 stateHandle = current.state(object : SyncServiceStateObserver {
                     override fun onUpdate(state: SyncServiceState) {
+                        connectionLog.info("event=sync_state state=$state")
                         val error = when (state) {
                             SyncServiceState.ERROR, SyncServiceState.TERMINATED -> "Couldn’t sync conversations.".also { ended.trySend(Unit) }
                             else -> null
@@ -455,7 +492,14 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                             offline = state == SyncServiceState.OFFLINE))
                     }
                 })
-                list = current.roomListService().allRooms()
+                val roomListService = current.roomListService()
+                responseHandle = roomListService.state(object : RoomListServiceStateListener {
+                    override fun onUpdate(state: RoomListServiceState) {
+                        if (state.hasResponse) failureStreak.set(0)
+                        events.trySend(Event.SyncResponse(state, generation))
+                    }
+                })
+                list = roomListService.allRooms()
                 // The limit truncates actual room vectors; it does not reserve that capacity.
                 entries = list.entriesWithDynamicAdapters(UInt.MAX_VALUE, object : RoomListEntriesListener {
                     override fun onUpdate(roomEntriesUpdate: List<RoomListEntriesUpdate>) {
@@ -468,36 +512,48 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                 syncLock.withLock { activeSync.value = current }
                 failures = 0
                 coroutineScope {
+                    val networkAvailableNow = AtomicReference<Boolean?>(null)
                     // While the app is hidden, a push lookup runs its own short encryption sync through this service.
                     // Offline mode covers a lost network; a sync that ended otherwise starts again while the app is open,
                     // as the Mac's ConnectionRecovery does. A stop is never cut short, or a start could land before it ends.
                     val visibility = launch {
                         foreground.collectLatest { visible ->
-                            if (!visible) return@collectLatest withContext(NonCancellable) { current.stop() }
-                            current.start()
-                            var restarts = 0
+                            events.trySend(Event.Visibility(visible, generation))
+                            if (!visible) return@collectLatest withContext(NonCancellable) { syncLock.withLock { current.stop() } }
+                            syncLock.withLock { if (foreground.value && networkAvailableNow.get() != false) current.start() }
                             for (end in ended) {
-                                if (restarts > 0) delay(1_000L shl minOf(restarts - 1, 5))
-                                restarts++
-                                current.start()
+                                val priorFailures = failureStreak.getAndIncrement()
+                                if (priorFailures > 0) delay(1_000L shl minOf(priorFailures - 1, 5))
+                                syncLock.withLock { if (foreground.value && networkAvailableNow.get() != false) current.start() }
                             }
                         }
                     }
                     // Offline, the SDK polls the server with pauses that grow to minutes; a start skips them, as the Mac does on wake.
-                    val network = launch { networkBack.collect { if (foreground.value) current.start() } }
+                    val networkJob = launch { network.collect { available ->
+                        networkAvailableNow.set(available)
+                        if (available) failureStreak.set(0)
+                        events.trySend(Event.Network(available, generation))
+                        // start/stop and a push's short sync share the same encryption sync.
+                        syncLock.withLock {
+                            if (available && foreground.value) current.start()
+                            else if (!available) withContext(NonCancellable) { current.stop() }
+                        }
+                    } }
                     retries.receive()
-                    network.cancel()
+                    networkJob.cancel()
                     visibility.cancel()
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
+                connectionLog.warning("event=sync_prepare_failed")
                 events.trySend(Event.Connection("Couldn’t sync conversations.", generation))
                 foreground.first { it }
                 val retryDelay = 1_000L shl minOf(failures++, 5)
                 withTimeoutOrNull(retryDelay) { retries.receive() }
             } finally {
                 stateHandle?.release()
+                responseHandle?.release()
                 stream?.release()
                 controller?.close()
                 entries?.close()
@@ -540,8 +596,14 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         data class Info(val info: RoomInfo, val room: Followed) : Event
         data class Entries(val updates: List<RoomListEntriesUpdate>, val generation: Long) : Event
         data class Connection(val error: String?, val generation: Long, val running: Boolean = false, val offline: Boolean = false) : Event
+        data class SyncResponse(val state: RoomListServiceState, val generation: Long) : Event
+        data class Network(val available: Boolean, val generation: Long) : Event
+        data class Visibility(val visible: Boolean, val generation: Long) : Event
     }
 }
+
+private val RoomListServiceState.hasResponse: Boolean
+    get() = this == RoomListServiceState.SETTING_UP || this == RoomListServiceState.RECOVERING || this == RoomListServiceState.RUNNING
 
 /** A message's text for a one-line preview; null when there is nothing to show, such as a membership change. */
 internal fun previewText(content: TimelineItemContent): String? =
