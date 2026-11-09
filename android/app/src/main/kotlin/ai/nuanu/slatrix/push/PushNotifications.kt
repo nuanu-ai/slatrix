@@ -37,12 +37,14 @@ class PushNotifications(private val context: Context) {
     val enabled: Boolean get() = manager.areNotificationsEnabled() &&
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    suspend fun deliver(client: Client, userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState?) {
+    suspend fun deliver(client: Client, userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState?): Boolean {
+        if (status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted) return true
         // Anyone holding the push token can name any event; only a joined room earns an alert we can't resolve.
         if (status !is NotificationStatus.Event &&
-            runCatching { client.getRoom(roomId)?.membership() }.getOrNull() != Membership.JOINED) return
+            runCatching { client.getRoom(roomId)?.membership() }.getOrNull() != Membership.JOINED) return false
         val body = (status as? NotificationStatus.Event)?.item?.messageBody()
         show(userId, roomId, eventId, status, identity, client.memberNames(roomId, body?.let(DisplayNames::mentioned).orEmpty()))
+        return true
     }
 
     fun delivered(userId: String, roomId: String, eventId: String): Boolean = synchronized(deliveryLock) {

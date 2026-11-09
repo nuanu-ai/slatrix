@@ -5,6 +5,7 @@ import android.content.Context
 import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountRuntime
 import ai.nuanu.slatrix.core.AccountState
+import ai.nuanu.slatrix.core.connectionLog
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -31,10 +32,11 @@ class PushNotificationWorker(context: Context, parameters: WorkerParameters) : C
         return try {
             val completed = withTimeoutOrNull(30_000) {
                 val runtime = AccountRuntime.get(applicationContext as Application)
-                val account = runtime.account.state.first { it !is AccountState.Connecting } as? AccountState.Connected
+                val account = runtime.account.backgroundSession()
                     ?: return@withTimeoutOrNull true
                 val rooms = runtime.rooms.filterNotNull().first { it.client === account.client }
                 var status: NotificationStatus? = null
+                var handled = true
                 try {
                     status = try {
                         rooms.notification(roomId, eventId)
@@ -45,14 +47,14 @@ class PushNotificationWorker(context: Context, parameters: WorkerParameters) : C
                     }
                     val identity = PushNotifications.knownIdentity(runtime.identity.filterNotNull().first().state)
                     if ((runtime.account.state.value as? AccountState.Connected)?.client === account.client) {
-                        notifications.deliver(account.client, account.userId, roomId, eventId, status, identity)
+                        handled = notifications.deliver(account.client, account.userId, roomId, eventId, status, identity)
                         // Activity also lists what arrived while the app was in the background.
                         (status as? NotificationStatus.Event)?.let { runtime.activity.value?.receive(it.item, roomId) }
                     }
                 } finally {
                     status?.destroy()
                 }
-                true
+                handled
             } == true
             if (completed) Result.success() else retryOrFail()
         } catch (cancelled: CancellationException) {
@@ -62,7 +64,10 @@ class PushNotificationWorker(context: Context, parameters: WorkerParameters) : C
         }
     }
 
-    private fun retryOrFail(): Result = if (runAttemptCount < 2) Result.retry() else Result.failure()
+    private fun retryOrFail(): Result {
+        connectionLog.info("event=push_delivery_retry attempt=$runAttemptCount exhausted=${runAttemptCount >= 2}")
+        return if (runAttemptCount < 2) Result.retry() else Result.failure()
+    }
 
     companion object {
         fun enqueue(context: Context, roomId: String, eventId: String, highPriority: Boolean) {

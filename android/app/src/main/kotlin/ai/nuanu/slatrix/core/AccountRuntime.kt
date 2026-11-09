@@ -12,12 +12,12 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -58,19 +58,26 @@ class AccountRuntime private constructor(application: Application) {
     init {
         scope.launch {
             var client: Client? = null
-            var registered = false
-            combine(account.state, foreground, ::Pair).collect { (state, visible) ->
+            var pushRegistration: Job? = null
+            account.state.collect { state ->
                 val next = (state as? AccountState.Connected)?.client
                 if (next !== client) {
+                    pushRegistration?.cancel()
+                    pushRegistration = null
                     mutableIdentity.value?.close()
                     mutableRooms.value?.close()
                     mutableActivity.value?.close()
                     mutableIdentity.value = null
                     mutableRooms.value = null
                     client = next
-                    registered = false
                     // One sync service per client: a second would run a second encryption sync.
-                    mutableRooms.value = next?.let { MatrixRooms(scope, it, foreground, network) }
+                    mutableRooms.value = next?.let {
+                        MatrixRooms(scope, it, foreground, network).also { rooms ->
+                            if (BuildConfig.PUSH_GATEWAY.isNotEmpty()) pushRegistration = scope.launch {
+                                PushRegistrationWorker.followConnection(application, rooms.connection)
+                            }
+                        }
+                    }
                     mutableIdentity.value = next?.let { IdentityVerification(scope, it) }
                     mutableActivity.value = next?.let { client ->
                         MatrixActivity((state as AccountState.Connected).userId, scope, { roomId, ids -> client.memberNames(roomId, ids) },
@@ -86,10 +93,6 @@ class AccountRuntime private constructor(application: Application) {
                             }
                         }
                     }
-                }
-                if (next != null && visible && !registered) {
-                    registered = true
-                    if (BuildConfig.PUSH_GATEWAY.isNotEmpty()) PushRegistrationWorker.enqueue(application)
                 }
             }
         }
