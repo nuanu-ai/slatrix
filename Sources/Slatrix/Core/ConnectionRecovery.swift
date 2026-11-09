@@ -1,5 +1,6 @@
 import AppKit
 import MatrixRustSDK
+import OSLog
 
 enum MatrixConnectionState: String, Equatable {
     case idle, connecting, running, offline, stopped, failed
@@ -26,8 +27,32 @@ private final class ConnectionStateObserver: SyncServiceStateObserver, @unchecke
     }
 }
 
+private final class RoomSyncStateObserver: RoomListServiceStateListener, @unchecked Sendable {
+    private let lock = NSLock()
+    private var revision = 0
+    let callback: @Sendable (RoomListServiceState, Int) -> Void
+    init(_ callback: @escaping @Sendable (RoomListServiceState, Int) -> Void) { self.callback = callback }
+    func onUpdate(state: RoomListServiceState) {
+        let next = lock.withLock {
+            revision += 1
+            return revision
+        }
+        callback(state, next)
+    }
+}
+
 @MainActor
 final class ConnectionRecovery {
+    private static let logger = Logger(subsystem: "ai.nuanu.slatrix", category: "connection")
+    private let networkChanges: @Sendable () -> AsyncStream<Bool>
+    private let wakeNotifications: NotificationCenter
+    init(
+        networkChanges: @escaping @Sendable () -> AsyncStream<Bool> = NetworkConnectivity.changes,
+        wakeNotifications: NotificationCenter? = nil
+    ) {
+        self.networkChanges = networkChanges
+        self.wakeNotifications = wakeNotifications ?? NSWorkspace.shared.notificationCenter
+    }
     private struct Attempt {
         let id: UUID
         let task: Task<Void, Error>
@@ -37,8 +62,15 @@ final class ConnectionRecovery {
     private var service: SyncService?
     private var client: Client?
     private var handle: TaskHandle?
+    private var responseHandle: TaskHandle?
     private var attempt: Attempt?
+    private var restartRequested = false
     private var revision = 0
+    private var responseRevision = 0
+    private var syncResponded = false
+    private var hasConnected = false
+    private var networkAvailable: Bool?
+    private var networkTask: Task<Void, Never>?
     private var sdkState: SyncServiceState?
     private var onUpdate: ((MatrixConnectionFeedback) -> Void)?
     private var automaticRetry: Task<Void, Never>?
@@ -66,31 +98,54 @@ final class ConnectionRecovery {
                         return
                     }
                     self.revision = revision
-                    // A network error pauses a room's send queue; what waited there goes out once sync is back.
-                    if state == .running, self.sdkState != .running, let client = self.client {
-                        Task { await client.enableAllSendQueues(enable: true) }
-                    }
+                    if state != .running, state != .idle || self.sdkState != nil { self.syncResponded = false }
                     self.sdkState = state
                     self.publish()
                     self.scheduleAutomaticRetry()
                 }
             })
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+        responseHandle = service.roomListService().state(
+            listener: RoomSyncStateObserver { [weak self] state, revision in
+                Task { @MainActor [weak self] in
+                    guard let self, self.generation == account, self.service != nil, revision > self.responseRevision
+                    else { return }
+                    self.responseRevision = revision
+                    self.syncResponded = state == .settingUp || state == .recovering || state == .running
+                    self.publish()
+                }
+            })
+        wakeObserver = wakeNotifications.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.generation == account else { return }
                 self.failures = 0
                 // From offline the SDK skips its server polling and syncs at once.
-                try? await self.retry()
+                try? await self.retry(restart: true)
+            }
+        }
+        networkTask = Task { @MainActor [weak self, networkChanges] in
+            for await available in networkChanges() {
+                guard let self, !Task.isCancelled, self.generation == account else { return }
+                let hadPath = self.networkAvailable != nil
+                self.networkAvailable = available
+                if !available { self.syncResponded = false }
+                self.publish()
+                if available, hadPath {
+                    self.failures = 0
+                    Task { @MainActor [weak self] in
+                        guard let self, self.generation == account else { return }
+                        try? await self.retry(restart: hadPath)
+                    }
+                }
             }
         }
     }
 
     // Offline mode covers network loss; this restarts a sync that ended in an error or stopped on its own.
     private func scheduleAutomaticRetry() {
+        guard networkAvailable != false else { return }
         guard sdkState == .error || sdkState == .terminated else {
-            if sdkState == .running { failures = 0 }
             return
         }
         guard automaticRetry == nil else { return }
@@ -107,36 +162,53 @@ final class ConnectionRecovery {
         }
     }
 
-    func retry() async throws {
+    func retry(restart: Bool = false) async throws {
         try Task.checkCancellation()
         guard let service else {
             throw MatrixServiceError.request("Still connecting. Try again in a moment.")
         }
+        guard networkAvailable != false else { return }
+        if restart { restartRequested = true }
         if let attempt {
             try await attempt.task.value
             try Task.checkCancellation()
             return
         }
-        guard sdkState != .running else { return }
+        guard restartRequested || sdkState != .running else { return }
         let account = generation
         let id = UUID()
         // UniFFI start is not cancellable. Keep its actual await alive even if
         // a caller leaves; teardown must wait for it before stopping this SDK.
         let task = Task { @MainActor [weak self] in
-            guard let self, self.generation == account else { throw CancellationError() }
-            await service.start()
-            guard self.generation == account else { throw CancellationError() }
+            guard let self else { throw CancellationError() }
+            defer {
+                // Clear ownership before waking callers, so a new restart cannot join an already finished attempt.
+                if self.generation == account, self.attempt?.id == id {
+                    self.attempt = nil
+                    self.publish()
+                }
+            }
+            repeat {
+                guard self.generation == account else { throw CancellationError() }
+                let shouldStop = self.restartRequested
+                self.restartRequested = false
+                if shouldStop {
+                    self.syncResponded = false
+                    self.publish()
+                    await service.stop()
+                }
+                guard self.generation == account else { throw CancellationError() }
+                guard self.networkAvailable != false else { return }
+                await service.start()
+                guard self.generation == account else { throw CancellationError() }
+            } while self.restartRequested
         }
         attempt = Attempt(id: id, task: task)
         publish()
         let result = await task.result
-        if generation == account, attempt?.id == id {
-            attempt = nil
-            publish()
-        }
         try Task.checkCancellation()
         try result.get()
-        // Only the sync observer reports Ready, once the server has actually answered.
+        // Only a successful room sync reports Ready.
     }
 
     func stop() async {
@@ -150,15 +222,24 @@ final class ConnectionRecovery {
         generation = UUID()
         handle?.cancel()
         handle = nil
+        responseHandle?.cancel()
+        responseHandle = nil
         automaticRetry?.cancel()
         automaticRetry = nil
+        networkTask?.cancel()
+        networkTask = nil
+        networkAvailable = nil
         failures = 0
-        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        if let wakeObserver { wakeNotifications.removeObserver(wakeObserver) }
         wakeObserver = nil
         service = nil
         client = nil
         attempt = nil
+        restartRequested = false
         revision = 0
+        responseRevision = 0
+        syncResponded = false
+        hasConnected = false
         sdkState = nil
         feedback = MatrixConnectionFeedback(
             state: .idle, isRetrying: false, canRetry: false, errorMessage: nil)
@@ -170,19 +251,43 @@ final class ConnectionRecovery {
     }
 
     private func publish() {
-        let (state, error): (MatrixConnectionState, String?) =
+        var state: MatrixConnectionState =
             switch sdkState {
-            case .running: (.running, nil)
-            case .offline: (.offline, "You’re offline. Check your connection.")
-            case .terminated: (.stopped, "Disconnected. Retry to reconnect.")
-            case .error: (.failed, "Couldn’t connect. Retry, or sign in again.")
-            case .idle: (.idle, nil)
-            case nil: (.connecting, nil)
+            case .running: syncResponded ? .running : .connecting
+            case .offline: .offline
+            case .terminated: .stopped
+            case .error: .failed
+            case .idle: .idle
+            case nil: .connecting
             }
+        let health = ConnectionHealth.resolve(
+            network: networkAvailable, running: sdkState == .running,
+            responded: syncResponded,
+            interrupted: sdkState == .offline || sdkState == .error || sdkState == .terminated,
+            previouslyConnected: hasConnected)
+        if networkAvailable == false { state = .offline }
         let busy = attempt != nil
-        feedback = MatrixConnectionFeedback(
-            state: state, isRetrying: busy, canRetry: service != nil && !busy && state != .running,
-            errorMessage: error)
+        if state == .running {
+            hasConnected = true
+            failures = 0
+        }
+        if state == .running, feedback.state != .running, let client {
+            let account = generation
+            Task { @MainActor [weak self] in
+                guard self?.generation == account else { return }
+                await client.enableAllSendQueues(enable: true)
+            }
+        }
+        let next = MatrixConnectionFeedback(
+            state: state, isRetrying: busy,
+            canRetry: service != nil && networkAvailable != false && !busy && state != .running,
+            errorMessage: health.notice)
+        if feedback != next {
+            Self.logger.log(
+                "event=connection state=\(health.rawValue, privacy: .public) retrying=\(busy) responded=\(self.syncResponded)"
+            )
+        }
+        feedback = next
         onUpdate?(feedback)
     }
 }
