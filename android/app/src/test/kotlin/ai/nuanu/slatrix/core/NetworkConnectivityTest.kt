@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,7 +26,7 @@ class NetworkConnectivityTest {
     @Test fun networkChangesArriveAtOnceAndLosingAnOldNetworkDoesNotDisconnectTheNewOne() = runTest {
         val application = ApplicationProvider.getApplicationContext<Application>()
         val connectivity = shadowOf(application.getSystemService(ConnectivityManager::class.java))
-        val available = MutableStateFlow<Boolean?>(null)
+        val available = MutableStateFlow<NetworkStatus?>(null)
         val job = backgroundScope.launch { networkAvailability(application).collect { available.value = it } }
         runCurrent()
         val callback = connectivity.networkCallbacks.single()
@@ -34,14 +35,16 @@ class NetworkConnectivityTest {
             val mobile = ShadowNetwork.newInstance(2)
             callback.onAvailable(wifi)
             runCurrent()
-            assertEquals(true, available.value)
+            assertEquals(true, available.value?.available)
             callback.onAvailable(mobile)
+            runCurrent()
+            assertTrue("A new default route must interrupt the old socket", available.value?.routeChanged == true)
             callback.onLost(wifi)
             runCurrent()
-            assertEquals(true, available.value)
+            assertEquals(true, available.value?.available)
             callback.onLost(mobile)
             runCurrent()
-            assertEquals(false, available.value)
+            assertEquals(false, available.value?.available)
         } finally {
             job.cancelAndJoin()
         }

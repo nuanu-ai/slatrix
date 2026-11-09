@@ -111,8 +111,7 @@ data class RoomListState(
 )
 
 class MatrixRooms(scope: CoroutineScope, internal val client: Client, private val foreground: StateFlow<Boolean> = MutableStateFlow(true),
-    /** Each time the phone has a working network again. */
-    private val network: Flow<Boolean> = emptyFlow()) {
+    private val network: Flow<NetworkStatus> = emptyFlow()) {
     private val syncLock = Mutex()
     private val activeSync = MutableStateFlow<SyncService?>(null)
     private val mutableState = MutableStateFlow(RoomListState())
@@ -262,7 +261,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             }
             is Event.Network -> if (event.generation == syncGeneration.get()) {
                 networkAvailable = event.available
-                if (!event.available) syncResponded = false
+                if (!event.available || event.routeChanged) syncResponded = false
                 updateConnection()
             }
             is Event.Visibility -> if (event.generation == syncGeneration.get()) {
@@ -529,14 +528,18 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                         }
                     }
                     // Offline, the SDK polls the server with pauses that grow to minutes; a start skips them, as the Mac does on wake.
-                    val networkJob = launch { network.collect { available ->
+                    val networkJob = launch { network.collect { status ->
+                        val available = status.available
                         networkAvailableNow.set(available)
                         if (available) failureStreak.set(0)
-                        events.trySend(Event.Network(available, generation))
+                        events.trySend(Event.Network(available, generation, status.routeChanged))
                         // start/stop and a push's short sync share the same encryption sync.
                         syncLock.withLock {
-                            if (available && foreground.value) current.start()
-                            else if (!available) withContext(NonCancellable) { current.stop() }
+                            if (available && foreground.value) {
+                                // start is a no-op while running, so a new default route must release the old socket first.
+                                if (status.routeChanged) withContext(NonCancellable) { current.stop() }
+                                if (foreground.value) current.start()
+                            } else if (!available) withContext(NonCancellable) { current.stop() }
                         }
                     } }
                     retries.receive()
@@ -597,7 +600,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         data class Entries(val updates: List<RoomListEntriesUpdate>, val generation: Long) : Event
         data class Connection(val error: String?, val generation: Long, val running: Boolean = false, val offline: Boolean = false) : Event
         data class SyncResponse(val state: RoomListServiceState, val generation: Long) : Event
-        data class Network(val available: Boolean, val generation: Long) : Event
+        data class Network(val available: Boolean, val generation: Long, val routeChanged: Boolean) : Event
         data class Visibility(val visible: Boolean, val generation: Long) : Event
     }
 }
