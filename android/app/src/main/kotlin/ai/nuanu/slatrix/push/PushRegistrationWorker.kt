@@ -5,6 +5,8 @@ import android.content.Context
 import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountRuntime
 import ai.nuanu.slatrix.core.AccountState
+import ai.nuanu.slatrix.core.connectionLog
+import ai.nuanu.slatrix.core.ConnectionState
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -20,9 +22,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.StateFlow
 
 class PushRegistrationWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
@@ -30,7 +32,7 @@ class PushRegistrationWorker(context: Context, parameters: WorkerParameters) : C
         return try {
             val completed = withTimeoutOrNull(30_000) {
                 val runtime = AccountRuntime.get(applicationContext as Application)
-                val account = runtime.account.state.first { it !is AccountState.Connecting } as? AccountState.Connected
+                val account = runtime.account.backgroundSession()
                     ?: return@withTimeoutOrNull true
                 val registration = PushRegistration(applicationContext)
                 val version = registration.tokenVersion
@@ -51,9 +53,18 @@ class PushRegistrationWorker(context: Context, parameters: WorkerParameters) : C
         }
     }
 
-    private fun retryOrFail(): Result = if (runAttemptCount < 4) Result.retry() else Result.failure()
+    private fun retryOrFail(): Result {
+        connectionLog.info("event=push_registration_retry attempt=$runAttemptCount exhausted=${runAttemptCount >= 4}")
+        return if (runAttemptCount < 4) Result.retry() else Result.failure()
+    }
 
     companion object {
+        internal suspend fun followConnection(context: Context, connection: StateFlow<ConnectionState>) {
+            connection.collect { state ->
+                if (state == ConnectionState.Connected) enqueue(context)
+            }
+        }
+
         fun enqueue(context: Context) {
             val request = OneTimeWorkRequestBuilder<PushRegistrationWorker>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())

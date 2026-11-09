@@ -114,11 +114,12 @@ class PushNotificationsTest {
             }
         }
 
-        notifications.deliver(client, "@alex:example.org", "!forged:example.org", "\$missing", NotificationStatus.EventNotFound, null)
-        notifications.deliver(client, "@alex:example.org", "!forged:example.org", "\$unresolved", null, null)
+        assertFalse("A room not yet available must leave delivery retryable",
+            notifications.deliver(client, "@alex:example.org", "!forged:example.org", "\$missing", NotificationStatus.EventNotFound, null))
+        assertFalse(notifications.deliver(client, "@alex:example.org", "!forged:example.org", "\$unresolved", null, null))
         assertTrue(manager.activeNotifications.isEmpty())
 
-        notifications.deliver(client, "@alex:example.org", "!team:example.org", "\$missing", NotificationStatus.EventNotFound, null)
+        assertTrue(notifications.deliver(client, "@alex:example.org", "!team:example.org", "\$missing", NotificationStatus.EventNotFound, null))
         assertEquals("New message", manager.activeNotifications.single().notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
 

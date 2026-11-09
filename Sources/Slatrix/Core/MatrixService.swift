@@ -529,6 +529,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var status: ConnectionStatus = .signedOut
     private(set) var connectionErrorMessage: String?
     private(set) var connectionState = MatrixConnectionState.idle
+    var connectionLabel: String {
+        connectionState == .running
+            ? ConnectionHealth.connected.label : connectionErrorMessage ?? ConnectionHealth.connecting.label
+    }
     private(set) var isRetryingConnection = false
     private(set) var canRetryConnection = false
     private let connectionRecovery = ConnectionRecovery()
@@ -1095,7 +1099,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         _ = try requireClient()
         let generation = sessionGeneration
         do {
-            try await connectionRecovery.retry()
+            try await connectionRecovery.retry(restart: true)
             guard sessionGeneration == generation else { throw CancellationError() }
         } catch {
             guard sessionGeneration == generation else { throw CancellationError() }

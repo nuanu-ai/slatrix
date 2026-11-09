@@ -138,6 +138,27 @@ class MatrixAccountDeviceTest {
     }
 
     // capability: auth.restore
+    @Test fun backgroundDeliveryRetriesATemporaryRestoreFailureAndReusesTheSavedDevice() = runBlocking {
+        val client = AuthClient()
+        val saved = StoredSession(client.authenticatedSession, "9de7b914-3890-4354-b3bb-8f4f53f0ee63",
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+        store.save(saved)
+        val available = java.util.concurrent.atomic.AtomicBoolean(false)
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration) { _, _, _, _, _ ->
+            check(available.get()) { "Temporary store failure" }
+            client
+        }
+        account.restore()
+        withTimeout(5_000) { account.state.first { it is AccountState.Failed } }
+        assertTrue("A failed restore must leave background work retryable", runCatching { account.backgroundSession() }.isFailure)
+        assertEquals(saved, store.load())
+        available.set(true)
+        val connected = withTimeout(5_000) { account.backgroundSession() }
+        assertEquals(client, connected?.client)
+        assertEquals(saved.session, client.restoredSession)
+    }
+
+    // capability: auth.restore
     @Test fun restoreReusesTheDeviceStoreAndPersistsRefreshedTokens() = runBlocking {
         val client = AuthClient()
         val saved = StoredSession(
@@ -408,6 +429,8 @@ class MatrixAccountDeviceTest {
 
             assertTrue(failed.canRetryRestore)
             assertFalse(client.loggedOut)
+            assertTrue(runCatching { account.backgroundSession() }.isFailure)
+            assertEquals("Background work must preserve an unfinished sign-out", failed, account.state.value)
         } finally {
             directory.delete()
             check(retainedDirectory.renameTo(directory))

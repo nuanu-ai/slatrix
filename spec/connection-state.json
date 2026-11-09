@@ -1,0 +1,13 @@
+{
+  "cases": [
+    {"name":"launch before any response","network":null,"foreground":true,"running":false,"responded":false,"interrupted":false,"previouslyConnected":false,"state":"connecting","label":"Connecting…"},
+    {"name":"tasks started but server has not answered","network":true,"foreground":true,"running":true,"responded":false,"interrupted":false,"previouslyConnected":false,"state":"connecting","label":"Connecting…"},
+    {"name":"server answered","network":true,"foreground":true,"running":true,"responded":true,"interrupted":false,"previouslyConnected":false,"state":"connected","label":"Connected"},
+    {"name":"network not yet observed but server answered","network":null,"foreground":true,"running":true,"responded":true,"interrupted":false,"previouslyConnected":false,"state":"connected","label":"Connected"},
+    {"name":"network lost while tasks still report running","network":false,"foreground":true,"running":true,"responded":true,"interrupted":false,"previouslyConnected":true,"state":"offline","label":"You’re offline"},
+    {"name":"internet works but server cannot be reached","network":true,"foreground":true,"running":false,"responded":false,"interrupted":true,"previouslyConnected":false,"state":"reconnecting","label":"Reconnecting…"},
+    {"name":"network returned but sync has not answered","network":true,"foreground":true,"running":true,"responded":false,"interrupted":false,"previouslyConnected":true,"state":"reconnecting","label":"Reconnecting…"},
+    {"name":"old response cannot make a stopped sync connected","network":true,"foreground":true,"running":false,"responded":true,"interrupted":true,"previouslyConnected":true,"state":"reconnecting","label":"Reconnecting…"},
+    {"name":"hidden application has paused its live connection","network":true,"foreground":false,"running":true,"responded":true,"interrupted":false,"previouslyConnected":true,"state":"paused","label":"Paused"}
+  ]
+}

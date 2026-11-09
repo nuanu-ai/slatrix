@@ -6,23 +6,18 @@ import ai.nuanu.slatrix.push.LaterReminders
 import ai.nuanu.slatrix.push.PushRegistration
 import ai.nuanu.slatrix.push.PushRegistrationWorker
 import android.app.NotificationManager
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -58,34 +53,31 @@ class AccountRuntime private constructor(application: Application) {
     private val foreground = ProcessLifecycleOwner.get().lifecycle.currentStateFlow
         .map { it.isAtLeast(Lifecycle.State.STARTED) }.stateIn(scope, SharingStarted.Eagerly, false)
 
-    // The phone has a network the system checked reaches the internet, which may be the moment an offline sync can resume.
-    private val networkBack = callbackFlow {
-        val connectivity = application.getSystemService(ConnectivityManager::class.java)
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-                if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) trySend(Unit)
-            }
-        }
-        connectivity.registerDefaultNetworkCallback(callback)
-        awaitClose { connectivity.unregisterNetworkCallback(callback) }
-    }
+    private val network = networkAvailability(application)
 
     init {
         scope.launch {
             var client: Client? = null
-            var registered = false
-            combine(account.state, foreground, ::Pair).collect { (state, visible) ->
+            var pushRegistration: Job? = null
+            account.state.collect { state ->
                 val next = (state as? AccountState.Connected)?.client
                 if (next !== client) {
+                    pushRegistration?.cancel()
+                    pushRegistration = null
                     mutableIdentity.value?.close()
                     mutableRooms.value?.close()
                     mutableActivity.value?.close()
                     mutableIdentity.value = null
                     mutableRooms.value = null
                     client = next
-                    registered = false
                     // One sync service per client: a second would run a second encryption sync.
-                    mutableRooms.value = next?.let { MatrixRooms(scope, it, foreground, networkBack) }
+                    mutableRooms.value = next?.let {
+                        MatrixRooms(scope, it, foreground, network).also { rooms ->
+                            if (BuildConfig.PUSH_GATEWAY.isNotEmpty()) pushRegistration = scope.launch {
+                                PushRegistrationWorker.followConnection(application, rooms.connection)
+                            }
+                        }
+                    }
                     mutableIdentity.value = next?.let { IdentityVerification(scope, it) }
                     mutableActivity.value = next?.let { client ->
                         MatrixActivity((state as AccountState.Connected).userId, scope, { roomId, ids -> client.memberNames(roomId, ids) },
@@ -101,10 +93,6 @@ class AccountRuntime private constructor(application: Application) {
                             }
                         }
                     }
-                }
-                if (next != null && visible && !registered) {
-                    registered = true
-                    if (BuildConfig.PUSH_GATEWAY.isNotEmpty()) PushRegistrationWorker.enqueue(application)
                 }
             }
         }

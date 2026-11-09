@@ -84,6 +84,19 @@ fun LiveYouScreen(userId: String, name: String?, onPreferences: () -> Unit, onSi
                         overflow = TextOverflow.MiddleEllipsis)
                 }
             }
+            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge),
+                horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
+                val connection = LocalConnection.current
+                Column(Modifier.weight(1f)) {
+                    Text("Connection", style = MaterialTheme.typography.bodyLarge)
+                    Text(connection.label, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                }
+                LocalConnectionRetry.current?.let { retry ->
+                    IconButton(onClick = retry, modifier = Modifier.size(UiMetrics.Touch)) {
+                        Icon(SlackIcons.Reconnect, "Reconnect", Modifier.size(UiMetrics.Icon))
+                    }
+                }
+            }
             onViewProfile?.let { view ->
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button) { view(name) }
                     .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {

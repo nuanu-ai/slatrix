@@ -4,7 +4,8 @@ import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
-import ai.nuanu.slatrix.ui.account.LocalOffline
+import ai.nuanu.slatrix.ui.account.LocalConnection
+import ai.nuanu.slatrix.core.ConnectionState
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.runtime.CompositionLocalProvider
@@ -35,7 +36,7 @@ class OfflineBannerScreenshots(private val dark: Boolean) {
         )
         compose.setContent {
             SlatrixTheme(dark = dark) {
-                CompositionLocalProvider(LocalOffline provides true) {
+                CompositionLocalProvider(LocalConnection provides ConnectionState.Offline) {
                     LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {})
                 }
             }

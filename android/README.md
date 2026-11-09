@@ -39,6 +39,11 @@ In You, View profile opens your profile; Edit profile there changes your display
 photo, cropped to a square.
 Open You, then Preferences, to change the color mode, and to take the colors from your
 phone's wallpaper. Color mode follows the system until you choose Light or Dark.
+You also shows the current connection. “Connected” means the server has answered;
+“Reconnecting…” means Slatrix is trying again. “You’re offline” means the phone has no network.
+Connection notices stay over the content and offer Retry.
+
+Connection changes and push retries appear under `SlatrixConnection` in logcat, without messages, account IDs or tokens.
 
 Use a dedicated test account and room for automated message checks.
 

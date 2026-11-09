@@ -11,6 +11,12 @@ import androidx.work.WorkManager
 import ai.nuanu.slatrix.push.NotificationTarget
 import ai.nuanu.slatrix.push.PushMessagingService
 import ai.nuanu.slatrix.push.PushNotifications
+import ai.nuanu.slatrix.push.PushRegistrationWorker
+import ai.nuanu.slatrix.core.ConnectionState
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runTest
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import org.matrix.rustcomponents.sdk.*
@@ -28,6 +34,32 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35])
 class PushDeliveryTest {
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun reconnectingChecksPushRegistrationAgainWithoutRestartingTheApp() = runTest {
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        val workManager = try {
+            WorkManager.getInstance(application)
+        } catch (_: IllegalStateException) {
+            WorkManager.initialize(application, Configuration.Builder().build())
+            WorkManager.getInstance(application)
+        }
+        val connection = MutableStateFlow(ConnectionState.Connected)
+        val following = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            PushRegistrationWorker.followConnection(application, connection)
+        }
+        try {
+            val first = workManager.getWorkInfosForUniqueWork("push-registration").get().map { it.id }.toSet()
+            assertTrue(first.isNotEmpty())
+            connection.value = ConnectionState.Reconnecting
+            connection.value = ConnectionState.Connected
+            val recovered = workManager.getWorkInfosForUniqueWork("push-registration").get()
+            assertTrue("Recovery must schedule a fresh registration, even when an earlier attempt finished or failed",
+                recovered.any { it.id !in first })
+        } finally {
+            following.cancel()
+        }
+    }
+
     // capability: notifications.alert
     @Test fun firebaseEventDeliveryOutlivesTheMessagingServiceCallback() {
         val application = ApplicationProvider.getApplicationContext<Application>()

@@ -17,6 +17,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.Client
@@ -43,7 +44,8 @@ sealed interface AccountState {
         override fun toString() = "BrowserSignIn(redacted)"
     }
     data class Connected(val client: Client, val userId: String, val warning: String? = null) : AccountState
-    data class Failed(val message: String, val canRetryRestore: Boolean, val options: SignInOptions? = null) : AccountState
+    data class Failed(val message: String, val canRetryRestore: Boolean, val options: SignInOptions? = null,
+        val restoreFailed: Boolean = false) : AccountState
 }
 
 class MatrixAccount(
@@ -192,6 +194,14 @@ class MatrixAccount(
         }
     }
 
+    suspend fun backgroundSession(): AccountState.Connected? {
+        if ((state.value as? AccountState.Failed)?.restoreFailed == true) restore()
+        val current = state.first { it !is AccountState.Connecting }
+        // A saved session that failed to restore is not a signed-out account: durable work must retry it.
+        check(current !is AccountState.Failed || !current.canRetryRestore) { "Session temporarily unavailable" }
+        return current as? AccountState.Connected
+    }
+
     fun cancel() = reset(AccountState.SignedOut)
 
     fun signOut() = reset(AccountState.Connecting(), signingOut = true)
@@ -252,7 +262,7 @@ class MatrixAccount(
                                 if (saved) "Couldn’t restore your session. Try again."
                                 else if (options == null) "Couldn’t connect to this server. Try again or choose another server."
                                 else "Couldn’t sign in. Check your details and try again.",
-                                saved, options,
+                                saved, options, restoreFailed = restoring,
                             )
                             pending.also { pending = null; it?.persistence?.deactivate() }
                         }

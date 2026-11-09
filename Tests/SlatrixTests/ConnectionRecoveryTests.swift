@@ -12,12 +12,18 @@ private final class SendQueueClient: Client, @unchecked Sendable {
     override func enableAllSendQueues(enable: Bool) async { enabled.append(enable) }
 }
 
+@MainActor private func onlineRecovery(wakeNotifications: NotificationCenter = NotificationCenter())
+    -> ConnectionRecovery
+{
+    ConnectionRecovery(networkChanges: { AsyncStream { $0.yield(true) } }, wakeNotifications: wakeNotifications)
+}
+
 @MainActor
 struct ConnectionRecoveryTests {
     // capability: message.send-offline
     @Test("Messages the SDK paused while offline go out when the connection returns, without a click")
     func reconnectResumesSending() async throws {
-        let recovery = ConnectionRecovery()
+        let recovery = onlineRecovery()
         let service = FakeSyncService(state: .offline)
         let client = SendQueueClient()
         try await recovery.attach(service, client: client) { _ in }
@@ -29,7 +35,7 @@ struct ConnectionRecoveryTests {
     @Test(
         "A sync error restarts sync without the user pressing Retry", arguments: [SyncServiceState.error, .terminated])
     func restartsAfterFailure(state: SyncServiceState) async throws {
-        let recovery = ConnectionRecovery()
+        let recovery = onlineRecovery()
         let service = FakeSyncService(state: .running)
         try await recovery.attach(service) { _ in }
         service.emit(state)
@@ -39,20 +45,82 @@ struct ConnectionRecoveryTests {
 
     @Test("Waking the Mac restarts an offline sync immediately")
     func restartsOnWake() async throws {
-        let recovery = ConnectionRecovery()
+        let notifications = NotificationCenter()
+        let recovery = onlineRecovery(wakeNotifications: notifications)
         let service = FakeSyncService(state: .offline)
         try await recovery.attach(service) { _ in }
-        NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.didWakeNotification, object: nil)
+        notifications.post(name: NSWorkspace.didWakeNotification, object: nil)
         #expect(await eventually { service.startCount == 1 && recovery.feedback.state == .running })
         await recovery.stop()
+    }
+
+    @Test("Waking a sync that still reports running resumes messages paused by a broken connection")
+    func wakesStaleRunningSync() async throws {
+        let notifications = NotificationCenter()
+        let recovery = onlineRecovery(wakeNotifications: notifications)
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        #expect(await eventually { client.enabled.all.last == true })
+        await client.enableAllSendQueues(enable: false)
+        notifications.post(name: NSWorkspace.didWakeNotification, object: nil)
+        #expect(await eventually { client.enabled.all.last == true })
+        await recovery.stop()
+    }
+
+    @Test("Network loss says offline, and a returned network reconnects without a click")
+    func networkLossAndReturn() async throws {
+        let network = AsyncStream<Bool>.makeStream()
+        let recovery = ConnectionRecovery(networkChanges: { network.stream })
+        let service = FakeSyncService(state: .running)
+        try await recovery.attach(service) { _ in }
+        #expect(await eventually { recovery.feedback.state == .running })
+        network.continuation.yield(false)
+        #expect(await eventually { recovery.feedback.state == .offline })
+        network.continuation.yield(true)
+        #expect(await eventually { recovery.feedback.state == .running })
+        await recovery.stop()
+        network.continuation.finish()
+    }
+
+    @Test("A slow SDK start cannot block reporting that the network disappeared")
+    func networkLossDuringStart() async throws {
+        let network = AsyncStream<Bool>.makeStream()
+        network.continuation.yield(true)
+        let recovery = ConnectionRecovery(networkChanges: { network.stream })
+        let service = FakeSyncService()
+        service.startGate.arm()
+        try await recovery.attach(service) { _ in }
+        let starting = Task { try await recovery.retry() }
+        #expect(await eventually { service.startGate.isWaiting })
+        network.continuation.yield(false)
+        #expect(await eventually { recovery.feedback.errorMessage == "You’re offline" })
+        service.startGate.release()
+        try await starting.value
+        await recovery.stop()
+        network.continuation.finish()
     }
 }
 
 @MainActor
 struct ConnectionRecoveryOwnershipTests {
+    @Test("Starting sync does not claim connected before the server answers")
+    func waitsForServerResponse() async throws {
+        let recovery = onlineRecovery()
+        let service = FakeSyncService()
+        service.confirmsSync = false
+        try await recovery.attach(service) { _ in }
+        try await recovery.retry()
+        await drainMainActor()
+        #expect(recovery.feedback.state == .connecting)
+        service.roomSync.emit(.settingUp)
+        #expect(await eventually { recovery.feedback.state == .running })
+        await recovery.stop()
+    }
+
     @Test("Only an SDK state reports sync as running, never start returning")
     func startReturningIsNotRunning() async throws {
-        let recovery = ConnectionRecovery()
+        let recovery = onlineRecovery()
         let service = FakeSyncService(state: .offline)
         service.stateOnStart = nil
         try await recovery.attach(service) { _ in }
@@ -63,7 +131,7 @@ struct ConnectionRecoveryOwnershipTests {
 
     @Test("Concurrent retries share one SDK start")
     func concurrentRetriesShareStart() async throws {
-        let recovery = ConnectionRecovery()
+        let recovery = onlineRecovery()
         let service = FakeSyncService(state: .offline)
         service.startGate.arm()
         try await recovery.attach(service) { _ in }
@@ -80,7 +148,7 @@ struct ConnectionRecoveryOwnershipTests {
 
     @Test("Stopping waits for an in-flight start, then stops the SDK and ignores its late states")
     func stopWaitsForStart() async throws {
-        let recovery = ConnectionRecovery()
+        let recovery = onlineRecovery()
         let service = FakeSyncService(state: .offline)
         service.startGate.arm()
         var published = 0
@@ -101,7 +169,7 @@ struct ConnectionRecoveryOwnershipTests {
 
     @Test("A newer attachment owns retries and ignores the previous service")
     func newerAttachmentWins() async throws {
-        let recovery = ConnectionRecovery()
+        let recovery = onlineRecovery()
         let old = FakeSyncService(state: .offline)
         let current = FakeSyncService(state: .offline)
         try await recovery.attach(old) { _ in }

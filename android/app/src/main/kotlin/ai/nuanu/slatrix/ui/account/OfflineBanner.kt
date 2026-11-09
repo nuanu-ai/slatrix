@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.ConnectionState
 import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -17,6 +18,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -34,13 +37,14 @@ import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 
-/** Whether the SDK has lost the server, for the banner each screen floats under its header. */
-val LocalOffline = compositionLocalOf { false }
+val LocalConnection = compositionLocalOf { ConnectionState.Connecting }
+val LocalConnectionRetry = compositionLocalOf<(() -> Unit)?> { null }
 
 /** Collects the connection here, so a change recomposes only the banners. */
 @Composable
-fun ProvideOffline(offline: StateFlow<Boolean>?, content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalOffline provides (offline?.collectAsState()?.value == true), content)
+fun ProvideConnection(connection: StateFlow<ConnectionState>?, onRetry: (() -> Unit)? = null, content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalConnection provides (connection?.collectAsState()?.value ?: ConnectionState.Connecting),
+        LocalConnectionRetry provides onRetry, content = content)
 }
 
 /**
@@ -49,21 +53,27 @@ fun ProvideOffline(offline: StateFlow<Boolean>?, content: @Composable () -> Unit
  */
 @Composable
 fun OfflineBanner() {
-    val offline = LocalOffline.current
+    val connection = LocalConnection.current
+    val onRetry = LocalConnectionRetry.current
+    val interrupted = connection != ConnectionState.Connected && connection != ConnectionState.Paused
     var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(offline) {
-        if (offline) delay(UiMetrics.ConnectionNoticeMillis)
-        shown = offline
+    LaunchedEffect(interrupted) {
+        if (interrupted) delay(UiMetrics.ConnectionNoticeMillis)
+        shown = interrupted
     }
-    Box(Modifier.fillMaxWidth().padding(top = UiMetrics.GapSmall), contentAlignment = Alignment.TopCenter) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall), contentAlignment = Alignment.TopCenter) {
         AnimatedVisibility(shown, enter = fadeIn(Motion.pane()), exit = ExitTransition.None) {
             val colors = SlatrixTheme.colors
             Surface(Modifier.semantics { liveRegion = LiveRegionMode.Polite }, shape = MaterialTheme.shapes.extraLarge,
                 color = colors.tooltip, contentColor = colors.onTooltip) {
                 Row(Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(SlackIcons.Offline, null, Modifier.size(UiMetrics.SmallIcon))
-                    Text("You’re offline. Check your connection.", style = MaterialTheme.typography.labelLarge)
+                    Icon(if (connection == ConnectionState.Offline) SlackIcons.Offline else SlackIcons.Reconnect,
+                        null, Modifier.size(UiMetrics.SmallIcon))
+                    Text(connection.label, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelLarge)
+                    onRetry?.let { retry ->
+                        TextButton(onClick = retry, colors = ButtonDefaults.textButtonColors(contentColor = colors.onTooltip)) { Text("Retry") }
+                    }
                 }
             }
         }
