@@ -127,6 +127,23 @@ struct TimelineLayoutTests {
         #expect(!rows.contains { if case .unread = $0.kind { true } else { false } })
     }
 
+    // capability: conversation.day-dividers
+    @Test("Day dividers stay distinct when server timestamps return to an earlier day")
+    func repeatedDayIdentities() {
+        let messages = [
+            message("a", "@alice", at: 0), message("b", "@bob", at: 24 * 60), message("c", "@alice", at: -1),
+        ]
+        let rows = TimelineLayout.rows(
+            messages, unreadBoundaryEventID: nil, groups: true, now: Self.now, calendar: Self.calendar,
+            locale: Self.locale)
+        #expect(Set(rows.map(\.id)).count == rows.count)
+        #expect(
+            rows.compactMap { row -> String? in
+                if case .day(let label) = row.kind { return label }
+                return nil
+            } == ["Today", "Yesterday", "Today"])
+    }
+
     @Test("Row identities survive older messages arriving above them")
     func stableIdentities() {
         let recent = [message("b", "@alice", at: 10)]

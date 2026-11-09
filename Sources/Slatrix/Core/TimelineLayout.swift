@@ -42,6 +42,7 @@ enum TimelineLayout {
         var previous: ChatMessage?
         // The previous message's day; one calendar lookup per day rather than per message.
         var currentDay: DateInterval?
+        var dayIDs = Set<String>()
         for message in messages {
             let newDay = currentDay.map { !($0.start <= message.timestamp && message.timestamp < $0.end) } ?? true
             if newDay {
@@ -53,10 +54,10 @@ enum TimelineLayout {
                     : calendar.date(byAdding: .day, value: -1, to: now).map {
                         calendar.isDate(message.timestamp, inSameDayAs: $0)
                     } == true ? "Yesterday" : message.timestamp.formatted(day)
-                rows.append(
-                    Row(
-                        id: "day-\(components.year ?? 0)-\(components.month ?? 0)-\(components.day ?? 0)",
-                        kind: .day(label)))
+                let dayID = "day-\(components.year ?? 0)-\(components.month ?? 0)-\(components.day ?? 0)"
+                // Server timestamps can return to a day already shown.
+                let id = dayIDs.insert(dayID).inserted ? dayID : "\(dayID)-\(message.id)"
+                rows.append(Row(id: id, kind: .day(label)))
             }
             let unread = unreadBoundaryEventID != nil && message.eventID == unreadBoundaryEventID
             if unread { rows.append(Row(id: "unread", kind: .unread)) }
