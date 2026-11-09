@@ -47,6 +47,19 @@ fun ProvideConnection(connection: StateFlow<ConnectionState>?, onRetry: (() -> U
         LocalConnectionRetry provides onRetry, content = content)
 }
 
+/** The connection has been down a moment: long enough for the banner and your own hollow dot, never a blink. */
+@Composable
+fun connectionLost(): Boolean {
+    val connection = LocalConnection.current
+    val interrupted = connection != ConnectionState.Connected && connection != ConnectionState.Paused
+    var lost by remember { mutableStateOf(false) }
+    LaunchedEffect(interrupted) {
+        if (interrupted) delay(UiMetrics.ConnectionNoticeMillis)
+        lost = interrupted
+    }
+    return lost
+}
+
 /**
  * Says the app is offline once a drop has lasted a moment, as the Mac's connection notice does. It floats at the top
  * of the box it is in, under the screen's header, so nothing under it moves.
@@ -55,12 +68,7 @@ fun ProvideConnection(connection: StateFlow<ConnectionState>?, onRetry: (() -> U
 fun OfflineBanner() {
     val connection = LocalConnection.current
     val onRetry = LocalConnectionRetry.current
-    val interrupted = connection != ConnectionState.Connected && connection != ConnectionState.Paused
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(interrupted) {
-        if (interrupted) delay(UiMetrics.ConnectionNoticeMillis)
-        shown = interrupted
-    }
+    val shown = connectionLost()
     Box(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall), contentAlignment = Alignment.TopCenter) {
         AnimatedVisibility(shown, enter = fadeIn(Motion.pane()), exit = ExitTransition.None) {
             val colors = SlatrixTheme.colors

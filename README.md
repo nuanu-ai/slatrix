@@ -19,7 +19,7 @@ Slatrix is written in SwiftUI and AppKit on top of the official [Matrix Rust SDK
 
 You can try a sample workspace from the sign-in screen without an account.
 
-Preferences → Account shows the current connection. A notice says when the network is unavailable or Slatrix is reconnecting to the server; cached conversations stay on screen.
+A notice says when the network is unavailable or Slatrix is reconnecting to the server; cached conversations stay on screen.
 
 ## Build
 

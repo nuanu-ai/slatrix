@@ -41,6 +41,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import ai.nuanu.slatrix.ui.designsystem.Motion
@@ -397,8 +399,7 @@ private fun HomeHeader(tab: HomeTab, userId: String, userAvatarUrl: String?, sta
         }
         Box(Modifier.sizeIn(minWidth = UiMetrics.Touch, minHeight = UiMetrics.Touch)
             .clickable(role = Role.Button, onClick = onYou).semantics { contentDescription = "You" }, contentAlignment = Alignment.Center) {
-            LiveAvatar(AvatarPlaceholder.initials(DisplayNames.localpart(userId)), AvatarPlaceholder.colorIndex(userId),
-                UiMetrics.HeaderAvatar, userAvatarUrl)
+            OwnAvatar(userId, UiMetrics.HeaderAvatar, userAvatarUrl)
         }
     }
     if (switching) WorkspaceSwitcher(state, selectedSpaceId, onSpace) { switching = false }
@@ -720,6 +721,21 @@ internal fun LiveAvatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.
         Text(initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label, color = SlatrixTheme.colors.onAvatar,
             maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
         Picture(url, size)
+    }
+}
+
+/** Your own avatar, with a dot at its corner that is green while you're connected and hollow once that's lost. */
+@Composable
+internal fun OwnAvatar(userId: String, size: Dp, url: String?) {
+    val colors = SlatrixTheme.colors
+    val lost = connectionLost()
+    val dot = size * 0.28f
+    Box(Modifier.size(size)) {
+        LiveAvatar(AvatarPlaceholder.initials(DisplayNames.localpart(userId)), AvatarPlaceholder.colorIndex(userId), size, url)
+        Box(Modifier.align(Alignment.BottomEnd).offset(size * 0.06f, size * 0.06f).size(dot)
+            .border(UiMetrics.FaceRing, colors.canvas, CircleShape).padding(UiMetrics.FaceRing).clip(CircleShape)
+            .background(if (lost) colors.canvas else colors.presenceActive)
+            .then(if (lost) Modifier.border(UiMetrics.FaceRing, colors.presenceAway, CircleShape) else Modifier))
     }
 }
 

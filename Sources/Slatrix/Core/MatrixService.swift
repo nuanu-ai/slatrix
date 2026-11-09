@@ -529,9 +529,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var status: ConnectionStatus = .signedOut
     private(set) var connectionErrorMessage: String?
     private(set) var connectionState = MatrixConnectionState.idle
-    var connectionLabel: String {
-        connectionState == .running
-            ? ConnectionHealth.connected.label : connectionErrorMessage ?? ConnectionHealth.connecting.label
+    /// Your own dot goes hollow: the connection dropped, as opposed to still being made.
+    var connectionLost: Bool { [.offline, .stopped, .failed].contains(connectionState) }
+    /// A crossed-out Wi-Fi only when the network itself is gone; reaching the server again turns an arrow.
+    var connectionSymbol: String {
+        connectionErrorMessage == ConnectionHealth.offline.label ? "wifi.slash" : "arrow.clockwise"
     }
     private(set) var isRetryingConnection = false
     private(set) var canRetryConnection = false

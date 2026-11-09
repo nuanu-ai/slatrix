@@ -137,7 +137,8 @@ struct SidebarView: View {
             } label: {
                 HStack(spacing: m.sp8) {
                     AvatarView(
-                        name: matrix.user?.name ?? "You", size: m.avatarFooter, presence: .active,
+                        name: matrix.user?.name ?? "You", size: m.avatarFooter,
+                        presence: matrix.connectionLost ? .away : .active,
                         surface: colors.sidebar, matrix: matrix, source: matrix.user?.avatarURL)
                     Text(matrix.user?.name ?? "You").font(m.font(.body)).foregroundStyle(colors.textPrimary)
                         .lineLimit(1)
