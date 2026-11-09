@@ -175,6 +175,21 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.thread-summary
+    @Test fun aThreadWhoseRepliesCameWhileTheAppWasAwayShowsTheServersCount() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417"), conversationItem("other", "\$other", "Hello")))
+        val room = ConversationRoom(timeline)
+        val reply = ThreadListItemEvent("\$reply", 1_700_000_100_000u, "@sam:example.org",
+            ProfileDetails.Ready("Sam Okafor", false, "mxc://example.org/sam", null, null), false, null)
+        room.threads = listOf(ThreadListItem(ThreadListItemEvent("\$root", 1_700_000_000_000u, "@mira:example.org",
+            ProfileDetails.Unavailable, false, null), reply, 2u))
+        val conversation = MatrixConversation(backgroundScope, room)
+        val rows = conversation.state.first { state -> state.rows.messages.any { it.thread != null } }.rows.messages
+        assertEquals(MessageThread(2, "Sam Okafor", 1_700_000_100_000L, "mxc://example.org/sam"), rows.single { it.body == "PR 417" }.thread)
+        assertNull(rows.single { it.body == "Hello" }.thread)
+        conversation.close()
+    }
+
     @Test fun aDayWithOnlyEventsTheAppHidesShowsNoDivider() = runTest {
         val start = 1_700_000_000_000uL
         val day = 86_400_000uL
@@ -965,6 +980,13 @@ private class JumpRoom(private val live: Timeline, private val around: Timeline,
 }
 
 private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
+    /** The server's list of the room's threads, newest activity first. */
+    var threads = emptyList<ThreadListItem>()
+    override fun threadListService(): ThreadListService = object : ThreadListService(NoHandle) {
+        private var loaded = emptyList<ThreadListItem>()
+        override fun items(): List<ThreadListItem> = loaded
+        override suspend fun paginate() { loaded = threads }
+    }
     var configuration: TimelineConfiguration? = null
     var markedUnread = true
     val sendQueueEnabled = CompletableDeferred<Boolean>()
