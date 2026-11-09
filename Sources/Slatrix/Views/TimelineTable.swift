@@ -16,7 +16,6 @@ struct TimelineEntry: Identifiable, Hashable {
     }
     let id: String
     var kind: Kind
-
 }
 
 struct TimelineWelcome: Hashable {
@@ -409,8 +408,7 @@ struct TimelineTable: NSViewRepresentable {
         return min(width, context.metrics.conversationRow)
     }
 
-    /// Builds the row's cell off screen and measures it there, so showing it later costs no SwiftUI work. Returns
-    /// whether the table had only an estimate for it.
+    /// Builds and measures the row ahead of display. Returns whether its measured height changed.
     @discardableResult private func prepare(_ row: Int) -> Bool {
         let entry = rows[row]
         let shown = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell
@@ -667,7 +665,7 @@ struct TimelineTable: NSViewRepresentable {
         scroll(to: opening)
         settle(keeping: opening)
         stopLoading()
-        // Opening a channel sometimes leaves space under its newest message or cuts it off, and no test reproduces it.
+        // Check the settled result after deferred AppKit layout as well as the opening pass.
         let start =
             switch opening {
             case .bottom: 0

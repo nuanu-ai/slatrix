@@ -14,6 +14,7 @@ private func readPerformanceLog(since date: Date, where match: (String) -> Bool)
     let predicate = NSPredicate(format: "subsystem == 'ai.nuanu.slatrix' AND category == 'performance'")
     let deadline = ContinuousClock.now + .seconds(20)
     while ContinuousClock.now < deadline {
+        // A store covers a fixed range; later writes need a fresh snapshot.
         guard let store = try? OSLogStore(scope: .currentProcessIdentifier) else { return nil }
         let entries = try? store.getEntries(at: store.position(date: date), matching: predicate)
         // The store starts near `date`, not at it, so an earlier test's entries can come first.
