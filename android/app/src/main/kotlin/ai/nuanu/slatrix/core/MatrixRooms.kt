@@ -431,6 +431,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     }
 
     private suspend fun sync() {
+        var failures = 0
         while (currentCoroutineContext().isActive) {
             val generation = syncGeneration.incrementAndGet()
             val ended = Channel<Unit>(Channel.CONFLATED)
@@ -465,6 +466,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                 controller = entries.controller()
                 check(controller.setFilter(RoomListEntriesDynamicFilterKind.All(emptyList())))
                 syncLock.withLock { activeSync.value = current }
+                failures = 0
                 coroutineScope {
                     // While the app is hidden, a push lookup runs its own short encryption sync through this service.
                     // Offline mode covers a lost network; a sync that ended otherwise starts again while the app is open,
@@ -482,7 +484,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                         }
                     }
                     // Offline, the SDK polls the server with pauses that grow to minutes; a start skips them, as the Mac does on wake.
-                    val network = launch { networkBack.collect { if (foreground.value && mutableOffline.value) current.start() } }
+                    val network = launch { networkBack.collect { if (foreground.value) current.start() } }
                     retries.receive()
                     network.cancel()
                     visibility.cancel()
@@ -491,7 +493,9 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                 throw cancelled
             } catch (_: Exception) {
                 events.trySend(Event.Connection("Couldn’t sync conversations.", generation))
-                retries.receive()
+                foreground.first { it }
+                val retryDelay = 1_000L shl minOf(failures++, 5)
+                withTimeoutOrNull(retryDelay) { retries.receive() }
             } finally {
                 stateHandle?.release()
                 stream?.release()

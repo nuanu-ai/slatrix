@@ -533,6 +533,28 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    @Test fun networkRecoveryDoesNotWaitForRoomListWorkToPublishOffline() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        val resuming = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        client.resumeSending = { resuming.complete(Unit); release.await() }
+        client.services.trySend(sync)
+        val network = MutableSharedFlow<Unit>()
+        val rooms = MatrixRooms(backgroundScope, client, networkBack = network)
+        try {
+            resuming.await()
+            network.subscriptionCount.first { it > 0 }
+            sync.end(SyncServiceState.OFFLINE)
+            network.emit(Unit)
+            release.complete(Unit)
+            withContext(Dispatchers.Default) { withTimeout(5_000) { sync.running.first { it } } }
+        } finally {
+            release.complete(Unit)
+            rooms.close()
+        }
+    }
+
     @Test fun syncRunsOnlyInTheForegroundWhileAPushStillResolvesItsEvent() = runTest {
         val client = RoomsClient(emptyList())
         val sync = RoomsSync()
@@ -566,6 +588,24 @@ class MatrixRoomsTest {
         }
         rooms.close()
     }
+
+    @Test fun aTemporaryFailurePreparingSyncRecoversWithoutAClick() = runTest {
+        val client = RoomsClient(emptyList())
+        val sync = RoomsSync()
+        val failNext = java.util.concurrent.atomic.AtomicBoolean(true)
+        client.services.trySend(sync)
+        client.finish = {
+            if (failNext.getAndSet(false)) throw IllegalStateException("Store temporarily busy")
+            client.services.receive()
+        }
+        val rooms = MatrixRooms(backgroundScope, client)
+        try {
+            withContext(Dispatchers.Default) { withTimeout(5_000) { sync.running.first { it } } }
+            assertNull(rooms.state.first { it.error == null }.error)
+        } finally {
+            rooms.close()
+        }
+    }
 }
 
 // About three times the 14–38 ms measured locally; rebuilding the whole list per message took 400–750 ms.
@@ -581,7 +621,8 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
         }
     }
     val sendQueuesEnabled = MutableStateFlow(false)
-    override suspend fun enableAllSendQueues(enable: Boolean) { sendQueuesEnabled.value = enable }
+    var resumeSending: suspend () -> Unit = {}
+    override suspend fun enableAllSendQueues(enable: Boolean) { resumeSending(); sendQueuesEnabled.value = enable }
     var spaces: SpaceService = RoomsSpaces()
     override suspend fun spaceService(): SpaceService = spaces
     val services = Channel<SyncService>(Channel.UNLIMITED)
