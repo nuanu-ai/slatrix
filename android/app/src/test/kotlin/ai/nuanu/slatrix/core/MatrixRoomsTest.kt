@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -498,6 +499,33 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    // capability: people.presence
+    @Test fun aDirectMessageShowsTheOtherPersonsDotOnceConnected() = runTest {
+        val avery = roomInfo("!dm:example.org", "Avery", direct = true)
+            .copy(heroes = listOf(RoomHero("@avery:example.org", "Avery", null, null, null)))
+        val client = RoomsClient(listOf(TestRoom(avery), TestRoom(roomInfo("!work:example.org", "Operations"))))
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val states = mapOf("@me:example.org" to "online", "@avery:example.org" to "online")
+        val rooms = MatrixRooms(backgroundScope, client, presenceOf = { states[it] })
+        val state = rooms.state.first { state -> state.rooms.any { it.presence != null } }
+        assertEquals(mapOf("Avery" to Presence.Active, "Operations" to null), state.rooms.associate { it.name to it.presence })
+        rooms.close()
+    }
+
+    // capability: home.dm-typing
+    @Test fun aDirectMessageSaysWhenTheOtherPersonTypesButNotWhenYouDo() = runTest {
+        val dm = TestRoom(roomInfo("!dm:example.org", "Avery", direct = true))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(dm)))
+        val typing = dm.typing.filterNotNull().first()
+        typing.call(listOf("@me:example.org"))
+        typing.call(listOf("@me:example.org", "@avery:example.org"))
+        rooms.state.first { it.rooms.single().typing }
+        typing.call(listOf("@me:example.org"))
+        rooms.state.first { !it.rooms.single().typing }
+        rooms.close()
+    }
+
     // capability: app.offline-banner
     @Test fun aDroppedServerConnectionSaysReconnectingUntilSyncAnswersWithoutAnError() = runTest {
         val client = RoomsClient(emptyList())
@@ -757,6 +785,7 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
     val services = Channel<SyncService>(Channel.UNLIMITED)
     var finish: suspend () -> SyncService = { services.receive() }
     override fun rooms(): List<Room> = cached
+    override fun userId(): String = "@me:example.org"
     override fun getRoom(roomId: String): Room? = cached.firstOrNull { it.id() == roomId }
     override fun syncService(): SyncServiceBuilder = object : SyncServiceBuilder(NoHandle) {
         override fun withOfflineMode(): SyncServiceBuilder = this
@@ -766,6 +795,12 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
 
 private class TestRoom(var info: RoomInfo, var latest: LatestEventValue = LatestEventValue.None) : Room(NoHandle) {
     private var listener: RoomInfoListener? = null
+    val typing = MutableStateFlow<TypingNotificationsListener?>(null)
+    override fun ownUserId(): String = "@me:example.org"
+    override fun subscribeToTypingNotifications(listener: TypingNotificationsListener): TaskHandle {
+        typing.value = listener
+        return RoomsHandle()
+    }
     var unreadable = false
     var favourite: Boolean? = null
     var failFavourite = false

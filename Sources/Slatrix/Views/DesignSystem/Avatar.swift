@@ -1,10 +1,6 @@
 import AppKit
 import SwiftUI
 
-enum Presence {
-    case active, away
-}
-
 /// A person's photo over their initials, as a circle; a space or channel passes a corner radius for a rounded square.
 struct AvatarView: View {
     /// Above this side a 128 px thumbnail looks soft, so a larger one replaces it once loaded.

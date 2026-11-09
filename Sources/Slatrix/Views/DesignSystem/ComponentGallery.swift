@@ -233,6 +233,8 @@ struct ComponentGallery: View {
             AvatarView(name: "Harbor", size: m.avatarLarge, presence: .active)
             CountBadge(text: "3")
             CountBadge(text: "99+")
+            ReadTicks(read: false)
+            ReadTicks(read: true)
             TagLabel(text: "You")
             TagLabel(text: "Invited")
             AvatarView(name: "Harbor", size: m.avatar, cornerRadius: m.radiusSpace)

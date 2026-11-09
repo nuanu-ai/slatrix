@@ -18,6 +18,8 @@ struct ChatRoom: Identifiable, Hashable {
     var name: String
     var topic: String = ""
     var isDirect = false
+    /// The other person in a direct message between two.
+    var partnerID: String? = nil
     var isEncrypted = false
     /// Slack's private channel: no one joins without an invitation.
     var isPrivate = false
@@ -122,6 +124,8 @@ struct ChatMessage: Identifiable, Hashable {
     var isEdited = false
     var isRedacted = false
     var sendState = "sent"
+    /// Who has read up to this message, from their read receipts.
+    var readBy: [String] = []
     var attachment: MessageAttachment? = nil
     var replyToID: String? = nil
     /// A thread reply also sent to the channel: `replyToID` is the reply, in its thread.

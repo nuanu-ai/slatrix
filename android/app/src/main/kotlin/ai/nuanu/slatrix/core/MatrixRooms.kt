@@ -30,6 +30,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.TypingNotificationsListener
 import org.matrix.rustcomponents.sdk.JoinRule
 import org.matrix.rustcomponents.sdk.LatestEventValue
 import org.matrix.rustcomponents.sdk.MsgLikeKind
@@ -83,6 +84,12 @@ data class RoomSummary(
     /** The pinned messages' event IDs, in the order they were pinned. */
     val pinned: List<String> = emptyList(),
     val avatarUrl: String? = null,
+    /** The other person in a direct message between two. */
+    val partnerId: String? = null,
+    /** Their dot; null when unknown or the server doesn't share presence. */
+    val presence: Presence? = null,
+    /** Someone else is typing in this direct message. */
+    val typing: Boolean = false,
     /** Unread mentions, which Activity's badge counts. */
     val mentions: Long = 0,
 )
@@ -111,7 +118,8 @@ data class RoomListState(
 )
 
 class MatrixRooms(scope: CoroutineScope, internal val client: Client, private val foreground: StateFlow<Boolean> = MutableStateFlow(true),
-    private val network: Flow<NetworkStatus> = emptyFlow()) {
+    private val network: Flow<NetworkStatus> = emptyFlow(),
+    private val presenceOf: suspend (String) -> String? = { serverPresence(client, it) }) {
     private val syncLock = Mutex()
     private val activeSync = MutableStateFlow<SyncService?>(null)
     private val mutableState = MutableStateFlow(RoomListState())
@@ -124,6 +132,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private val spaces = mutableMapOf<String, SpaceSummary>()
     private val invitations = mutableMapOf<String, Invitation>()
     private var parents: Map<String, List<String>>? = null
+    private var presence = emptyMap<String, Presence>()
+    private val typing = mutableSetOf<String>()
     private val spaceRequests = Channel<SpaceRequest>(Channel.UNLIMITED)
     private val followed = mutableMapOf<String, Followed>()
     private val syncGeneration = AtomicLong()
@@ -139,6 +149,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             coroutineScope {
                 launch { sync() }
                 launch { refreshSpaces() }
+                launch { followPresence() }
                 add(client.rooms())
                 // After add's lookup, so the first space result covers the cached rooms, and before publish, so an empty account gets one.
                 spaceRequests.trySend(SpaceRequest.Rebuild)
@@ -219,6 +230,14 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                 accept(event.info)
                 // Space ancestry changes only with a space.
                 if (event.info.isSpace || wasSpace) spaceRequests.trySend(SpaceRequest.Rebuild)
+            }
+            is Event.Typing -> if (followed[event.id] === event.room) {
+                if (event.typing) typing += event.id else typing -= event.id
+                summaries[event.id]?.let { if (it.typing != event.typing) summaries[event.id] = it.copy(typing = event.typing) }
+            }
+            is Event.Presence -> {
+                presence = event.dots
+                summaries.replaceAll { _, room -> room.partnerId?.let(presence::get).let { if (it == room.presence) room else room.copy(presence = it) } }
             }
             is Event.Spaces -> {
                 if (event.parents != null) {
@@ -303,6 +322,13 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                 })
                 val info = room.roomInfo()
                 currentCoroutineContext().ensureActive()
+                // A direct message's row says when the other person types, in place of its latest message.
+                if (info.isDirect) {
+                    val me = room.ownUserId()
+                    entry.typingHandle = room.subscribeToTypingNotifications(object : TypingNotificationsListener {
+                        override fun call(typingUserIds: List<String>) { events.trySend(Event.Typing(id, typingUserIds.any { it != me }, entry)) }
+                    })
+                }
                 accept(info)
                 ids += id
             } catch (cancelled: CancellationException) {
@@ -353,6 +379,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             markedUnread = info.isMarkedUnread, messages = info.numUnreadMessages.clampedLong(),
             notifications = info.numUnreadNotifications.clampedLong(), mentions = info.numUnreadMentions.clampedLong(),
         )
+        val partner = info.heroes.singleOrNull()?.userId?.takeIf { info.isDirect }
         val summary = RoomSummary(
             id = info.id, name = name, direct = info.isDirect, topic = info.topic.orEmpty(),
             unread = UnreadBadge.forRoom(unread), mentions = unread.mentions,
@@ -362,6 +389,9 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             starred = info.isFavourite,
             // A direct message without a picture of its own shows the other person's.
             avatarUrl = info.avatarUrl ?: info.heroes.singleOrNull()?.avatarUrl?.takeIf { info.isDirect },
+            partnerId = partner,
+            presence = partner?.let(presence::get),
+            typing = info.id in typing,
             // Slack's private channel: only an invitation lets someone in. A restricted room is open to its space, a public channel.
             isPrivate = info.joinRule.let { it is JoinRule.Invite || it is JoinRule.Knock || it is JoinRule.Private },
             resumeAt = UnreadLine.resumeAt(unread, info.fullyReadEventId),
@@ -405,6 +435,17 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             spacesKnown = parents != null,
             invitations = invitations.values.sortedWith(compareBy<Invitation, String>(String.CASE_INSENSITIVE_ORDER) { it.name }.thenBy { it.id }),
         )
+    }
+
+    /** Each minute while connected, the dots of the people you message, recent ones first. */
+    private suspend fun followPresence() {
+        val me = runCatching { client.userId() }.getOrNull() ?: return
+        while (true) {
+            mutableConnection.first { it == ConnectionState.Connected }
+            val people = mutableState.value.rooms.mapNotNull { it.partnerId }.take(50)
+            events.send(Event.Presence(PresencePolicy.dots(me, people, presenceOf)))
+            delay(60_000)
+        }
     }
 
     private fun topLevel(id: String): Boolean = parents?.get(id).isNullOrEmpty()
@@ -582,9 +623,13 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     /** A room whose info updates the list follows; it is also the token that tells its callbacks from a released one's. */
     private inner class Followed(val room: Room) {
         var handle: TaskHandle? = null
+        var typingHandle: TaskHandle? = null
 
         fun release() {
             handle?.release()
+            typingHandle?.release()
+            // Typing that stopped while unfollowed never says so.
+            runCatching { typing -= room.id() }
             room.close()
         }
     }
@@ -602,6 +647,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         data class SyncResponse(val state: RoomListServiceState, val generation: Long) : Event
         data class Network(val available: Boolean, val generation: Long, val routeChanged: Boolean) : Event
         data class Visibility(val visible: Boolean, val generation: Long) : Event
+        data class Presence(val dots: Map<String, ai.nuanu.slatrix.core.Presence>) : Event
+        data class Typing(val id: String, val typing: Boolean, val room: Followed) : Event
     }
 }
 

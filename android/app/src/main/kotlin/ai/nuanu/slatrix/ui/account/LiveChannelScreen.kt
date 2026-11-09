@@ -14,6 +14,7 @@ import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.ThreadOrigin
 import ai.nuanu.slatrix.ui.designsystem.Motion
+import ai.nuanu.slatrix.ui.designsystem.ReadTicks
 import ai.nuanu.slatrix.ui.designsystem.OnAccentFill
 import ai.nuanu.slatrix.ui.designsystem.bubble
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
@@ -444,7 +445,7 @@ private fun ChatHeader(room: RoomSummary, thread: Boolean, typing: List<String>,
             .clickable(role = Role.Button, onClickLabel = "Conversation details", onClick = onOpenDetails),
             verticalAlignment = Alignment.CenterVertically) {
             Lead {
-                if (room.direct) LiveAvatar(room.initials, room.colorIndex, leadSize(), room.avatarUrl)
+                if (room.direct) LiveAvatar(room.initials, room.colorIndex, leadSize(), room.avatarUrl, room.presence)
                 else ChannelGlyph(room.isPrivate, colors.textPrimary)
             }
             lines()
@@ -666,11 +667,15 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, nam
                 { MessageBody(message, if (message.sendState == MessageSendState.Sending) fill.textSecondary else fill.textBody, me, names, onPerson) }
             } else null
             val time = @Composable { color: Color ->
-                Text(when (message.sendState) {
-                    MessageSendState.Sent -> remember(message.timestamp) { timeLabel(message.timestamp) }
-                    MessageSendState.Sending -> "Sending…"
-                    MessageSendState.Failed -> "Not sent"
-                }, style = MaterialTheme.typography.labelSmall, maxLines = 1, color = color)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(when (message.sendState) {
+                        MessageSendState.Sent -> remember(message.timestamp) { timeLabel(message.timestamp) }
+                        MessageSendState.Sending -> "Sending…"
+                        MessageSendState.Failed -> "Not sent"
+                    }, style = MaterialTheme.typography.labelSmall, maxLines = 1, color = color)
+                    if (own && message.sendState == MessageSendState.Sent)
+                        ReadTicks(message.seen, color, Modifier.padding(start = UiMetrics.TicksGap))
+                }
             }
             val timeColor = if (failed && !own) fill.destructive else fill.textSecondary
             Column(Modifier.padding(if (media) PaddingValues(UiMetrics.GapTiny)

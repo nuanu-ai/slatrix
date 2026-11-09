@@ -350,6 +350,7 @@ enum MatrixMapping {
                 senders: $0.senders.map(\.senderId))
         }
         if case .ready(_, _, let avatar, _, _) = item.senderProfile { result.avatarURL = avatar }
+        result.readBy = Array(item.readReceipts.keys)
         if let state = item.localSendState {
             switch state {
             case .notSentYet: result.sendState = "sending"
@@ -510,6 +511,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     let people = PeopleService()
     let pinnedMessages = PinnedMessagesService()
     let savedMessages = SavedMessagesService()
+    let presence = PresenceService()
     let sharedFiles = SharedFilesService()
     let avatarImages = AvatarImageCache()
     /// Decoded inline images and posters by event and source, so a row that comes back draws its picture at once.
@@ -1135,6 +1137,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         people.attach(nil)
         pinnedMessages.attach(nil)
         savedMessages.attach(nil, accountID: nil)
+        presence.stop()
         sharedFiles.attach(nil)
         threadFeed.reset()
         activity.clear()
@@ -3005,11 +3008,33 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         case .running:
             status = .ready
             savedMessages.resume()
+            watchPresence()
         case .failed: status = .error
         case .idle, .connecting, .offline, .stopped: status = .syncing
         }
         requestRefresh()
     }
+    /// Asks again on every reconnect, so dots catch up at once.
+    private func watchPresence() {
+        guard let client, let me = user?.id else { return }
+        presence.start(
+            me: me, fetch: { await Self.presenceState(of: $0, client: client) },
+            // Recent ones first, as the sidebar lists them.
+            people: { [weak self] in Array((self?.rooms ?? []).compactMap(\.partnerID).prefix(50)) })
+    }
+
+    private nonisolated static func presenceState(of userID: String, client: Client) async -> String? {
+        struct Status: Decodable { let presence: String }
+        guard let session = try? client.session(), var url = URL(string: session.homeserverUrl) else { return nil }
+        url.append(path: "_matrix/client/v3/presence/\(userID)/status")
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+            (response as? HTTPURLResponse)?.statusCode == 200
+        else { return nil }
+        return try? JSONDecoder().decode(Status.self, from: data).presence
+    }
+
     /// Servers honor a room mention only from someone with the power level for it; for anyone else "@room" is text.
     func mentions(_ message: ComposerFormat.Message) -> Mentions {
         Mentions(userIds: message.mentions, room: message.mentionsRoom && canMentionRoom)

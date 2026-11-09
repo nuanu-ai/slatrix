@@ -5,6 +5,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.layout.BoxWithConstraints
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.DisplayNames
+import ai.nuanu.slatrix.core.Presence
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SpaceSummary
@@ -550,7 +551,7 @@ private fun CompactRow(room: RoomSummary, onRoom: (String) -> Unit, onActions: (
         .padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         Lead {
-            if (room.direct) LiveAvatar(room.initials, room.colorIndex, leadSize(), room.avatarUrl)
+            if (room.direct) LiveAvatar(room.initials, room.colorIndex, leadSize(), room.avatarUrl, room.presence)
             else ChannelGlyph(room.isPrivate, color)
         }
         Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = color,
@@ -604,7 +605,7 @@ private fun ConversationRow(room: RoomSummary, onRoom: (String) -> Unit, onActio
     Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.ConversationRow).conversation(room, onRoom, onActions).unreadState(room)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowAvatar, room.avatarUrl)
+        LiveAvatar(room.initials, room.colorIndex, UiMetrics.RowAvatar, room.avatarUrl, room.presence)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Text(room.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
@@ -615,7 +616,9 @@ private fun ConversationRow(room: RoomSummary, onRoom: (String) -> Unit, onActio
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 // Held at a line's height while there's nothing to show, so every row is the same height.
-                Text(preview(room), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary,
+                if (room.typing) Text("typing…", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = colors.accent,
+                    minLines = 1, maxLines = 1)
+                else Text(preview(room), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary,
                     minLines = 1, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 UnreadCount(room.unread)
             }
@@ -713,31 +716,34 @@ internal fun latestTime(timestamp: Long): String {
 internal fun LiveAvatar(name: String, size: Dp = UiMetrics.Avatar, url: String? = null) =
     LiveAvatar(AvatarPlaceholder.initials(name), AvatarPlaceholder.colorIndex(name), size, url)
 
+/** With [presence], a dot at its corner: green when active, hollow when away. */
 @Composable
-internal fun LiveAvatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.Avatar, url: String? = null) {
-    // People are round, as in every messenger; workspaces and channels are rounded squares.
-    Box(Modifier.size(size).clip(CircleShape).background(AvatarStyle.fill(DesignTokens.avatarColors[colorIndex])), contentAlignment = Alignment.Center) {
-        // Two letters shrink to fit, so every avatar in a list has the same width.
-        Text(initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label, color = SlatrixTheme.colors.onAvatar,
-            maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
-        Picture(url, size)
+internal fun LiveAvatar(initials: String, colorIndex: Int, size: Dp = UiMetrics.Avatar, url: String? = null, presence: Presence? = null) {
+    Box(Modifier.size(size)) {
+        // People are round, as in every messenger; workspaces and channels are rounded squares.
+        Box(Modifier.matchParentSize().clip(CircleShape).background(AvatarStyle.fill(DesignTokens.avatarColors[colorIndex])), contentAlignment = Alignment.Center) {
+            // Two letters shrink to fit, so every avatar in a list has the same width.
+            Text(initials, Modifier.padding(horizontal = UiMetrics.GapTiny), style = AvatarStyle.label, color = SlatrixTheme.colors.onAvatar,
+                maxLines = 1, softWrap = false, autoSize = AvatarStyle.fit)
+            Picture(url, size)
+        }
+        if (presence != null) {
+            val colors = SlatrixTheme.colors
+            val away = presence == Presence.Away
+            Box(Modifier.align(Alignment.BottomEnd).offset(size * 0.06f, size * 0.06f).size(size * 0.24f)
+                .semantics { contentDescription = if (away) "Away" else "Active" }
+                .border(UiMetrics.FaceRing, colors.canvas, CircleShape).padding(UiMetrics.FaceRing).clip(CircleShape)
+                .background(if (away) colors.canvas else colors.presenceActive)
+                .then(if (away) Modifier.border(UiMetrics.FaceRing, colors.presenceAway, CircleShape) else Modifier))
+        }
     }
 }
 
-/** Your own avatar, with a dot at its corner that is green while you're connected and hollow once that's lost. */
+/** Your own avatar, its dot green while you're connected and hollow once that's lost. */
 @Composable
-internal fun OwnAvatar(userId: String, size: Dp, url: String?) {
-    val colors = SlatrixTheme.colors
-    val lost = connectionLost()
-    val dot = size * 0.28f
-    Box(Modifier.size(size)) {
-        LiveAvatar(AvatarPlaceholder.initials(DisplayNames.localpart(userId)), AvatarPlaceholder.colorIndex(userId), size, url)
-        Box(Modifier.align(Alignment.BottomEnd).offset(size * 0.06f, size * 0.06f).size(dot)
-            .border(UiMetrics.FaceRing, colors.canvas, CircleShape).padding(UiMetrics.FaceRing).clip(CircleShape)
-            .background(if (lost) colors.canvas else colors.presenceActive)
-            .then(if (lost) Modifier.border(UiMetrics.FaceRing, colors.presenceAway, CircleShape) else Modifier))
-    }
-}
+internal fun OwnAvatar(userId: String, size: Dp, url: String?) =
+    LiveAvatar(AvatarPlaceholder.initials(DisplayNames.localpart(userId)), AvatarPlaceholder.colorIndex(userId), size, url,
+        if (connectionLost()) Presence.Away else Presence.Active)
 
 /** The picture at [url] over whatever sits beneath it, once it has loaded, in the same box, so nothing moves. */
 @Composable

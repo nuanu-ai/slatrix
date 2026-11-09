@@ -247,7 +247,8 @@ extension RoomListRefresherTests {
             })
     }
 
-    @Test("A direct message without a picture of its own shows the other person's")
+    // capability: people.presence
+    @Test("A direct message knows the other person, and without a picture of its own shows theirs")
     func directMessagePicture() async {
         var info = roomInfo(id: "!avery:example.org", isDirect: true)
         info.heroes = [
@@ -259,6 +260,7 @@ extension RoomListRefresherTests {
         refresher.attach(FakeClient(rooms: [FakeRoom(info)]))
         refresher.request()
         #expect(await eventually { refresher.rooms.first?.avatarURL == "mxc://example.org/avery" })
+        #expect(refresher.rooms.first?.partnerID == "@avery:example.org")
     }
 }
 

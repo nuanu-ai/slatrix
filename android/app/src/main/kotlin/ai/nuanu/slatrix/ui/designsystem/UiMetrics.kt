@@ -24,6 +24,10 @@ object UiMetrics {
     val LargeIcon = 24.dp
     val Divider = 1.dp
     val Hairline = 0.5.dp
+    /** The ticks by your message's time, and the gap before them. */
+    val TicksWidth = 15.dp
+    val TicksHeight = 10.dp
+    val TicksGap = 3.dp
     /** A grey bar standing in for a line of text while it loads. */
     val SkeletonLine = 12.dp
     /** Design B's two-line conversation row and its 48 dp avatar or channel tile. */

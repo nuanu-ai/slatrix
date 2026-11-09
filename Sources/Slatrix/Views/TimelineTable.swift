@@ -48,6 +48,8 @@ struct TimelineMessageEntry: Hashable {
     var highlighted: Bool
     var sendFailure: MessageSendFailure?
     var sendBusy: Bool
+    /// The readers a group's first row shows by its time; nil where it shows no ticks.
+    var seenBy: [String]? = nil
     /// The reader collapsed this message's image or video.
     var mediaCollapsed = false
     /// Rows capture their action target from it, so a new context redraws them.
@@ -1195,6 +1197,14 @@ struct TimelineRow: View, Equatable {
                     own: message.senderID == matrix.user?.id, highlighted: row.highlighted, isSaved: row.saved,
                     isPinned: row.pinned, sendFailure: row.sendFailure, sendBusy: row.sendBusy, hovered: hovered,
                     timeLabel: row.time,
+                    seen: row.seenBy.map { readers in
+                        (
+                            !readers.isEmpty,
+                            readers.isEmpty
+                                ? nil
+                                : SeenPolicy.tooltip(readers) { id in matrix.members.first { $0.id == id }?.name }
+                        )
+                    },
                     avatar: AvatarView(
                         name: message.senderName, size: metrics.avatar, matrix: matrix, source: message.avatarURL),
                     replierAvatar: message.lastReply.map {

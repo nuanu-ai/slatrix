@@ -111,6 +111,10 @@ data class ConversationMessage(
     val uploadProgress: Float? = null,
     /** The sender's picture, drawn over the initials once it loads. */
     val avatarUrl: String? = null,
+    /** Who has read up to this message, from their read receipts. */
+    val readBy: List<String> = emptyList(),
+    /** Your message, read by someone. */
+    val seen: Boolean = false,
 ) : ConversationRow {
     /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
     val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
@@ -805,6 +809,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      */
     private fun Source.rows(): List<ConversationRow> {
         val rows = ArrayList<ConversationRow>(items.size)
+        val readers = SeenPolicy.readers(items.mapNotNull { (it as? ConversationMessage)?.run { Triple(id, senderId, readBy) } },
+            ownUserId.orEmpty())
         var previous: ConversationMessage? = null
         var divider: ConversationRow? = null
         for (index in items.indices) {
@@ -817,8 +823,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             divider?.let(rows::add)
             divider = null
             val grouped = previous?.let { groupsUnder(it, row) } == true
+            val seen = !readers[row.id].isNullOrEmpty()
             // Stored back, so an unchanged row stays the same object in the next batch.
-            val current = if (row.grouped == grouped) row else row.copy(grouped = grouped).also { items[index] = it }
+            val current = if (row.grouped == grouped && row.seen == seen) row
+                else row.copy(grouped = grouped, seen = seen).also { items[index] = it }
             rows.add(current)
             previous = current
         }
@@ -948,6 +956,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             // An edit goes out as text, so only a text message keeps its kind.
             editable = event.isEditable && shown.kind == MessageKind.Text,
             edited = (content.kind as? MsgLikeKind.Message)?.content?.isEdited == true,
+            readBy = event.readReceipts.keys.toList(),
             reactions = event.reactions.map { reaction ->
                 MessageReaction(reaction.key, reaction.senders.size, reaction.senders.any { it.senderId == ownUserId },
                     reaction.senders.map { it.senderId })
