@@ -445,7 +445,7 @@ private fun ChatHeader(room: RoomSummary, thread: Boolean, typing: List<String>,
             .clickable(role = Role.Button, onClickLabel = "Conversation details", onClick = onOpenDetails),
             verticalAlignment = Alignment.CenterVertically) {
             Lead {
-                if (room.direct) LiveAvatar(room.initials, room.colorIndex, leadSize(), room.avatarUrl)
+                if (room.direct) LiveAvatar(room.initials, room.colorIndex, leadSize(), room.avatarUrl, room.presence)
                 else ChannelGlyph(room.isPrivate, colors.textPrimary)
             }
             lines()

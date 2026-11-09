@@ -63,6 +63,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.onNodeWithTag
 import org.junit.Rule
+import ai.nuanu.slatrix.core.Presence
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -441,6 +442,32 @@ class LiveHomeScreenTest {
         val blake = compose.onNodeWithText("Blake").fetchSemanticsNode().boundsInRoot
         val avery = compose.onNodeWithText("Avery").fetchSemanticsNode().boundsInRoot
         assertTrue("The newest conversation leads", blake.top < avery.top)
+    }
+
+    // capability: people.presence
+    @Test fun aDirectMessageShowsWhetherTheOtherPersonIsActiveOrAwayAndNothingWhenUnknown() {
+        val rooms = listOf(
+            direct("!avery:example.org", "Avery").copy(presence = Presence.Active),
+            direct("!blake:example.org", "Blake").copy(presence = Presence.Away),
+            direct("!casey:example.org", "Casey"),
+        )
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {}) } }
+        tab("DMs").performClick()
+
+        compose.onNode(hasText("Avery") and hasContentDescription("Active")).assertIsDisplayed()
+        compose.onNode(hasText("Blake") and hasContentDescription("Away")).assertIsDisplayed()
+        compose.onNode(hasText("Casey") and (hasContentDescription("Active") or hasContentDescription("Away"))).assertDoesNotExist()
+    }
+
+    // capability: home.dm-typing
+    @Test fun aDirectMessageSaysTypingInPlaceOfItsLatestMessageWhileTheOtherPersonTypes() {
+        val rooms = listOf(direct("!avery:example.org", "Avery", latest = LatestMessage("See you at noon", 1_000, own = false))
+            .copy(typing = true))
+        compose.setContent { SlatrixTheme { LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spacesKnown = true), {}, {}, {}) } }
+        tab("DMs").performClick()
+
+        compose.onNodeWithText("typing…").assertIsDisplayed()
+        compose.onNodeWithText("See you at noon").assertDoesNotExist()
     }
 
     @Test fun aDirectMessagesTimeIsSmallAndQuietEvenWhileUnread() {
