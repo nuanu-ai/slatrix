@@ -162,6 +162,19 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.seen
+    @Test fun yourMessagesShowSeenOnceSomeoneHasReadUpToThem() = runTest {
+        val timeline = ConversationTimeline(listOf(
+            conversationItem("a", "\$a", "First", sender = "@me:example.org", editable = true),
+            conversationItem("b", "\$b", "Reply", readBy = listOf("@mira:example.org")),
+            conversationItem("c", "\$c", "Second", sender = "@me:example.org", editable = true, readBy = listOf("@me:example.org")),
+        ))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val rows = conversation.state.first { it.rows.isNotEmpty() }.rows.messages
+        assertEquals(listOf("First" to true, "Reply" to false, "Second" to false), rows.map { it.body to it.seen })
+        conversation.close()
+    }
+
     @Test fun aDayWithOnlyEventsTheAppHidesShowsNoDivider() = runTest {
         val start = 1_700_000_000_000uL
         val day = 86_400_000uL
@@ -1095,6 +1108,7 @@ internal fun conversationItem(
     editable: Boolean = false,
     editState: EventSendState? = null,
     deleting: Boolean = false,
+    readBy: List<String> = emptyList(),
     onMap: () -> Unit = {},
 ): TimelineItem {
     val event = EventTimelineItem(
@@ -1111,7 +1125,7 @@ internal fun conversationItem(
         reactions = reactions, eventTypeRaw = "m.room.message", timestamp = timestamp,
         localSendState = sendState, editSendState = editState,
         redactionSendState = if (deleting) EventSendState.NotSentYet(null) else null, localCreatedAt = null,
-        readReceipts = emptyMap(), origin = null, canBeRepliedTo = true,
+        readReceipts = readBy.associateWith { Receipt(null) }, origin = null, canBeRepliedTo = true,
         lazyProvider = object : LazyTimelineItemProvider(NoHandle) {},
     )
     return object : TimelineItem(NoHandle) {

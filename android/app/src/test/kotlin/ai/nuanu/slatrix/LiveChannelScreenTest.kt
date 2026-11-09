@@ -406,6 +406,22 @@ class LiveChannelScreenTest {
         compose.runOnIdle { assertEquals(failed, deleted) }
     }
 
+    // capability: message.seen
+    @Test fun yourSentMessagesTickOnceAndTwiceWhenSeenWhileOthersAndSendingOnesShowNone() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(
+                    message("Read already", minutes = 0, sender = "Jordan").copy(seen = true),
+                    message("Not yet", minutes = 1, sender = "Jordan"),
+                    message("Theirs", minutes = 2),
+                    message("On its way", minutes = 3, sender = "Jordan", state = MessageSendState.Sending),
+                ), loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onAllNodesWithContentDescription("Seen", useUnmergedTree = true).assertCountEquals(1)
+        compose.onAllNodesWithContentDescription("Sent", useUnmergedTree = true).assertCountEquals(1)
+    }
+
     @Test fun theHeaderNamesTheChannelInPrimaryTextAndSendEndsTheComposerToolbar() {
         compose.setContent {
             SlatrixTheme(dark = false) {
