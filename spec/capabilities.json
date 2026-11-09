@@ -38,7 +38,7 @@
     {"id": "search.messages", "what": "Search messages, encrypted ones included, with in: and from: filters.", "mac": "done", "android": "done"},
     {"id": "search.recent", "what": "Search offers your recent searches.", "mac": "done", "android": "done"},
 
-    {"id": "conversation.history", "what": "A conversation opens at its newest messages and loads older ones as you scroll up.", "mac": "done", "android": "done"},
+    {"id": "conversation.history", "what": "A conversation opens at its newest messages and loads older ones as you scroll up, keeping messages readable and in place.", "mac": "done", "android": "done"},
     {"id": "conversation.intro", "what": "The start of a conversation shows its intro.", "mac": "done", "android": "done"},
     {"id": "conversation.day-dividers", "what": "Day dividers read Today, Yesterday or the date.", "mac": "done", "android": "done"},
     {"id": "conversation.grouping", "what": "Messages one person sends within five minutes group under one name.", "mac": "done", "android": "done"},
@@ -46,7 +46,7 @@
     {"id": "conversation.read", "what": "Reading a conversation's newest messages marks it read.", "mac": "done", "android": "done"},
     {"id": "conversation.mark-read", "what": "Mark a conversation, or every conversation, read.", "mac": "done", "android": "done"},
     {"id": "conversation.mark-unread", "what": "Mark a conversation unread.", "mac": "done", "android": "done"},
-    {"id": "conversation.keep-position", "what": "Coming back to a conversation returns to where you were reading.", "mac": "done", "android": "n/a: as in Slack's mobile app, a conversation opens at its New line or its newest message"},
+    {"id": "conversation.keep-position", "what": "Coming back to a conversation returns to the same message at the same place on screen.", "mac": "done", "android": "n/a: as in Slack's mobile app, a conversation opens at its New line or its newest message"},
     {"id": "conversation.jump-to-message", "what": "A message opened from search or a link shows highlighted in its conversation.", "mac": "done", "android": "done"},
     {"id": "conversation.jump-to-newest", "what": "A button over the composer takes you back to the newest message once you scroll up or open an older one.", "mac": "done", "android": "done"},
     {"id": "conversation.members", "what": "See a conversation's members from its header.", "mac": "done", "android": "done"},

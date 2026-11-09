@@ -16,18 +16,6 @@ struct TimelineEntry: Identifiable, Hashable {
     }
     let id: String
     var kind: Kind
-
-    /// The parts of this entry that decide its height, the same in every timeline that shows the message.
-    fileprivate var layoutKey: TimelineEntry {
-        guard case .message(var entry) = kind else { return TimelineEntry(id: "", kind: kind) }
-        entry.message.id = entry.message.eventID
-        entry.message.timelineEventID = nil
-        entry.saved = false
-        entry.highlighted = false
-        entry.sendBusy = false
-        entry.context = nil
-        return TimelineEntry(id: "", kind: .message(entry))
-    }
 }
 
 struct TimelineWelcome: Hashable {
@@ -114,7 +102,7 @@ struct TimelineTable: NSViewRepresentable {
     var jumpID: UUID?
     var startsAtUnread: Bool
     /// Where to remember the reading position across visits.
-    var memoryKey: String?
+    var memoryKey: TimelineMemory.Key?
     var canLoadOlder: Bool
     var canLoadNewer: Bool
     var scroller: TimelineScroller
@@ -148,26 +136,14 @@ struct TimelineTable: NSViewRepresentable {
     }
 }
 
-/// Reading positions by conversation, for coming back to where you left off. Session-scoped keys keep accounts apart.
-@MainActor private enum TimelineMemory {
-    static var positions: [String: TimelineScrollPolicy.Position] = [:]
-}
-
 @MainActor final class TimelineTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     private typealias Policy = TimelineScrollPolicy
     private static let cellID = NSUserInterfaceItemIdentifier("timeline-row")
-    /// Heights by layout, width and display settings, shared by every timeline so revisiting a room measures nothing.
-    private struct HeightKey: Hashable {
-        var entry: TimelineEntry
-        var width: CGFloat
-        var settings: Settings
-    }
     private struct Settings: Hashable {
         var zoom: CGFloat
         var density: MessageDensity
         var showAvatars: Bool
     }
-    private static var heights: [HeightKey: CGFloat] = [:]
     /// How far ahead of the reader rows are measured, in screens, and how long one pass between frames may take.
     private static let ahead: CGFloat = 2
     private static let prefetchSlice = Duration.milliseconds(4)
@@ -189,9 +165,6 @@ struct TimelineTable: NSViewRepresentable {
     private var settings: Settings?
     private var spacerHeight: CGFloat = 0
     private var insets = NSEdgeInsets()
-    /// Rows whose height in the table is an estimate. Only rows on screen are measured at once, and those near it
-    /// between frames, so opening a room or loading a page lays out a screenful, not the whole history.
-    private var estimated = Set<String>()
     private var opened = false
     private var pendingFocus: String?
     private var hoveredID: String?
@@ -260,7 +233,7 @@ struct TimelineTable: NSViewRepresentable {
         if previous == nil, !opened {
             loading = Performance.begin(configuration.context.isThread ? .threadLoading : .timelineLoading)
             // A table shows one timeline; the view it leaves with may already describe the next.
-            atOlderMessage = !configuration.live
+            atOlderMessage = !configuration.live && !restoresReadingPosition
         }
         configuration.context.onHeight = { [weak self] id, height in self?.reported(height, for: id) }
         configuration.context.onReactionFrame = { [weak self] id, key, frame in
@@ -415,11 +388,7 @@ struct TimelineTable: NSViewRepresentable {
             return context.isThread ? context.metrics.sp8 : context.metrics.conversationEnd
         default: break
         }
-        if let height = known[entry.id] {
-            estimated.remove(entry.id)
-            return height
-        }
-        estimated.insert(entry.id)
+        if let height = known[entry.id] { return height }
         return estimate(entry)
     }
 
@@ -439,30 +408,19 @@ struct TimelineTable: NSViewRepresentable {
         return min(width, context.metrics.conversationRow)
     }
 
-    private func key(_ entry: TimelineEntry) -> HeightKey? {
-        settings.map { HeightKey(entry: entry.layoutKey, width: rowWidth, settings: $0) }
-    }
-
-    /// Builds the row's cell off screen and measures it there, so showing it later costs no SwiftUI work. Returns
-    /// whether the table had only an estimate for it.
+    /// Builds and measures the row ahead of display. Returns whether its measured height changed.
     @discardableResult private func prepare(_ row: Int) -> Bool {
         let entry = rows[row]
-        guard let key = key(entry) else { return false }
         let shown = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell
         let cell = shown ?? prepared[entry.id] ?? dequeue()
         if shown == nil { prepared[entry.id] = cell }
         show(entry, in: cell)
-        let wasKnown = known[entry.id] != nil
-        let measured = Self.heights[key]
-        // shortcut: the cache is dropped whole when it grows past a few busy rooms at a few widths; an LRU if that
-        // shows up in profiles.
-        if Self.heights.count > 50_000 { Self.heights.removeAll() }
-        // Whole points keep every row, and the text in it, on the pixel grid.
-        let height = measured ?? max(1, ceil(cell.height(width: width)))
-        Self.heights[key] = height
+        let previous = known[entry.id]
+        // Measure the cell that will be shown; another timeline or a reused cell can have different local state.
+        let height = max(1, ceil(cell.height(width: width)))
         known[entry.id] = height
         if shown == nil { cell.frame = NSRect(x: 0, y: 0, width: width, height: height) }
-        return !wasKnown
+        return previous != height
     }
 
     /// Rows the reader left behind give their cells back for the next ones.
@@ -510,9 +468,12 @@ struct TimelineTable: NSViewRepresentable {
     /// Rows near the screen are measured ahead, between frames.
     private func settle(keeping position: Policy.Position?) {
         defer { prefetchSoon() }
-        for _ in 0..<4 {
+        while true {
             let shown = table.rows(in: scrollView.contentView.bounds)
-            let pending = IndexSet((Range(shown) ?? 0..<0).filter { estimated.contains(rows[$0].id) })
+            let pending = IndexSet(
+                (Range(shown) ?? 0..<0).filter {
+                    rows[$0].kind != .spacer && rows[$0].kind != .end && known[rows[$0].id] == nil
+                })
             guard !pending.isEmpty else { return }
             let anchor = position ?? self.position(excluding: pending)
             Performance.measure(.rowsMeasure, ["rows": pending.count]) { for row in pending { prepare(row) } }
@@ -570,12 +531,11 @@ struct TimelineTable: NSViewRepresentable {
         let height = ceil(reported)
         // Only a row laid out at its measured height says something about its content: a reused cell reports its
         // old row's height first.
-        guard let row = index[id], let key = key(rows[row]), let measured = Self.heights[key],
+        guard let row = index[id], let measured = known[id],
             abs(height - measured) > 0.5,
             let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell,
             cell.entry?.id == id, abs(cell.frame.height - measured) < 0.5
         else { return }
-        Self.heights[key] = height
         known[id] = height
         // Not inside the SwiftUI update that reported it.
         DispatchQueue.main.async { [weak self] in
@@ -698,15 +658,14 @@ struct TimelineTable: NSViewRepresentable {
         opened = true
         let focused = pendingFocus.flatMap { focus in rows.first { $0.messageEventID == focus }?.id }
         if focused != nil { pendingFocus = nil }
-        let remembered =
-            configuration.live ? configuration.memoryKey.flatMap { TimelineMemory.positions[$0] }.flatMap(local) : nil
+        let remembered = configuration.live || restoresReadingPosition ? rememberedPosition : nil
         let opening = Policy.opening(
-            focusedRowID: focused, unreadRowID: index["unread"] == nil ? nil : "unread",
+            focusedRowID: restoresReadingPosition ? nil : focused, unreadRowID: index["unread"] == nil ? nil : "unread",
             startsAtUnread: configuration.startsAtUnread, remembered: remembered, contains: { index[$0] != nil })
         scroll(to: opening)
         settle(keeping: opening)
         stopLoading()
-        // Opening a channel sometimes leaves space under its newest message or cuts it off, and no test reproduces it.
+        // Check the settled result after deferred AppKit layout as well as the opening pass.
         let start =
             switch opening {
             case .bottom: 0
@@ -769,7 +728,7 @@ struct TimelineTable: NSViewRepresentable {
     private func scroll(to position: Policy.Position) {
         // A row the reader has mostly scrolled past is off screen to the settle that follows, so an estimate of its
         // height would move everything after it.
-        if case .anchored(let id, _) = position, estimated.contains(id), let row = index[id] {
+        if case .anchored(let id, _) = position, known[id] == nil, let row = index[id] {
             prepare(row)
             noteHeights([row])
         }
@@ -912,20 +871,27 @@ struct TimelineTable: NSViewRepresentable {
             TimelineMemory.positions[key] = nil
             return
         }
-        if opened { TimelineMemory.positions[key] = persistent(position()) }
+        guard opened else { return }
+        if case .anchored(let id, let offset) = position(), let row = index[id], let eventID = rows[row].messageEventID
+        {
+            TimelineMemory.positions[key] = TimelineMemory.Anchor(eventID: eventID, offset: offset)
+        } else {
+            TimelineMemory.positions[key] = nil
+        }
     }
 
-    /// Row IDs are per timeline instance; a remembered position names a message by its event instead.
-    private func persistent(_ position: Policy.Position) -> Policy.Position {
-        guard case .anchored(let id, let offset) = position, let row = index[id], let event = rows[row].messageEventID
-        else { return position }
-        return .anchored(rowID: "event:" + event, offset: offset)
+    private var restoresReadingPosition: Bool {
+        guard let configuration, !configuration.startsAtUnread, configuration.jumpID == nil,
+            let key = configuration.memoryKey, let anchor = TimelineMemory.positions[key]
+        else { return false }
+        return configuration.focusedEventID == anchor.eventID
     }
 
-    private func local(_ position: Policy.Position) -> Policy.Position? {
-        guard case .anchored(let id, let offset) = position, id.hasPrefix("event:") else { return position }
-        let event = String(id.dropFirst(6))
-        return rows.first { $0.messageEventID == event }.map { .anchored(rowID: $0.id, offset: offset) }
+    private var rememberedPosition: Policy.Position? {
+        guard let key = configuration?.memoryKey, let anchor = TimelineMemory.positions[key],
+            let row = rows.first(where: { $0.messageEventID == anchor.eventID })
+        else { return nil }
+        return .anchored(rowID: row.id, offset: anchor.offset)
     }
 
     // MARK: Hover

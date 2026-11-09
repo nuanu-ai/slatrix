@@ -44,11 +44,12 @@ struct TimelineHostedTests {
         let popovers: Popovers
         let atBottom: (Bool) -> Void
         var zoom: CGFloat = 1
+        var thread = false
         /// A new timeline of the same conversation, as the app opens one at an older message and back.
         var timeline = 0
         var body: some View {
             TimelineView(
-                matrix: service, room: room, savedIDs: [], onThread: { _ in },
+                matrix: service, room: room, thread: thread, savedIDs: [], onThread: { _ in },
                 onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onBottomVisibilityChange: atBottom,
                 insets: TimelineHostedTests.insets
             )
@@ -215,6 +216,66 @@ struct TimelineHostedTests {
         #expect(harness.top(of: "Message 39") != nil)
         await settle(harness) { !harness.bottomReports.isEmpty }
         #expect(harness.bottomReports == [true])
+    }
+
+    // capability: conversation.history
+    @Test(
+        "Every row fits its rendered content on opening, before any scrolling",
+        arguments: [false, true])
+    func openingRowsFit(longPlainBody: Bool) throws {
+        let messages = (0..<100).map { index -> ChatMessage in
+            var message = Self.messages(index..<index + 1, prefix: "Opening-\(longPlainBody)")[0]
+            message.body =
+                longPlainBody
+                ? String(repeating: "A link destination in the plain body. ", count: 100) : "Short plain body"
+            message.formattedBody =
+                longPlainBody
+                ? "<p>A short formatted message \(index)</p>"
+                : String(
+                    repeating:
+                        "<p>A longer formatted paragraph with <strong>emphasis</strong> and a <a href='https://example.org'>link</a>.</p>",
+                    count: 8)
+            return message
+        }
+        let harness = Harness(messages: messages, height: 900)
+        defer { harness.close() }
+        harness.layout()
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        let shown = try #require(Range(table.rows(in: harness.clip.bounds)))
+        for row in shown {
+            guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell,
+                case .message = cell.entry?.kind
+            else { continue }
+            #expect(
+                abs(table.rect(ofRow: row).height - ceil(cell.height(width: cell.frame.width))) < 0.5,
+                "Row \(row) must fit before a scroll can repair it")
+        }
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
+    }
+
+    // capability: conversation.history
+    @Test("A conversation's rows fit after the same messages were shown in a thread")
+    func threadHeightDoesNotCarryOver() throws {
+        var message = Self.messages(0..<1, prefix: "Thread-height")[0]
+        message.senderID = "@other:example.org"
+        message.replyCount = 2
+        let harness = Harness(messages: [message], width: 400, height: 600)
+        defer { harness.close() }
+        harness.service.threadMessages = [message]
+        var fixture = harness.fixture(Self.room)
+        fixture.thread = true
+        harness.hosting.rootView = fixture
+        harness.layout()
+        let threadRow = try #require(harness.cell(showing: message.eventID))
+        let threadHeight = threadRow.frame.height
+
+        fixture.thread = false
+        fixture.timeline = 1
+        harness.hosting.rootView = fixture
+        harness.layout()
+        let conversationRow = try #require(harness.cell(showing: message.eventID))
+        #expect(conversationRow.frame.height > threadHeight, "The conversation also shows the replies bar")
+        #expect(conversationRow.frame.height == ceil(conversationRow.height(width: conversationRow.frame.width)))
     }
 
     @Test("At its newest message the last row sits on the composer, and once it slips under the composer it is unread")
@@ -606,6 +667,45 @@ struct TimelineHostedTests {
         await settle(harness)
         harness.hosting.rootView = harness.fixture(Self.room)
         await settle(harness) { harness.top(of: reading) != nil }
+        #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
+    }
+
+    // capability: conversation.keep-position
+    @Test("Returning after a conversation's history was evicted restores the message and its screen offset")
+    func restoresPositionBeyondCache() async throws {
+        let items = (0..<120).map { index in
+            FakeTimelineItem(textEvent("$reading-\(index)", body: "Reading \(index)", sender: "@other:example.org"))
+        }
+        let room = FakeOpenRoom(Self.room.id, cached: Array(items.suffix(20)))
+        room.focusedItems = items
+        let others = (0..<6).map { index in
+            FakeOpenRoom(
+                "!away-\(index):example.org",
+                cached: [FakeTimelineItem(textEvent("$away-\(index)", body: "Away \(index)"))])
+        }
+        let harness = Harness(opening: room)
+        defer { harness.close() }
+        harness.service.configureRoomOpenForChecks(
+            client: FakeClient(rooms: [room] + others), roomList: FakeRoomListService(),
+            user: ChatUser(id: Self.user, name: "Reader"))
+        await harness.service.selectRoom(room.id())
+        await settle(harness) { harness.cell(showing: "$reading-119") != nil }
+        let timeline = try #require(room.timelines.all.first)
+        timeline.emit([.reset(values: items)])
+        await settle(harness) { harness.rowCount > 100 }
+        harness.scroll(toTop: 600)
+        let reading = try #require(harness.firstVisibleBody)
+        let before = try #require(harness.top(of: reading))
+
+        // Leave the view before the SDK replaces its messages, as the room pane's identity does.
+        harness.hosting.rootView = harness.fixture(ChatRoom(id: others[0].id(), name: "Away"))
+        harness.layout()
+        for other in others { await harness.service.selectRoom(other.id()) }
+        #expect(timeline.allListenersCancelled)
+        await harness.service.selectRoom(room.id())
+        harness.hosting.rootView = harness.fixture(Self.room)
+        await settle(harness) { harness.top(of: reading) != nil }
+        #expect(harness.service.messages.contains { $0.body == reading })
         #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
     }
 
