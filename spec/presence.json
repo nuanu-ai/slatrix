@@ -1,0 +1,12 @@
+{
+  "about": "The dot on a person's picture, from the presence the server reports for them and for you. A server with presence turned off reports even you as offline while you're connected, so then nobody gets a dot. Unknown means the server didn't answer.",
+  "cases": [
+    {"name": "online is a green dot", "own": "online", "theirs": "online", "dot": "active"},
+    {"name": "idle is a hollow ring", "own": "online", "theirs": "unavailable", "dot": "away"},
+    {"name": "offline is a hollow ring", "own": "online", "theirs": "offline", "dot": "away"},
+    {"name": "unknown shows nothing", "own": "online", "theirs": null, "dot": null},
+    {"name": "you idle still counts as shared", "own": "unavailable", "theirs": "online", "dot": "active"},
+    {"name": "a server that reports you offline doesn't share presence", "own": "offline", "theirs": "online", "dot": null},
+    {"name": "a server that doesn't answer for you shows nothing", "own": null, "theirs": "online", "dot": null}
+  ]
+}

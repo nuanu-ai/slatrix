@@ -55,7 +55,9 @@ struct DirectMessageRow: View {
     var body: some View {
         let badge = UnreadBadge(room)
         HStack(spacing: m.sp8) {
-            AvatarView(name: room.name, size: m.avatar, matrix: matrix, source: room.avatarURL)
+            AvatarView(
+                name: room.name, size: m.avatar, presence: room.partnerID.flatMap { matrix?.presence.dots[$0] },
+                matrix: matrix, source: room.avatarURL)
             VStack(alignment: .leading, spacing: m.sp2) {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                     Text(room.name).font(m.font(.reading, badge != .none ? .bold : .regular))

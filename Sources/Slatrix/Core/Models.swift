@@ -18,6 +18,8 @@ struct ChatRoom: Identifiable, Hashable {
     var name: String
     var topic: String = ""
     var isDirect = false
+    /// The other person in a direct message between two.
+    var partnerID: String? = nil
     var isEncrypted = false
     /// Slack's private channel: no one joins without an invitation.
     var isPrivate = false

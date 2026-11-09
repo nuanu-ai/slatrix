@@ -286,7 +286,9 @@ final class RoomListRefresher {
         return .room(
             ChatRoom(
                 id: info.id, name: info.displayName ?? info.id, topic: info.topic ?? "",
-                isDirect: info.isDirect, isEncrypted: isEncrypted, isPrivate: isPrivate,
+                isDirect: info.isDirect,
+                partnerID: info.isDirect && info.heroes.count == 1 ? info.heroes[0].userId : nil,
+                isEncrypted: isEncrypted, isPrivate: isPrivate,
                 unread: Int(info.numUnreadNotifications), unreadMessages: Int(info.numUnreadMessages),
                 isMarkedUnread: info.isMarkedUnread, mentions: Int(info.numUnreadMentions),
                 favorite: info.isFavourite, muted: info.cachedUserDefinedNotificationMode == .mute,

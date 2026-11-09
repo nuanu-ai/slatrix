@@ -335,7 +335,9 @@ private struct SidebarRoomRow: View, Equatable {
             HStack(spacing: m.sp8) {
                 if room.isDirect {
                     AvatarView(
-                        name: room.name, size: m.avatarSmall, matrix: matrix, source: room.avatarURL
+                        name: room.name, size: m.avatarSmall,
+                        presence: room.partnerID.flatMap { matrix.presence.dots[$0] }, surface: colors.sidebar,
+                        matrix: matrix, source: room.avatarURL
                     ).opacity(room.muted && !selected ? 0.5 : 1)
                 } else {
                     Image(systemName: room.channelSymbol).font(m.font(.body)).frame(width: m.sp16)

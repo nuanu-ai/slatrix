@@ -70,7 +70,10 @@ struct ChannelHeader: View {
             Button(action: open) {
                 HStack(spacing: m.sp8) {
                     if ConversationHeader.isOneToOne(room) {
-                        AvatarView(name: room.name, size: m.avatarMedium, matrix: matrix, source: room.avatarURL)
+                        AvatarView(
+                            name: room.name, size: m.avatarMedium,
+                            presence: room.partnerID.flatMap { matrix.presence.dots[$0] }, matrix: matrix,
+                            source: room.avatarURL)
                     }
                     VStack(alignment: .leading, spacing: m(1)) {
                         HStack(spacing: m.sp4) {
