@@ -257,14 +257,6 @@ struct PreferencesView: View {
                     .disabled(matrix.isPreview || matrix.user == nil)
             }
             Divider().overlay(colors.border)
-            if matrix.user != nil {
-                HStack {
-                    Text("Connection").font(m.font(.body))
-                    Spacer()
-                    Text(matrix.isPreview ? "Preview" : matrix.connectionLabel)
-                        .font(m.font(.body)).foregroundStyle(colors.textSecondary)
-                }
-            }
             VStack(alignment: .leading, spacing: m.sp12) {
                 sectionTitle("Security")
                 DeviceVerificationSettings(

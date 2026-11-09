@@ -83,6 +83,21 @@ struct ConnectionRecoveryTests {
         network.continuation.finish()
     }
 
+    @Test("A path update that keeps the network leaves a running sync alone")
+    func steadyNetworkKeepsSync() async throws {
+        let network = AsyncStream<Bool>.makeStream()
+        let recovery = ConnectionRecovery(networkChanges: { network.stream })
+        let service = FakeSyncService(state: .running)
+        try await recovery.attach(service) { _ in }
+        network.continuation.yield(true)
+        network.continuation.yield(true)
+        network.continuation.yield(false)
+        #expect(await eventually { recovery.feedback.state == .offline })
+        #expect(service.stopCount == 0)
+        await recovery.stop()
+        network.continuation.finish()
+    }
+
     @Test("A slow SDK start cannot block reporting that the network disappeared")
     func networkLossDuringStart() async throws {
         let network = AsyncStream<Bool>.makeStream()

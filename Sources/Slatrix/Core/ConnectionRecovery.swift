@@ -127,15 +127,16 @@ final class ConnectionRecovery {
         networkTask = Task { @MainActor [weak self, networkChanges] in
             for await available in networkChanges() {
                 guard let self, !Task.isCancelled, self.generation == account else { return }
-                let hadPath = self.networkAvailable != nil
+                // The monitor reports every path change; only a network back after a loss needs a fresh sync.
+                let returned = self.networkAvailable == false && available
                 self.networkAvailable = available
                 if !available { self.syncResponded = false }
                 self.publish()
-                if available, hadPath {
+                if returned {
                     self.failures = 0
                     Task { @MainActor [weak self] in
                         guard let self, self.generation == account else { return }
-                        try? await self.retry(restart: hadPath)
+                        try? await self.retry(restart: true)
                     }
                 }
             }

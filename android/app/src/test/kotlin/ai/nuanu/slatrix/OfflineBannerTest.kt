@@ -7,7 +7,16 @@ import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.account.LiveYouScreen
 import ai.nuanu.slatrix.ui.account.ProvideConnection
 import ai.nuanu.slatrix.core.ConnectionState
+import ai.nuanu.slatrix.ui.designsystem.AppColors
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.View
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.test.onNodeWithContentDescription
+import kotlin.math.abs
 import android.app.Application
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -32,22 +41,34 @@ import org.robolectric.annotation.GraphicsMode
 class OfflineBannerTest {
     @get:Rule val compose = createComposeRule()
 
-    // capability: app.connection-status
-    @Test fun youShowsTheCurrentConnectionEvenWhenThereIsNoBanner() {
+    // capability: app.own-presence
+    @Test fun yourOwnDotIsGreenWhileConnectedAndHollowOnceTheConnectionIsLost() {
         val connection = MutableStateFlow(ConnectionState.Connected)
+        lateinit var view: View
+        lateinit var colors: AppColors
         compose.setContent {
-            val density = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale = 2f)) {
-                SlatrixTheme { ProvideConnection(connection, {}) { LiveYouScreen("@alex:example.org", "Alex", {}, {}, onBack = {}) } }
+            view = LocalView.current
+            SlatrixTheme {
+                colors = SlatrixTheme.colors
+                ProvideConnection(connection) { LiveHomeScreen("@alex:example.org", RoomListState(loading = false), {}, {}, {}) }
             }
         }
-        compose.onNodeWithText("Connected").assertExists()
-        val preferences = compose.onNodeWithText("Preferences").fetchSemanticsNode().boundsInRoot
-        connection.value = ConnectionState.Reconnecting
-        compose.waitUntil(5_000) { compose.onAllNodes(hasText("Reconnecting…")).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("Connected").assertDoesNotExist()
-        assertEquals("The connection row stays still at large text sizes", preferences,
-            compose.onNodeWithText("Preferences").fetchSemanticsNode().boundsInRoot)
+        val you = compose.onNodeWithContentDescription("You").fetchSemanticsNode().boundsInRoot
+        // The dot's middle sits this far right and down from the avatar's.
+        val reach = with(compose.density) { UiMetrics.HeaderAvatar.toPx() } * 0.42f
+        fun dot(): Color {
+            compose.waitForIdle()
+            val picture = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(Canvas(it)) }
+            return Color(picture.getPixel((you.center.x + reach).toInt(), (you.center.y + reach).toInt()))
+        }
+        fun near(a: Color, b: Color) = listOf(a.red - b.red, a.green - b.green, a.blue - b.blue).all { abs(it) < 0.02f }
+        assertTrue("Green while connected", near(colors.presenceActive, dot()))
+        connection.value = ConnectionState.Offline
+        compose.mainClock.advanceTimeBy(UiMetrics.ConnectionNoticeMillis + 100)
+        assertTrue("Hollow once the connection is lost", !near(colors.presenceActive, dot()))
+        connection.value = ConnectionState.Connected
+        compose.mainClock.advanceTimeBy(100)
+        assertTrue("Green again once it's back", near(colors.presenceActive, dot()))
     }
 
     @Test fun waitingForTheServerSaysReconnectingAndOffersRetry() {

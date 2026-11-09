@@ -50,6 +50,9 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     val onAvatar = roles.getValue("onAvatar")
     val destructive = roles.getValue("destructive")
     val warning = roles.getValue("warning")
+    /** Your own avatar's dot: filled while connected, a hollow ring once the connection is lost. */
+    val presenceActive = roles.getValue("presenceActive")
+    val presenceAway = roles.getValue("presenceAway")
     /** A mention count's badge. */
     val mention = roles.getValue("mention")
     val mentionText = roles.getValue("mentionText")

@@ -75,26 +75,13 @@ fun LiveYouScreen(userId: String, name: String?, onPreferences: () -> Unit, onSi
         item {
             Row(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                LiveAvatar(AvatarPlaceholder.initials(localpart), AvatarPlaceholder.colorIndex(userId), UiMetrics.ProfileAvatar, avatarUrl)
+                OwnAvatar(userId, UiMetrics.ProfileAvatar, avatarUrl)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
                     Text(name ?: localpart, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                     // On one line, cut in the middle so both its name and its server stay readable.
                     Text(userId, style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary, maxLines = 1,
                         overflow = TextOverflow.MiddleEllipsis)
-                }
-            }
-            Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge),
-                horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
-                val connection = LocalConnection.current
-                Column(Modifier.weight(1f)) {
-                    Text("Connection", style = MaterialTheme.typography.bodyLarge)
-                    Text(connection.label, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
-                }
-                LocalConnectionRetry.current?.let { retry ->
-                    IconButton(onClick = retry, modifier = Modifier.size(UiMetrics.Touch)) {
-                        Icon(SlackIcons.Reconnect, "Reconnect", Modifier.size(UiMetrics.Icon))
-                    }
                 }
             }
             onViewProfile?.let { view ->

@@ -2974,11 +2974,12 @@ private struct ConnectionBanner: View {
         let message = matrix.connectionErrorMessage
         ZStack {
             if shown, let message {
-                Banner(text: message, symbol: "wifi.slash") {
-                    if matrix.canRetryConnection || matrix.isRetryingConnection {
-                        Button(matrix.isRetryingConnection ? "Reconnecting…" : "Retry", action: onRetry)
-                            .disabled(matrix.isRetryingConnection)
-                    }
+                // While a retry runs the notice itself says so, so the button steps aside.
+                Banner(
+                    text: message,
+                    symbol: matrix.connectionSymbol
+                ) {
+                    if matrix.canRetryConnection { Button("Retry", action: onRetry) }
                 }.transition(.opacity)
             }
         }
