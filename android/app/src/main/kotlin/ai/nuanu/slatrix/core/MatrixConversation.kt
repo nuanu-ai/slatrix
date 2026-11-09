@@ -236,6 +236,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      * after page, so history stops loading on its own after a few of those, as on the Mac.
      */
     @Volatile private var blankPages = 0
+    /**
+     * The server's count for each recent thread, by its root. The SDK counts only replies it has seen, and a phone
+     * that slept through them has none, so their roots would show no replies at all.
+     */
+    @Volatile private var serverThreads = emptyMap<String, MessageThread>()
 
     private sealed interface Update {
         data class Batch(val source: Source, val diff: List<TimelineDiff>) : Update
@@ -266,6 +271,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             currentCoroutineContext().ensureActive()
             ready.complete(Unit)
             operations.launch { nameEveryone() }
+            if (threadRoot == null && view == ConversationView.Timeline) operations.launch { countThreads() }
             // A thread shows its reply wherever it is; a channel first checks whether its live timeline holds it.
             var deciding = at != null && threadRoot == null
             var oldest: String? = null
@@ -803,6 +809,28 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     private fun Source.apply(diff: TimelineDiff) = items.applyDiff(diff, ::row)
 
+    private suspend fun countThreads() {
+        val list = quietly { room.threadListService() } ?: return
+        try {
+            quietly { list.paginate() } ?: return
+            val items = list.items()
+            serverThreads = try {
+                items.associate { thread ->
+                    val latest = thread.latestEvent
+                    thread.rootEvent.eventId to MessageThread(thread.numReplies.coerceAtMost(Int.MAX_VALUE.toUInt()).toInt(),
+                        latest?.let { it.senderProfile.nameOf(it.sender) }, latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong(),
+                        (latest?.senderProfile as? ProfileDetails.Ready)?.avatarUrl)
+                }
+            } finally {
+                items.forEach { it.destroy() }
+            }
+            // An empty batch maps the rows again, now with the server's counts.
+            shown?.let { updates.trySend(Update.Batch(it, emptyList())) }
+        } finally {
+            list.close()
+        }
+    }
+
     /**
      * The visible rows, each message grouped under the one before it when the same sender sent it soon after. A day
      * divider shows only above a message, as on the Mac, since the SDK also starts days that hold only hidden events.
@@ -824,9 +852,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             divider = null
             val grouped = previous?.let { groupsUnder(it, row) } == true
             val seen = !readers[row.id].isNullOrEmpty()
+            val server = row.eventId?.let(serverThreads::get)
+            val thread = if (server != null && server.replies > (row.thread?.replies ?: 0)) server else row.thread
             // Stored back, so an unchanged row stays the same object in the next batch.
-            val current = if (row.grouped == grouped && row.seen == seen) row
-                else row.copy(grouped = grouped, seen = seen).also { items[index] = it }
+            val current = if (row.grouped == grouped && row.seen == seen && row.thread == thread) row
+                else row.copy(grouped = grouped, seen = seen, thread = thread).also { items[index] = it }
             rows.add(current)
             previous = current
         }
