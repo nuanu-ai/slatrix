@@ -101,13 +101,7 @@ extension MessageReaction {
     func tooltip(me: String?, name: (String) -> String?) -> String {
         let ordered = senders.filter { $0 == me } + senders.filter { $0 != me }
         let names = ordered.map { $0 == me ? "You" : name($0) ?? MatrixID.localpart($0) }
-        let who =
-            switch names.count {
-            case 0: "\(count) \(count == 1 ? "person" : "people")"
-            case 1: names[0]
-            case 2, 3: names.dropLast().joined(separator: ", ") + " and " + names[names.count - 1]
-            default: "\(names[0]), \(names[1]) and \(names.count - 2) others"
-            }
+        let who = names.isEmpty ? "\(count) \(count == 1 ? "person" : "people")" : MatrixID.listed(names)
         return "\(who) reacted with \(EmojiCatalog.shortcode(for: key))"
     }
 

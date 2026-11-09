@@ -5,14 +5,16 @@ import Testing
 @testable import Slatrix
 
 struct TimelineMappingTests {
-    private func event(_ id: EventOrTransactionId, remote: Bool, kind: MsgLikeKind) -> EventTimelineItem {
+    private func event(
+        _ id: EventOrTransactionId, remote: Bool, kind: MsgLikeKind, readBy: [String: Receipt] = [:]
+    ) -> EventTimelineItem {
         EventTimelineItem(
             isRemote: remote, eventOrTransactionId: id, sender: "@me:example.org", senderProfile: .unavailable,
             forwarder: nil, forwarderProfile: nil, isOwn: true, isEditable: true,
             content: .msgLike(content: MsgLikeContent(kind: kind, inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
             reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000,
             localSendState: remote ? nil : .notSentYet(progress: nil), editSendState: nil, redactionSendState: nil,
-            localCreatedAt: nil, readReceipts: [:], origin: nil, canBeRepliedTo: true,
+            localCreatedAt: nil, readReceipts: readBy, origin: nil, canBeRepliedTo: true,
             lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
     }
     private let text = MsgLikeKind.message(
@@ -33,6 +35,17 @@ struct TimelineMappingTests {
         #expect(echo.id == sent.id)
         #expect(echo.eventID == "txn" && echo.sendState == "sending")
         #expect(sent.eventID == "$sent" && sent.sendState == "sent")
+    }
+
+    @Test("A message carries who has read up to it")
+    func readers() throws {
+        let message = try #require(
+            MatrixMapping.message(
+                event(
+                    .eventId(eventId: "$read"), remote: true, kind: text,
+                    readBy: ["@anna:example.org": Receipt(timestamp: 2_000)]),
+                roomID: "!r:example.org", ownUserID: "@me:example.org"))
+        #expect(message.readBy == ["@anna:example.org"])
     }
 
     @Test("A message from outside a live timeline is identified by its event")

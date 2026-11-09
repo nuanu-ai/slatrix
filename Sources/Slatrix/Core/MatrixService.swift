@@ -350,6 +350,7 @@ enum MatrixMapping {
                 senders: $0.senders.map(\.senderId))
         }
         if case .ready(_, _, let avatar, _, _) = item.senderProfile { result.avatarURL = avatar }
+        result.readBy = Array(item.readReceipts.keys)
         if let state = item.localSendState {
             switch state {
             case .notSentYet: result.sendState = "sending"

@@ -122,6 +122,8 @@ struct ChatMessage: Identifiable, Hashable {
     var isEdited = false
     var isRedacted = false
     var sendState = "sent"
+    /// Who has read up to this message, from their read receipts.
+    var readBy: [String] = []
     var attachment: MessageAttachment? = nil
     var replyToID: String? = nil
     /// A thread reply also sent to the channel: `replyToID` is the reply, in its thread.

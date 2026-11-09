@@ -80,6 +80,7 @@
     {"id": "message.reactions.show", "what": "Reactions show under a message with their counts, yours marked, and who reacted.", "mac": "done", "android": "done"},
     {"id": "message.reactions.toggle", "what": "Tap a reaction to add yours or take it back.", "mac": "done", "android": "done"},
     {"id": "message.thread-summary", "what": "A thread's first message shows its reply count, who replied and when.", "mac": "done", "android": "done"},
+    {"id": "message.seen", "what": "Your message shows one tick once sent and two once someone has read it, and who read it.", "mac": "done", "android": "missing"},
     {"id": "message.retry-failed", "what": "Your message shows while it sends, and one that failed can be retried or deleted.", "mac": "done", "android": "done"},
     {"id": "message.send-offline", "what": "Messages written offline go out once the connection returns.", "mac": "done", "android": "done"},
 

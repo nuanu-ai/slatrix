@@ -56,3 +56,38 @@ struct TagLabel: View {
             .background(colors.sunken, in: Capsule())
     }
 }
+
+/// By the time of your message, as messengers draw it: one grey tick once the server has it, two in the accent once
+/// someone has read it.
+struct ReadTicks: View {
+    let read: Bool
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+
+    var body: some View {
+        let width = m(15)
+        Ticks(read: read)
+            .stroke(style: StrokeStyle(lineWidth: width * 0.1, lineCap: .round, lineJoin: .round))
+            .foregroundStyle(read ? appearance.colors.accent : appearance.colors.textTertiary)
+            .frame(width: width, height: m(10))
+            .accessibilityElement().accessibilityLabel(read ? "Seen" : "Sent")
+    }
+
+    /// Drawn on a 24 by 16 grid; the second tick of a pair runs parallel to the first.
+    private struct Ticks: Shape {
+        let read: Bool
+        func path(in rect: CGRect) -> Path {
+            let x = rect.width / 24
+            let y = rect.height / 16
+            func p(_ px: CGFloat, _ py: CGFloat) -> CGPoint { CGPoint(x: rect.minX + px * x, y: rect.minY + py * y) }
+            var path = Path()
+            if read {
+                path.addLines([p(1.5, 8.5), p(6, 13), p(14.5, 3)])
+                path.addLines([p(10.5, 11.5), p(12, 13), p(20.5, 3)])
+            } else {
+                path.addLines([p(5, 8.5), p(9.5, 13), p(18, 3)])
+            }
+            return path
+        }
+    }
+}

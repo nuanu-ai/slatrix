@@ -216,6 +216,7 @@ struct TimelineView: View {
         let pinned = Set(room.pinnedEventIDs)
         let pending = matrix.pendingSendActions
         let collapsed = matrix.collapsedMedia
+        let seen = matrix.user.map { SeenPolicy.headers(rows, me: $0.id) } ?? [:]
         for row in rows {
             switch row.kind {
             case .day(let label): entries.append(TimelineEntry(id: row.id, kind: .day(label)))
@@ -235,6 +236,7 @@ struct TimelineView: View {
                                 highlighted: highlighted == message.eventID,
                                 sendFailure: failures.isEmpty ? nil : failures[key],
                                 sendBusy: !pending.isEmpty && pending.contains(key) || sendActions.contains(message.id),
+                                seenBy: seen[row.id],
                                 mediaCollapsed: !collapsed.isEmpty && collapsed.contains(message.eventID),
                                 context: context))))
             }
@@ -460,6 +462,8 @@ struct MessageRow: View {
     var hovered = false
     /// Precomputed by the timeline's layout; formatted here only for rows shown elsewhere.
     var timeLabel: String? = nil
+    /// Ticks by the time: whether someone has read it, and who, for the tooltip.
+    var seen: (read: Bool, tooltip: String?)? = nil
     var avatar: AvatarView? = nil
     /// The thread's last replier, in the replies bar.
     var replierAvatar: AvatarView? = nil
@@ -536,6 +540,9 @@ struct MessageRow: View {
                         if !compact {
                             Text(time).font(m.font(.subheadline)).monospacedDigit()
                                 .foregroundStyle(colors.textSecondary)
+                        }
+                        if let seen, !pendingSend {
+                            ReadTicks(read: seen.read).help(seen.tooltip ?? "")
                         }
                         if isSaved {
                             Image(systemName: "bookmark.fill").font(m.font(.subheadline)).foregroundStyle(colors.accent)

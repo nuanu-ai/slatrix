@@ -1,0 +1,22 @@
+{
+  "about": "Who has read each of your messages. A person's read receipt sits on the newest message they have read, so they have read every earlier one too. Your own receipts never count. Messages from others get no readers.",
+  "cases": [
+    {"name": "nobody has read it yet", "me": "@me", "messages": [{"id": "a", "sender": "@me", "readBy": []}], "seen": {"a": []}},
+    {"name": "a receipt on the message itself", "me": "@me", "messages": [{"id": "a", "sender": "@me", "readBy": ["@anna"]}], "seen": {"a": ["@anna"]}},
+    {"name": "your own receipt does not count", "me": "@me", "messages": [{"id": "a", "sender": "@me", "readBy": ["@me"]}], "seen": {"a": []}},
+    {"name": "a receipt further down covers everything above it", "me": "@me", "messages": [
+      {"id": "a", "sender": "@me", "readBy": []},
+      {"id": "b", "sender": "@me", "readBy": []},
+      {"id": "c", "sender": "@anna", "readBy": ["@anna"]}
+    ], "seen": {"a": ["@anna"], "b": ["@anna"]}},
+    {"name": "a receipt above a message does not cover it", "me": "@me", "messages": [
+      {"id": "a", "sender": "@me", "readBy": ["@anna"]},
+      {"id": "b", "sender": "@me", "readBy": []}
+    ], "seen": {"a": ["@anna"], "b": []}},
+    {"name": "several readers, each once, in a stable order", "me": "@me", "messages": [
+      {"id": "a", "sender": "@me", "readBy": ["@igor"]},
+      {"id": "b", "sender": "@me", "readBy": ["@anna", "@me"]},
+      {"id": "c", "sender": "@igor", "readBy": ["@igor"]}
+    ], "seen": {"a": ["@anna", "@igor"], "b": ["@anna", "@igor"]}}
+  ]
+}
