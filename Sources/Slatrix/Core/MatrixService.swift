@@ -1156,6 +1156,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         jump = nil
         for copy in pendingCopies { copy.cancel() }
         threadOrigins = [:]
+        TimelineMemory.positions = TimelineMemory.positions.filter { $0.key.sessionID != sessionGeneration }
         sessionGeneration = UUID()
         selection = UUID()
         notificationRetries.reset()
@@ -1322,8 +1323,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     func selectRoom(_ id: String) async {
         jump = nil
-        if showRecentRoom(id) { return }
-        await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil)
+        let key = TimelineMemory.Key(sessionID: notificationSessionID, roomID: id)
+        let remembered = selectedRoomID == id ? nil : TimelineMemory.positions[key]?.eventID
+        let anchor = remembered.flatMap { $0.hasPrefix("$") ? $0 : nil }
+        if showRecentRoom(id, containing: anchor) { return }
+        if let anchor {
+            await open(id, at: anchor)
+        } else {
+            await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil)
+        }
     }
 
     /// Opens a conversation with unread messages at its unread line.

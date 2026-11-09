@@ -51,7 +51,7 @@ struct TimelineView: View {
     @State private var scroller = TimelineScroller()
     private var colors: AppColors { appearance.colors }
     private var messages: [ChatMessage] { thread ? matrix.threadMessages : matrix.messages }
-    /// A conversation opened at an older message is not live: it neither follows new messages nor is remembered.
+    /// A conversation loaded around an older message does not follow new messages.
     private var live: Bool { thread || matrix.focusedEventID == nil }
     private var hasOlder: Bool {
         !matrix.isPreview && (thread ? matrix.hasMoreThreadHistory : matrix.loadsMoreHistory)
@@ -72,7 +72,8 @@ struct TimelineView: View {
             entries: entries, context: updatedContext, live: live, bottomAligned: !thread,
             focusedEventID: thread ? jumpTarget : jumpTarget ?? matrix.focusedEventID,
             jumpID: jumpTarget == nil ? nil : matrix.jump?.id, startsAtUnread: startsAtUnread,
-            memoryKey: "\(matrix.notificationSessionID)|\(room.id)|\(thread ? threadRootID ?? "" : "")",
+            memoryKey: TimelineMemory.Key(
+                sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
             canLoadOlder: hasOlder && !loadingHistory,
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },

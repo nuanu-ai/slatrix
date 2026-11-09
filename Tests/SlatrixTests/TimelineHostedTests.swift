@@ -670,6 +670,45 @@ struct TimelineHostedTests {
         #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
     }
 
+    // capability: conversation.keep-position
+    @Test("Returning after a conversation's history was evicted restores the message and its screen offset")
+    func restoresPositionBeyondCache() async throws {
+        let items = (0..<120).map { index in
+            FakeTimelineItem(textEvent("$reading-\(index)", body: "Reading \(index)", sender: "@other:example.org"))
+        }
+        let room = FakeOpenRoom(Self.room.id, cached: Array(items.suffix(20)))
+        room.focusedItems = items
+        let others = (0..<6).map { index in
+            FakeOpenRoom(
+                "!away-\(index):example.org",
+                cached: [FakeTimelineItem(textEvent("$away-\(index)", body: "Away \(index)"))])
+        }
+        let harness = Harness(opening: room)
+        defer { harness.close() }
+        harness.service.configureRoomOpenForChecks(
+            client: FakeClient(rooms: [room] + others), roomList: FakeRoomListService(),
+            user: ChatUser(id: Self.user, name: "Reader"))
+        await harness.service.selectRoom(room.id())
+        await settle(harness) { harness.cell(showing: "$reading-119") != nil }
+        let timeline = try #require(room.timelines.all.first)
+        timeline.emit([.reset(values: items)])
+        await settle(harness) { harness.rowCount > 100 }
+        harness.scroll(toTop: 600)
+        let reading = try #require(harness.firstVisibleBody)
+        let before = try #require(harness.top(of: reading))
+
+        // Leave the view before the SDK replaces its messages, as the room pane's identity does.
+        harness.hosting.rootView = harness.fixture(ChatRoom(id: others[0].id(), name: "Away"))
+        harness.layout()
+        for other in others { await harness.service.selectRoom(other.id()) }
+        #expect(timeline.allListenersCancelled)
+        await harness.service.selectRoom(room.id())
+        harness.hosting.rootView = harness.fixture(Self.room)
+        await settle(harness) { harness.top(of: reading) != nil }
+        #expect(harness.service.messages.contains { $0.body == reading })
+        #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
+    }
+
     @Test("Leaving an older message for the newest ones lands at the newest, wherever the reader had been")
     func returnFromOlderLandsAtNewest() async throws {
         let harness = Harness(messages: Self.messages(0..<40))

@@ -103,7 +103,7 @@ struct TimelineTable: NSViewRepresentable {
     var jumpID: UUID?
     var startsAtUnread: Bool
     /// Where to remember the reading position across visits.
-    var memoryKey: String?
+    var memoryKey: TimelineMemory.Key?
     var canLoadOlder: Bool
     var canLoadNewer: Bool
     var scroller: TimelineScroller
@@ -135,11 +135,6 @@ struct TimelineTable: NSViewRepresentable {
         coordinator.stopLoading()
         coordinator.recycleCells()
     }
-}
-
-/// Reading positions by conversation, for coming back to where you left off. Session-scoped keys keep accounts apart.
-@MainActor private enum TimelineMemory {
-    static var positions: [String: TimelineScrollPolicy.Position] = [:]
 }
 
 @MainActor final class TimelineTableCoordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
@@ -239,7 +234,7 @@ struct TimelineTable: NSViewRepresentable {
         if previous == nil, !opened {
             loading = Performance.begin(configuration.context.isThread ? .threadLoading : .timelineLoading)
             // A table shows one timeline; the view it leaves with may already describe the next.
-            atOlderMessage = !configuration.live
+            atOlderMessage = !configuration.live && !restoresReadingPosition
         }
         configuration.context.onHeight = { [weak self] id, height in self?.reported(height, for: id) }
         configuration.context.onReactionFrame = { [weak self] id, key, frame in
@@ -665,10 +660,9 @@ struct TimelineTable: NSViewRepresentable {
         opened = true
         let focused = pendingFocus.flatMap { focus in rows.first { $0.messageEventID == focus }?.id }
         if focused != nil { pendingFocus = nil }
-        let remembered =
-            configuration.live ? configuration.memoryKey.flatMap { TimelineMemory.positions[$0] }.flatMap(local) : nil
+        let remembered = configuration.live || restoresReadingPosition ? rememberedPosition : nil
         let opening = Policy.opening(
-            focusedRowID: focused, unreadRowID: index["unread"] == nil ? nil : "unread",
+            focusedRowID: restoresReadingPosition ? nil : focused, unreadRowID: index["unread"] == nil ? nil : "unread",
             startsAtUnread: configuration.startsAtUnread, remembered: remembered, contains: { index[$0] != nil })
         scroll(to: opening)
         settle(keeping: opening)
@@ -879,20 +873,27 @@ struct TimelineTable: NSViewRepresentable {
             TimelineMemory.positions[key] = nil
             return
         }
-        if opened { TimelineMemory.positions[key] = persistent(position()) }
+        guard opened else { return }
+        if case .anchored(let id, let offset) = position(), let row = index[id], let eventID = rows[row].messageEventID
+        {
+            TimelineMemory.positions[key] = TimelineMemory.Anchor(eventID: eventID, offset: offset)
+        } else {
+            TimelineMemory.positions[key] = nil
+        }
     }
 
-    /// Row IDs are per timeline instance; a remembered position names a message by its event instead.
-    private func persistent(_ position: Policy.Position) -> Policy.Position {
-        guard case .anchored(let id, let offset) = position, let row = index[id], let event = rows[row].messageEventID
-        else { return position }
-        return .anchored(rowID: "event:" + event, offset: offset)
+    private var restoresReadingPosition: Bool {
+        guard let configuration, !configuration.startsAtUnread, configuration.jumpID == nil,
+            let key = configuration.memoryKey, let anchor = TimelineMemory.positions[key]
+        else { return false }
+        return configuration.focusedEventID == anchor.eventID
     }
 
-    private func local(_ position: Policy.Position) -> Policy.Position? {
-        guard case .anchored(let id, let offset) = position, id.hasPrefix("event:") else { return position }
-        let event = String(id.dropFirst(6))
-        return rows.first { $0.messageEventID == event }.map { .anchored(rowID: $0.id, offset: offset) }
+    private var rememberedPosition: Policy.Position? {
+        guard let key = configuration?.memoryKey, let anchor = TimelineMemory.positions[key],
+            let row = rows.first(where: { $0.messageEventID == anchor.eventID })
+        else { return nil }
+        return .anchored(rowID: row.id, offset: anchor.offset)
     }
 
     // MARK: Hover
