@@ -38,7 +38,7 @@
     {"id": "search.messages", "what": "Search messages, encrypted ones included, with in: and from: filters.", "mac": "done", "android": "done"},
     {"id": "search.recent", "what": "Search offers your recent searches.", "mac": "done", "android": "done"},
 
-    {"id": "conversation.history", "what": "A conversation opens at its newest messages and loads older ones as you scroll up.", "mac": "done", "android": "done"},
+    {"id": "conversation.history", "what": "A conversation opens at its newest messages, with rows fitting their content, and loads older ones as you scroll up.", "mac": "done", "android": "done"},
     {"id": "conversation.intro", "what": "The start of a conversation shows its intro.", "mac": "done", "android": "done"},
     {"id": "conversation.day-dividers", "what": "Day dividers read Today, Yesterday or the date.", "mac": "done", "android": "done"},
     {"id": "conversation.grouping", "what": "Messages one person sends within five minutes group under one name.", "mac": "done", "android": "done"},
