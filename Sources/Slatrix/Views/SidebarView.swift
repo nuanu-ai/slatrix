@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The sidebar: a panel inset in the window, with the window buttons on top, the space's name and its menu, the
-/// shortcuts, the conversations, and you at the bottom.
+/// The sidebar: a panel inset in the window, or in a frame theme the frame itself, with the window buttons on top, the
+/// space's name and its menu, the shortcuts, the conversations, and you at the bottom.
 struct SidebarView: View {
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
@@ -29,8 +29,10 @@ struct SidebarView: View {
     var onBrowseChannels: () -> Void
     /// Section titles folded shut; held by the window, so they survive the sidebar moving into the drawer and back.
     @Binding var collapsed: Set<String>
+    /// Over the conversation in the drawer, where a frame theme's sidebar needs a panel of the frame's own.
+    var floating = false
     @Environment(\.metrics) private var m
-    private var colors: AppColors { appearance.colors }
+    @ThemeColors private var colors
     private var workspace: Workspace? { matrix.workspaces.first { $0.id == workspaceID } }
     private var activityCount: Int {
         let rooms = matrix.rooms.filter { room in
@@ -50,28 +52,33 @@ struct SidebarView: View {
     }
 
     var body: some View {
+        let panel = floating || !appearance.theme.framed
         VStack(spacing: 0) {
-            HStack {
-                // The window buttons are AppKit's and sit here, over the panel.
-                Spacer()
-                IconButton(symbol: "sidebar.left", label: "Hide sidebar", role: .body, action: onHide)
-                    .foregroundStyle(colors.textSecondary)
-            }.frame(height: m.paneHeader - m.sidebarInset).background(WindowDragArea())
-            if route == .directMessages {
-                DirectMessagesColumn(
-                    matrix: matrix, search: $directMessageSearch, unreadOnly: $unreadDirectMessagesOnly,
-                    onSelect: onSelect, onCompose: { onCreate(.directMessage) })
-            } else {
-                header
-                list
+            VStack(spacing: 0) {
+                HStack {
+                    // The window buttons are AppKit's and sit here, over the panel.
+                    Spacer()
+                    IconButton(symbol: "sidebar.left", label: "Hide sidebar", role: .body, action: onHide)
+                        .foregroundStyle(colors.textSecondary)
+                }.frame(height: m.paneHeader - (appearance.theme.framed ? 0 : m.sidebarInset))
+                    .background(WindowDragArea())
+                if route == .directMessages {
+                    DirectMessagesColumn(
+                        matrix: matrix, search: $directMessageSearch, unreadOnly: $unreadDirectMessagesOnly,
+                        onSelect: onSelect, onCompose: { onCreate(.directMessage) })
+                } else {
+                    header
+                    list
+                }
             }
+            .padding(.horizontal, m.sp8)
+            // The list fades out above you.
+            .fadeOut(bottom: m.sidebarFade)
+            footer
         }
-        .padding(.horizontal, m.sp8)
-        // The list scrolls on under you, fading out above you.
-        .safeAreaInset(edge: .bottom, spacing: 0) { footer }
-        .background(colors.sidebar)
+        .background(panel ? colors.sidebar : .clear)
         .clipShape(RoundedRectangle(cornerRadius: m.radiusPanel))
-        .elevation(.e1, cornerRadius: m.radiusPanel)
+        .elevation(panel ? .e1 : nil, cornerRadius: m.radiusPanel)
         .foregroundStyle(colors.textBody)
     }
 
@@ -138,8 +145,8 @@ struct SidebarView: View {
                 HStack(spacing: m.sp8) {
                     AvatarView(
                         name: matrix.user?.name ?? "You", size: m.avatarFooter,
-                        presence: matrix.connectionLost ? .away : .active,
-                        surface: colors.sidebar, matrix: matrix, source: matrix.user?.avatarURL)
+                        presence: matrix.connectionLost ? .away : .active, matrix: matrix,
+                        source: matrix.user?.avatarURL)
                     Text(matrix.user?.name ?? "You").font(m.font(.body)).foregroundStyle(colors.textPrimary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
@@ -150,8 +157,6 @@ struct SidebarView: View {
                 Button(accessory.title, action: accessory.action).buttonStyle(.primary).controlSize(.small)
             }
         }.padding(.horizontal, m.sp8).padding(.bottom, m.sp8)
-            .background(colors.sidebar)
-            .fadeAbove(colors.sidebar, height: m.sidebarFade)
     }
 
     private func shortcut(_ item: AppRoute, label: String, badge: Int = 0, count: Int = 0) -> some View {
@@ -213,6 +218,7 @@ private struct SpacesMenu: View {
     let onEdit: (String) -> Void
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
 
     private func item(_ space: Workspace?, index: Int, colors: AppColors) -> some View {
         let badge: UnreadBadge = space?.id == workspaceID ? .none : WorkspaceRail.badge(space?.id, rooms: matrix.rooms)
@@ -229,7 +235,6 @@ private struct SpacesMenu: View {
     }
 
     var body: some View {
-        let colors = appearance.colors
         let entries = WorkspaceRail.entries(workspaces: matrix.workspaces, rooms: matrix.rooms)
         let current = matrix.workspaces.first { $0.id == workspaceID }
         let othersUnread = entries.contains {
@@ -237,7 +242,8 @@ private struct SpacesMenu: View {
         }
         Menu {
             ForEach(Array(entries.enumerated()), id: \.offset) { index, space in
-                item(space, index: index, colors: colors)
+                // The menu is AppKit's and draws in the window's colors, not the frame's.
+                item(space, index: index, colors: appearance.colors)
             }
             Divider()
             if let current {
@@ -319,8 +325,7 @@ private struct SidebarRoomRow: View, Equatable {
     let onMarkRead: (ChatRoom) -> Void
     let onNotifications: (String) -> Void
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
-    private var colors: AppColors { appearance.colors }
+    @ThemeColors private var colors
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.room == rhs.room && lhs.selected == rhs.selected && lhs.hasDraft == rhs.hasDraft
@@ -336,7 +341,7 @@ private struct SidebarRoomRow: View, Equatable {
                 if room.isDirect {
                     AvatarView(
                         name: room.name, size: m.avatarSmall,
-                        presence: room.partnerID.flatMap { matrix.presence.dots[$0] }, surface: colors.sidebar,
+                        presence: room.partnerID.flatMap { matrix.presence.dots[$0] },
                         matrix: matrix, source: room.avatarURL
                     ).opacity(room.muted && !selected ? 0.5 : 1)
                 } else {
@@ -390,11 +395,11 @@ struct SidebarRowFill: ViewModifier {
     let selected: Bool
     @State private var hovering = false
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
 
     func body(content: Content) -> some View {
         content.background(
-            selected ? appearance.colors.selection : hovering ? appearance.colors.hover : .clear,
+            selected ? colors.selection : hovering ? colors.hover : .clear,
             in: RoundedRectangle(cornerRadius: m.radius)
         ).onHover { hovering = $0 }
     }

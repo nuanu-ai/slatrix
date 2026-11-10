@@ -718,7 +718,7 @@ struct RootView: View {
                 ) {
                     HStack(spacing: 0) {
                         if !sidebarCollapsed {
-                            sidebar.padding([.leading, .vertical], m.sidebarInset).transition(.move(edge: .leading))
+                            sidebar().padding([.leading, .vertical], m.sidebarInset).transition(.move(edge: .leading))
                             WithWidths(widths) { widths in
                                 ResizeHandle(
                                     currentWidth: sidebarWidth(widths), onChange: resizeSidebar,
@@ -773,7 +773,7 @@ struct RootView: View {
                                     inspector(room).layoutIsolated()
                                 }
                             }
-                        }
+                        }.frameCard(colors.theme.framed, leading: sidebarCollapsed)
                     }
                     .overlay(alignment: .leading) { drawer }
                     .animation(Motion.pane, value: sidebarCollapsed)
@@ -786,13 +786,16 @@ struct RootView: View {
         .overlay(alignment: .topLeading) {
             SearchMenu(
                 bar: searchBar, matrix: matrix, recents: recentSearches, visited: history,
-                top: m.paneHeader, onPick: pickSearch)
+                top: m.paneHeader + (colors.theme.framed ? m.sidebarInset : 0), onPick: pickSearch)
         }
-        // The window moves by its top edge wherever nothing there takes the click, and its buttons sit centered in it.
+        // The window moves by its top edge wherever nothing there takes the click, and its buttons sit centered in it,
+        // level with the toolbar, which a frame theme insets.
         .background(alignment: .top) {
-            WindowDragArea().frame(height: m.paneHeader).background(WindowButtonsCentering())
+            WindowDragArea().frame(height: m.paneHeader + (colors.theme.framed ? 2 * m.sidebarInset : 0))
+                .background(WindowButtonsCentering())
         }
-        .background(colors.canvas).foregroundStyle(colors.textBody).ignoresSafeArea(.container, edges: .top)
+        .background(FrameBackground(colors: colors, gradient: appearance.windowGradient))
+        .foregroundStyle(colors.textBody).ignoresSafeArea(.container, edges: .top)
     }
 
     /// What needs attention until it resolves, across the top of the pane: the connection, waits that can be
@@ -977,10 +980,13 @@ struct RootView: View {
     }
 
     /// The conversation list, beside the conversation or in the drawer.
-    private var sidebar: some View {
-        Sized(widths, width: sidebarWidth) { sidebarContent }
+    /// On a frame theme's frame, where it takes the frame's colors, with AppKit's controls drawn dark on a colored one.
+    private func sidebar(floating: Bool = false) -> some View {
+        Sized(widths, width: sidebarWidth) { sidebarContent(floating: floating) }
+            .environment(\.onFrame, colors.theme.framed)
+            .transformEnvironment(\.colorScheme) { if colors.theme.framed && !colors.translucentFrame { $0 = .dark } }
     }
-    private var sidebarContent: some View {
+    private func sidebarContent(floating: Bool) -> some View {
         SidebarView(
             matrix: matrix,
             route: Binding(
@@ -1014,7 +1020,7 @@ struct RootView: View {
             }, onEditWorkspace: { roomDetails = DetailsSelection(id: $0) },
             onNotifications: { roomNotifications = DetailsSelection(id: $0) },
             onHide: { handleMenu("toggle-sidebar") }, accessory: sidebarAccessory,
-            onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections
+            onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections, floating: floating
         ).layoutIsolated()
     }
 
@@ -1029,7 +1035,8 @@ struct RootView: View {
                     colors.scrim.contentShape(Rectangle())
                 }.buttonStyle(.row)
                     .focusable(false).accessibilityLabel("Close sidebar").transition(.opacity)
-                sidebar.padding([.leading, .vertical], m.sidebarInset).transition(.move(edge: .leading))
+                sidebar(floating: true).padding([.leading, .vertical], m.sidebarInset)
+                    .transition(.move(edge: .leading))
             }
         }
         .animation(Motion.pane, value: shown)

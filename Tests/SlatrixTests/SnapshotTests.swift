@@ -165,6 +165,46 @@ struct Snapshots {
         try write(await settledImage(hosting), "preferences-\(name)")
     }
 
+    @Test("Every theme, with the window gradient where it has one", arguments: ColorTheme.allCases, Theme.allCases)
+    func colorTheme(_ colorTheme: ColorTheme, theme: Theme) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        let appearance = AppearanceStore()
+        let saved = ["appearance.mode", "appearance.theme", "appearance.windowGradient", "layout.sidebarHidden"].map {
+            ($0, UserDefaults.standard.object(forKey: $0))
+        }
+        defer { for (key, value) in saved { UserDefaults.standard.set(value, forKey: key) } }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        appearance.theme = colorTheme
+        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let window = offscreenWindow(
+            NSSize(width: 1280, height: 800),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let name = "theme-\(colorTheme.rawValue)-\(theme.rawValue)"
+        try write(await settledImage(hosting), name)
+        guard colorTheme.framed else { return }
+        if !appearance.colors.translucentFrame {
+            appearance.windowGradient = true
+            try write(await settledImage(hosting), name + "-gradient")
+        }
+        // Too narrow to dock the sidebar, so it opens as a drawer over the conversation.
+        window.setContentSize(NSSize(width: 480, height: 800))
+        _ = try await settledImage(hosting)
+        NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "toggle-sidebar"])
+        try write(await settledImage(hosting), name + "-drawer")
+    }
+
     @Test("Window widths, with and without a thread, and the collapsed sidebar's drawer", arguments: Theme.allCases)
     func widths(theme: Theme) async throws {
         _ = NSApplication.shared

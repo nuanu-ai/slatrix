@@ -25,6 +25,27 @@ struct ThemeTests {
         }
         #expect(contrast(colors.accent, colors.canvas) >= 4.5)
         #expect(contrast(colors.mentionYouText, over(colors.mentionYouFill, colors.canvas)) >= 4.5)
+        // Where a message crosses a doodle, and under the pointer too.
+        let doodled = over(colors.wallpaperDoodle, colors.canvas)
+        #expect(contrast(colors.textSecondary, over(colors.hover, doodled)) >= 4.5)
+        #expect(contrast(colors.accent, doodled) >= 4.5)
+    }
+
+    // capability: app.themes
+    @Test(
+        "The sidebar's text stays readable on the frame, through the gradient and over any desktop",
+        arguments: ColorTheme.allCases, [false, true])
+    func readableOnFrame(theme: ColorTheme, dark: Bool) {
+        let colors = AppColors(dark: dark, theme: theme)
+        let sidebar = colors.onFrame
+        // A translucent frame lets the desktop through, so it is read over the darkest and lightest one.
+        let frames = [colors.frame, colors.frameEnd].flatMap { [over($0, .black), over($0, .white)] }
+        for frame in frames {
+            for surface in [frame, over(sidebar.hover, frame), over(sidebar.selection, frame)] {
+                #expect(contrast(sidebar.textPrimary, surface) >= 4.5)
+                #expect(contrast(sidebar.textSecondary, surface) >= 4.5)
+            }
+        }
     }
 
     /// A translucent fill as it draws on an opaque surface.

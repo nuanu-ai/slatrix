@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 extension View {
@@ -37,11 +38,62 @@ extension View {
         }
     }
 
-    /// What scrolls on under this view fades into `canvas` over `height` above it, with no line between them.
-    func fadeAbove(_ canvas: Color, height: CGFloat) -> some View {
-        overlay(alignment: .top) {
-            LinearGradient(colors: [canvas.opacity(0), canvas], startPoint: .top, endPoint: .bottom)
-                .frame(height: height).allowsHitTesting(false).alignmentGuide(.top) { $0[.bottom] }
+    /// In a frame theme, the conversation and its panes as a card on the frame, inset as the sidebar is; `leading`
+    /// insets that edge too while no sidebar sits beside it. Elsewhere it changes nothing, and switching keeps the
+    /// conversation as it is.
+    func frameCard(_ framed: Bool, leading: Bool) -> some View { modifier(FrameCard(framed: framed, leading: leading)) }
+
+    /// Fades this view out over `height` at its bottom edge, into whatever lies behind it.
+    func fadeOut(bottom height: CGFloat) -> some View {
+        mask {
+            VStack(spacing: 0) {
+                Rectangle()
+                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: height)
+            }
         }
+    }
+}
+
+/// The window behind the sidebar and the conversation: the canvas, or a frame theme's frame, fading into a
+/// neighboring hue with the window gradient. Glass is the system's sidebar material under the theme's tint.
+struct FrameBackground: View {
+    let colors: AppColors
+    let gradient: Bool
+
+    var body: some View {
+        if colors.translucentFrame {
+            SidebarMaterial().overlay(colors.frame)
+        } else {
+            // Mostly downward, so the sidebar carries the drift.
+            LinearGradient(
+                stops: [
+                    .init(color: colors.frame, location: 0.1),
+                    .init(color: gradient ? colors.frameEnd : colors.frame, location: 0.9),
+                ],
+                startPoint: UnitPoint(x: 0.4, y: 0), endPoint: UnitPoint(x: 0.6, y: 1))
+        }
+    }
+}
+
+/// Apple's sidebar material, which lets the desktop through and dims while the window is inactive.
+private struct SidebarMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        (view.material, view.blendingMode, view.state) = (.sidebar, .behindWindow, .followsWindowActiveState)
+        return view
+    }
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}
+
+private struct FrameCard: ViewModifier {
+    let framed: Bool
+    let leading: Bool
+    @ThemeColors private var colors
+    @Environment(\.metrics) private var m
+
+    func body(content: Content) -> some View {
+        let inset = framed ? m.sidebarInset : 0
+        content.background(colors.canvas).clipShape(RoundedRectangle(cornerRadius: framed ? m.radiusLarge : 0))
+            .padding([.vertical, .trailing], inset).padding(.leading, leading ? inset : 0)
     }
 }

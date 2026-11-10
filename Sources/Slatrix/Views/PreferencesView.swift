@@ -127,22 +127,28 @@ struct PreferencesView: View {
                                 colors: AppColors(
                                     dark: mode == .dark || (mode == .system && appearance.systemIsDark),
                                     theme: appearance.theme),
-                                split: mode == .system)
+                                gradient: appearance.windowGradient, split: mode == .system)
                         }
                     }
                 }
             }
             VStack(alignment: .leading, spacing: m.sp12) {
                 sectionTitle("Theme")
-                HStack(spacing: m.sp12) {
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: m.sp12), count: 3), spacing: m.sp16
+                ) {
                     ForEach(ColorTheme.allCases) { theme in
                         choiceTile(label: theme.name, selected: appearance.theme == theme) {
                             appearance.theme = theme
                         } preview: {
-                            AppMiniature(colors: AppColors(dark: appearance.isDark, theme: theme))
+                            AppMiniature(
+                                colors: AppColors(dark: appearance.isDark, theme: theme),
+                                gradient: appearance.windowGradient)
                         }
                     }
                 }
+                Toggle("Window gradient", isOn: $appearance.windowGradient).toggleStyle(.switch).font(m.font(.body))
+                    .disabled(!appearance.theme.framed || colors.translucentFrame)
             }
             Divider().overlay(colors.border)
             VStack(alignment: .leading, spacing: m.sp12) {
@@ -367,24 +373,28 @@ struct PreferencesView: View {
 private struct AppMiniature: View {
     @Environment(\.metrics) private var m
     let colors: AppColors
+    var gradient = false
     var split = false
     var body: some View {
+        let framed = colors.theme.framed
+        let side = colors.onFrame
         VStack(spacing: 0) {
             HStack(spacing: m.sp4) {
-                ForEach(0..<3) { _ in Circle().fill(colors.textSecondary.opacity(0.45)).frame(width: m(4), height: m(4))
+                ForEach(0..<3) { _ in Circle().fill(side.textSecondary.opacity(0.45)).frame(width: m(4), height: m(4))
                 }
                 Spacer()
-                Capsule().fill(colors.textSecondary.opacity(0.13)).frame(width: m(42), height: m(5))
+                Capsule().fill(side.textSecondary.opacity(0.13)).frame(width: m(42), height: m(5))
                 Spacer()
-            }.padding(.horizontal, m.sp8).frame(height: m(15)).background(colors.canvas)
+            }.padding(.horizontal, m.sp8).frame(height: m(15)).background(framed ? .clear : colors.canvas)
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: m.sp4) {
-                    Capsule().fill(colors.textSecondary.opacity(0.55)).frame(width: m(29), height: m(4))
-                    RoundedRectangle(cornerRadius: m(2)).fill(colors.accentFill).frame(height: m(8))
-                    Capsule().fill(colors.textSecondary.opacity(0.25)).frame(width: m(25), height: m(3))
-                    Capsule().fill(colors.textSecondary.opacity(0.25)).frame(width: m(31), height: m(3))
+                    Capsule().fill(side.textSecondary.opacity(0.55)).frame(width: m(29), height: m(4))
+                    RoundedRectangle(cornerRadius: m(2)).fill(framed ? side.selection : colors.accentFill)
+                        .frame(height: m(8))
+                    Capsule().fill(side.textSecondary.opacity(0.25)).frame(width: m(25), height: m(3))
+                    Capsule().fill(side.textSecondary.opacity(0.25)).frame(width: m(31), height: m(3))
                     Spacer(minLength: 0)
-                }.padding(m.sp8).frame(width: m(47)).background(colors.sidebar)
+                }.padding(m.sp8).frame(width: m(47)).background(framed ? .clear : colors.sidebar)
                 VStack(alignment: .leading, spacing: m.sp8) {
                     Capsule().fill(colors.textBody.opacity(0.5)).frame(width: m(29), height: m(4))
                     ForEach(0..<2) { index in
@@ -400,8 +410,11 @@ private struct AppMiniature: View {
                     }
                     Spacer(minLength: 0)
                 }.padding(m.sp8).frame(maxWidth: .infinity).background(
-                    split ? AppColors(dark: false, theme: colors.theme).canvas : colors.canvas)
+                    split ? AppColors(dark: false, theme: colors.theme).canvas : colors.canvas
+                )
+                .clipShape(RoundedRectangle(cornerRadius: framed ? m(3) : 0))
+                .padding([.trailing, .bottom], framed ? m(3) : 0)
             }
-        }.accessibilityHidden(true)
+        }.background(FrameBackground(colors: colors, gradient: gradient)).accessibilityHidden(true)
     }
 }

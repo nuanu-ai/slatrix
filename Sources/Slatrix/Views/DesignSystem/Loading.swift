@@ -21,10 +21,10 @@ struct SkeletonRows: View {
     var count = 6
     var interval: Performance.Name? = nil
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
     var body: some View {
         AfterLoadingDelay(active: true, hasContent: false, offline: false, interval: interval) {
-            let fill = appearance.colors.sunken
+            let fill = colors.sunken
             VStack(alignment: .leading, spacing: m.sp20) {
                 ForEach(0..<count, id: \.self) { index in
                     HStack(alignment: .top, spacing: m.sp12) {

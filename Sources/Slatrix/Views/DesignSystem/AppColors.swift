@@ -8,11 +8,11 @@ extension AppearanceStore {
 /// Every color in the UI, by role. Views pick a role, never a value. A theme's neutral base and one accent, the one
 /// picked in System Settings.
 struct AppColors {
-    let dark: Bool
+    private(set) var dark: Bool
     /// The system accent in this theme, in sRGB.
-    let accentBase: NSColor
+    private(set) var accentBase: NSColor
     let theme: ColorTheme
-    private let neutrals: Neutrals
+    private var neutrals: Neutrals
 
     init(dark: Bool, accent: NSColor? = nil, theme: ColorTheme = .standard) {
         self.dark = dark
@@ -36,8 +36,16 @@ struct AppColors {
         var ink: UInt32
         /// How much stronger lines and the selection are than the default theme's.
         var lines = 1.0
+        var onAccent: UInt32 = 0xffffff
+        /// A frame theme's window frame; the others leave the canvas there.
+        var frame: Frame?
 
         init(_ theme: ColorTheme, dark: Bool) {
+            if theme.framed {
+                self = Neutrals(.standard, dark: dark)
+                frame = Frame(theme, dark: dark)
+                return
+            }
             switch (theme, dark) {
             case (.standard, false):
                 (text, secondary, tertiary) = (0x1d1d1f, 0x636368, 0x86868b)
@@ -68,10 +76,75 @@ struct AppColors {
                 (text, secondary, tertiary) = (0xffffff, 0xc7c7cc, 0xaeaeb2)
                 (canvas, sidebar, overlay, control, ink) = (0x000000, 0x141416, 0x1c1c1f, 0x161618, 0xffffff)
                 lines = 2
+            default: preconditionFailure("\(theme) draws a frame")
+            }
+        }
+    }
+
+    /// A frame theme's frame and the sidebar's text on it, light on the colored ones.
+    private struct Frame {
+        /// The frame at the top, and where the window gradient takes it by the bottom.
+        var start, end, secondary, tertiary: UInt32
+        /// Glass lets the desktop through the system's sidebar material, under a tint that keeps text readable on any
+        /// desktop.
+        var opacity = 1.0
+        var translucent: Bool { opacity < 1 }
+
+        init(_ theme: ColorTheme, dark: Bool) {
+            switch (theme, dark) {
+            case (.aubergine, false): (start, end, secondary, tertiary) = (0x4a1f4f, 0x2c2259, 0xd4c9d5, 0xa48fa7)
+            case (.aubergine, true): (start, end, secondary, tertiary) = (0x2b1530, 0x1b1638, 0xc8c2c9, 0x958a98)
+            case (.jade, false): (start, end, secondary, tertiary) = (0x1c4a3e, 0x17394f, 0xd6dedc, 0x8ea49e)
+            case (.jade, true): (start, end, secondary, tertiary) = (0x122e28, 0x0f2433, 0xc1c9c7, 0x889694)
+            case (.lagoon, false): (start, end, secondary, tertiary) = (0x1c3d61, 0x123f4d, 0xd6dce3, 0x8e9eb0)
+            case (.lagoon, true): (start, end, secondary, tertiary) = (0x13263c, 0x0e3038, 0xc2c7cc, 0x89929e)
+            case (.midnight, false): (start, end, secondary, tertiary) = (0x141c3a, 0x2a1b47, 0xc2c4cc, 0x8a8e9c)
+            case (.midnight, true): (start, end, secondary, tertiary) = (0x0c1126, 0x1a1030, 0xc0c1c7, 0x868892)
+            case (_, false): (start, end, secondary, tertiary, opacity) = (0xf3f3f5, 0xf3f3f5, 0x46464b, 0x6e6e73, 0.85)
+            case (_, true): (start, end, secondary, tertiary, opacity) = (0x1d1d20, 0x1d1d20, 0xc4c4ca, 0x98989e, 0.88)
             }
         }
     }
     private var ink: Color { Color(hex: neutrals.ink) }
+
+    // MARK: Frame
+
+    /// The window around the sidebar and the conversation: the canvas, unless the theme colors it.
+    var frame: Color { neutrals.frame.map { Color(hex: $0.start).opacity($0.opacity) } ?? canvas }
+    /// Where the window gradient takes the frame, at the bottom.
+    var frameEnd: Color { neutrals.frame.map { Color(hex: $0.end).opacity($0.opacity) } ?? canvas }
+    /// Glass: the desktop shows through the frame.
+    var translucentFrame: Bool { neutrals.frame?.translucent == true }
+    /// The doodles behind the messages in a frame theme, faint enough that text crossing one stays readable.
+    var wallpaperDoodle: Color {
+        guard let frame = neutrals.frame else { return .clear }
+        if dark { return .white.opacity(0.06) }
+        return frame.translucent ? .black.opacity(0.05) : Color(hex: frame.start).opacity(0.06)
+    }
+    /// The colors of what sits on the frame, such as the sidebar: on a colored frame its text, lines and fills are
+    /// light, and the accent is white, as in Slack's sidebar.
+    var onFrame: AppColors {
+        guard let frame = neutrals.frame else { return self }
+        var colors = self
+        (colors.neutrals.secondary, colors.neutrals.tertiary) = (frame.secondary, frame.tertiary)
+        guard !frame.translucent else { return colors }
+        colors.dark = true
+        colors.accentBase = .white
+        colors.neutrals.text = 0xffffff
+        colors.neutrals.ink = 0xffffff
+        (colors.neutrals.canvas, colors.neutrals.sidebar) = (frame.start, frame.start)
+        colors.neutrals.control = Self.mix(0xffffff, 0.12, over: frame.start)
+        colors.neutrals.onAccent = frame.start
+        colors.neutrals.lines = 1.6
+        return colors
+    }
+
+    private static func mix(_ top: UInt32, _ amount: Double, over bottom: UInt32) -> UInt32 {
+        [16, 8, 0].reduce(0) { mixed, shift in
+            let (a, b) = (Double(top >> shift & 255), Double(bottom >> shift & 255))
+            return mixed | UInt32((a * amount + b * (1 - amount)).rounded()) << shift
+        }
+    }
 
     // MARK: Text
 
@@ -127,17 +200,18 @@ struct AppColors {
 
     /// The system accent as a fill: the one main button, the send button, badges, the highlighted menu row.
     var accentFill: Color { Color(nsColor: accentBase) }
-    /// The accent as text and icons: links, the open conversation's icon, a mention. Deepened in light mode and lifted
-    /// in dark mode, so it reads as text on the canvas.
+    /// The accent as text and icons: links, the open conversation's icon, a mention. Deepened in light mode, more so
+    /// over a frame theme's doodles, and lifted in dark mode, so it reads as text on the canvas.
     var accent: Color {
-        Color(nsColor: accentBase.blended(withFraction: 0.2, of: dark ? .white : .black) ?? accentBase)
+        let depth = dark || neutrals.frame == nil ? 0.2 : 0.3
+        return Color(nsColor: accentBase.blended(withFraction: depth, of: dark ? .white : .black) ?? accentBase)
     }
     /// The fill behind something of yours, such as your reaction or a mention of you.
     var accentTint: Color { accentFill.opacity(dark ? 0.18 : 0.1) }
     /// The edge of something of yours.
     var accentLine: Color { accentFill.opacity(dark ? 0.5 : 0.32) }
     /// Text and icons on an accent fill.
-    var onAccent: Color { .white }
+    var onAccent: Color { Color(hex: neutrals.onAccent) }
     /// Done and verified marks.
     var success: Color { Color(hex: dark ? 0x30d158 : 0x248a3d) }
     var destructive: Color { Color(hex: dark ? 0xff453a : 0xd70015) }
@@ -204,4 +278,21 @@ func initials(_ value: String) -> String {
 func avatarColor(_ name: String) -> Color {
     let hash = name.utf8.reduce(UInt64(5381)) { ($0 &* 33) &+ UInt64($1) }
     return Color(hex: [0x78669d, 0x447389, 0x9a6d4c, 0x5d7f5a, 0xa16576, 0x5d78a0][Int(hash % 6)])
+}
+
+private struct OnFrameKey: EnvironmentKey { static let defaultValue = false }
+
+extension EnvironmentValues {
+    /// Set on what sits on a frame theme's frame, such as the sidebar, so it draws in `AppColors.onFrame`.
+    var onFrame: Bool {
+        get { self[OnFrameKey.self] }
+        set { self[OnFrameKey.self] = newValue }
+    }
+}
+
+/// The theme's colors where a view sits: on the window, or on a frame theme's frame.
+@MainActor @propertyWrapper struct ThemeColors: DynamicProperty {
+    @EnvironmentObject private var appearance: AppearanceStore
+    @Environment(\.onFrame) private var onFrame
+    var wrappedValue: AppColors { onFrame ? appearance.colors.onFrame : appearance.colors }
 }
