@@ -143,7 +143,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
             state is AccountState.Connected -> key((state as AccountState.Connected).client) {
                 val userId = (state as AccountState.Connected).userId
                 val client = (state as AccountState.Connected).client
-                val media = remember(client) { MatrixMedia(client, File(context.cacheDir, "media")) }
+                val media = remember(client) { MatrixMedia(client, userId, File(context.cacheDir, "media")) }
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
                 val laterScope = rememberCoroutineScope()
                 // Later's cards and place outlive its tab, so coming back to it neither reads nor scrolls again.

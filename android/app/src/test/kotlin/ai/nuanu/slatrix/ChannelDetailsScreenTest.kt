@@ -5,8 +5,6 @@ import ai.nuanu.slatrix.core.ChannelMember
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.MessageKind
-import org.matrix.rustcomponents.sdk.NoHandle
-import org.matrix.rustcomponents.sdk.MediaSource
 import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.ConversationState
@@ -318,7 +316,7 @@ class ChannelDetailsScreenTest {
 
     // capability: conversation.files
     @Test fun filesNameAnAttachmentByItsFileAndTypeNotItsCaption() {
-        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office"; override fun toJson(): String = "\"${url()}\"" }
+        val source = TestMediaSource("mxc://example.org/office")
         val photo = pinned("Our new office").copy(kind = MessageKind.Attachment,
             attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, source))
         details(room, ChannelDetailsActions(files = { SharedFiles(ConversationState(listOf(photo), loading = false)) }))
@@ -399,7 +397,7 @@ class ChannelDetailsScreenTest {
 
     private fun file(name: String, kind: MessageAttachment.Kind) = pinned(name).copy(kind = MessageKind.Attachment,
         attachment = MessageAttachment(kind, name, null, 1_000, 1600, 900,
-            object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/$name"; override fun toJson(): String = "\"${url()}\"" }))
+            TestMediaSource("mxc://example.org/$name")))
 
     @Test fun loadMoreHoldsItsPlaceWhileLoadingAndAFailedPageTriesAgain() {
         val files = mutableStateOf(SharedFiles(ConversationState(listOf(pinned("spec.pdf").copy(kind = MessageKind.Attachment)),

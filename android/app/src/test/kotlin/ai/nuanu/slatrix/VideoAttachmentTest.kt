@@ -26,8 +26,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.matrix.rustcomponents.sdk.MediaSource
-import org.matrix.rustcomponents.sdk.NoHandle
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -38,7 +36,7 @@ import org.robolectric.annotation.GraphicsMode
 class VideoAttachmentTest {
     @get:Rule val compose = createComposeRule()
     private val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
-    private val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/clip"; override fun toJson(): String = "\"${url()}\"" }
+    private val source = TestMediaSource("mxc://example.org/clip")
     private val clip = MessageAttachment(MessageAttachment.Kind.Video, "clip.mp4", "video/mp4", 5_000_000, 1280, 720, source,
         durationMillis = 83_000)
     private val requested = mutableListOf<MessageAttachment>()
@@ -70,7 +68,7 @@ class VideoAttachmentTest {
     }
 
     @Test fun playingAnotherVideoStopsTheFirst() {
-        val other = clip.copy(name = "other.mp4", source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/other"; override fun toJson(): String = "\"${url()}\"" })
+        val other = clip.copy(name = "other.mp4", source = TestMediaSource("mxc://example.org/other"))
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(listOf(clip to "v", other to "w").map { (attachment, id) ->

@@ -31,8 +31,6 @@ import android.app.Application
 import android.graphics.Bitmap
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CompletableDeferred
-import org.matrix.rustcomponents.sdk.MediaSource
-import org.matrix.rustcomponents.sdk.NoHandle
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -101,7 +99,7 @@ class MessageContentTest {
         }
     }
 
-    private val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office"; override fun toJson(): String = "\"${url()}\"" }
+    private val source = TestMediaSource("mxc://example.org/office")
 
     private fun SemanticsNodeInteraction.text(): AnnotatedString =
         fetchSemanticsNode().config[SemanticsProperties.Text].single()
@@ -245,7 +243,7 @@ class MessageContentTest {
 
     // capability: message.image
     @Test fun anImageIsDecodedAgainForItsNewBoxWhenTheRoomForItChanges() {
-        val resized = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/resized"; override fun toJson(): String = "\"${url()}\"" }
+        val resized = TestMediaSource("mxc://example.org/resized")
         val width = mutableStateOf(412.dp)
         show(message("wide.png").copy(kind = MessageKind.Attachment,
             attachment = MessageAttachment(MessageAttachment.Kind.Image, "wide.png", "image/png", 2_000_000, 1600, 900, resized)),
@@ -310,7 +308,7 @@ class MessageContentTest {
     // capability: message.media-viewer
     @Test fun theViewerStaysOnTheSameImageAndZoomWhenThePhoneTurns() {
         val restoration = StateRestorationTester(compose)
-        val turned = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/turned"; override fun toJson(): String = "\"${url()}\"" }
+        val turned = TestMediaSource("mxc://example.org/turned")
         show(message("office.jpg").copy(kind = MessageKind.Attachment,
             attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, turned)),
             set = { restoration.setContent(it) })

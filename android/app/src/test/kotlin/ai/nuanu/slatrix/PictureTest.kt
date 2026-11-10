@@ -9,11 +9,13 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -68,11 +70,14 @@ class PictureTest {
         val current = mutableStateOf(if (thumbnail) attachment.copy(thumbnail = Source("first")) else attachment)
         val first = current.value
         val requested = CompletableDeferred<Unit>()
+        var staleFrame = false
         compose.setContent {
             val item = current.value
-            picture(item, 16, 16, false) { _, _, _, _ ->
+            val image = picture(item, 16, 16, false) { _, _, _, _ ->
                 if (item === first) png() else { requested.complete(Unit); null }
-            }?.let { Image(it, "Private picture") }
+            }
+            SideEffect { if (item !== first && image != null) staleFrame = true }
+            image?.let { Image(it, "Private picture") }
         }
         compose.waitUntil { displayed() == 1 }
         compose.runOnIdle {
@@ -81,5 +86,6 @@ class PictureTest {
         compose.waitForIdle()
         compose.waitUntil { requested.isCompleted }
         assertEquals(0, displayed())
+        assertFalse("A changed source never composes the old pixels, even before the new loader runs", staleFrame)
     }
 }

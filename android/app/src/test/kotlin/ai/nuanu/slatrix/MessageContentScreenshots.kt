@@ -17,8 +17,6 @@ import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import android.graphics.Bitmap
 import java.io.ByteArrayOutputStream
-import org.matrix.rustcomponents.sdk.MediaSource
-import org.matrix.rustcomponents.sdk.NoHandle
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -42,7 +40,7 @@ class MessageContentScreenshots(private val dark: Boolean) {
         val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
         val today = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 9); set(Calendar.MINUTE, 0) }.timeInMillis
         val minute = 60_000L
-        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office"; override fun toJson(): String = "\"${url()}\"" }
+        val source = TestMediaSource("mxc://example.org/office")
         val png = ByteArrayOutputStream().also {
             Bitmap.createBitmap(1600, 900, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(96, 125, 139)) }
                 .compress(Bitmap.CompressFormat.PNG, 100, it)

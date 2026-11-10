@@ -1,5 +1,7 @@
 package ai.nuanu.slatrix.core
 
+import ai.nuanu.slatrix.TestMediaSource
+
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.test.runTest
@@ -13,11 +15,6 @@ import org.matrix.rustcomponents.sdk.MediaSource
 import org.matrix.rustcomponents.sdk.NoHandle
 
 class MatrixMediaTest {
-    private class Source(private val url: String) : MediaSource(NoHandle) {
-        override fun url(): String = url
-        override fun toJson(): String = "\"$url\""
-    }
-
     private class MediaClient(private val download: File) : Client(NoHandle) {
         override suspend fun getMediaThumbnail(mediaSource: MediaSource, width: ULong, height: ULong): ByteArray =
             mediaSource.url().toByteArray()
@@ -27,14 +24,14 @@ class MatrixMediaTest {
         }
     }
 
-    private val original = Source("mxc://example.org/original")
-    private val thumbnail = Source("mxc://example.org/thumbnail")
+    private val original = TestMediaSource("mxc://example.org/original")
+    private val thumbnail = TestMediaSource("mxc://example.org/thumbnail")
     private fun image(size: Long?, thumbnailSize: Long? = null) = MessageAttachment(MessageAttachment.Kind.Image, "photo.jpg",
         "image/jpeg", size, 1600, 900, original, thumbnail.takeIf { thumbnailSize != null }, thumbnailSize)
 
     // capability: message.image
     @Test fun aPictureComesFromTheSendersThumbnailOrASmallOriginalAndNeverFromAHugeOne() = runTest {
-        val media = MatrixMedia(MediaClient(File("unused")), Files.createTempDirectory("media").toFile())
+        val media = MatrixMedia(MediaClient(File("unused")), "@me:example.org", Files.createTempDirectory("media").toFile())
         suspend fun inline(attachment: MessageAttachment) = media.picture(attachment, 400, 300)?.decodeToString()
         assertEquals("mxc://example.org/thumbnail", inline(image(50_000_000, thumbnailSize = 40_000)))
         assertEquals("mxc://example.org/original", inline(image(2_000_000)))
@@ -51,7 +48,7 @@ class MatrixMediaTest {
                 throw IllegalStateException("Not on the server yet")
             override suspend fun getMediaContent(mediaSource: MediaSource): ByteArray = "the photo being sent".toByteArray()
         }
-        val media = MatrixMedia(client, Files.createTempDirectory("media").toFile())
+        val media = MatrixMedia(client, "@me:example.org", Files.createTempDirectory("media").toFile())
         assertEquals("the photo being sent", media.picture(image(2_000_000), 400, 300)?.decodeToString())
     }
 
@@ -63,14 +60,14 @@ class MatrixMediaTest {
                 "the server's thumbnail".toByteArray()
             override suspend fun getMediaContent(mediaSource: MediaSource): ByteArray = "the photo you sent".toByteArray()
         }
-        val media = MatrixMedia(client, Files.createTempDirectory("media").toFile())
+        val media = MatrixMedia(client, "@me:example.org", Files.createTempDirectory("media").toFile())
         assertEquals("the photo you sent", media.picture(image(2_000_000).copy(own = true), 400, 300)?.decodeToString())
         assertEquals("the server's thumbnail", media.picture(image(2_000_000), 400, 300)?.decodeToString())
     }
 
     // capability: message.media-viewer
     @Test fun theViewerShowsTheOriginalWhenItIsSmallEnoughAndTheThumbnailOtherwise() = runTest {
-        val media = MatrixMedia(MediaClient(File("unused")), Files.createTempDirectory("media").toFile())
+        val media = MatrixMedia(MediaClient(File("unused")), "@me:example.org", Files.createTempDirectory("media").toFile())
         suspend fun full(attachment: MessageAttachment) = media.picture(attachment, 2048, 2048, full = true)?.decodeToString()
         assertEquals("mxc://example.org/original", full(image(2_000_000, thumbnailSize = 40_000)))
         assertEquals("mxc://example.org/thumbnail", full(image(50_000_000, thumbnailSize = 40_000)))
@@ -80,8 +77,8 @@ class MatrixMediaTest {
     @Test fun aDownloadKeepsItsContentAndStaysInsideTheAppsFolderWhateverItsName() = runTest {
         val download = Files.createTempFile("download", ".tmp").toFile().apply { writeText("quarterly numbers") }
         val folder = Files.createTempDirectory("media").toFile()
-        val media = MatrixMedia(MediaClient(download), folder)
-        fun file(name: String) = MessageAttachment(MessageAttachment.Kind.File, name, "application/pdf", 17, null, null, Source("mxc://example.org/$name"))
+        val media = MatrixMedia(MediaClient(download), "@me:example.org", folder)
+        fun file(name: String) = MessageAttachment(MessageAttachment.Kind.File, name, "application/pdf", 17, null, null, TestMediaSource("mxc://example.org/$name"))
         val report = media.file(file("../../Q3 report.pdf"))
         assertEquals("quarterly numbers", report.readText())
         assertEquals("Q3 report.pdf", report.name)
@@ -91,19 +88,19 @@ class MatrixMediaTest {
         assertEquals("quarterly numbers", long.readText())
     }
     // capability: message.file
-    @Test fun aNewSessionCannotReuseAnotherSessionsDecryptedFile() = runTest {
+    @Test fun anotherAccountCannotReuseADecryptedFile() = runTest {
         val folder = Files.createTempDirectory("media").toFile()
         val download = Files.createTempFile("download", ".tmp").toFile().apply { writeText("first account") }
         val attachment = image(1024)
-        val first = MatrixMedia(MediaClient(download), folder)
+        val first = MatrixMedia(MediaClient(download), "@me:example.org", folder)
         assertEquals("first account", first.file(attachment).readText())
         download.writeText("second account")
-        val second = MatrixMedia(MediaClient(download), folder)
+        val second = MatrixMedia(MediaClient(download), "@other:example.org", folder)
         assertEquals("second account", second.file(attachment).readText())
         val denied = MatrixMedia(object : Client(NoHandle) {
             override suspend fun getMediaFile(mediaSource: MediaSource, filename: String?, mimeType: String, useCache: Boolean,
                 tempDir: String?): MediaFileHandle = throw SecurityException("Not this account's file")
-        }, folder)
+        }, "@denied:example.org", folder)
         assertTrue(runCatching { denied.file(attachment) }.exceptionOrNull() is SecurityException)
         download.delete()
         assertEquals("The first session still reuses its own download", "first account", first.file(attachment).readText())
@@ -112,7 +109,7 @@ class MatrixMediaTest {
     // capability: message.file
     @Test fun aChangedEncryptionKeyDoesNotReuseTheOldDecryptedFile() = runTest {
         val download = Files.createTempFile("download", ".tmp").toFile().apply { writeText("first decryption") }
-        val media = MatrixMedia(MediaClient(download), Files.createTempDirectory("media").toFile())
+        val media = MatrixMedia(MediaClient(download), "@me:example.org", Files.createTempDirectory("media").toFile())
         fun source(revision: String) = object : MediaSource(NoHandle) {
             override fun url() = "mxc://example.org/private"
             override fun toJson() = "{\"url\":\"${url()}\",\"key\":\"$revision\"}"
@@ -121,6 +118,16 @@ class MatrixMediaTest {
         assertEquals("first decryption", media.file(first).readText())
         download.writeText("second decryption")
         assertEquals("second decryption", media.file(first.copy(source = source("second"))).readText())
+    }
+    // capability: message.file
+    @Test fun reopeningTheSameAccountReusesItsDownloadWithoutTheNetwork() = runTest {
+        val download = Files.createTempFile("download", ".tmp").toFile().apply { writeText("cached file") }
+        val client = MediaClient(download)
+        val folder = Files.createTempDirectory("media").toFile()
+        val attachment = image(1024)
+        MatrixMedia(client, "@me:example.org", folder).file(attachment)
+        download.delete()
+        assertEquals("cached file", MatrixMedia(client, "@me:example.org", folder).file(attachment).readText())
     }
 
 }

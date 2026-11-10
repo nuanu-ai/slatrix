@@ -27,8 +27,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.matrix.rustcomponents.sdk.MediaSource
-import org.matrix.rustcomponents.sdk.NoHandle
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -39,7 +37,7 @@ import org.robolectric.annotation.GraphicsMode
 class CaptionEditTest {
     @get:Rule val compose = createComposeRule()
     private val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
-    private val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office"; override fun toJson(): String = "\"${url()}\"" }
+    private val source = TestMediaSource("mxc://example.org/office")
     private val edits = mutableListOf<Pair<String?, String?>>()
 
     private fun media(id: String, caption: String, own: Boolean, name: String = "office.jpg",
