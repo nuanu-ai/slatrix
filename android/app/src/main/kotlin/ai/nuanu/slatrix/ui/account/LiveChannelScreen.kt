@@ -348,7 +348,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             // A row that starts a run again: after the replies bar or the New line, so it shows its sender.
             fun restarts(row: ConversationMessage) = row.id == firstReply || line != null && row.eventId == line
             // Slack's way back to the newest message, once the reader scrolls up or opened an older one.
-            val away by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
+            // Away as soon as new messages would no longer follow, even within a newest message taller than the screen.
+            val away by remember { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 0 } }
             val jumpShows = jumped && (state.focused || away)
             // Opened at an older message, the button stays over the newest loaded one, so the list keeps room for it from its
             // first rows. Scrolled away, the newest is off screen and the room would only move what the reader is looking at.
