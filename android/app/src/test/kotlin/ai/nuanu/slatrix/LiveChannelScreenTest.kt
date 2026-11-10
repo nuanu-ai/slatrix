@@ -735,6 +735,21 @@ class LiveChannelScreenTest {
         compose.onNodeWithContentDescription("Jump to recent messages").assertDoesNotExist()
     }
 
+    @Test fun aReaderScrolledUpInsideALongNewestMessageGetsTheButton() {
+        val long = message((1..120).joinToString("\n") { "Line $it" }, minutes = 61)
+        val rows = (1..60).map { message("Message $it", minutes = it) } + long
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(rows, loading = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        // A slow drag of half the screen, which stays inside the newest message.
+        compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeDown(centerY / 2, centerY * 3 / 2, durationMillis = 1_000) }
+        compose.onNodeWithText("Message 60").assertIsNotDisplayed()
+        compose.onNodeWithText(long.body).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Jump to recent messages").assertIsDisplayed()
+    }
+
     // capability: conversation.jump-to-newest
     @Test fun theButtonTakesAConversationOpenedAtAnOlderMessageLiveToItsNewest() {
         val state = mutableStateOf(ConversationState((1..60).map { message("Message $it", minutes = it) }, loading = false,
