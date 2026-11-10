@@ -3,6 +3,8 @@ package ai.nuanu.slatrix.ui.account
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.layout.BoxWithConstraints
+import ai.nuanu.slatrix.core.NotificationChoice
+import ai.nuanu.slatrix.core.NotificationSetting
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.DisplayNames
 import ai.nuanu.slatrix.core.Presence
@@ -86,6 +88,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
@@ -174,6 +177,9 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     onMarkUnread: suspend (String, Boolean) -> Boolean = { _, _ -> true },
     /** Marks these conversations read, and returns the ones that failed. */
     onMarkAllRead: suspend (List<String>) -> List<String> = { emptyList() },
+    /** When a conversation notifies, read and changed from its long-press sheet; a failure throws. */
+    onNotifications: suspend (String) -> NotificationSetting = { NotificationSetting(NotificationChoice.Default, NotificationChoice.All) },
+    onSetNotifications: suspend (String, NotificationChoice) -> Unit = { _, _ -> },
     onNewMessage: (() -> Unit)? = null,
     /** Home's closed sections, kept with the account, and where a change to them goes. */
     collapsedSections: Set<String> = emptySet(), onCollapsedSections: (Set<String>) -> Unit = {},
@@ -187,6 +193,7 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
     val tab = HomeTab.entries[pager.currentPage]
     var searching by rememberSaveable { mutableStateOf(false) }
     var actions by remember { mutableStateOf<String?>(null) }
+    var notifying by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var adding by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -317,7 +324,10 @@ fun LiveHomeScreen(userId: String, state: RoomListState, onRoom: (String) -> Uni
                     notice = "Couldn’t mark everything as read."
                 }
             }
-        }) { actions = null }
+        }, { notifying = room.id }) { actions = null }
+    }
+    shown.rooms.firstOrNull { it.id == notifying }?.let { room ->
+        ConversationNotifications({ onNotifications(room.id) }, { onSetNotifications(room.id, it) }, scope) { notifying = null }
     }
     if (adding) AddChannelSheet(onBrowseChannels, onCreateChannel) { adding = false }
     notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
@@ -640,10 +650,30 @@ private fun preview(room: RoomSummary): AnnotatedString {
     }
 }
 
+/** What a conversation notifies about, chosen from its long-press sheet as in its details. */
+@Composable
+private fun ConversationNotifications(read: suspend () -> NotificationSetting, save: suspend (NotificationChoice) -> Unit,
+    scope: CoroutineScope, onDismiss: () -> Unit) {
+    var loads by remember { mutableIntStateOf(0) }
+    var setting by remember { mutableStateOf<Result<NotificationSetting>?>(null) }
+    LaunchedEffect(loads) {
+        val result = attempt(read)
+        if (result.isSuccess || setting?.isSuccess != true) setting = result
+    }
+    BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
+        Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
+            Text("Notify me about", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
+                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            // Saves through Home's scope, so closing the sheet doesn't cancel a change on its way.
+            NotificationChoices(setting, save, scope, { setting = Result.success(it) }) { loads++ }
+        }
+    }
+}
+
 /** Slack's long-press sheet for a conversation: its name, then what can be done with it. */
 @Composable
 private fun ConversationActions(room: RoomSummary, anyUnread: Boolean, onStar: (Boolean) -> Unit, onMarkUnread: (Boolean) -> Unit,
-    onMarkAllRead: () -> Unit, onDismiss: () -> Unit) {
+    onMarkAllRead: () -> Unit, onNotifications: () -> Unit, onDismiss: () -> Unit) {
     val noun = if (room.direct) "conversation" else "channel"
     // The sheet closes at once, so an action applies as it goes.
     fun afterHiding(action: () -> Unit) { action(); onDismiss() }
@@ -660,6 +690,7 @@ private fun ConversationActions(room: RoomSummary, anyUnread: Boolean, onStar: (
                 afterHiding { onMarkUnread(!unread) }
             }
             if (anyUnread) SheetRow(SlackIcons.MarkAllRead, "Mark all as read") { afterHiding(onMarkAllRead) }
+            SheetRow(SlackIcons.Bell, "Notifications") { afterHiding(onNotifications) }
         }
     }
 }

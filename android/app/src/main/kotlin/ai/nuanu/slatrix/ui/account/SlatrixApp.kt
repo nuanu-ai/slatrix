@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.ChannelActionFailure
 import ai.nuanu.slatrix.core.ConnectionState
 
 import ai.nuanu.slatrix.core.waiting
@@ -476,6 +477,8 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
     var collapsed by remember(preferences) { mutableStateOf(preferences.collapsedSections) }
     // Read only by the tab bar, so a new Activity item doesn't recompose Home.
     val activityItems = feed?.items?.collectAsState()
+    // Home lists rooms only once the client is there, so this message is a safeguard.
+    val channel = { id: String -> MatrixChannel(rooms?.client ?: throw ChannelActionFailure("Couldn’t load your settings."), id) }
     LiveHomeScreen(userId, state, open, onYou, { rooms?.retry() }, selectedSpaceId, onSpace,
         onStar = { id, starred -> rooms?.setStarred(id, starred) ?: false },
         collapsedSections = collapsed, onCollapsedSections = { collapsed = it; preferences.collapsedSections = it },
@@ -488,6 +491,8 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
         onMarkAllRead = { ids ->
             (rooms?.markAllRead(ids) ?: ids).also { failed -> (ids - failed.toSet()).forEach(PushNotifications(context)::clear) }
         },
+        onNotifications = { id -> channel(id).notifications() },
+        onSetNotifications = { id, choice -> channel(id).setNotifications(choice) },
         later = later,
         search = { onClose ->
             val messages = search?.state?.collectAsState()?.value ?: MessageSearchState()

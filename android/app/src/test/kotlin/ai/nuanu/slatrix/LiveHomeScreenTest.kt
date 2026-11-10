@@ -9,6 +9,8 @@ import androidx.compose.ui.platform.LocalDensity
 import android.app.Application
 import android.view.WindowInsetsController
 import ai.nuanu.slatrix.core.LatestMessage
+import ai.nuanu.slatrix.core.NotificationChoice
+import ai.nuanu.slatrix.core.NotificationSetting
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SpaceSummary
@@ -426,6 +428,25 @@ class LiveHomeScreenTest {
         compose.onNodeWithText("general").performTouchInput { longClick() }
         compose.onNodeWithText("Star channel").performClick()
         compose.onNodeWithText("Couldn’t star general.").assertIsDisplayed()
+    }
+
+    // capability: conversation.notifications
+    @Test fun longPressingAConversationChoosesWhenItNotifies() {
+        val chosen = mutableListOf<Pair<String, NotificationChoice>>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveHomeScreen("@alex:example.org", RoomListState(listOf(channel("!general:example.org", "general")), loading = false, spacesKnown = true),
+                    {}, {}, {}, onNotifications = { NotificationSetting(NotificationChoice.Default, NotificationChoice.All) },
+                    onSetNotifications = { id, choice -> chosen += id to choice })
+            }
+        }
+        compose.onNodeWithText("general").performTouchInput { longClick() }
+        compose.onNodeWithText("Notifications").performClick()
+        compose.onNodeWithText("Default (All new messages)").assertIsSelected()
+        compose.onNodeWithText("Mentions and keywords").performClick()
+
+        compose.onNodeWithText("Mentions and keywords").assertIsSelected()
+        compose.runOnIdle { assertEquals(listOf("!general:example.org" to NotificationChoice.Mentions), chosen) }
     }
 
     // capability: home.dms
