@@ -178,10 +178,11 @@ private struct SavedMessageRow: View {
             .background(hovered ? colors.hover : .clear, in: RoundedRectangle(cornerRadius: m.radius))
             .contentShape(Rectangle())
         }.buttonStyle(.row).disabled(room?.membership != "join")
-            .onHover { hovered = $0 }
             .overlay(alignment: .topTrailing) {
                 if hovered { toolbar.padding(.trailing, m.sp12).padding(.top, m.sp12) }
             }
+            // After the overlay, so the pointer on the actions still hovers the row.
+            .onHover { hovered = $0 }
             .accessibilityActions {
                 ForEach(commands, id: \.title) { command in Button(command.title, action: command.run) }
                 if reference.laterState == .inProgress {
