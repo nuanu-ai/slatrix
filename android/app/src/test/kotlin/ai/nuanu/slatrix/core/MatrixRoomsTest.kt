@@ -520,9 +520,10 @@ class MatrixRoomsTest {
         val typing = dm.typing.filterNotNull().first()
         typing.call(listOf("@me:example.org"))
         typing.call(listOf("@me:example.org", "@avery:example.org"))
-        rooms.state.first { it.rooms.single().typing }
+        // The list can still be empty here, as the room's typing subscription comes before it's listed.
+        rooms.state.first { it.rooms.singleOrNull()?.typing == true }
         typing.call(listOf("@me:example.org"))
-        rooms.state.first { !it.rooms.single().typing }
+        rooms.state.first { it.rooms.singleOrNull()?.typing == false }
         rooms.close()
     }
 
