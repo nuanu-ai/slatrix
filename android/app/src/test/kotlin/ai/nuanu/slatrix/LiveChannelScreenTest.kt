@@ -116,25 +116,27 @@ class LiveChannelScreenTest {
     }
 
     // capability: conversation.history
-    // Opened cold, sync holds only the newest message or two, and the page under them filled the screen in view.
-    @Test fun aConversationOpenedColdShowsOnceItsFirstPageFillsTheScreen() {
+    // Cached messages are readable while history loads, and keep their place when it arrives.
+    @Test fun aConversationShowsItsCacheWhileTheFirstPageLoads() {
         val state = mutableStateOf(ConversationState(listOf(message("Message 39", 39), message("Message 40", 40)), loading = false))
         compose.setContent {
             screen = LocalView.current
             SlatrixTheme { bubble = SlatrixTheme.colors.bubbleIn.toArgb(); LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
         }
-        assertFalse("The newest messages wait for the page under them", drawn("Message 40"))
+        assertTrue("The cached message is already painted", drawn("Message 40"))
+        val before = compose.onNodeWithText("Message 40").fetchSemanticsNode().boundsInRoot
         compose.runOnIdle { state.value = state.value.copy(rows = (1..40).map { message("Message $it", minutes = it) }) }
         compose.waitUntil { drawn("Message 40") }
+        assertEquals(before, compose.onNodeWithText("Message 40").fetchSemanticsNode().boundsInRoot)
     }
 
-    @Test fun aConversationWithLittleHistoryShowsOnceItHasNoMore() {
+    @Test fun aShortConversationShowsItsCacheBeforeHistoryFinishes() {
         val state = mutableStateOf(ConversationState(listOf(message("Hello", 0)), loading = false))
         compose.setContent {
             screen = LocalView.current
             SlatrixTheme { bubble = SlatrixTheme.colors.bubbleIn.toArgb(); LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
         }
-        assertFalse(drawn("Hello"))
+        assertTrue(drawn("Hello"))
         compose.runOnIdle { state.value = state.value.copy(hasMore = false) }
         compose.waitUntil { drawn("Hello") }
     }
