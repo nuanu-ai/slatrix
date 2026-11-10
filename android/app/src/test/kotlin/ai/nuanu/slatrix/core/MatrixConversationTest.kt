@@ -1,5 +1,8 @@
 package ai.nuanu.slatrix.core
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
@@ -851,6 +854,52 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.history
+    @Test fun forwardPagingReadsPastHiddenEventsToTheNextMessage() = runTest {
+        val next = conversationItem("next", "\$next", "Next visible message")
+        val around = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier")))
+        val pages = ArrayDeque(listOf(emptyList(), emptyList(), listOf(next)))
+        around.onForward = {
+            val page = pages.removeFirst()
+            around.emit(page.map { TimelineDiff.PushBack(it) })
+            false
+        }
+        val live = ConversationTimeline(listOf(conversationItem("latest", "\$latest", "Latest")))
+        val conversation = MatrixConversation(backgroundScope, JumpRoom(live, around), at = "\$old")
+        try {
+            conversation.state.first { !it.loading && it.focused }
+            conversation.loadNewer("\$old")
+            val advanced = withContext(Dispatchers.Default) {
+                withTimeout(2_000) { conversation.state.first { it.rows.messages.any { row -> row.eventId == "\$next" } } }
+            }
+            assertTrue("The reader is still in history, before the live end", advanced.focused)
+            assertEquals("Next visible message", advanced.rows.messages.last().body)
+        } finally { conversation.close() }
+    }
+
+    // capability: conversation.history
+    @Test fun aLongRunOfHiddenForwardPagesStopsWithARetryThatContinuesForward() = runTest {
+        val around = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier")))
+        var available = false
+        around.onForward = {
+            if (available) around.emit(listOf(TimelineDiff.PushBack(conversationItem("next", "\$next", "Next visible message"))))
+            false
+        }
+        val live = ConversationTimeline(listOf(conversationItem("latest", "\$latest", "Latest")))
+        val conversation = MatrixConversation(backgroundScope, JumpRoom(live, around), at = "\$old")
+        try {
+            conversation.state.first { !it.loading && it.focused }
+            conversation.loadNewer("\$old")
+            withContext(Dispatchers.Default) { withTimeout(2_000) { conversation.state.first { it.error != null } } }
+            available = true
+            assertTrue(conversation.retry())
+            val advanced = withContext(Dispatchers.Default) {
+                withTimeout(2_000) { conversation.state.first { it.rows.messages.last().eventId == "\$next" } }
+            }
+            assertNull("Retry clears the error", advanced.error)
+        } finally { conversation.close() }
+    }
+
     // capability: conversation.jump-to-newest
     @Test fun showingTheNewestTurnsAConversationOpenedAtAnOlderMessageLive() = runTest {
         val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
@@ -1069,7 +1118,8 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     var pages = 0
     /** What a page brings, by its number, sent as the SDK sends it before the page returns. */
     var onPage: (Int) -> Unit = {}
-    override suspend fun paginateForwards(numEvents: UShort): Boolean = true
+    var onForward: suspend () -> Boolean = { true }
+    override suspend fun paginateForwards(numEvents: UShort): Boolean = onForward()
     override suspend fun paginateBackwards(numEvents: UShort): Boolean {
         pages++
         onPage(pages)

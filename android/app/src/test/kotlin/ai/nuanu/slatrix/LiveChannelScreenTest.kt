@@ -116,27 +116,54 @@ class LiveChannelScreenTest {
     }
 
     // capability: conversation.history
-    // Opened cold, sync holds only the newest message or two, and the page under them filled the screen in view.
-    @Test fun aConversationOpenedColdShowsOnceItsFirstPageFillsTheScreen() {
+    // Cached messages are readable while history loads, and keep their place when it arrives.
+    @Test fun aConversationShowsItsCacheWhileTheFirstPageLoads() {
         val state = mutableStateOf(ConversationState(listOf(message("Message 39", 39), message("Message 40", 40)), loading = false))
         compose.setContent {
             screen = LocalView.current
             SlatrixTheme { bubble = SlatrixTheme.colors.bubbleIn.toArgb(); LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
         }
-        assertFalse("The newest messages wait for the page under them", drawn("Message 40"))
+        assertTrue("The cached message is already painted", drawn("Message 40"))
+        val before = compose.onNodeWithText("Message 40").fetchSemanticsNode().boundsInRoot
         compose.runOnIdle { state.value = state.value.copy(rows = (1..40).map { message("Message $it", minutes = it) }) }
         compose.waitUntil { drawn("Message 40") }
+        assertEquals(before, compose.onNodeWithText("Message 40").fetchSemanticsNode().boundsInRoot)
     }
 
-    @Test fun aConversationWithLittleHistoryShowsOnceItHasNoMore() {
+    @Test fun aShortConversationShowsItsCacheBeforeHistoryFinishes() {
         val state = mutableStateOf(ConversationState(listOf(message("Hello", 0)), loading = false))
         compose.setContent {
             screen = LocalView.current
             SlatrixTheme { bubble = SlatrixTheme.colors.bubbleIn.toArgb(); LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
         }
-        assertFalse(drawn("Hello"))
+        assertTrue(drawn("Hello"))
         compose.runOnIdle { state.value = state.value.copy(hasMore = false) }
         compose.waitUntil { drawn("Hello") }
+    }
+
+    // capability: message.thread-summary
+    @Test fun aLateThreadSummaryKeepsTheMessageBeingReadInPlace() {
+        lateRowUpdateKeepsReadingPosition { it.copy(thread = MessageThread(2, "Sam", null)) }
+        compose.onNodeWithText("2 replies").assertExists()
+    }
+
+    // capability: message.edited
+    @Test fun anEditBelowTheMessageBeingReadKeepsItsPlace() {
+        lateRowUpdateKeepsReadingPosition { it.copy(body = "An edited message\nwith several new lines\narriving below the reader", edited = true) }
+    }
+
+    private fun lateRowUpdateKeepsReadingPosition(update: (ConversationMessage) -> ConversationMessage) {
+        val rows = (1..80).map { message("Message $it", minutes = it) }
+        val state = mutableStateOf(ConversationState(rows, loading = false, hasMore = false))
+        compose.setContent {
+            SlatrixTheme { LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                onOpenThread = {}) }
+        }
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(40)
+        val before = compose.onNodeWithText("Message 39", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { state.value = state.value.copy(rows = rows.map { if (it.body == "Message 40") update(it) else it }) }
+        compose.waitForIdle()
+        assertEquals(before, compose.onNodeWithText("Message 39", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot)
     }
 
     private var screen: android.view.View? = null

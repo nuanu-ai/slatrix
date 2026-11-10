@@ -235,6 +235,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      * Pages asked for since an older message last showed. Joins, topic changes and other hidden events can fill page
      * after page, so history stops loading on its own after a few of those, as on the Mac.
      */
+    private var retryPage: () -> Unit = ::loadOlder
     @Volatile private var blankPages = 0
     /**
      * The server's count for each recent thread, by its root. The SDK counts only replies it has seen, and a phone
@@ -391,6 +392,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             if (!pageLock.tryLock()) return@launch
             try {
                 if (!mutableState.value.hasMore || blankPages >= MAX_BLANK_PAGES) return@launch
+                retryPage = ::loadOlder
                 mutableState.update { it.copy(loadingHistory = true, error = null) }
                 do {
                     val endReached = timeline().paginateBackwards(50u)
@@ -424,13 +426,28 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             try {
                 val focused = shown?.takeIf { it.focused } ?: return@launch
                 if (pending != null) return@launch
-                if (!focused.timeline.paginateForwards(50u)) return@launch
-                currentCoroutineContext().ensureActive()
-                goLive(anchor ?: newestEvent())
+                retryPage = { loadNewer(anchor) }
+                mutableState.update { it.copy(error = null) }
+                val newest = newestEvent()
+                var emptyPages = 0
+                do {
+                    val endReached = focused.timeline.paginateForwards(50u)
+                    currentCoroutineContext().ensureActive()
+                    caughtUp()
+                    if (endReached) {
+                        goLive(anchor ?: newestEvent())
+                        return@launch
+                    }
+                    emptyPages++
+                } while (shown === focused && newestEvent() == newest && emptyPages < MAX_BLANK_PAGES)
+                if (shown === focused && newestEvent() == newest) {
+                    mutableState.update { it.copy(error = "Couldn’t load newer messages.") }
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                // The reader reaching the newest message asks again.
+                currentCoroutineContext().ensureActive()
+                mutableState.update { it.copy(error = "Couldn’t load newer messages.") }
             } finally {
                 pageLock.unlock()
             }
@@ -525,7 +542,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     /** False once the timeline failed to open or stopped updating, so only reopening the room can help. */
     fun retry(): Boolean {
         if (!updating.isActive) return false
-        loadOlder()
+        retryPage()
         return true
     }
 

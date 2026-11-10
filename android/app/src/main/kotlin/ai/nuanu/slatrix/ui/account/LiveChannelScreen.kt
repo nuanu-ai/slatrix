@@ -54,7 +54,6 @@ import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -165,18 +164,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val opensAt = state.highlight ?: newLine.start ?: newLine.back?.first
     fun opens(row: ConversationRow) = row.id == opensAt || (row as? ConversationMessage)?.eventId == opensAt
     var jumped by remember(opensAt, state.jump) { mutableStateOf(opensAt == null) }
-    // Opened cold, sync holds only the newest message or two, so the messages wait until a page fills the screen under
-    // them or there's no more to load, and the screen never fills in view.
-    val filled by remember { derivedStateOf { list.canScrollForward } }
-    val open = remember { object { var settled = false; var paging = false } }
-    if (state.loadingHistory) open.paging = true
-    if (filled || !state.hasMore || state.error != null || open.paging && !state.loadingHistory) open.settled = true
-    val settled = open.settled
     val latest = state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?
     val read by rememberUpdatedState(onRead)
-    LaunchedEffect(latest?.id, latest?.eventId, resumed, jumped, settled) {
+    LaunchedEffect(latest?.id, latest?.eventId, resumed, jumped) {
         val event = latest?.eventId ?: return@LaunchedEffect
-        if (!resumed || !jumped || !settled) return@LaunchedEffect
+        if (!resumed || !jumped) return@LaunchedEffect
         snapshotFlow {
             list.layoutInfo.visibleItemsInfo.any { item ->
                 item.key == latest.id && ReadState.seen(item.offset.toFloat(), (item.offset + item.size).toFloat(),
@@ -230,6 +222,23 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         } finally {
             jumped = true
             lit = null
+        }
+    }
+    val previous = remember { object { var rows = emptyList<ConversationRow>() } }
+    SideEffect {
+        if (previous.rows !== state.rows) {
+            val before = previous.rows.filterIsInstance<ConversationMessage>().associateBy { it.id }
+            val changed = state.rows.filterIsInstance<ConversationMessage>().filter { row ->
+                before[row.id]?.let { it != row } == true
+            }.mapTo(mutableSetOf()) { it.id }
+            // Reverse layout anchors the bottom row. While reading history, keep an unchanged reading row instead.
+            if (changed.isNotEmpty() && jumped && !list.isScrollInProgress &&
+                (list.firstVisibleItemIndex != 0 || list.firstVisibleItemScrollOffset != 0)) {
+                val anchor = list.layoutInfo.visibleItemsInfo.lastOrNull { it.key in before && it.key !in changed }
+                val index = anchor?.let { item -> state.rows.indexOfLast { it.id == item.key } } ?: -1
+                if (index >= 0) list.requestScrollToItem(state.rows.lastIndex - index, -checkNotNull(anchor).offset)
+            }
+            previous.rows = state.rows
         }
     }
     val loadNewer by rememberUpdatedState(onLoadNewer)
@@ -351,7 +360,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = footer + jumpRoom)) {
                 // The pressed message hides while its copy stands forward over the sheet.
                 val forward = menu?.message?.id.takeIf { sheetTop != null }
-                itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row -> Box(Modifier.alpha(if (settled && row.id != forward) 1f else 0f)) {
+                itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row -> Box(Modifier.alpha(if (row.id != forward) 1f else 0f)) {
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Column(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
@@ -711,11 +720,8 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, nam
                 }
                 val root = message.eventId
                 // Inside a thread the root's replies bar says it instead.
-                // A summary that lands after the row is on screen eases the bar in instead of popping it.
-                AnimatedVisibility(message.thread != null && root != null && onOpenThread != null,
-                    enter = expandVertically(Motion.pane()) + fadeIn(Motion.pane()), exit = ExitTransition.None) {
-                    val thread = message.thread
-                    if (thread != null && root != null && onOpenThread != null) Box(inset) { ThreadReplies(thread) { onOpenThread(root) } }
+                if (message.thread != null && root != null && onOpenThread != null) {
+                    Box(inset) { ThreadReplies(message.thread) { onOpenThread(root) } }
                 }
             }
             // In the bubble's bottom padding, so the bar comes and goes without moving anything.

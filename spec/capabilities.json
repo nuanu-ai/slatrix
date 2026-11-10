@@ -38,7 +38,7 @@
     {"id": "search.messages", "what": "Search messages, encrypted ones included, with in: and from: filters.", "mac": "done", "android": "done"},
     {"id": "search.recent", "what": "Search offers your recent searches.", "mac": "done", "android": "done"},
 
-    {"id": "conversation.history", "what": "A conversation opens at its newest messages and loads older ones as you scroll up, keeping messages readable and in place.", "mac": "done", "android": "done"},
+    {"id": "conversation.history", "what": "A conversation shows cached messages at once; scrolling loads the surrounding history while keeping messages readable and in place.", "mac": "done", "android": "done"},
     {"id": "conversation.intro", "what": "The start of a conversation shows its intro.", "mac": "done", "android": "done"},
     {"id": "conversation.day-dividers", "what": "Day dividers read Today, Yesterday or the date.", "mac": "done", "android": "done"},
     {"id": "conversation.grouping", "what": "Messages one person sends within five minutes group under one name.", "mac": "done", "android": "done"},
@@ -80,7 +80,7 @@
     {"id": "message.media-viewer", "what": "Open an image or video full size and step through the conversation's media.", "mac": "done", "android": "done"},
     {"id": "message.reactions.show", "what": "Reactions show under a message with their counts, yours marked, and who reacted.", "mac": "done", "android": "done"},
     {"id": "message.reactions.toggle", "what": "Tap a reaction to add yours or take it back.", "mac": "done", "android": "done"},
-    {"id": "message.thread-summary", "what": "A thread's first message shows its reply count, who replied and when.", "mac": "done", "android": "done"},
+    {"id": "message.thread-summary", "what": "A thread's first message shows its reply count, who replied and when; late summaries keep the reader's place in history.", "mac": "done", "android": "done"},
     {"id": "message.seen", "what": "Your message shows one tick once sent and two once someone has read it.", "mac": "done", "android": "done"},
     {"id": "message.retry-failed", "what": "Your message shows while it sends, and one that failed can be retried or deleted.", "mac": "done", "android": "done"},
     {"id": "message.send-offline", "what": "Messages written offline go out once the connection returns.", "mac": "done", "android": "done"},
