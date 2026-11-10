@@ -92,14 +92,14 @@ struct AppColors {
 
         init(_ theme: ColorTheme, dark: Bool) {
             switch (theme, dark) {
-            case (.aubergine, false): (start, end, secondary, tertiary) = (0x4a1f4f, 0x2c2259, 0xd4c9d5, 0xa48fa7)
-            case (.aubergine, true): (start, end, secondary, tertiary) = (0x2b1530, 0x1b1638, 0xc8c2c9, 0x958a98)
+            case (.aubergine, false): (start, end, secondary, tertiary) = (0x4a1f4f, 0x231b6f, 0xd4c9d5, 0xa48fa7)
+            case (.aubergine, true): (start, end, secondary, tertiary) = (0x2b1530, 0x0f1252, 0xc8c2c9, 0x958a98)
             case (.jade, false): (start, end, secondary, tertiary) = (0x1c4a3e, 0x17394f, 0xd6dedc, 0x8ea49e)
-            case (.jade, true): (start, end, secondary, tertiary) = (0x122e28, 0x0f2433, 0xc1c9c7, 0x889694)
-            case (.lagoon, false): (start, end, secondary, tertiary) = (0x1c3d61, 0x123f4d, 0xd6dce3, 0x8e9eb0)
-            case (.lagoon, true): (start, end, secondary, tertiary) = (0x13263c, 0x0e3038, 0xc2c7cc, 0x89929e)
-            case (.midnight, false): (start, end, secondary, tertiary) = (0x141c3a, 0x2a1b47, 0xc2c4cc, 0x8a8e9c)
-            case (.midnight, true): (start, end, secondary, tertiary) = (0x0c1126, 0x1a1030, 0xc0c1c7, 0x868892)
+            case (.jade, true): (start, end, secondary, tertiary) = (0x122e28, 0x081e3a, 0xc1c9c7, 0x889694)
+            case (.lagoon, false): (start, end, secondary, tertiary) = (0x1c3d61, 0x054040, 0xd6dce3, 0x8e9eb0)
+            case (.lagoon, true): (start, end, secondary, tertiary) = (0x13263c, 0x003b33, 0xc2c7cc, 0x89929e)
+            case (.midnight, false): (start, end, secondary, tertiary) = (0x141c3a, 0x401656, 0xc2c4cc, 0x8a8e9c)
+            case (.midnight, true): (start, end, secondary, tertiary) = (0x0c1126, 0x2d083f, 0xc0c1c7, 0x868892)
             case (_, false): (start, end, secondary, tertiary, opacity) = (0xf3f3f5, 0xf3f3f5, 0x46464b, 0x6e6e73, 0.85)
             case (_, true): (start, end, secondary, tertiary, opacity) = (0x1d1d20, 0x1d1d20, 0xc4c4ca, 0x98989e, 0.88)
             }

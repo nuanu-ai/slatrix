@@ -48,6 +48,28 @@ struct ThemeTests {
         }
     }
 
+    // capability: app.themes
+    @Test(
+        "The window gradient visibly shifts a colored frame, light and dark",
+        arguments: ColorTheme.allCases.filter(\.framed), [false, true])
+    func gradientShows(theme: ColorTheme, dark: Bool) throws {
+        let colors = AppColors(dark: dark, theme: theme)
+        // Glass has no gradient: the desktop shows through its frame instead.
+        guard !colors.translucentFrame else { return }
+        // About Jade's light frame, the faintest that still reads as a gradient across the window.
+        #expect(try difference(colors.frame, colors.frameEnd) >= 24)
+    }
+
+    /// How far apart two colors look: CIE76's distance in Lab.
+    private func difference(_ first: Color, _ second: Color) throws -> Double {
+        let lab = try #require(CGColorSpace(name: CGColorSpace.genericLab))
+        func components(_ color: Color) throws -> [CGFloat] {
+            try #require(NSColor(color).cgColor.converted(to: lab, intent: .defaultIntent, options: nil)?.components)
+        }
+        let (first, second) = (try components(first), try components(second))
+        return sqrt(zip(first, second).prefix(3).map { Double(($0 - $1) * ($0 - $1)) }.reduce(0, +))
+    }
+
     /// A translucent fill as it draws on an opaque surface.
     private func over(_ top: Color, _ bottom: Color) -> Color {
         let (top, bottom) = (NSColor(top).usingColorSpace(.sRGB)!, NSColor(bottom).usingColorSpace(.sRGB)!)

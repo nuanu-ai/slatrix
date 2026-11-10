@@ -19,8 +19,8 @@ struct WindowHostedTests {
 
         init(zoom: Double = 1) {
             _ = NSApplication.shared
-            // A pane dragged in an earlier test keeps its width; every window here opens panes at their own.
-            UserDefaults.standard.removeObject(forKey: "layout.paneWidth")
+            // A pane dragged or a sidebar hidden in an earlier test stays so; every window here opens as it first would.
+            for key in ["layout.paneWidth", "layout.sidebarHidden"] { UserDefaults.standard.removeObject(forKey: key) }
             matrix.enterPreview()
             messages = busyConversation(1_000, roomID: matrix.selectedRoomID!, tag: UUID().uuidString)
             matrix.messages = messages
@@ -557,6 +557,37 @@ struct WindowHostedTests {
                 .max { $0.minX < $1.minX })
         #expect(editors() == 0)
         #expect(lineShown(pane, from: pane.minY))
+    }
+
+    // capability: app.themes
+    @Test(
+        "A frame theme's frame shows between the sidebar and the conversation card, with and without the gradient",
+        arguments: ColorTheme.allCases.filter(\.framed), [false, true])
+    func frameBesideCard(theme: ColorTheme, dark: Bool) async throws {
+        let saved = ["appearance.mode", "appearance.theme", "appearance.windowGradient"].map {
+            ($0, UserDefaults.standard.object(forKey: $0))
+        }
+        defer { for (key, value) in saved { UserDefaults.standard.set(value, forKey: key) } }
+        let harness = Harness()
+        defer { harness.close() }
+        harness.appearance.mode = dark ? .dark : .light
+        harness.appearance.theme = theme
+        #expect(await harness.settle())
+        let card = try #require(harness.conversationLeft)
+        let canvas = try #require(NSColor(harness.appearance.colors.canvas).usingColorSpace(.sRGB))
+        // The sidebar's divider, from the window's top edge to its bottom.
+        let handle = Metrics()(SidebarLayout.handleWidth)
+        let gap = CGRect(x: card - handle, y: 0, width: handle, height: harness.hosting.bounds.height)
+        for gradient in [false, true] {
+            harness.appearance.windowGradient = gradient
+            #expect(
+                await eventually {
+                    harness.longestRun(in: gap) {
+                        abs($0.redComponent - canvas.redComponent) + abs($0.greenComponent - canvas.greenComponent)
+                            + abs($0.blueComponent - canvas.blueComponent) < 0.03
+                    } == 0
+                }, "\(theme) \(dark ? "dark" : "light"), gradient \(gradient)")
+        }
     }
 
     @Test("Each divider takes the pointer a few points to either side of its line")
