@@ -15,6 +15,7 @@ import org.matrix.rustcomponents.sdk.NoHandle
 class MatrixMediaTest {
     private class Source(private val url: String) : MediaSource(NoHandle) {
         override fun url(): String = url
+        override fun toJson(): String = "\"$url\""
     }
 
     private class MediaClient(private val download: File) : Client(NoHandle) {
@@ -89,4 +90,37 @@ class MatrixMediaTest {
         assertEquals("A name too long for the file system is cut but keeps its type", "pdf", long.extension)
         assertEquals("quarterly numbers", long.readText())
     }
+    // capability: message.file
+    @Test fun aNewSessionCannotReuseAnotherSessionsDecryptedFile() = runTest {
+        val folder = Files.createTempDirectory("media").toFile()
+        val download = Files.createTempFile("download", ".tmp").toFile().apply { writeText("first account") }
+        val attachment = image(1024)
+        val first = MatrixMedia(MediaClient(download), folder)
+        assertEquals("first account", first.file(attachment).readText())
+        download.writeText("second account")
+        val second = MatrixMedia(MediaClient(download), folder)
+        assertEquals("second account", second.file(attachment).readText())
+        val denied = MatrixMedia(object : Client(NoHandle) {
+            override suspend fun getMediaFile(mediaSource: MediaSource, filename: String?, mimeType: String, useCache: Boolean,
+                tempDir: String?): MediaFileHandle = throw SecurityException("Not this account's file")
+        }, folder)
+        assertTrue(runCatching { denied.file(attachment) }.exceptionOrNull() is SecurityException)
+        download.delete()
+        assertEquals("The first session still reuses its own download", "first account", first.file(attachment).readText())
+    }
+
+    // capability: message.file
+    @Test fun aChangedEncryptionKeyDoesNotReuseTheOldDecryptedFile() = runTest {
+        val download = Files.createTempFile("download", ".tmp").toFile().apply { writeText("first decryption") }
+        val media = MatrixMedia(MediaClient(download), Files.createTempDirectory("media").toFile())
+        fun source(revision: String) = object : MediaSource(NoHandle) {
+            override fun url() = "mxc://example.org/private"
+            override fun toJson() = "{\"url\":\"${url()}\",\"key\":\"$revision\"}"
+        }
+        val first = image(1024).copy(source = source("first"))
+        assertEquals("first decryption", media.file(first).readText())
+        download.writeText("second decryption")
+        assertEquals("second decryption", media.file(first.copy(source = source("second"))).readText())
+    }
+
 }

@@ -101,7 +101,7 @@ class MessageContentTest {
         }
     }
 
-    private val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office" }
+    private val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office"; override fun toJson(): String = "\"${url()}\"" }
 
     private fun SemanticsNodeInteraction.text(): AnnotatedString =
         fetchSemanticsNode().config[SemanticsProperties.Text].single()
@@ -245,7 +245,7 @@ class MessageContentTest {
 
     // capability: message.image
     @Test fun anImageIsDecodedAgainForItsNewBoxWhenTheRoomForItChanges() {
-        val resized = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/resized" }
+        val resized = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/resized"; override fun toJson(): String = "\"${url()}\"" }
         val width = mutableStateOf(412.dp)
         show(message("wide.png").copy(kind = MessageKind.Attachment,
             attachment = MessageAttachment(MessageAttachment.Kind.Image, "wide.png", "image/png", 2_000_000, 1600, 900, resized)),
@@ -310,7 +310,7 @@ class MessageContentTest {
     // capability: message.media-viewer
     @Test fun theViewerStaysOnTheSameImageAndZoomWhenThePhoneTurns() {
         val restoration = StateRestorationTester(compose)
-        val turned = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/turned" }
+        val turned = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/turned"; override fun toJson(): String = "\"${url()}\"" }
         show(message("office.jpg").copy(kind = MessageKind.Attachment,
             attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, turned)),
             set = { restoration.setContent(it) })

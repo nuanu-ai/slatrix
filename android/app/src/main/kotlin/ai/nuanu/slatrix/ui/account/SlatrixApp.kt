@@ -60,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.CancellationException
@@ -139,7 +140,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
             else -> null
         }
         when {
-            state is AccountState.Connected -> {
+            state is AccountState.Connected -> key((state as AccountState.Connected).client) {
                 val userId = (state as AccountState.Connected).userId
                 val client = (state as AccountState.Connected).client
                 val media = remember(client) { MatrixMedia(client, File(context.cacheDir, "media")) }
@@ -171,6 +172,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                 var remembered by rememberSaveable(userId) { mutableStateOf(workspacePreferences.selectedSpaceId) }
                 val identityState = identity?.state?.collectAsState()?.value ?: IdentityState()
                 val selected = workspace?.selected?.collectAsState()?.value
+                val pictures = remember(client) { SessionPictures() }
                 val avatars = remember(client) { SessionAvatars(MatrixAvatars(client)::thumbnail) }
                 val userAvatarUrl by remember(client) { MatrixProfile(client).photo() }.collectAsState(null)
                 // Kept across visits and asked again on each, so You opens on your name rather than swapping it in.
@@ -236,7 +238,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         onNotificationHandled(target)
                     }
                 }
-                CompositionLocalProvider(LocalAvatarLoader provides avatars) { Box(Modifier.fillMaxSize()) {
+                CompositionLocalProvider(LocalAvatarLoader provides avatars, LocalPictures provides pictures) { Box(Modifier.fillMaxSize()) {
                     ProvideConnection(rooms?.connection, rooms?.let { it::retry }) { ConnectedAccountScreen(identityState,
                         { identity?.requestVerification() }, { identity?.acceptVerification() },
                         { identity?.confirmMatch() }, { identity?.rejectMismatch() }, { identity?.recover(it) },

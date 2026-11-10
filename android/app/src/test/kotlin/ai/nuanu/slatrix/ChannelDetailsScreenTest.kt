@@ -318,7 +318,7 @@ class ChannelDetailsScreenTest {
 
     // capability: conversation.files
     @Test fun filesNameAnAttachmentByItsFileAndTypeNotItsCaption() {
-        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office" }
+        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office"; override fun toJson(): String = "\"${url()}\"" }
         val photo = pinned("Our new office").copy(kind = MessageKind.Attachment,
             attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, source))
         details(room, ChannelDetailsActions(files = { SharedFiles(ConversationState(listOf(photo), loading = false)) }))
@@ -399,7 +399,7 @@ class ChannelDetailsScreenTest {
 
     private fun file(name: String, kind: MessageAttachment.Kind) = pinned(name).copy(kind = MessageKind.Attachment,
         attachment = MessageAttachment(kind, name, null, 1_000, 1600, 900,
-            object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/$name" }))
+            object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/$name"; override fun toJson(): String = "\"${url()}\"" }))
 
     @Test fun loadMoreHoldsItsPlaceWhileLoadingAndAFailedPageTriesAgain() {
         val files = mutableStateOf(SharedFiles(ConversationState(listOf(pinned("spec.pdf").copy(kind = MessageKind.Attachment)),

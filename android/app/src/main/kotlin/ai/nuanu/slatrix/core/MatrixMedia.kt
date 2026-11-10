@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.core
 
 import java.io.File
+import java.util.UUID
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -8,7 +9,9 @@ import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.Client
 
 /** Fetches attachments through the SDK, which decrypts them and keeps them in its media store. */
-class MatrixMedia(private val client: Client, private val folder: File) {
+class MatrixMedia(private val client: Client, folder: File) {
+    // Never consult a previous client's decrypted downloads, including the old URL-only cache.
+    private val folder = File(folder, UUID.randomUUID().toString())
     /**
      * A picture of an image or video no bigger than [width]×[height] pixels. Inline it is the sender's thumbnail, or
      * else an image small enough to fetch whole, since the SDK downloads all of an encrypted original even for a
@@ -42,7 +45,7 @@ class MatrixMedia(private val client: Client, private val folder: File) {
             extension.isEmpty() -> sent.take(MAX_NAME)
             else -> sent.take(MAX_NAME - extension.length - 1) + "." + extension
         }
-        val target = File(File(folder, digest(attachment.source.url())), name)
+        val target = File(File(folder, digest(attachment.source.toJson())), name)
         if (target.isFile) return target
         client.getMediaFile(attachment.source, name, attachment.mimeType ?: "application/octet-stream", true, null).use { handle ->
             withContext(Dispatchers.IO) {

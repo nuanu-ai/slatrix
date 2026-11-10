@@ -62,7 +62,7 @@ class ChannelDetailsScreenshots(private val dark: Boolean, private val fontScale
             files = {
                 fun shared(id: String, sender: String, name: String, minutes: Int, kind: MessageAttachment.Kind, mime: String) =
                     message(id, sender, name, minutes).copy(kind = MessageKind.Attachment, attachment = MessageAttachment(kind, name, mime,
-                        240_000, 1600, 900, object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/$id" }))
+                        240_000, 1600, 900, object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/$id"; override fun toJson(): String = "\"${url()}\"" }))
                 SharedFiles(ConversationState(listOf(shared("c", "Jordan", "onboarding-v3.key", 40, MessageAttachment.Kind.File,
                     "application/x-iwork-keynote-sffkey"),
                     message("d", "Mira", "Research notes: https://example.org/research/onboarding", 50),

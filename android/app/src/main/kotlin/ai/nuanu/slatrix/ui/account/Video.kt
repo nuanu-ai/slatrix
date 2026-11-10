@@ -83,7 +83,7 @@ internal class VideoPlayback(private val context: Context, private val loadFile:
     val player: Player? get() = exo
 
     suspend fun start(attachment: MessageAttachment) {
-        val key = attachment.source.url()
+        val key = attachment.source.toJson()
         fetching = key
         val file = try { loadFile(attachment) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
         // Another video asked for meanwhile wins; one that can't be fetched leaves its poster, ready to try again.
@@ -140,7 +140,7 @@ internal fun InlineVideo(attachment: MessageAttachment, load: PictureLoader, vid
     val colors = SlatrixTheme.colors
     val shape = MaterialTheme.shapes.large
     val scope = rememberCoroutineScope()
-    val key = attachment.source.url()
+    val key = attachment.source.toJson()
     val player = videos.player.takeIf { videos.playing == key }
     var full by remember { mutableStateOf(false) }
     // A video scrolled away stops, as its row is gone.

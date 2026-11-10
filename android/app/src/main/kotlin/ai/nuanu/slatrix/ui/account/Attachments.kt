@@ -42,6 +42,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -144,33 +146,35 @@ internal suspend fun saveFile(context: Context, file: File, attachment: MessageA
 /** Fetches a picture of an attachment no bigger than the pixels asked for; [full] asks for the original, for the viewer. */
 typealias PictureLoader = suspend (MessageAttachment, width: Int, height: Int, full: Boolean) -> ByteArray?
 
-/** Decoded pictures, shared by every conversation, so scrolling back or reopening a room shows them at once. */
-private val pictures = object : LruCache<String, ImageBitmap>((Runtime.getRuntime().maxMemory() / 8).toInt()) {
-    override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
+/** Shared across conversations only within the connected client. */
+internal class SessionPictures : LruCache<PictureKey, ImageBitmap>((Runtime.getRuntime().maxMemory() / 8).toInt()) {
+    override fun sizeOf(key: PictureKey, value: ImageBitmap) = value.width * value.height * 4
 }
+internal data class PictureKey(val source: Pair<String, String?>, val width: Int, val height: Int, val full: Boolean)
+internal val LocalPictures = staticCompositionLocalOf<SessionPictures?> { null }
 
-/**
- * The picture, decoded off the main thread to exactly the size asked for: filling it inline, or fitting inside it
- * full screen. Null while it loads or when there's none.
- */
+/** Decodes off the main thread; resizing keeps the current source visible while the new size loads. */
 @Composable
 internal fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): ImageBitmap? {
-    val url = attachment.source.url()
-    val key = "$url@${width}x$height${if (full) " full" else ""}"
-    val picture by produceState(pictures[key]?.let { url to it }, key) {
-        // The state outlives a change of size: this picture at its old size shows until the new one loads, another never does.
-        value = pictures[key]?.let { url to it } ?: value?.takeIf { it.first == url }
-        if (pictures[key] != null) return@produceState
-        try {
-            load(attachment, width, height, full)?.let { bytes -> withContext(Dispatchers.Default) { decode(bytes, width, height, full) } }
-                ?.also { pictures.put(key, it) }?.let { value = url to it }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            // A broken picture leaves the box as it is and never moves the row.
+    val pictures = LocalPictures.current ?: remember { SessionPictures() }
+    val source = attachment.source.toJson() to attachment.thumbnail?.toJson()
+    val cacheKey = PictureKey(source, width, height, full)
+    return key(pictures) {
+        val picture by produceState(pictures[cacheKey]?.let { source to it }, cacheKey) {
+            value = pictures[cacheKey]?.let { source to it } ?: value?.takeIf { it.first == source }
+            if (pictures[cacheKey] != null) return@produceState
+            try {
+                load(attachment, width, height, full)?.let { bytes -> withContext(Dispatchers.Default) { decode(bytes, width, height, full) } }
+                    ?.also { pictures.put(cacheKey, it) }?.let { value = source to it }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A broken picture leaves the box as it is and never moves the row.
+            }
         }
+        // produceState keeps its previous value until its new producer starts.
+        picture?.takeIf { it.first == source }?.second
     }
-    return picture?.second
 }
 
 /**

@@ -42,7 +42,7 @@ class MessageContentScreenshots(private val dark: Boolean) {
         val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
         val today = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 9); set(Calendar.MINUTE, 0) }.timeInMillis
         val minute = 60_000L
-        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office" }
+        val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office"; override fun toJson(): String = "\"${url()}\"" }
         val png = ByteArrayOutputStream().also {
             Bitmap.createBitmap(1600, 900, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(96, 125, 139)) }
                 .compress(Bitmap.CompressFormat.PNG, 100, it)

@@ -39,7 +39,7 @@ import org.robolectric.annotation.GraphicsMode
 class CaptionEditTest {
     @get:Rule val compose = createComposeRule()
     private val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
-    private val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office" }
+    private val source = object : MediaSource(NoHandle) { override fun url(): String = "mxc://example.org/office"; override fun toJson(): String = "\"${url()}\"" }
     private val edits = mutableListOf<Pair<String?, String?>>()
 
     private fun media(id: String, caption: String, own: Boolean, name: String = "office.jpg",
