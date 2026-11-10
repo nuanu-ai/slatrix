@@ -37,6 +37,7 @@ class AccountRuntime private constructor(application: Application) {
         OAuthConfiguration(clientName = "Slatrix", redirectUri = "$callbackScheme:/oauth/callback",
             clientUri = "https://github.com/nuanu-ai/slatrix", logoUri = null, tosUri = null, policyUri = null,
             staticRegistrations = emptyMap()),
+        File(application.cacheDir, "media"),
         onSignOut = { client ->
             application.getSystemService(NotificationManager::class.java).cancelAll()
             LaterReminders(application).sync(null, SavedList()) { "" to "" }

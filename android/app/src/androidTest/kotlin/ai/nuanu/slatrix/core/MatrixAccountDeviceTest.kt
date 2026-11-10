@@ -386,7 +386,8 @@ class MatrixAccountDeviceTest {
         val directories = mutableListOf<File>()
         var cleanedUp: Client? = null
         val releaseCleanup = CompletableDeferred<Unit>()
-        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration, onSignOut = {
+        val download = File(directory, "media/account-a/b/report.pdf").apply { parentFile!!.mkdirs(); writeText("decrypted") }
+        val account = MatrixAccount(scope, store, File(directory, "matrix"), oauthConfiguration, File(directory, "media"), onSignOut = {
             check(!client.loggedOut)
             cleanedUp = it
             releaseCleanup.await()
@@ -410,6 +411,7 @@ class MatrixAccountDeviceTest {
         assertTrue(client.loggedOut)
         assertTrue("The auth error subscription keeps the closed client alive", client.subscriptionCancelled)
         assertFalse(directories.first().exists())
+        assertFalse("Decrypted downloads go with the session", download.exists())
         assertTrue("A sign-in started during cleanup keeps its store", directories.last().exists())
     }
 

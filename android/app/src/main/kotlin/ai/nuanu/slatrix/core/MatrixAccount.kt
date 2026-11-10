@@ -53,6 +53,8 @@ class MatrixAccount(
     private val store: SessionStore,
     private val rootDirectory: File,
     private val oauthConfiguration: OAuthConfiguration,
+    /** Decrypted attachments, which sign-out deletes along with the stores. */
+    private val downloads: File? = null,
     private val onSignOut: suspend (Client) -> Unit = {},
     private val clientFactory: suspend (String, String, String, Boolean, ClientSessionDelegate) -> Client =
         { homeserver, storeId, storeKey, restoring, delegate ->
@@ -237,7 +239,7 @@ class MatrixAccount(
                 }
                 if (oldAttempt != null) dispose(oldAttempt)
                 // A session that is still saved can restore into its store, so keep it.
-                if (cleared) stores.forEach { it.deleteRecursively() }
+                if (cleared) (stores.toList() + listOfNotNull(downloads)).forEach { it.deleteRecursively() }
             }
         }
     }
