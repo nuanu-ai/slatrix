@@ -17,8 +17,8 @@ struct ResizeHandle: View {
     @State private var hovering = false
 
     var body: some View {
+        // Clear around its line, so a frame theme's frame shows between the sidebar and the conversation.
         ZStack {
-            appearance.colors.canvas
             // The sidebar floats on its own, so its divider shows only under the pointer; a pane keeps its hairline.
             Rectangle().fill(
                 dragging || hovering
