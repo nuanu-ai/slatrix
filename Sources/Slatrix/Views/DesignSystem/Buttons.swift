@@ -69,10 +69,9 @@ struct ButtonChrome<Label: View>: View {
     @ViewBuilder let label: Label
     @Environment(\.metrics) private var m
     @Environment(\.controlSize) private var size
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
 
     var body: some View {
-        let colors = appearance.colors
         if kind == .link {
             label.foregroundStyle(destructive ? colors.destructive : colors.accent).underline(
                 state == .hover || state == .pressed
@@ -116,10 +115,9 @@ struct IconChrome<Label: View>: View {
     var round = false
     @ViewBuilder let label: Label
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
 
     var body: some View {
-        let colors = appearance.colors
         let fill = state == .pressed ? colors.pressed : state == .hover ? colors.hover : .clear
         Group {
             if round {
@@ -246,10 +244,10 @@ private struct FocusRing: ViewModifier {
 struct ToolbarCapsule<Content: View>: View {
     @ViewBuilder let content: Content
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
 
     var body: some View {
         HStack(spacing: 0) { content }.padding(.horizontal, m.sp2).frame(height: m.control)
-            .glass(appearance.colors.control, in: Capsule(), cornerRadius: m.control / 2)
+            .glass(colors.control, in: Capsule(), cornerRadius: m.control / 2)
     }
 }

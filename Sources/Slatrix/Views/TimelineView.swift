@@ -121,6 +121,8 @@ struct TimelineView: View {
             guard highlighted != nil, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
             highlighted = nil
         }
+        // A frame theme's doodles, which stay put while the messages scroll over them.
+        .background { if colors.theme.framed { WallpaperBackground(ink: colors.wallpaperDoodle) } }
         .background(colors.canvas)
         // Every message redraws the timeline; it fills what it is given, so that never lays out the window.
         .layoutIsolated()

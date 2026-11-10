@@ -7,10 +7,9 @@ struct FieldChrome<Content: View>: View {
     @ViewBuilder let content: Content
     @Environment(\.metrics) private var m
     @Environment(\.isEnabled) private var enabled
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
 
     var body: some View {
-        let colors = appearance.colors
         let shape = RoundedRectangle(cornerRadius: m.control / 2)
         let edge = error ? colors.destructive : focused ? colors.accentFill : colors.borderStrong
         content.textFieldStyle(.plain).font(m.font(.body)).foregroundStyle(colors.textPrimary)
@@ -52,10 +51,9 @@ struct SearchField: View {
     var onEscape: (() -> Void)? = nil
     @FocusState private var focused: Bool
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
 
     var body: some View {
-        let colors = appearance.colors
         FieldChrome(focused: focused) {
             HStack(spacing: m.sp8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(colors.textSecondary).accessibilityHidden(true)

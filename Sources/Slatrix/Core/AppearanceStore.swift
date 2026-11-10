@@ -6,18 +6,19 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var name: String { rawValue.capitalized }
 }
-/// The window's neutrals, in light and dark. Every theme keeps the system accent.
+/// The window's neutrals, in light and dark, or, as Slack's themes do, a color for the window's frame around the
+/// conversation. Every theme keeps the system accent.
 enum ColorTheme: String, CaseIterable, Identifiable {
-    case standard, slate, sand, contrast
+    case standard, slate, sand, contrast, aubergine, jade, lagoon, midnight, glass
     var id: String { rawValue }
     var name: String {
         switch self {
-        case .standard: "Default"
-        case .slate: "Slate"
-        case .sand: "Sand"
         case .contrast: "High Contrast"
+        default: self == .standard ? "Default" : rawValue.capitalized
         }
     }
+    /// The sidebar sits on the window's frame, and the conversation is a card on it.
+    var framed: Bool { ![.standard, .slate, .sand, .contrast].contains(self) }
 }
 enum MessageDensity: String, CaseIterable, Identifiable {
     case comfortable, compact
@@ -30,6 +31,10 @@ enum MessageDensity: String, CaseIterable, Identifiable {
     @Published var theme =
         ColorTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.theme") ?? "") ?? .standard
     { didSet { save(theme.rawValue, "theme") } }
+    /// Slack's window gradient: a frame theme's frame fades into a neighboring hue.
+    @Published var windowGradient = UserDefaults.standard.bool(forKey: "appearance.windowGradient") {
+        didSet { UserDefaults.standard.set(windowGradient, forKey: "appearance.windowGradient") }
+    }
     @Published var density =
         MessageDensity(rawValue: UserDefaults.standard.string(forKey: "appearance.density") ?? "comfortable")
         ?? .comfortable

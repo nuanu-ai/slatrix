@@ -61,6 +61,9 @@ struct DesignTokenTests {
             "mentionYouFill": \.mentionYouFill, "code": \.code, "presenceActive": \.presenceActive,
             "presenceAway": \.presenceAway, "mediaBackdrop": \.mediaBackdrop, "mediaControl": \.mediaControl,
             "mediaShade": \.mediaShade, "onMedia": \.onMedia, "onMediaEdge": \.onMediaEdge,
+            "frame": \.frame, "frameEnd": \.frameEnd, "onFrame": \.onFrame.textPrimary,
+            "onFrameSecondary": \.onFrame.textSecondary, "onFrameTertiary": \.onFrame.textTertiary,
+            "frameSelection": \.onFrame.selection, "wallpaperDoodle": \.wallpaperDoodle,
         ]
         #expect(Set(tokens.mac.colors.keys) == Set(roles.keys))
         #expect(Set(tokens.mac.themes.keys) == Set(ColorTheme.allCases.dropFirst().map(\.rawValue)))
@@ -77,6 +80,36 @@ struct DesignTokenTests {
                     "\(theme) \(role), \(dark ? "dark" : "light"): \(drawn.resolve(in: .init())) ≠ \(expected)")
             }
         }
+    }
+
+    // capability: app.themes
+    @Test("The wallpaper draws the shared doodle board")
+    func wallpaper() throws {
+        struct Board: Decodable {
+            var tile: Double
+            var stroke: Double
+            var icons: [String: String]
+            var doodles: [[Doodle]]
+        }
+        enum Doodle: Decodable, Equatable {
+            case number(Double)
+            case icon(String)
+            init(from decoder: Decoder) throws {
+                let value = try decoder.singleValueContainer()
+                if let number = try? value.decode(Double.self) {
+                    self = .number(number)
+                } else {
+                    self = .icon(try value.decode(String.self))
+                }
+            }
+        }
+        let board: Board = try SharedSpec.decode("design/wallpaper.json")
+        #expect(Double(Wallpaper.tile) == board.tile)
+        #expect(Double(Wallpaper.stroke) == board.stroke)
+        #expect(Wallpaper.icons == board.icons)
+        #expect(
+            Wallpaper.doodles.map { [.number($0.x), .number($0.y), .number($0.turn), .icon($0.icon)] }
+                == board.doodles)
     }
 
     @Test("Each file type's tile has its shared color")

@@ -11,7 +11,7 @@ struct SectionHeader<MenuItems: View>: View {
     var onAdd: () -> Void = {}
     @ViewBuilder var menu: MenuItems
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
     @State private var hovering = false
     @FocusState private var focus: Action?
 
@@ -44,7 +44,7 @@ struct SectionHeader<MenuItems: View>: View {
                     .focused($focus, equals: .add).opacity(revealed ? 1 : 0)
             }
         }
-        .foregroundStyle(appearance.colors.textSecondary)
+        .foregroundStyle(colors.textSecondary)
         .padding(.leading, m.sp8)
         .contentShape(Rectangle()).onHover { hovering = $0 }
     }

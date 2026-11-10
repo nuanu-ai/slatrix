@@ -181,24 +181,25 @@ enum Motion {
 
 extension View {
     /// Lifts a surface to `level`: a shadow, plus a hairline in dark mode where shadows barely show.
-    func elevation(_ level: Elevation, cornerRadius: CGFloat) -> some View {
+    /// Nil draws nothing and keeps the view's identity, for a surface that lifts in some places only.
+    func elevation(_ level: Elevation?, cornerRadius: CGFloat) -> some View {
         modifier(ElevationModifier(level: level, cornerRadius: cornerRadius))
     }
 }
 
 private struct ElevationModifier: ViewModifier {
-    let level: Elevation
+    let level: Elevation?
     let cornerRadius: CGFloat
     @Environment(\.colorScheme) private var scheme
     @Environment(\.metrics) private var m
 
     func body(content: Content) -> some View {
-        let shadow = level.shadow
+        let shadow = level?.shadow ?? (opacity: 0, radius: 0, y: 0)
         let dark = scheme == .dark
         content
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius)
-                    .strokeBorder((dark ? Color.white : Color.black).opacity(level.edge), lineWidth: 0.5)
+                    .strokeBorder((dark ? Color.white : Color.black).opacity(level?.edge ?? 0), lineWidth: 0.5)
             }
             // One shadow for the surface, not one under every glyph on it.
             .compositingGroup()

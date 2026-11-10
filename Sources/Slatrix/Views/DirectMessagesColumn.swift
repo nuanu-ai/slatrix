@@ -8,16 +8,16 @@ struct DirectMessagesColumn: View {
     let onSelect: (String) -> Void
     let onCompose: () -> Void
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
     var body: some View {
         let openID = matrix.selectedRoomID
         VStack(spacing: 0) {
             HStack(spacing: m.sp4) {
                 Text("Direct messages").font(m.font(.title3, .semibold)).lineLimit(1)
-                    .foregroundStyle(appearance.colors.textPrimary)
+                    .foregroundStyle(colors.textPrimary)
                 Spacer(minLength: m.sp2)
                 IconButton(symbol: "square.and.pencil", label: "New message", role: .body, action: onCompose)
-                    .foregroundStyle(appearance.colors.textSecondary)
+                    .foregroundStyle(colors.textSecondary)
             }.padding(.leading, m.sp8).frame(height: m(36))
             // Slack has Unreads in the header; under the field it leaves the title whole in a sidebar this narrow.
             VStack(alignment: .trailing, spacing: m.sp8) {
@@ -50,8 +50,7 @@ struct DirectMessageRow: View {
     var selected = false
     var matrix: MatrixService? = nil
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
-    private var colors: AppColors { appearance.colors }
+    @ThemeColors private var colors
     var body: some View {
         let badge = UnreadBadge(room)
         HStack(spacing: m.sp8) {

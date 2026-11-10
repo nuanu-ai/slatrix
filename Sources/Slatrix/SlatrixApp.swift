@@ -25,7 +25,8 @@ struct SlatrixApp: App {
         Window("Slatrix", id: "main") {
             RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, metrics)
                 .preferredColorScheme(appearance.preferredColorScheme)
-                .background(WindowConfiguration(background: NSColor(appearance.colors.canvas))).frame(
+                .background(WindowConfiguration(background: NSColor(appearance.colors.frame).withAlphaComponent(1)))
+                .frame(
                     minWidth: minimumSize.width, minHeight: minimumSize.height)
         }
         .windowStyle(.hiddenTitleBar).defaultSize(width: 1440, height: 940)

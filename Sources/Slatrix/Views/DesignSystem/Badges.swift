@@ -8,10 +8,9 @@ struct CountBadge: View {
     /// 16 pt instead of 18, for a badge on a button.
     var small = false
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
 
     var body: some View {
-        let colors = appearance.colors
         let side = m(small ? 16 : 18)
         Text(text).font(m.font(.subheadline, .semibold)).monospacedDigit().lineLimit(1)
             .padding(.horizontal, small ? m.sp4 : m(6)).frame(minWidth: side, minHeight: side)
@@ -27,10 +26,9 @@ struct FilterChip: View {
     let active: Bool
     var menu = true
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
 
     var body: some View {
-        let colors = appearance.colors
         let shape = Capsule()
         HStack(spacing: m.sp4) {
             Text(title).font(m.font(.body))
@@ -47,10 +45,9 @@ struct FilterChip: View {
 struct TagLabel: View {
     let text: String
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
 
     var body: some View {
-        let colors = appearance.colors
         Text(text).font(m.font(.subheadline, .semibold)).lineLimit(1).foregroundStyle(colors.textSecondary)
             .padding(.horizontal, m.sp4 + m.sp2).frame(height: m(18))
             .background(colors.sunken, in: Capsule())
@@ -62,13 +59,13 @@ struct TagLabel: View {
 struct ReadTicks: View {
     let read: Bool
     @Environment(\.metrics) private var m
-    @EnvironmentObject private var appearance: AppearanceStore
+    @ThemeColors private var colors
 
     var body: some View {
         let width = m(15)
         Ticks(read: read)
             .stroke(style: StrokeStyle(lineWidth: width * 0.1, lineCap: .round, lineJoin: .round))
-            .foregroundStyle(read ? appearance.colors.accent : appearance.colors.textTertiary)
+            .foregroundStyle(read ? colors.accent : colors.textTertiary)
             .frame(width: width, height: m(10))
             .accessibilityElement().accessibilityLabel(read ? "Seen" : "Sent")
     }
