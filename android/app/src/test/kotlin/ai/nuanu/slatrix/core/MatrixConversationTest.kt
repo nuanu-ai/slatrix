@@ -877,6 +877,29 @@ class MatrixConversationTest {
         } finally { conversation.close() }
     }
 
+    // capability: conversation.history
+    @Test fun aLongRunOfHiddenForwardPagesStopsWithARetryThatContinuesForward() = runTest {
+        val around = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier")))
+        var available = false
+        around.onForward = {
+            if (available) around.emit(listOf(TimelineDiff.PushBack(conversationItem("next", "\$next", "Next visible message"))))
+            false
+        }
+        val live = ConversationTimeline(listOf(conversationItem("latest", "\$latest", "Latest")))
+        val conversation = MatrixConversation(backgroundScope, JumpRoom(live, around), at = "\$old")
+        try {
+            conversation.state.first { !it.loading && it.focused }
+            conversation.loadNewer("\$old")
+            withContext(Dispatchers.Default) { withTimeout(2_000) { conversation.state.first { it.error != null } } }
+            available = true
+            assertTrue(conversation.retry())
+            val advanced = withContext(Dispatchers.Default) {
+                withTimeout(2_000) { conversation.state.first { it.rows.messages.last().eventId == "\$next" } }
+            }
+            assertNull("Retry clears the error", advanced.error)
+        } finally { conversation.close() }
+    }
+
     // capability: conversation.jump-to-newest
     @Test fun showingTheNewestTurnsAConversationOpenedAtAnOlderMessageLive() = runTest {
         val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
