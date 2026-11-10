@@ -225,19 +225,21 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
     }
     val previous = remember { object { var rows = emptyList<ConversationRow>() } }
-    if (previous.rows !== state.rows) {
-        val before = previous.rows.filterIsInstance<ConversationMessage>().associateBy { it.id }
-        val changed = state.rows.filterIsInstance<ConversationMessage>().filter { row ->
-            before[row.id]?.let { it.thread != row.thread } == true
-        }.mapTo(mutableSetOf()) { it.id }
-        // Reverse layout anchors the bottom row. While reading history, keep an unchanged reading row instead.
-        if (changed.isNotEmpty() && jumped && !list.isScrollInProgress &&
-            (list.firstVisibleItemIndex != 0 || list.firstVisibleItemScrollOffset != 0)) {
-            val anchor = list.layoutInfo.visibleItemsInfo.lastOrNull { it.key in before && it.key !in changed }
-            val index = anchor?.let { item -> state.rows.indexOfLast { it.id == item.key } } ?: -1
-            if (index >= 0) SideEffect { list.requestScrollToItem(state.rows.lastIndex - index, -checkNotNull(anchor).offset) }
+    SideEffect {
+        if (previous.rows !== state.rows) {
+            val before = previous.rows.filterIsInstance<ConversationMessage>().associateBy { it.id }
+            val changed = state.rows.filterIsInstance<ConversationMessage>().filter { row ->
+                before[row.id]?.let { it != row } == true
+            }.mapTo(mutableSetOf()) { it.id }
+            // Reverse layout anchors the bottom row. While reading history, keep an unchanged reading row instead.
+            if (changed.isNotEmpty() && jumped && !list.isScrollInProgress &&
+                (list.firstVisibleItemIndex != 0 || list.firstVisibleItemScrollOffset != 0)) {
+                val anchor = list.layoutInfo.visibleItemsInfo.lastOrNull { it.key in before && it.key !in changed }
+                val index = anchor?.let { item -> state.rows.indexOfLast { it.id == item.key } } ?: -1
+                if (index >= 0) list.requestScrollToItem(state.rows.lastIndex - index, -checkNotNull(anchor).offset)
+            }
+            previous.rows = state.rows
         }
-        previous.rows = state.rows
     }
     val loadNewer by rememberUpdatedState(onLoadNewer)
     // Asks each time the newest row comes into view, and again after a page while it stays there.

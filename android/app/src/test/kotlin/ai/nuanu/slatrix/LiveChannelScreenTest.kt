@@ -143,6 +143,16 @@ class LiveChannelScreenTest {
 
     // capability: message.thread-summary
     @Test fun aLateThreadSummaryKeepsTheMessageBeingReadInPlace() {
+        lateRowUpdateKeepsReadingPosition { it.copy(thread = MessageThread(2, "Sam", null)) }
+        compose.onNodeWithText("2 replies").assertExists()
+    }
+
+    // capability: message.edited
+    @Test fun anEditBelowTheMessageBeingReadKeepsItsPlace() {
+        lateRowUpdateKeepsReadingPosition { it.copy(body = "An edited message\nwith several new lines\narriving below the reader", edited = true) }
+    }
+
+    private fun lateRowUpdateKeepsReadingPosition(update: (ConversationMessage) -> ConversationMessage) {
         val rows = (1..80).map { message("Message $it", minutes = it) }
         val state = mutableStateOf(ConversationState(rows, loading = false, hasMore = false))
         compose.setContent {
@@ -151,12 +161,9 @@ class LiveChannelScreenTest {
         }
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(40)
         val before = compose.onNodeWithText("Message 39", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        compose.runOnIdle {
-            state.value = state.value.copy(rows = rows.map { if (it.body == "Message 40") it.copy(thread = MessageThread(2, "Sam", null)) else it })
-        }
+        compose.runOnIdle { state.value = state.value.copy(rows = rows.map { if (it.body == "Message 40") update(it) else it }) }
         compose.waitForIdle()
         assertEquals(before, compose.onNodeWithText("Message 39", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot)
-        compose.onNodeWithText("2 replies").assertExists()
     }
 
     private var screen: android.view.View? = null
