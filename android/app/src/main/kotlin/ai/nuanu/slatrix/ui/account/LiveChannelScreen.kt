@@ -54,7 +54,6 @@ import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -224,6 +223,21 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             jumped = true
             lit = null
         }
+    }
+    val previous = remember { object { var rows = emptyList<ConversationRow>() } }
+    if (previous.rows !== state.rows) {
+        val before = previous.rows.filterIsInstance<ConversationMessage>().associateBy { it.id }
+        val changed = state.rows.filterIsInstance<ConversationMessage>().filter { row ->
+            before[row.id]?.let { it.thread != row.thread } == true
+        }.mapTo(mutableSetOf()) { it.id }
+        // Reverse layout anchors the bottom row. While reading history, keep an unchanged reading row instead.
+        if (changed.isNotEmpty() && jumped && !list.isScrollInProgress &&
+            (list.firstVisibleItemIndex != 0 || list.firstVisibleItemScrollOffset != 0)) {
+            val anchor = list.layoutInfo.visibleItemsInfo.lastOrNull { it.key in before && it.key !in changed }
+            val index = anchor?.let { item -> state.rows.indexOfLast { it.id == item.key } } ?: -1
+            if (index >= 0) SideEffect { list.requestScrollToItem(state.rows.lastIndex - index, -checkNotNull(anchor).offset) }
+        }
+        previous.rows = state.rows
     }
     val loadNewer by rememberUpdatedState(onLoadNewer)
     // Asks each time the newest row comes into view, and again after a page while it stays there.
@@ -704,11 +718,8 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, nam
                 }
                 val root = message.eventId
                 // Inside a thread the root's replies bar says it instead.
-                // A summary that lands after the row is on screen eases the bar in instead of popping it.
-                AnimatedVisibility(message.thread != null && root != null && onOpenThread != null,
-                    enter = expandVertically(Motion.pane()) + fadeIn(Motion.pane()), exit = ExitTransition.None) {
-                    val thread = message.thread
-                    if (thread != null && root != null && onOpenThread != null) Box(inset) { ThreadReplies(thread) { onOpenThread(root) } }
+                if (message.thread != null && root != null && onOpenThread != null) {
+                    Box(inset) { ThreadReplies(message.thread) { onOpenThread(root) } }
                 }
             }
             // In the bubble's bottom padding, so the bar comes and goes without moving anything.

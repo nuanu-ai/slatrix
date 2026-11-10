@@ -141,6 +141,24 @@ class LiveChannelScreenTest {
         compose.waitUntil { drawn("Hello") }
     }
 
+    // capability: message.thread-summary
+    @Test fun aLateThreadSummaryKeepsTheMessageBeingReadInPlace() {
+        val rows = (1..80).map { message("Message $it", minutes = it) }
+        val state = mutableStateOf(ConversationState(rows, loading = false, hasMore = false))
+        compose.setContent {
+            SlatrixTheme { LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                onOpenThread = {}) }
+        }
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(40)
+        val before = compose.onNodeWithText("Message 39", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle {
+            state.value = state.value.copy(rows = rows.map { if (it.body == "Message 40") it.copy(thread = MessageThread(2, "Sam", null)) else it })
+        }
+        compose.waitForIdle()
+        assertEquals(before, compose.onNodeWithText("Message 39", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot)
+        compose.onNodeWithText("2 replies").assertExists()
+    }
+
     private var screen: android.view.View? = null
     private var bubble = 0
 
