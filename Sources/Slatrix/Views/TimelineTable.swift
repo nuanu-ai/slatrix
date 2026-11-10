@@ -310,6 +310,8 @@ struct TimelineTable: NSViewRepresentable {
                 // The table guesses the height of a row inserted off screen from the rows around it until something
                 // asks for the row's frame, and puts the real one in at a later layout, past this wrapper.
                 for case .insert(let offset, _, _) in difference.insertions { _ = table.rect(ofRow: offset) }
+                // That moves the rows below without moving the views it already shows for them.
+                alignRowViews()
             }
             var changed = IndexSet()
             if settingsChanged {
@@ -530,11 +532,11 @@ struct TimelineTable: NSViewRepresentable {
     private func reported(_ reported: CGFloat, for id: String) {
         let height = ceil(reported)
         // Only a row laid out at its measured height says something about its content: a reused cell reports its
-        // old row's height first.
+        // old row's height first. At some zooms the table gives a row's cell half a point more than the row.
         guard let row = index[id], let measured = known[id],
             abs(height - measured) > 0.5,
             let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell,
-            cell.entry?.id == id, abs(cell.frame.height - measured) < 0.5
+            cell.entry?.id == id, abs(cell.frame.height - measured) < 1
         else { return }
         known[id] = height
         // Not inside the SwiftUI update that reported it.
@@ -557,6 +559,15 @@ struct TimelineTable: NSViewRepresentable {
         NSAnimationContext.current.duration = 0
         table.noteHeightOfRows(withIndexesChanged: rows)
         NSAnimationContext.endGrouping()
+    }
+
+    /// Puts the rows on screen where the table's geometry says they are; left where a guessed height put them, they
+    /// overlap the rows the table adds next to them, or leave a gap.
+    private func alignRowViews() {
+        table.enumerateAvailableRowViews { rowView, row in
+            let rect = table.rect(ofRow: row)
+            if rowView.frame != rect { rowView.frame = rect }
+        }
     }
 
     // MARK: Position
@@ -1130,7 +1141,8 @@ struct TimelineRow: View, Equatable {
                 // read there a row whose content shrank (names landing, a preview going) would keep a gap under it.
                 .background {
                     GeometryReader { geometry in
-                        Color.clear.onChange(of: geometry.size.height) { _, height in
+                        // From the first layout too: a row measured off screen can change before it is shown.
+                        Color.clear.onChange(of: geometry.size.height, initial: true) { _, height in
                             context.onHeight(entry.id, height)
                         }
                     }
