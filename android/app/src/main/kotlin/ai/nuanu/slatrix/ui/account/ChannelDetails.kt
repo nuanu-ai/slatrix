@@ -227,36 +227,43 @@ private fun label(choice: NotificationChoice, default: NotificationChoice) =
 @Composable
 private fun NotificationsPage(loaded: Result<NotificationSetting>?, actions: ChannelDetailsActions, scope: CoroutineScope,
     onChange: (NotificationSetting) -> Unit, onRetry: () -> Unit, onBack: () -> Unit) {
+    PushedPage("Notifications", onBack) {
+        item { NotificationChoices(loaded, actions.setNotifications, scope, onChange, onRetry) }
+    }
+}
+
+/** A conversation's "Notify me about" choices, shared by its details and Home's long-press sheet. */
+@Composable
+internal fun NotificationChoices(loaded: Result<NotificationSetting>?, save: suspend (NotificationChoice) -> Unit,
+    scope: CoroutineScope, onChange: (NotificationSetting) -> Unit, onRetry: () -> Unit) {
     val setting = loaded?.getOrNull()
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
-    PushedPage("Notifications", onBack) {
-        item {
-            Column(Modifier.selectableGroup()) {
-                NotificationChoice.entries.forEach { choice ->
-                    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
-                        .selectable(setting?.choice == choice, enabled = setting != null && !saving, role = Role.RadioButton) {
-                            val before = setting ?: return@selectable
-                            // Shows at once, as Slack's does, and goes back if saving fails.
-                            onChange(before.copy(choice = choice))
-                            saving = true
-                            error = null
-                            scope.launch {
-                                attempt { actions.setNotifications(choice) }.onFailure { onChange(before); error = it.message }
-                                saving = false
-                            }
-                        }.padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                        Text(label(choice, setting?.default ?: NotificationChoice.All), Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyLarge)
-                        RadioButton(selected = setting?.choice == choice, onClick = null)
-                    }
+    Column {
+        Column(Modifier.selectableGroup()) {
+            NotificationChoice.entries.forEach { choice ->
+                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
+                    .selectable(setting?.choice == choice, enabled = setting != null && !saving, role = Role.RadioButton) {
+                        val before = setting ?: return@selectable
+                        // Shows at once, as Slack's does, and goes back if saving fails.
+                        onChange(before.copy(choice = choice))
+                        saving = true
+                        error = null
+                        scope.launch {
+                            attempt { save(choice) }.onFailure { onChange(before); error = it.message }
+                            saving = false
+                        }
+                    }.padding(horizontal = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+                    Text(label(choice, setting?.default ?: NotificationChoice.All), Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyLarge)
+                    RadioButton(selected = setting?.choice == choice, onClick = null)
                 }
             }
-            error?.let { NoteLine(it) }
-            loaded?.exceptionOrNull()?.let { failure ->
-                NoteLine(failure.message.orEmpty())
-                TextButton(onClick = onRetry, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
-            }
+        }
+        error?.let { NoteLine(it) }
+        loaded?.exceptionOrNull()?.let { failure ->
+            NoteLine(failure.message.orEmpty())
+            TextButton(onClick = onRetry, Modifier.padding(horizontal = UiMetrics.GapSmall)) { Text("Try again") }
         }
     }
 }
@@ -572,7 +579,7 @@ private fun DelayedProgress() {
 }
 
 /** [action]'s result, or its failure; cancellation still cancels. */
-private suspend fun <T> attempt(action: suspend () -> T): Result<T> = try {
+internal suspend fun <T> attempt(action: suspend () -> T): Result<T> = try {
     Result.success(action())
 } catch (cancelled: CancellationException) {
     throw cancelled

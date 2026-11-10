@@ -197,24 +197,24 @@ class MatrixWorkspaceTest {
         val client = WorkspaceClient()
         val workspace = MatrixWorkspace(backgroundScope, client)
         val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+        // Leaving a timeline waits for its rows, which map off the test's dispatcher, so this waits for the composer.
+        suspend fun opened() = requireNotNull(workspace.selected.first { it?.composer != null }).also { runCurrent() }
 
         workspace.open(alpha, threadRoot = "\$root")
-        runCurrent()
-        assertEquals("\$root", workspace.selected.value?.threadRoot)
+        val thread = opened()
+        assertEquals("\$root", thread.threadRoot)
         assertEquals(TimelineFocus.Thread("\$root"), client.focuses.last())
-        val reply = requireNotNull(workspace.selected.value?.composer)
+        val reply = requireNotNull(thread.composer)
         reply.state.first { !it.loading }
         reply.edit("A reply in the thread")
 
         workspace.open(alpha)
-        runCurrent()
+        val channel = requireNotNull(opened().composer)
         assertEquals(TimelineFocus.Live(true), client.focuses.last())
-        val channel = requireNotNull(workspace.selected.value?.composer)
         assertEquals("", channel.state.first { !it.loading }.text)
 
         workspace.open(alpha, threadRoot = "\$root")
-        runCurrent()
-        assertEquals("A reply in the thread", requireNotNull(workspace.selected.value?.composer).state.first { !it.loading }.text)
+        assertEquals("A reply in the thread", requireNotNull(opened().composer).state.first { !it.loading }.text)
         workspace.close()
     }
 
