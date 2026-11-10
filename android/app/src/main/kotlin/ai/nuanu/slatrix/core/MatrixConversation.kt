@@ -424,9 +424,18 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             try {
                 val focused = shown?.takeIf { it.focused } ?: return@launch
                 if (pending != null) return@launch
-                if (!focused.timeline.paginateForwards(50u)) return@launch
-                currentCoroutineContext().ensureActive()
-                goLive(anchor ?: newestEvent())
+                val newest = newestEvent()
+                var emptyPages = 0
+                do {
+                    val endReached = focused.timeline.paginateForwards(50u)
+                    currentCoroutineContext().ensureActive()
+                    caughtUp()
+                    if (endReached) {
+                        goLive(anchor ?: newestEvent())
+                        return@launch
+                    }
+                    emptyPages++
+                } while (shown === focused && newestEvent() == newest && emptyPages < MAX_BLANK_PAGES)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
