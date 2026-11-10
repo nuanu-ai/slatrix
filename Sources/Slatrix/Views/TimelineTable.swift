@@ -1126,7 +1126,8 @@ struct TimelineRow: View, Equatable {
     var body: some View {
         if let appearance = context.appearance {
             content.frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-                .frame(maxHeight: .infinity, alignment: .top)
+                // The content's own height, inside the cell's frame: the frame never gets shorter than the cell, so
+                // read there a row whose content shrank (names landing, a preview going) would keep a gap under it.
                 .background {
                     GeometryReader { geometry in
                         Color.clear.onChange(of: geometry.size.height) { _, height in
@@ -1134,6 +1135,7 @@ struct TimelineRow: View, Equatable {
                         }
                     }
                 }
+                .frame(maxHeight: .infinity, alignment: .top)
                 .environment(\.metrics, metrics).environmentObject(appearance)
                 .environment(\.openURL, context.openURL)
                 .environment(
