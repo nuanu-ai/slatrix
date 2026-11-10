@@ -205,6 +205,37 @@ struct TimelineHostedTests {
         }
     }
 
+    @Test("A row shrinks with its content when people's names land after it was measured")
+    func rowShrinksWithItsContent() async throws {
+        let id = "@someone-with-a-long-name:a-homeserver-with-a-long-name.example.org"
+        var messages = Self.messages(0..<6)
+        messages[5].senderID = "@other:example.org"
+        messages[5].formattedBody = Array(repeating: "<a href=\"https://matrix.to/#/\(id)\">\(id)</a>", count: 8)
+            .joined(separator: " ")
+        let harness = Harness(messages: messages, width: 620, height: 700)
+        defer { harness.close() }
+        await settle(harness) { harness.cell(showing: messages[5].eventID) != nil }
+        let cell = try #require(harness.cell(showing: messages[5].eventID))
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        let row = table.row(for: cell)
+        let before = table.rect(ofRow: row).height
+
+        harness.service.members = [ChatUser(id: id, name: "Sam")]
+        // Names are drawn from the members as they land, without a new row, so the cell reports its own height.
+        let content = { ceil(cell.height(width: cell.frame.width)) }
+        #expect(
+            await eventually {
+                harness.layout()
+                return content() < before
+            }, "Short names take fewer lines")
+        #expect(
+            await eventually {
+                harness.layout()
+                return abs(table.rect(ofRow: row).height - content()) < 0.5
+            },
+            "The row closes up under the shorter text instead of keeping its old height")
+    }
+
     // capability: conversation.history
     @Test("A conversation opens at its newest message in its first layout")
     func opensAtBottom() async throws {
