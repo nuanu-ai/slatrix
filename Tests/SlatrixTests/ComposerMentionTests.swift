@@ -34,4 +34,25 @@ struct ComposerMentionTests {
         #expect(message.body == "@deadlock agent")
         #expect(message.html == "<a href=\"https://matrix.to/#/@deadlock:example.org\">deadlock agent</a>")
     }
+
+    @Test("A word replaced behind the caret, as a spelling correction does, leaves the caret after the space")
+    func replacementBehindCaretKeepsCaret() throws {
+        var draft = ""
+        let hosting = NSHostingView(
+            rootView: MessageComposer(
+                text: Binding(get: { draft }, set: { draft = $0 }), placeholder: "Message #team", members: [],
+                onSend: { _, _ in }, onTyping: { _ in }
+            ).environmentObject(AppearanceStore()))
+        hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        hosting.layoutSubtreeIfNeeded()
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        let editor = try #require(views(hosting).compactMap { $0 as? NSTextView }.first { $0.isEditable })
+        let atCaret = NSRange(location: NSNotFound, length: 0)
+        for character in "teh " { editor.insertText(String(character), replacementRange: atCaret) }
+
+        editor.insertText("the", replacementRange: NSRange(location: 0, length: 3))
+        editor.insertText("x", replacementRange: atCaret)
+
+        #expect(editor.string == "the x", "The space typed before the correction stays between the words")
+    }
 }
