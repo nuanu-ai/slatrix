@@ -587,6 +587,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var firstUnreadEventID: String?
     private var forwardLoadID: UUID?
     private(set) var hasMoreThreadHistory = true
+    /// The SDK adds a thread's root only once it has every reply, and the pane opens on the root: nothing loads above
+    /// it, and a loading row there would only drop the thread when the first page ends.
+    func loadsMoreThreadHistory(rootID: String?) -> Bool {
+        hasMoreThreadHistory && threadMessages.first?.eventID != rootID
+    }
     var members: [ChatUser] = []
     /// Whether your power level lets you notify the whole selected room, read with its members.
     var canMentionRoom = false

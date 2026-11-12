@@ -54,7 +54,7 @@ struct TimelineView: View {
     /// A conversation loaded around an older message does not follow new messages.
     private var live: Bool { thread || matrix.focusedEventID == nil }
     private var hasOlder: Bool {
-        !matrix.isPreview && (thread ? matrix.hasMoreThreadHistory : matrix.loadsMoreHistory)
+        !matrix.isPreview && (thread ? matrix.loadsMoreThreadHistory(rootID: threadRootID) : matrix.loadsMoreHistory)
     }
     /// The intro tops a conversation loaded back to its start, or one with nothing else to show.
     private var reachedStart: Bool { matrix.isPreview || !matrix.hasMoreHistory }
