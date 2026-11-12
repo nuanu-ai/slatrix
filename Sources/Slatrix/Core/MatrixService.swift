@@ -2052,7 +2052,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     func loadMoreThread(rootID: String) async throws -> Bool {
-        guard loadedThreadRootID == rootID, let threadTimeline else { throw MatrixServiceError.noRoom }
+        // The pane asks as soon as it shows, often before its thread has opened; the opening loads the first page.
+        guard loadedThreadRootID == rootID, let threadTimeline else { return false }
         let token = threadSelection
         let page =
             threadPage?.selection == token
