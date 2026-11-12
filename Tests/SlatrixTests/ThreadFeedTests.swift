@@ -218,6 +218,16 @@ struct ThreadRoutingTests {
         _ = try await service.loadMoreThread(rootID: root.eventID)
         #expect(service.threadMessages == [root])
     }
+
+    @Test("A thread that shows its root first has no older replies to load above it; one still without its root does")
+    func nothingAboveTheRoot() {
+        var reply = root
+        reply.id = "$reply"
+        service.threadMessages = [root, reply]
+        #expect(!service.loadsMoreThreadHistory(rootID: root.eventID))
+        service.threadMessages = [reply]
+        #expect(service.loadsMoreThreadHistory(rootID: root.eventID))
+    }
 }
 
 @MainActor

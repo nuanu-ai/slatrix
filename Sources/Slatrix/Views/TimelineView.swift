@@ -54,11 +54,7 @@ struct TimelineView: View {
     /// A conversation loaded around an older message does not follow new messages.
     private var live: Bool { thread || matrix.focusedEventID == nil }
     private var hasOlder: Bool {
-        guard !matrix.isPreview else { return false }
-        guard thread else { return matrix.loadsMoreHistory }
-        // The SDK adds a thread's root only once it has every reply, and the pane opens on the root: nothing loads
-        // above it, and a loading row there would only drop the thread when the first page ends.
-        return matrix.hasMoreThreadHistory && messages.first?.eventID != threadRootID
+        !matrix.isPreview && (thread ? matrix.loadsMoreThreadHistory(rootID: threadRootID) : matrix.loadsMoreHistory)
     }
     /// The intro tops a conversation loaded back to its start, or one with nothing else to show.
     private var reachedStart: Bool { matrix.isPreview || !matrix.hasMoreHistory }
