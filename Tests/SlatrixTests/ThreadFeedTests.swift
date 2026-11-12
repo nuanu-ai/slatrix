@@ -212,10 +212,10 @@ struct ThreadRoutingTests {
         #expect(service.threadMessages == [root])
     }
 
-    @Test("A thread that isn't open cannot page in the room timeline")
-    func unopenedThreadPaging() async {
+    @Test("Older replies asked for while the thread is still opening are left to its opening, with no error")
+    func pagingWhileOpening() async throws {
         service.threadMessages = [root]
-        await #expect(throws: (any Error).self) { _ = try await service.loadMoreThread(rootID: "$unopened") }
+        _ = try await service.loadMoreThread(rootID: root.eventID)
         #expect(service.threadMessages == [root])
     }
 }
