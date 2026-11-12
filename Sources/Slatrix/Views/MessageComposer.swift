@@ -740,6 +740,8 @@ private struct ComposerNativeEditor: NSViewRepresentable {
         view.isAutomaticDashSubstitutionEnabled = false
         view.isAutomaticTextReplacementEnabled = false
         view.isContinuousSpellCheckingEnabled = true
+        // As in Slack: misspellings are underlined, never changed as you type.
+        view.isAutomaticSpellingCorrectionEnabled = false
         view.allowsUndo = true
         view.delegate = context.coordinator
         // AppKit registers a text view for dragged text only when it becomes editable, and this one starts editable.
@@ -1179,7 +1181,10 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
     override func shouldChangeText(in range: NSRange, replacementString: String?) -> Bool {
         let whole = widened(range)
         guard whole != range, let replacementString else {
-            caretAfterEdit = replacementString.map { range.location + ($0 as NSString).length }
+            // Only an edit at the caret: a spelling correction replaces the word behind the space just typed.
+            caretAfterEdit =
+                NSMaxRange(range) >= selectedRange().location
+                ? replacementString.map { range.location + ($0 as NSString).length } : nil
             return super.shouldChangeText(in: range, replacementString: replacementString)
         }
         insertText(replacementString, replacementRange: whole)
