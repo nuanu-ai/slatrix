@@ -1,6 +1,8 @@
 import Foundation
 import MatrixRustSDK
 
+@testable import Slatrix
+
 /// A live timeline that, like the SDK, hands its cached items to a new listener as the first reset.
 final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     private let lock = NSLock()
@@ -42,6 +44,15 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     override func sendReadReceipt(receiptType: ReceiptType, eventId: String) async throws {
         receipts.append("\(receiptType == .read ? "read" : "fully"):\(eventId)")
     }
+    /// As the SDK does, on the newest event this timeline was given.
+    override func markAsRead(receiptType: ReceiptType) async throws {
+        let latest = lock.withLock { newest }
+        try await sendReadReceipt(receiptType: receiptType, eventId: latest ?? "")
+    }
+    private lazy var newest: String? = cached.compactMap(Self.eventID).last
+    private static func eventID(_ item: TimelineItem) -> String? {
+        item.asEvent().map { MatrixMapping.identifier($0.eventOrTransactionId) }
+    }
     /// Messages sent through this timeline into the room's send queue.
     let sent = Recorder<Void>()
     override func send(msg: RoomMessageEventContentWithoutRelation) async throws -> SendHandle {
@@ -49,7 +60,17 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         return SendHandle(noHandle: .init())
     }
     func emit(_ diff: [TimelineDiff]) {
-        let callbacks = lock.withLock { listeners }
+        let added = diff.flatMap { change -> [TimelineItem] in
+            switch change {
+            case .pushBack(let value): [value]
+            case .append(let values), .reset(let values): values
+            default: []
+            }
+        }
+        let callbacks = lock.withLock {
+            if let last = added.compactMap(Self.eventID).last { newest = last }
+            return listeners
+        }
         for listener in callbacks { listener.onUpdate(diff: diff) }
     }
 }

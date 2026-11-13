@@ -763,8 +763,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     val timeline = timeline()
                     if (heldUnread || !isLatestRemote(eventId)) return@withLock false
                     if (lastRead == eventId) return@withLock true
-                    // A thread's timeline sends this for the thread; the channel's marker and unread flag stay.
-                    timeline.sendReadReceipt(ReceiptType.READ, eventId)
+                    // On the timeline's latest event, not the message: the SDK never points a receipt at your own
+                    // message, so after one the server would still count what others added to it, a reaction say, as
+                    // unread. A thread's timeline sends this for the thread; the channel's marker and unread flag stay.
+                    timeline.markAsRead(ReceiptType.READ)
                     currentCoroutineContext().ensureActive()
                     if (!isLatestRemote(eventId)) return@withLock false
                     if (threadRoot != null) { lastRead = eventId; return@withLock true }

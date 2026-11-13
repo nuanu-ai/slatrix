@@ -92,6 +92,20 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.read
+    @Test fun readingYourOwnNewestMessageReadsWhatOthersAddedAfterIt() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("theirs", "\$theirs", "Ready?"),
+            conversationItem("mine", "\$mine", "Shipped", sender = "@me:example.org")))
+        // Someone reacted to it: an event after it that the conversation shows inside its row, so the server counts it unread.
+        timeline.unshownLatest = "\$reaction"
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.messages.size == 2 }
+
+        assertTrue(conversation.markRead("\$mine"))
+        assertEquals(ReceiptType.READ to "\$reaction", timeline.receipts.receive())
+        conversation.close()
+    }
+
     @Test fun retryLoadsFailedHistoryAgainWithoutLosingMessages() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.pageFailure = IllegalStateException("Offline")
@@ -1132,7 +1146,19 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         receiptFailure?.let { throw it }
         receipts.send(receiptType to eventId)
     }
-    fun emit(diff: List<TimelineDiff>) { listeners.forEach { it.onUpdate(diff) } }
+    /** The events this timeline holds, as the SDK keeps them, and one after them it shows no row for, such as a reaction. */
+    private val held = cached.map(::eventIdOf).toMutableList()
+    var unshownLatest: String? = null
+    override suspend fun markAsRead(receiptType: ReceiptType) {
+        receiptFailure?.let { throw it }
+        receipts.send(receiptType to checkNotNull(unshownLatest ?: held.lastOrNull { it != null }))
+    }
+    private fun eventIdOf(item: TimelineItem) = (item.asEvent()?.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId
+    fun emit(diff: List<TimelineDiff>) {
+        // Some checks send changes no real timeline would, to see the conversation survive them.
+        runCatching { diff.forEach { held.applyDiff(it, ::eventIdOf) } }
+        listeners.forEach { it.onUpdate(diff) }
+    }
     override fun createMessageContent(msgType: MessageType): RoomMessageEventContentWithoutRelation = ConversationContent(msgType)
     override suspend fun send(msg: RoomMessageEventContentWithoutRelation): SendHandle {
         submissions.send(msg as ConversationContent)
