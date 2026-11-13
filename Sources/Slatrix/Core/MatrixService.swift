@@ -2612,8 +2612,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             guard isVisible() else { throw CancellationError() }
             _ = try self.validatedThreadReadTimeline(target)
             guard self.lastThreadReceipt != target else { return }
-            // The thread timeline adds the thread ID to the receipt.
-            try await original.sendReadReceipt(receiptType: .read, eventId: target.eventID)
+            // The thread timeline adds the thread ID to the receipt, on its latest event as a channel's is.
+            try await original.markAsRead(receiptType: .read)
             guard isVisible() else { throw CancellationError() }
             _ = try self.validatedThreadReadTimeline(target)
             self.lastThreadReceipt = target

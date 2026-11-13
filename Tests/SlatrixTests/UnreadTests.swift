@@ -10,6 +10,11 @@ private final class ReceiptTimeline: Timeline, @unchecked Sendable {
     let forwardGate = Gate()
     var failure: ReceiptType?
     var forwardEnd = false
+    /// The timeline's latest event, which may be one it shows no row for, such as a reaction.
+    var latest = "$visible"
+    override func markAsRead(receiptType: ReceiptType) async throws {
+        try await sendReadReceipt(receiptType: receiptType, eventId: latest)
+    }
     override func sendReadReceipt(receiptType: ReceiptType, eventId: String) async throws {
         writes.append("\(receiptType == .read ? "read" : "fully"):\(eventId)")
         if receiptType == .read { await readGate.wait() }
@@ -154,6 +159,13 @@ struct UnreadSDKActionsTests {
         #expect(timeline.writes.all == ["read:$visible", "fully:$visible"])
     }
 
+    @Test("Reading your own newest message reads what others added after it, such as a reaction to it")
+    func readsPastYourOwnMessage() async throws {
+        timeline.latest = "$reaction"
+        try await UnreadSDKActions.acknowledge(timeline: timeline, eventID: "$mine") {}
+        #expect(timeline.writes.all.first == "read:$reaction")
+    }
+
     @Test("A failed read receipt fails and never moves the fully-read marker")
     func failedRead() async {
         timeline.failure = .read
@@ -184,7 +196,7 @@ struct UnreadSDKActionsTests {
         current = false
         timeline.readGate.release()
         await #expect(throws: CancellationError.self) { try await old.value }
-        #expect(timeline.writes.all == ["read:$old"])
+        #expect(timeline.writes.all == ["read:$visible"])
     }
 
     // capability: conversation.mark-read

@@ -57,7 +57,9 @@ enum UnreadMapping {
 enum UnreadSDKActions {
     static func acknowledge(timeline: Timeline, eventID: String, validate: () throws -> Void) async throws {
         try validate()
-        try await timeline.sendReadReceipt(receiptType: .read, eventId: eventID)
+        // On the timeline's latest event, not the message: the SDK never points a receipt at your own message, so after
+        // one the server would still count what others added to it, a reaction say, as unread.
+        try await timeline.markAsRead(receiptType: .read)
         try validate()
         try await timeline.sendReadReceipt(receiptType: .fullyRead, eventId: eventID)
         try validate()

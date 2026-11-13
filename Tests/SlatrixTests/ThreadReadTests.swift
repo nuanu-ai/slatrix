@@ -127,7 +127,7 @@ struct ThreadReadTests {
         let target = try target(f)
         try await f.service.markVisibleThreadRead(target, isVisible: { true })
         try await f.service.markVisibleThreadRead(target, isVisible: { true })
-        #expect(f.thread.writes.all == ["read:$reply"])
+        #expect(f.thread.writes.all == ["mark-read"])
         #expect(f.main.writes.all.isEmpty)
     }
 
@@ -197,7 +197,7 @@ struct ThreadReadTests {
         }
         f.thread.failsWrites = false
         try await f.service.markVisibleThreadRead(target, isVisible: { true })
-        #expect(f.thread.writes.all == ["read:$reply", "read:$reply"])
+        #expect(f.thread.writes.all == ["mark-read", "mark-read"])
     }
 
     @Test("A receipt in flight when the thread is reopened finishes once and is not credited to the new pane")
@@ -210,6 +210,6 @@ struct ThreadReadTests {
         f.apply(.threadReopened)
         f.thread.gate.release()
         await #expect(throws: CancellationError.self) { try await reading.value }
-        #expect(f.thread.writes.all == ["read:$reply"])
+        #expect(f.thread.writes.all == ["mark-read"])
     }
 }
