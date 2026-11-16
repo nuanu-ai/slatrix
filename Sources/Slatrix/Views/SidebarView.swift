@@ -346,7 +346,6 @@ private struct SidebarRoomRow: View, Equatable {
                     ).opacity(room.muted && !selected ? 0.5 : 1)
                 } else {
                     Image(systemName: room.channelSymbol).font(m.font(.body)).frame(width: m.sp16)
-                        .foregroundStyle(colors.textTertiary)
                 }
                 Text(room.name).font(m.font(.body, badge != .none ? .semibold : .regular)).lineLimit(1)
                     .truncationMode(.tail)
@@ -354,7 +353,8 @@ private struct SidebarRoomRow: View, Equatable {
                 if hasDraft { Image(systemName: "pencil").font(m.font(.subheadline)) }
                 if case .count(let count) = badge { CountBadge(text: count) }
             }
-            .foregroundStyle(room.muted && !selected ? colors.textSecondary : colors.textPrimary)
+            // As in Slack, a read or muted conversation recedes, so an unread one stands out by more than its weight.
+            .foregroundStyle(selected || (badge != .none && !room.muted) ? colors.textPrimary : colors.textSecondary)
             .padding(.leading, room.isDirect ? m.sp4 : m.sp8).padding(.trailing, m.sp8).frame(height: m.row)
             .modifier(SidebarRowFill(selected: selected))
         }.buttonStyle(.row).help(room.name)
