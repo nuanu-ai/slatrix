@@ -69,6 +69,17 @@ struct SendQueueTests {
         #expect(try !failure(error, recoverable: recoverable).message.contains("private-payload"))
     }
 
+    @Test("A file too big for the server says so and offers only Delete, since sending it again can't work")
+    func fileTooLarge() throws {
+        let tooLarge = try failure(
+            .genericApiError(
+                msg: "The provided media is too large to upload. Maximum upload length is 1 bytes, tried to upload 2"
+            ),
+            recoverable: false)
+        #expect(tooLarge.message == "This file is bigger than the server accepts. Delete it to send the rest.")
+        #expect(!tooLarge.canRetry)
+    }
+
     @Test("A message that couldn't go out offline waits as pending; other failures still show")
     func offlineFailureIsPending() throws {
         let network = try failure(.genericApiError(msg: "x"), recoverable: true)

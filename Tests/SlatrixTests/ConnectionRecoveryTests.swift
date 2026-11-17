@@ -10,6 +10,26 @@ private final class SendQueueClient: Client, @unchecked Sendable {
     init() { super.init(noHandle: .init()) }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
     override func enableAllSendQueues(enable: Bool) async { enabled.append(enable) }
+
+    /// A room whose queue the SDK stopped after a failed send.
+    let stopped = StoppedQueueRoom()
+    private let errors = Recorder<SendQueueRoomErrorListener>()
+    func failSend(roomID: String) {
+        errors.all.last?.onError(roomId: roomID, error: .Generic(msg: "502", details: nil))
+    }
+    override func subscribeToSendQueueStatus(listener: SendQueueRoomErrorListener) -> TaskHandle {
+        errors.append(listener)
+        return FakeCancellableHandle(noHandle: .init())
+    }
+    override func getRoom(roomId: String) throws -> Room? { roomId == "!room" ? stopped : nil }
+}
+
+final class StoppedQueueRoom: Room, @unchecked Sendable {
+    let enabled = Recorder<Bool>()
+    init() { super.init(noHandle: .init()) }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func isSendQueueEnabled() -> Bool { enabled.all.last ?? false }
+    override func enableSendQueue(enable: Bool) { enabled.append(enable) }
 }
 
 @MainActor private func onlineRecovery(wakeNotifications: NotificationCenter = NotificationCenter())
@@ -29,6 +49,20 @@ struct ConnectionRecoveryTests {
         try await recovery.attach(service, client: client) { _ in }
         service.emit(.running)
         #expect(await eventually { client.enabled.all == [true] })
+        await recovery.stop()
+    }
+
+    @Test("A room whose sending stopped on a server error resumes by itself while connected, without a restart")
+    func failedSendResumes() async throws {
+        let recovery = ConnectionRecovery(
+            networkChanges: { AsyncStream { $0.yield(true) } }, wakeNotifications: NotificationCenter(),
+            sendQueueResumeDelay: { _ in .zero })
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        #expect(await eventually { recovery.feedback.state == .running })
+        client.failSend(roomID: "!room")
+        #expect(await eventually { client.stopped.enabled.all == [true] })
         await recovery.stop()
     }
 

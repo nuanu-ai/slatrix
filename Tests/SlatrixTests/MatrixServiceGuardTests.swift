@@ -30,6 +30,12 @@ struct HomeserverAndSessionTests {
         #expect(!shown.contains("private-token") && !shown.contains("private-password"))
     }
 
+    @Test("A file the app couldn't queue says the file didn't go, and keeps it to send again")
+    func attachmentQueueFailure() {
+        let shown = MatrixService.safeError(RoomError.FailedSendingAttachment(message: "store locked"))
+        #expect(shown == "Couldn’t send the file. It’s still attached, so send again.")
+    }
+
     @Test(
         "Only an unknown-token error ends the local session; network and permission errors keep it",
         arguments: [

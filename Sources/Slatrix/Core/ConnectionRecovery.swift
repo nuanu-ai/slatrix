@@ -41,17 +41,26 @@ private final class RoomSyncStateObserver: RoomListServiceStateListener, @unchec
     }
 }
 
+private final class SendQueueErrorObserver: SendQueueRoomErrorListener, @unchecked Sendable {
+    let callback: @Sendable (String) -> Void
+    init(_ callback: @escaping @Sendable (String) -> Void) { self.callback = callback }
+    func onError(roomId: String, error: ClientError) { callback(roomId) }
+}
+
 @MainActor
 final class ConnectionRecovery {
     private static let logger = Logger(subsystem: "ai.nuanu.slatrix", category: "connection")
     private let networkChanges: @Sendable () -> AsyncStream<Bool>
     private let wakeNotifications: NotificationCenter
+    private let sendQueueResumeDelay: (Int) -> Duration
     init(
         networkChanges: @escaping @Sendable () -> AsyncStream<Bool> = NetworkConnectivity.changes,
-        wakeNotifications: NotificationCenter? = nil
+        wakeNotifications: NotificationCenter? = nil,
+        sendQueueResumeDelay: @escaping (Int) -> Duration = { .seconds(min(300, 5 << min($0, 6))) }
     ) {
         self.networkChanges = networkChanges
         self.wakeNotifications = wakeNotifications ?? NSWorkspace.shared.notificationCenter
+        self.sendQueueResumeDelay = sendQueueResumeDelay
     }
     private struct Attempt {
         let id: UUID
@@ -76,6 +85,9 @@ final class ConnectionRecovery {
     private var automaticRetry: Task<Void, Never>?
     private var failures = 0
     private var wakeObserver: NSObjectProtocol?
+    private var sendQueueHandle: TaskHandle?
+    private var sendQueueResumes: [String: Task<Void, Never>] = [:]
+    private var sendQueueFailures: [String: Int] = [:]
     private(set) var feedback = MatrixConnectionFeedback(
         state: .idle, isRetrying: false, canRetry: false, errorMessage: nil)
 
@@ -114,6 +126,13 @@ final class ConnectionRecovery {
                     self.publish()
                 }
             })
+        sendQueueHandle = client?.subscribeToSendQueueStatus(
+            listener: SendQueueErrorObserver { [weak self] roomID in
+                Task { @MainActor [weak self] in
+                    guard let self, self.generation == account else { return }
+                    self.resumeSending(roomID: roomID)
+                }
+            })
         wakeObserver = wakeNotifications.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -140,6 +159,24 @@ final class ConnectionRecovery {
                     }
                 }
             }
+        }
+    }
+
+    // A failed send stops its room's queue, and everything sent there after it waits. A reconnect resumes every room,
+    // but a server error over a working connection brings none, so the room resumes on its own, a little later each
+    // time, so a file the server keeps refusing isn't sent again and again.
+    private func resumeSending(roomID: String) {
+        guard feedback.state == .running, sendQueueResumes[roomID] == nil, let client else { return }
+        let failures = sendQueueFailures[roomID, default: 0]
+        sendQueueFailures[roomID] = failures + 1
+        let account = generation
+        let delay = sendQueueResumeDelay(failures)
+        sendQueueResumes[roomID] = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled, self.generation == account else { return }
+            self.sendQueueResumes[roomID] = nil
+            guard let room = try? client.getRoom(roomId: roomID), !room.isSendQueueEnabled() else { return }
+            room.enableSendQueue(enable: true)
         }
     }
 
@@ -227,6 +264,11 @@ final class ConnectionRecovery {
         responseHandle = nil
         automaticRetry?.cancel()
         automaticRetry = nil
+        sendQueueHandle?.cancel()
+        sendQueueHandle = nil
+        for resume in sendQueueResumes.values { resume.cancel() }
+        sendQueueResumes = [:]
+        sendQueueFailures = [:]
         networkTask?.cancel()
         networkTask = nil
         networkAvailable = nil
@@ -273,6 +315,7 @@ final class ConnectionRecovery {
             failures = 0
         }
         if state == .running, feedback.state != .running, let client {
+            sendQueueFailures = [:]
             let account = generation
             Task { @MainActor [weak self] in
                 guard self?.generation == account else { return }

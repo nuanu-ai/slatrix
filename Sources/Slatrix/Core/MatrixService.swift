@@ -63,6 +63,11 @@ struct MessageSendFailure: Hashable {
             return Self(
                 kind: .invalidMedia,
                 message: "This file type isn’t supported. Delete this and choose another file.")
+        // The room holds everything sent after it until it's deleted.
+        case .genericApiError(let msg) where msg.contains("media is too large to upload"):
+            return Self(
+                kind: .invalidMedia,
+                message: "This file is bigger than the server accepts. Delete it to send the rest.")
         case .genericApiError:
             return recoverable
                 ? Self(
@@ -3416,6 +3421,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         if let error = error as? RoomNotificationSaveFailure { return error.warning }
         if let error = error as? AccountNotificationDefaultsSaveFailure { return error.warning }
         if let error = error as? MatrixLinkError { return error.localizedDescription }
+        if case .FailedSendingAttachment? = error as? RoomError {
+            return "Couldn’t send the file. It’s still attached, so send again."
+        }
         let raw = String(describing: error).lowercased()
         if raw.contains("invalid username or password") { return "Wrong username or password." }
         if raw.contains("forbidden") { return "You don’t have permission to do that." }
