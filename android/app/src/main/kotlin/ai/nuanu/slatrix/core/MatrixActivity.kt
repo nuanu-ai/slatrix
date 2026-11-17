@@ -54,6 +54,15 @@ fun List<ActivityItem>.inWorkspace(rooms: List<RoomSummary>, spaceId: String?): 
 }
 
 /**
+ * The items as Activity's count holds them: a thread reply stays unread until you open it, anything else also reads
+ * once its conversation in [rooms] does.
+ */
+fun List<ActivityItem>.readWith(rooms: List<RoomSummary>): List<ActivityItem> {
+    val read = rooms.filter { it.unread == UnreadBadge.None }.mapTo(HashSet()) { it.id }
+    return map { if (it.unread && it.kind != ActivityKind.ThreadReply && it.roomId in read) it.copy(unread = false) else it }
+}
+
+/**
  * What the SDK says notified you, newest first, as on the Mac: the events sync and pushes deliver while the app runs.
  * Reactions show when a push rule lets them notify.
  */

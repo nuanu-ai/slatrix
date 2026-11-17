@@ -93,6 +93,16 @@ class ActivityWorkspaceTest {
         assertEquals(listOf("!ours", "!dm"), items.inWorkspace(rooms, "!studio").map { it.roomId })
         assertEquals(listOf("!ours", "!theirs", "!dm"), items.inWorkspace(rooms, null).map { it.roomId })
     }
+
+    @Test fun aMentionReadInItsConversationReadsInActivityButAThreadReplyWaitsToBeOpened() {
+        fun item(id: String, kind: ActivityKind, root: String? = null) =
+            ActivityItem(id, "!team", "\$$id", "", false, "Sam", "S", 0, "Hi", 0, kind, root)
+        val items = listOf(item("mention", ActivityKind.Mention), item("reply", ActivityKind.ThreadReply, "\$root"))
+        fun room(unread: UnreadBadge) = listOf(RoomSummary("!team", "team", false, "", unread, "T", 0, emptySet()))
+
+        assertEquals(listOf(false, true), items.readWith(room(UnreadBadge.None)).map { it.unread })
+        assertEquals(listOf(true, true), items.readWith(room(UnreadBadge.Count("1"))).map { it.unread })
+    }
 }
 
 private fun notification(eventId: String, body: String, at: ULong, mention: Boolean = false, thread: String? = null,
