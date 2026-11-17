@@ -1,8 +1,7 @@
 #!/bin/bash
-# One-time setup of the key Sparkle checks updates against, run by the owner on their Mac with `gh` signed in.
+# One-time setup of the key Sparkle checks updates against, run by the owner on the Mac that ships releases.
 # Creates (or reuses) the EdDSA key pair in the login keychain, writes the public key into Config/Info.plist for
-# you to commit, and stores the private key as the SPARKLE_ED_PRIVATE_KEY secret for the release workflow.
-# The private key is never printed or written into the repository.
+# you to commit. scripts/release.sh signs updates with the private key from the keychain, which never leaves it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/swift-env.sh
@@ -21,9 +20,4 @@ else
     sed -i '' "s|^\(    <key>SUFeedURL</key>.*\)$|\1\\
     <key>SUPublicEDKey</key><string>$public</string>|" Config/Info.plist
 fi
-
-scratch=$(mktemp -d)
-trap 'rm -rf "$scratch"' EXIT
-"${keys[@]}" -x "$scratch/sparkle.key"
-gh secret set SPARKLE_ED_PRIVATE_KEY < "$scratch/sparkle.key"
-echo "SPARKLE_ED_PRIVATE_KEY is set. Commit Config/Info.plist, which now holds the public key."
+echo "Commit Config/Info.plist, which now holds the public key."
