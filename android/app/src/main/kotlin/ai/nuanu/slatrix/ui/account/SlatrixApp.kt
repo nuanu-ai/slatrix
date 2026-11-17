@@ -82,6 +82,7 @@ import ai.nuanu.slatrix.core.MatrixActivity
 import ai.nuanu.slatrix.core.ActivityBadge
 import ai.nuanu.slatrix.core.RoomUnread
 import ai.nuanu.slatrix.core.inWorkspace
+import ai.nuanu.slatrix.core.readWith
 import ai.nuanu.slatrix.core.MatrixThreadFeed
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.ThreadFeedState
@@ -526,7 +527,7 @@ private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads
     val all = activity?.items?.collectAsState()?.value.orEmpty()
     val known = rooms?.state?.collectAsState()?.value?.rooms.orEmpty()
     fun room(id: String) = known.firstOrNull { it.id == id }
-    val items = remember(all, known, selectedSpaceId) { all.inWorkspace(known, selectedSpaceId) }
+    val items = remember(all, known, selectedSpaceId) { all.inWorkspace(known, selectedSpaceId).readWith(known) }
     ActivityScreen(items, { item -> activity?.markRead(item.id); room(item.roomId)?.let { jump(it, item.eventId, item.threadRoot) } },
         { id, root -> room(id)?.let { threads?.open(it, root) } }) {
         val inScope = remember(known, selectedSpaceId) { known.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) } }
