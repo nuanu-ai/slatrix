@@ -35,6 +35,16 @@ enum ActivityBadge {
         // A reply that mentions you already counts through its room's mentions.
         return mentions + items.count { $0.kind == .message && $0.threadRootID != nil && !$0.hasMention && !$0.opened }
     }
+
+    /// Whether Activity marks the item unread: a thread reply until you open it, anything else until you open it or
+    /// read its conversation, so the marks match what the count holds.
+    static func isUnread(_ item: ActivityItem, room: ChatRoom?) -> Bool {
+        guard !item.opened else { return false }
+        if item.kind == .invite { return true }
+        if item.threadRootID != nil && !item.hasMention { return true }
+        guard let room else { return false }
+        return room.mentions > 0 || room.hasUnread
+    }
 }
 
 @MainActor
@@ -44,6 +54,10 @@ enum ActivityBadge {
     private var seen: [String] = []
     private var seenIDs = Set<String>()
     static let maximumItems = 300
+    /// The thread on screen: its replies count as opened, the ones that land while it shows too.
+    var shownThread: (roomID: String, rootID: String)? {
+        didSet { if let shownThread { markThreadOpened(roomID: shownThread.roomID, rootID: shownThread.rootID) } }
+    }
 
     func clear() {
         items = []
@@ -133,6 +147,10 @@ enum ActivityBadge {
         return Set(runs.compactMap(\.mention).filter { $0 != "@room" })
     }
 
+    func markOpened(_ id: String) {
+        if let index = items.firstIndex(where: { $0.id == id }) { items[index].opened = true }
+    }
+
     func markThreadOpened(roomID: String, rootID: String) {
         for index in items.indices where items[index].roomID == roomID && items[index].threadRootID == rootID {
             items[index].opened = true
@@ -150,6 +168,10 @@ enum ActivityBadge {
                 items[index] = updated
             }
             return false
+        }
+        var item = item
+        if let shownThread, shownThread.roomID == item.roomID, shownThread.rootID == item.threadRootID {
+            item.opened = true
         }
         seenIDs.insert(item.id)
         seen.append(item.id)

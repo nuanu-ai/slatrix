@@ -2157,6 +2157,7 @@ struct RootView: View {
             }
             return
         }
+        matrix.activity.markOpened(item.id)
         if let rootID = item.threadRootID { matrix.activity.markThreadOpened(roomID: item.roomID, rootID: rootID) }
         if let eventID = item.eventID {
             selectRoom(item.roomID, record: true, eventID: eventID)
