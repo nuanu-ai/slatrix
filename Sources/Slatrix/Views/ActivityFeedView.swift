@@ -122,14 +122,15 @@ struct ActivityFeedView: View {
     }
 
     private func activityRow(_ item: ActivityItem) -> some View {
-        HStack(alignment: .top, spacing: m.sp12) {
+        let unread = ActivityBadge.isUnread(item, room: matrix.rooms.first { $0.id == item.roomID })
+        return HStack(alignment: .top, spacing: m.sp12) {
             AvatarView(
                 name: item.senderName.isEmpty ? item.roomName : item.senderName, size: m.avatar, matrix: matrix,
                 source: item.avatarURL)
             VStack(alignment: .leading, spacing: m.sp8) {
                 HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                     Text(item.senderName.isEmpty ? item.roomName : item.senderName).font(
-                        m.font(.body, .semibold)
+                        m.font(.body, unread ? .semibold : .regular)
                     ).foregroundStyle(colors.textPrimary).lineLimit(1)
                     Text(
                         item.kind == .invite ? "invited you" : item.hasMention ? "mentioned you" : "in \(item.roomName)"
@@ -138,6 +139,8 @@ struct ActivityFeedView: View {
                     Text(item.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
                         m.font(.subheadline)
                     ).foregroundStyle(colors.textSecondary)
+                    // As in Slack, a dot marks what you haven't opened.
+                    if unread { Circle().fill(colors.accent).frame(width: m.sp8, height: m.sp8) }
                 }
                 if item.hasMention || item.kind == .invite {
                     Text(item.roomName).font(m.font(.subheadline, .medium)).foregroundStyle(colors.accent)
@@ -160,6 +163,7 @@ struct ActivityFeedView: View {
             }
         }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(
-                Rectangle())
+                Rectangle()
+            ).accessibilityValue(unread ? "Unread" : "")
     }
 }

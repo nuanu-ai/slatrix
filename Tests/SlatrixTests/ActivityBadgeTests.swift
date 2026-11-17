@@ -57,4 +57,26 @@ struct ActivityBadgeTests {
         activity.record(Self.reply(0))
         #expect(ActivityBadge.count(rooms: [], items: activity.items) == 0)
     }
+
+    @Test("A reply that lands while its thread shows counts as opened")
+    func replyToShownThread() {
+        let activity = ActivityService()
+        activity.shownThread = (roomID: "!room-0", rootID: "$root")
+        activity.record(Self.reply(0))
+        #expect(ActivityBadge.count(rooms: [], items: activity.items) == 0)
+    }
+
+    @Test("A mention shows unread until it's opened or its conversation is read")
+    func mentionUnread() {
+        var room = ChatRoom(id: "!room-0", name: "room")
+        room.mentions = 1
+        var mention = Self.reply(0, mention: true)
+        mention.threadRootID = nil
+        #expect(ActivityBadge.isUnread(mention, room: room))
+        room.mentions = 0
+        #expect(!ActivityBadge.isUnread(mention, room: room))
+        room.mentions = 1
+        mention.opened = true
+        #expect(!ActivityBadge.isUnread(mention, room: room))
+    }
 }
