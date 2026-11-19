@@ -7,6 +7,15 @@ final class FakeHomeserver: @unchecked Sendable {
     private var messages: [[String: Any]]
     private let dropFirstSendResponse: Bool
     private let refusesDeletions: Bool
+    private let refusesEdits: Bool
+    /// Deletions whose response waits for `releaseDeletions()`.
+    private var heldDeletions: [() -> Void] = []
+    private var holdsDeletions: Bool
+    var deletionsHeld: Int { queue.sync { heldDeletions.count } }
+    /// The bodies of the messages the room holds, oldest first.
+    var bodies: [String] {
+        queue.sync { messages.reversed().compactMap { ($0["content"] as? [String: Any])?["body"] as? String } }
+    }
     private var sent: [String: String] = [:]
     private var dropped: String?
     private var replayed = false
@@ -16,10 +25,13 @@ final class FakeHomeserver: @unchecked Sendable {
     private(set) var url = ""
 
     init(
-        room: String, messages: [[String: Any]], dropFirstSendResponse: Bool = false, refusesDeletions: Bool = false
+        room: String, messages: [[String: Any]], dropFirstSendResponse: Bool = false, refusesDeletions: Bool = false,
+        holdsDeletions: Bool = false, refusesEdits: Bool = false
     ) async throws {
         self.dropFirstSendResponse = dropFirstSendResponse
         self.refusesDeletions = refusesDeletions
+        self.holdsDeletions = holdsDeletions
+        self.refusesEdits = refusesEdits
         self.room = room
         self.messages = messages
         let parameters = NWParameters.tcp
@@ -45,6 +57,15 @@ final class FakeHomeserver: @unchecked Sendable {
 
     deinit { listener.cancel() }
 
+    /// Answers the deletions held so far, and every later one at once.
+    func releaseDeletions() {
+        queue.sync {
+            holdsDeletions = false
+            for answer in heldDeletions { answer() }
+            heldDeletions = []
+        }
+    }
+
     private func read(_ connection: NWConnection, _ received: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [self] data, _, done, error in
             guard error == nil else { return connection.cancel() }
@@ -58,13 +79,20 @@ final class FakeHomeserver: @unchecked Sendable {
                 let payload = Data(buffer[end.upperBound..<(end.upperBound + length)])
                 buffer = Data(buffer[(end.upperBound + length)...])
                 let request = lines.first?.split(separator: " ").map(String.init) ?? []
-                guard let (status, body) = respond(request.first ?? "", request.count > 1 ? request[1] : "", payload)
-                else { return connection.cancel() }
-                let json = try! JSONSerialization.data(withJSONObject: body)
-                let head =
-                    "HTTP/1.1 \(status) \(status == 200 ? "OK" : "Not Found")\r\n"
-                    + "Content-Type: application/json\r\nContent-Length: \(json.count)\r\n\r\n"
-                connection.send(content: Data(head.utf8) + json, completion: .idempotent)
+                let (method, target) = (request.first ?? "", request.count > 1 ? request[1] : "")
+                let answer = { [self] in
+                    guard let (status, body) = respond(method, target, payload) else { return connection.cancel() }
+                    let json = try! JSONSerialization.data(withJSONObject: body)
+                    let head =
+                        "HTTP/1.1 \(status) \(status == 200 ? "OK" : "Not Found")\r\n"
+                        + "Content-Type: application/json\r\nContent-Length: \(json.count)\r\n\r\n"
+                    connection.send(content: Data(head.utf8) + json, completion: .idempotent)
+                }
+                if holdsDeletions, method == "PUT", target.contains("/redact/") {
+                    heldDeletions.append(answer)
+                } else {
+                    answer()
+                }
             }
             if done { connection.cancel() } else { read(connection, buffer) }
         }
@@ -83,6 +111,9 @@ final class FakeHomeserver: @unchecked Sendable {
             let content = try? JSONSerialization.jsonObject(with: payload) as? [String: Any]
         {
             let transaction = segments[7]
+            if refusesEdits, content["m.new_content"] != nil {
+                return (403, ["errcode": "M_FORBIDDEN", "error": "Not allowed"])
+            }
             if let eventID = sent[transaction] {
                 if transaction == dropped { replayed = true }
                 return (200, ["event_id": eventID])

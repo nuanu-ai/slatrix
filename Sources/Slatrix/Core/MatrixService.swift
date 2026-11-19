@@ -545,6 +545,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var isRetryingConnection = false
     private(set) var canRetryConnection = false
     private let connectionRecovery = ConnectionRecovery()
+    private var refusedChanges: RefusedChanges?
     private var profileLoadTask: Task<Void, Never>?
     private var profileRevision: UInt64 = 0
     private var avatarRevision: UInt64 = 0
@@ -815,6 +816,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadSelection = threadID
         setMessageActionThread(rootID: rootID)
     }
+    func watchRefusedChangesForChecks() async throws { try await watchRefusedChanges(try requireClient()) }
     func configureRoomOpenForChecks(client: Client, roomList: RoomListService, user: ChatUser) {
         self.client = client
         self.user = user
@@ -1098,6 +1100,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             self.applyConnection(feedback)
         }
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        try await watchRefusedChanges(newClient)
+        guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         let allRooms = try await service.roomListService().allRooms()
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         roomList = Self.observeAllRooms(
@@ -1219,6 +1223,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         forwardLoadID = nil
         recentEmoji = []
         await connectionRecovery.stop()
+        refusedChanges?.stop()
+        refusedChanges = nil
         mainSendFailures = [:]
         threadSendFailures = [:]
         sendFailures = [:]
@@ -1779,8 +1785,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         var eventOrTransactionId: EventOrTransactionId?
         var isRemote = false
         var failure: MessageSendFailure?
-        /// Your deletion or edit of this sent message, which the server refused.
-        var refused: SendTarget?
         var forwardMedia: ForwardMediaRevision?
         var media: MediaSource?
         /// Images, files and videos say whether they have a thumbnail; other kinds leave the lookup alone.
@@ -1803,12 +1807,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         result.eventOrTransactionId = event.eventOrTransactionId
         result.isRemote = event.isRemote
         result.failure = MessageSendFailure.failure(event.localSendState)
-        // A failure the room's queue retries by itself is still on its way.
-        func refused(_ state: EventSendState?) -> Bool {
-            if case .sendingFailed(_, isRecoverable: false) = state { true } else { false }
-        }
-        result.refused =
-            refused(event.redactionSendState) ? .redaction : refused(event.editSendState) ? .edit : nil
         if case .msgLike(let content) = event.content, case .message(let message) = content.kind {
             result.forwardMedia = (try? ForwardMessageContent(message))?.mediaRevision
             switch message.msgType {
@@ -1849,13 +1847,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         marks.reserveCapacity(items.count)
         var projected: [ChatMessage] = []
         projected.reserveCapacity(items.count)
-        var refused: [(EventOrTransactionId, SendTarget)] = []
         for item in items {
             let key = ObjectIdentifier(item)
             let projection = cached[key] ?? projection(of: item, roomID: roomID)
-            if cached[key] == nil, let target = projection.refused, let id = projection.eventOrTransactionId {
-                refused.append((id, target))
-            }
             projections[key] = projection
             marks.append(projection.unread)
             guard let id = projection.id, let eventOrTransactionId = projection.eventOrTransactionId else { continue }
@@ -1887,22 +1881,23 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             firstUnreadEventID = UnreadMapping.firstUnreadEventID(in: marks)
         }
         sendFailures = mainSendFailures.merging(threadSendFailures) { _, latest in latest }
-        if !refused.isEmpty, let timeline = inThread ? threadTimeline : timeline { undo(refused, in: timeline) }
         return projected
     }
 
-    /// As Slack keeps a message it couldn't delete or edit: the message goes back to how the server has it, and you
-    /// hear why. Deleting or editing it again is the retry.
-    private func undo(_ changes: [(EventOrTransactionId, SendTarget)], in timeline: Timeline) {
+    /// As Slack keeps a message it couldn't delete or edit: it goes back to how the server has it, and you hear why
+    /// if its conversation is the one on screen. Deleting or editing it again is the retry.
+    private func watchRefusedChanges(_ client: Client) async throws {
         let session = sessionGeneration
-        Task {
-            for (id, target) in changes {
-                guard (try? await timeline.abortSend(itemId: id, target: target)) == true, session == sessionGeneration
-                else { continue }
-                errorMessage =
-                    target == .redaction ? "Couldn’t delete this message." : "Couldn’t edit this message."
-            }
+        let watcher = RefusedChanges(client: client) { [weak self] undone in
+            guard let self, session == sessionGeneration, selectedRoomID == undone.roomID,
+                undone.threadRootID == nil || undone.threadRootID == visibleActionThreadID
+            else { return }
+            errorMessage =
+                undone.target == .redaction ? "Couldn’t delete this message." : "Couldn’t edit this message."
         }
+        refusedChanges?.stop()
+        refusedChanges = watcher
+        try await watcher.start()
     }
 
     /// `draft` is the composer's Matrix HTML. `alsoToChannel` copies a thread reply to the channel once it's sent.

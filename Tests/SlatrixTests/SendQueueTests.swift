@@ -204,62 +204,42 @@ struct SendQueueStaleMessageTests {
     }
 }
 
-private final class ChangeTimeline: Timeline, @unchecked Sendable {
-    let aborted = Recorder<String>()
-    override func abortSend(itemId: EventOrTransactionId, target: SendTarget) async throws -> Bool {
-        aborted.append("\(target) \(MatrixMapping.identifier(itemId))")
-        return true
+/// A client whose rooms' send queues report to the test.
+private final class QueueClient: Client, @unchecked Sendable {
+    private let lock = NSLock()
+    private let room: Room
+    private var reporting: SendQueueRoomUpdateListener?
+    var listener: SendQueueRoomUpdateListener? { lock.withLock { reporting } }
+    init(room: Room) {
+        self.room = room
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func getRoom(roomId: String) throws -> Room? { roomId == room.id() ? room : nil }
+    override func subscribeToSendQueueUpdates(listener: SendQueueRoomUpdateListener) async throws -> TaskHandle {
+        lock.withLock { reporting = listener }
+        return FakeCancellableHandle(noHandle: .init())
     }
 }
 
-/// A deletion or edit of a sent message that the server has not accepted.
 @MainActor
-struct UnconfirmedChangeTests {
-    private let service = MatrixService()
-    private let timeline = ChangeTimeline(noHandle: .init())
-    private let roomID = "!room:example.org"
-
-    private func show(_ event: EventTimelineItem, inThread: Bool) {
-        service.configureMessageActionsForChecks(
-            client: FakeClient(), main: inThread ? nil : timeline, thread: inThread ? timeline : nil,
-            rootID: inThread ? "$root" : nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
-        service.projectMediaCaptionForChecks([FakeTimelineItem(event)], roomID: roomID, inThread: inThread)
-    }
-
-    private func own(redacted: Bool) -> EventTimelineItem {
-        var event = textEvent("$reply", body: "On it", sender: "@me:example.org", redacted: redacted)
-        event.isOwn = true
-        return event
-    }
-
+struct RefusedChangeTests {
     // capability: message.delete
-    @Test(
-        "A deletion on its way shows the message deleted; one the server refused brings it back and says so",
-        arguments: [false, true])
-    func refusedDeletion(inThread: Bool) async throws {
-        var event = own(redacted: true)
-        event.redactionSendState = .notSentYet(progress: nil)
-        show(event, inThread: inThread)
-        // A failure the room's queue retries by itself is still on its way.
-        event.redactionSendState = .sendingFailed(error: .genericApiError(msg: "x"), isRecoverable: true)
-        show(event, inThread: inThread)
-        await drainMainActor()
-        #expect(timeline.aborted.all.isEmpty && service.errorMessage == nil)
-        #expect((inThread ? service.threadMessages : service.messages).first?.isRedacted == true)
-
-        event.redactionSendState = .sendingFailed(error: .genericApiError(msg: "x"), isRecoverable: false)
-        show(event, inThread: inThread)
-        #expect(await eventually { service.errorMessage == "Couldn’t delete this message." })
-        #expect(timeline.aborted.all == ["redaction $reply"])
-    }
-
-    // capability: message.edit
-    @Test("An edit the server refused goes back to the message as it was and says so")
-    func refusedEdit() async throws {
-        var event = own(redacted: false)
-        event.editSendState = .sendingFailed(error: .genericApiError(msg: "x"), isRecoverable: false)
-        show(event, inThread: false)
-        #expect(await eventually { service.errorMessage == "Couldn’t edit this message." })
-        #expect(timeline.aborted.all == ["edit $reply"])
+    @Test("Only what the server refused is cancelled; a failure the queue retries by itself is still on its way")
+    func cancelsOnlyRefused() async throws {
+        var waiting = textEvent("$waiting", body: "Waiting", redacted: true)
+        waiting.redactionSendState = .sendingFailed(error: .genericApiError(msg: "x"), isRecoverable: true)
+        var refused = textEvent("$refused", body: "Refused", redacted: true)
+        refused.redactionSendState = .sendingFailed(error: .genericApiError(msg: "x"), isRecoverable: false)
+        let room = FakeOpenRoom("!room:example.org", cached: [FakeTimelineItem(waiting), FakeTimelineItem(refused)])
+        let client = QueueClient(room: room)
+        let changes = RefusedChanges(client: client) { _ in }
+        defer { changes.stop() }
+        try await changes.start()
+        client.listener?.onUpdate(roomId: room.id(), update: .newLocalEvent(transactionId: "deletion"))
+        client.listener?.onUpdate(
+            roomId: room.id(),
+            update: .sendError(transactionId: "deletion", error: .genericApiError(msg: "403"), isRecoverable: false))
+        #expect(await eventually { room.timelines.all.first?.aborted.all == ["redaction $refused"] })
     }
 }

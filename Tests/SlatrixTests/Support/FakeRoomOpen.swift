@@ -75,6 +75,12 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         sent.append(())
         return SendHandle(noHandle: .init())
     }
+    /// What sends were cancelled, as the target and the message.
+    let aborted = Recorder<String>()
+    override func abortSend(itemId: EventOrTransactionId, target: SendTarget) async throws -> Bool {
+        aborted.append("\(target) \(MatrixMapping.identifier(itemId))")
+        return true
+    }
     func emit(_ diff: [TimelineDiff]) {
         let added = diff.flatMap { change -> [TimelineItem] in
             switch change {
