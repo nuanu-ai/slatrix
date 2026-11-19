@@ -132,6 +132,33 @@ struct ConnectionRecoveryTests {
         network.continuation.finish()
     }
 
+    @Test(
+        "A room sync callback delivered while offline cannot resume sending before the new connection answers",
+        arguments: [RoomListServiceState.settingUp, .recovering, .running])
+    func lateRoomSyncDuringNetworkLoss(response: RoomListServiceState) async throws {
+        let network = AsyncStream<Bool>.makeStream()
+        let recovery = ConnectionRecovery(networkChanges: { network.stream })
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { client.enabled.all.last == true })
+
+        network.continuation.yield(false)
+        try #require(await eventually { recovery.feedback.state == .offline })
+        await client.enableAllSendQueues(enable: false)
+        service.roomSync.emit(response)
+        await drainMainActor()
+
+        service.confirmsSync = false
+        network.continuation.yield(true)
+        try #require(await eventually { service.startCount > 0 && !recovery.feedback.isRetrying })
+        #expect(client.enabled.all.last == false)
+        service.roomSync.emit(.running)
+        #expect(await eventually { client.enabled.all.last == true && recovery.feedback.state == .running })
+        await recovery.stop()
+        network.continuation.finish()
+    }
+
     @Test("A slow SDK start cannot block reporting that the network disappeared")
     func networkLossDuringStart() async throws {
         let network = AsyncStream<Bool>.makeStream()

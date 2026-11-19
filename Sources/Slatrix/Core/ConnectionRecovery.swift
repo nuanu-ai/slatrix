@@ -149,7 +149,7 @@ final class ConnectionRecovery {
                 // The monitor reports every path change; only a network back after a loss needs a fresh sync.
                 let returned = self.networkAvailable == false && available
                 self.networkAvailable = available
-                if !available { self.syncResponded = false }
+                if !available || returned { self.syncResponded = false }
                 self.publish()
                 if returned {
                     self.failures = 0
