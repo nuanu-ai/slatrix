@@ -13,27 +13,51 @@ struct MentionPalette: Equatable {
 extension NSAttributedString.Key {
     /// A mention pill's fill, which `PillLayoutManager` draws rounded behind the text.
     static let mentionPill = NSAttributedString.Key("SlatrixMentionPill")
+    /// Inline code's fill, which `PillLayoutManager` draws as it draws a mention's.
+    static let codeSpan = NSAttributedString.Key("SlatrixCodeSpan")
 }
 
 extension NSMutableAttributedString {
     /// Reserves each pill's padding on both sides as real space, kerning after its last character, so the text around
     /// a pill never touches its fill. Run again after the font size changes.
     func padMentionPills() {
-        enumerateAttribute(.mentionPill, in: NSRange(location: 0, length: length)) { value, range, _ in
-            guard value != nil, let font = attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
-            else { return }
-            let last = NSMaxRange(range) - 1
-            let kern = 2 * PillLayoutManager.padding(font)
-            // Setting an equal value still counts as an edit, and a text view puts the caret after its last edit.
-            guard attribute(.kern, at: last, effectiveRange: nil) as? CGFloat != kern else { return }
-            addAttribute(.kern, value: kern, range: NSRange(location: last, length: 1))
+        for key in PillLayoutManager.keys {
+            enumerateAttribute(key, in: NSRange(location: 0, length: length)) { value, range, _ in
+                guard value != nil, let font = attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+                else { return }
+                let last = NSMaxRange(range) - 1
+                let kern = 2 * PillLayoutManager.padding(font)
+                // Setting an equal value still counts as an edit, and a text view puts the caret after its last edit.
+                guard attribute(.kern, at: last, effectiveRange: nil) as? CGFloat != kern else { return }
+                addAttribute(.kern, value: kern, range: NSRange(location: last, length: 1))
+            }
         }
     }
 }
 
-/// Draws `.mentionPill` runs as Slack's inline mention: a rounded fill as tall as the font, whatever the line holds,
-/// around text inset by the padding that `padMentionPills()` reserves.
-class PillLayoutManager: NSLayoutManager {
+/// Draws `.mentionPill` and `.codeSpan` runs as Slack's inline mentions and code: a rounded fill as tall as the font,
+/// whatever the line holds, around text inset by the padding that `padMentionPills()` reserves. A mention that fits on
+/// the next line wraps there whole.
+class PillLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
+    static let keys: [NSAttributedString.Key] = [.mentionPill, .codeSpan]
+
+    override init() {
+        super.init()
+        delegate = self
+    }
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        delegate = self
+    }
+
+    func layoutManager(_ layoutManager: NSLayoutManager, shouldBreakLineByWordBeforeCharacterAt charIndex: Int) -> Bool
+    {
+        guard let storage = textStorage, charIndex > 0, charIndex < storage.length else { return true }
+        var mention = NSRange()
+        return storage.attribute(.mentionPill, at: charIndex, effectiveRange: &mention) == nil
+            || mention.location == charIndex
+    }
+
     struct Pill {
         /// In text container coordinates, one per line the mention spans.
         var rect: NSRect
@@ -47,52 +71,56 @@ class PillLayoutManager: NSLayoutManager {
     func pills(forCharacterRange characters: NSRange) -> [Pill] {
         guard let storage = textStorage else { return [] }
         var pills: [Pill] = []
-        storage.enumerateAttribute(.mentionPill, in: characters) { value, range, _ in
-            guard let fill = value as? NSColor,
-                let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
-            else { return }
-            // A 3 pt radius at 15 pt, and a hair more than the font's height.
-            let radius = font.pointSize * 0.2
-            let bleed = font.pointSize * 0.05
-            let text = storage.string as NSString
-            var glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-            // One fill per line the mention spans, from its first glyph there to where the next glyph starts, which
-            // takes in the kerning after its last character. (Glyph bounding rects run wide on lines with emoji.)
-            while glyphs.length > 0 {
-                var line = NSRange()
-                let fragment = lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: &line)
-                let part = NSIntersectionRange(glyphs, line)
-                glyphs = NSRange(location: NSMaxRange(part), length: NSMaxRange(glyphs) - NSMaxRange(part))
-                // A mention that wraps ends the line at its last word, padded as its end is.
-                var words = characterRange(forGlyphRange: part, actualGlyphRange: nil)
-                while words.length > 1, text.character(at: NSMaxRange(words) - 1) == 0x20 { words.length -= 1 }
-                let next = NSMaxRange(glyphRange(forCharacterRange: words, actualCharacterRange: nil))
-                let start = location(forGlyphAt: part.location)
-                let end =
-                    next < NSMaxRange(line)
-                    ? fragment.minX + location(forGlyphAt: next).x
-                    : lineFragmentUsedRect(forGlyphAt: part.location, effectiveRange: nil).maxX
-                // From the baseline, so taller glyphs elsewhere on the line or line spacing never stretch it.
-                let rect = NSRect(
-                    x: fragment.minX + start.x, y: fragment.minY + start.y - font.ascender - bleed,
-                    width: end - fragment.minX - start.x + (glyphs.length > 0 ? 2 * Self.padding(font) : 0),
-                    height: font.ascender - font.descender + 2 * bleed)
-                pills.append(Pill(rect: rect, radius: radius, fill: fill))
+        for key in Self.keys {
+            storage.enumerateAttribute(key, in: characters) { value, range, _ in
+                guard let fill = value as? NSColor,
+                    let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+                else { return }
+                // The small radius at the reading size, scaled with the font, and a hair more than the font's height.
+                let radius = font.pointSize * Metrics().radiusSmall / TextRole.reading.points
+                let bleed = font.pointSize * 0.05
+                let text = storage.string as NSString
+                var glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                // One fill per line the mention spans, from its first glyph there to where the next glyph starts, which
+                // takes in the kerning after its last character. (Glyph bounding rects run wide on lines with emoji.)
+                while glyphs.length > 0 {
+                    var line = NSRange()
+                    let fragment = lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: &line)
+                    let part = NSIntersectionRange(glyphs, line)
+                    glyphs = NSRange(location: NSMaxRange(part), length: NSMaxRange(glyphs) - NSMaxRange(part))
+                    // A mention that wraps ends the line at its last word, padded as its end is.
+                    var words = characterRange(forGlyphRange: part, actualGlyphRange: nil)
+                    while words.length > 1, text.character(at: NSMaxRange(words) - 1) == 0x20 { words.length -= 1 }
+                    let next = NSMaxRange(glyphRange(forCharacterRange: words, actualCharacterRange: nil))
+                    let start = location(forGlyphAt: part.location)
+                    let end =
+                        next < NSMaxRange(line)
+                        ? fragment.minX + location(forGlyphAt: next).x
+                        : lineFragmentUsedRect(forGlyphAt: part.location, effectiveRange: nil).maxX
+                    // From the baseline, so taller glyphs elsewhere on the line or line spacing never stretch it.
+                    let rect = NSRect(
+                        x: fragment.minX + start.x, y: fragment.minY + start.y - font.ascender - bleed,
+                        width: end - fragment.minX - start.x + (glyphs.length > 0 ? 2 * Self.padding(font) : 0),
+                        height: font.ascender - font.descender + 2 * bleed)
+                    pills.append(Pill(rect: rect, radius: radius, fill: fill))
+                }
             }
         }
         return pills
     }
 
-    /// A mention's text sits in the middle of its reserved space.
+    /// A pill's text sits in the middle of its reserved space.
     override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         guard let storage = textStorage else { return super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin) }
         let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
-        storage.enumerateAttribute(.mentionPill, in: characters) { value, range, _ in
-            let glyphs = NSIntersectionRange(
-                glyphRange(forCharacterRange: range, actualCharacterRange: nil), glyphsToShow)
-            let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
-            let shift = value != nil ? font.map(Self.padding) ?? 0 : 0
-            super.drawGlyphs(forGlyphRange: glyphs, at: NSPoint(x: origin.x + shift, y: origin.y))
+        storage.enumerateAttribute(.mentionPill, in: characters) { mention, range, _ in
+            storage.enumerateAttribute(.codeSpan, in: range) { code, range, _ in
+                let glyphs = NSIntersectionRange(
+                    glyphRange(forCharacterRange: range, actualCharacterRange: nil), glyphsToShow)
+                let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+                let shift = mention != nil || code != nil ? font.map(Self.padding) ?? 0 : 0
+                super.drawGlyphs(forGlyphRange: glyphs, at: NSPoint(x: origin.x + shift, y: origin.y))
+            }
         }
     }
 
@@ -231,7 +259,8 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         var paragraph = NSParagraphStyle()
         var lineStart = true
         for run in runs {
-            let size = run.style.contains(.code) ? max(10, fontSize - 1) : fontSize
+            let base = run.block.heading > 0 ? MessageBlocks.headingSize(run.block.heading, fontSize) : fontSize
+            let size = run.style.contains(.code) ? max(10, base - 1) : base
             var font =
                 run.style.contains(.code)
                 ? NSFont.monospacedSystemFont(ofSize: size, weight: .regular) : NSFont.systemFont(ofSize: size)
@@ -245,7 +274,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             if run.block.code {
                 attributes[.codeBlock] = textColor.withAlphaComponent(0.04)
             } else if run.style.contains(.code) {
-                attributes[.backgroundColor] = textColor.withAlphaComponent(0.07)
+                attributes[.codeSpan] = textColor.withAlphaComponent(0.07)
             }
             if run.block.quote > 0 { attributes[.quoteBar] = textColor.withAlphaComponent(0.25) }
             if let link = run.link.flatMap({ MessageBodyRenderer.safeLink($0.absoluteString) }) {
@@ -258,29 +287,31 @@ struct NativeSelectableMessageText: NSViewRepresentable {
                 attributes[.underlineStyle] = nil
                 attributes[.mentionPill] = own ? mentions.ownFill : mentions.fill
             }
-            let style = { (marker: Bool) in
+            let style = { (marker: CGFloat) in
                 MessageBlocks.paragraph(
-                    quote: run.block.quote > 0, list: run.block.list, code: run.block.code, hangingMarker: marker,
-                    fontSize: fontSize, lineSpacing: lineSpacing)
+                    quote: run.block.quote > 0, list: run.block.list, code: run.block.code, marker: marker,
+                    heading: run.block.heading > 0 && result.length > 0, fontSize: fontSize, lineSpacing: lineSpacing)
             }
-            if lineStart { paragraph = style(run.marker) }
-            attributes[.paragraphStyle] = paragraph
-            if run.marker, let space = run.text.last {
-                // The marker fills the list indent, so a wrapped line starts under the item's first word.
-                let width = NSAttributedString(string: run.text, attributes: attributes).size().width
-                result.append(NSAttributedString(string: String(run.text.dropLast()), attributes: attributes))
-                attributes[.kern] = max(0, MessageBlocks.listIndent(fontSize) - width)
-                result.append(NSAttributedString(string: String(space), attributes: attributes))
+            if run.marker {
+                // The marker and its space end at the list indent, so bullets and numbers sit the same distance from
+                // their text, and a wrapped line starts under the item's first word.
+                let marker = MessageBlocks.marker(run.text, attributes: attributes)
+                paragraph = style(marker.size().width)
+                marker.addAttribute(
+                    .paragraphStyle, value: paragraph, range: NSRange(location: 0, length: marker.length))
+                result.append(marker)
                 lineStart = false
                 continue
             }
+            if lineStart { paragraph = style(0) }
+            attributes[.paragraphStyle] = paragraph
             // The run's later lines are lines of their own, which never start with a marker.
             let text = run.text as NSString
             let firstBreak = text.range(of: "\n")
             let head = firstBreak.location == NSNotFound ? text.length : NSMaxRange(firstBreak)
             result.append(NSAttributedString(string: text.substring(to: head), attributes: attributes))
             if head < text.length {
-                paragraph = style(false)
+                paragraph = style(0)
                 attributes[.paragraphStyle] = paragraph
                 result.append(NSAttributedString(string: text.substring(from: head), attributes: attributes))
             }

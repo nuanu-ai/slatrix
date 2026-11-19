@@ -1396,11 +1396,14 @@ private final class ComposerLayoutManager: PillLayoutManager {
             }
         }
         let font = view.typingAttributes[.font] as? NSFont ?? .systemFont(ofSize: NSFont.systemFontSize)
-        let marker = NSAttributedString(
-            string: block == .bullet ? "•" : "\(number).",
+        let marker = MessageBlocks.marker(
+            block == .bullet ? "• " : "\(number). ",
             attributes: [.font: NSFont.systemFont(ofSize: font.pointSize), .foregroundColor: NSColor.labelColor])
         // Where a message's marker text sits, so a list looks the same before and after sending.
-        marker.draw(at: NSPoint(x: baseline.x, y: baseline.y - font.ascender))
+        marker.draw(
+            at: NSPoint(
+                x: baseline.x + MessageBlocks.listIndent(font.pointSize) - marker.size().width,
+                y: baseline.y - font.ascender))
     }
 }
 

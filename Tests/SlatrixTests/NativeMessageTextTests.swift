@@ -32,11 +32,10 @@ struct NativeMessageTextTests {
         #expect(traits(at: 4)?.contains(.italic) == true)
     }
 
-    @Test("Code is monospaced on a background and keeps nested bold")
+    @Test("Code is monospaced and keeps nested bold")
     func code() {
         #expect(traits(at: 10)?.contains(.monoSpace) == true)
         #expect(traits(at: 10)?.contains(.bold) == true)
-        #expect(text.attribute(.backgroundColor, at: 10, effectiveRange: nil) is NSColor)
     }
 
     @Test("Strikethrough and underline are both applied")
@@ -128,6 +127,23 @@ struct NativeMessageTextTests {
         }
     }
 
+    @Test("Headings step down in size from h1 to h3, all above the body, and h4 to h6 share h3's size")
+    func headings() throws {
+        let runs = MessageBodyRenderer().render(
+            body: "", formattedBody: "<h1>A</h1><h2>B</h2><h3>C</h3><h4>D</h4><h6>E</h6><p>f</p>"
+        ).runs
+        let text = NativeSelectableMessageText.attributed(
+            runs, fontSize: 14, textColor: .labelColor, linkColor: .systemBlue)
+        let sizes = try ["A", "B", "C", "D", "E", "f"].map { letter in
+            let font =
+                text.attribute(
+                    .font, at: (text.string as NSString).range(of: letter).location, effectiveRange: nil) as? NSFont
+            return try #require(font).pointSize
+        }
+        #expect(sizes[0] > sizes[1] && sizes[1] > sizes[2] && sizes[2] > sizes[5])
+        #expect(sizes[3] == sizes[2] && sizes[4] == sizes[2])
+    }
+
     @Test("A blank line between paragraphs is a small gap, not a whole line; in a code block it stays a line")
     func paragraphGap() {
         func gap(_ block: MessageBlock = MessageBlock()) -> CGFloat {
@@ -164,8 +180,22 @@ struct NativeMessageTextTests {
             ], fontSize: 15, textColor: .labelColor, linkColor: .systemBlue)
         let at = positions(text, width: 200)
         let wrapped = try #require((2..<text.length).first { at($0).y > at(2).y })
-        #expect(at(0).x == 0 && at(2).x > 0)
+        #expect(at(0).x < at(2).x)
         #expect(abs(at(wrapped).x - at(2).x) < 0.5)
+    }
+
+    @Test("A bullet and a number end the same distance before their item's text, which starts at one indent")
+    func listMarkers() {
+        let list = MessageBlock(list: 1)
+        let storage = laidOut([
+            MessageBodyRun(text: "• ", block: list, marker: true), MessageBodyRun(text: "one\n", block: list),
+            MessageBodyRun(text: "12. ", block: list, marker: true), MessageBodyRun(text: "two", block: list),
+        ])
+        func at(_ index: Int) -> NSRect { glyphs(storage, NSRange(location: index, length: 1)) }
+        let bulletGap = at(2).minX - at(0).maxX
+        let numberGap = at(10).minX - at(8).maxX
+        #expect(abs(bulletGap - numberGap) < 0.5)
+        #expect(at(2).minX == at(10).minX)
     }
 
     @Test("A code block sits on a padded fill instead of inline code's background")
@@ -236,6 +266,30 @@ struct NativeMessageTextTests {
         let after = glyphs(storage, NSRange(location: 16, length: 1))
         #expect(before.maxX <= found[1].minX + 0.01)
         #expect(after.minX >= found[1].maxX - 0.01)
+    }
+
+    @Test("A mention that fits on a line moves to the next one whole instead of breaking inside the name")
+    func mentionKeepsTogether() throws {
+        let name = mention("Евгения Красносельская-Тихомирова")
+        let alone = laidOut([name], width: 2_000)
+        let width = glyphs(alone, NSRange(location: 0, length: alone.length)).width + 20
+        let storage = laidOut([MessageBodyRun(text: "Reviewers this week: "), name], width: width)
+        let mentionRange = NSRange(location: 21, length: storage.length - 21)
+        #expect(pills(storage).count == 1)
+        #expect(glyphs(storage, mentionRange).minX < 1)
+    }
+
+    @Test("Inline code sits on a fill wider than its letters, and the words beside it stay clear of the fill")
+    func inlineCodePadding() throws {
+        let storage = laidOut([
+            MessageBodyRun(text: "Set "), MessageBodyRun(text: "MAX", style: .code), MessageBodyRun(text: " now"),
+        ])
+        let fill = try #require(pills(storage).first)
+        let font = try #require(storage.attribute(.font, at: 4, effectiveRange: nil) as? NSFont)
+        let letters = NSAttributedString(string: "MAX", attributes: [.font: font]).size().width
+        #expect(glyphs(storage, NSRange(location: 3, length: 1)).maxX <= fill.minX + 0.01)
+        #expect(glyphs(storage, NSRange(location: 7, length: 1)).minX >= fill.maxX - 0.01)
+        #expect(fill.width >= letters + 2)
     }
 
     @Test("A mention's text is drawn in the middle of its pill")

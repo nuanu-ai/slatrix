@@ -16,9 +16,30 @@ enum MessageBlocks {
     static func barWidth(_ fontSize: CGFloat) -> CGFloat { fontSize * 0.27 }
     static func codePadding(_ fontSize: CGFloat) -> CGFloat { fontSize * 0.5 }
 
-    /// A line's style. `hangingMarker`: the line starts with its list marker as text, inside the indent.
+    /// h1 and h2 on the macOS title sizes, and h3 to h6 a step above the reading size, scaled from `fontSize`, the
+    /// reading size at the current zoom.
+    static func headingSize(_ level: Int, _ fontSize: CGFloat) -> CGFloat {
+        let role: TextRole = level == 1 ? .title1 : level == 2 ? .title2 : .title3
+        return fontSize * role.points / TextRole.reading.points
+    }
+
+    /// A list marker and the space after it, in `attributes`, with a bullet in a heavier weight so it reads at any
+    /// zoom.
+    static func marker(_ text: String, attributes: [NSAttributedString.Key: Any]) -> NSMutableAttributedString {
+        let marker = NSMutableAttributedString(string: text, attributes: attributes)
+        if text.hasPrefix("•"), let font = attributes[.font] as? NSFont {
+            marker.addAttribute(
+                .font, value: NSFont.systemFont(ofSize: font.pointSize, weight: .heavy),
+                range: NSRange(location: 0, length: 1))
+        }
+        return marker
+    }
+
+    /// A line's style. `marker`: the width of the list marker the line starts with, which hangs in the indent.
+    /// `heading`: the line is a heading below other lines, with a gap above it.
     static func paragraph(
-        quote: Bool, list: Int, code: Bool, hangingMarker: Bool = false, fontSize: CGFloat, lineSpacing: CGFloat
+        quote: Bool, list: Int, code: Bool, marker: CGFloat = 0, heading: Bool = false, fontSize: CGFloat,
+        lineSpacing: CGFloat
     ) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
         style.lineSpacing = lineSpacing
@@ -26,8 +47,9 @@ enum MessageBlocks {
             (quote ? quoteIndent(fontSize) : 0) + CGFloat(list) * listIndent(fontSize)
             + (code ? codePadding(fontSize) : 0)
         style.headIndent = indent
-        style.firstLineHeadIndent = hangingMarker ? indent - listIndent(fontSize) : indent
+        style.firstLineHeadIndent = max(0, indent - marker)
         if code { style.tailIndent = -codePadding(fontSize) }
+        if heading { style.paragraphSpacingBefore = fontSize * Metrics().sp8 / TextRole.reading.points }
         return style
     }
 
