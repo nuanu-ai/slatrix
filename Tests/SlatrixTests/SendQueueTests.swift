@@ -203,3 +203,63 @@ struct SendQueueStaleMessageTests {
         #expect(service.pendingSendActions.isEmpty && service.sendFailures.isEmpty)
     }
 }
+
+private final class ChangeTimeline: Timeline, @unchecked Sendable {
+    let aborted = Recorder<String>()
+    override func abortSend(itemId: EventOrTransactionId, target: SendTarget) async throws -> Bool {
+        aborted.append("\(target) \(MatrixMapping.identifier(itemId))")
+        return true
+    }
+}
+
+/// A deletion or edit of a sent message that the server has not accepted.
+@MainActor
+struct UnconfirmedChangeTests {
+    private let service = MatrixService()
+    private let timeline = ChangeTimeline(noHandle: .init())
+    private let roomID = "!room:example.org"
+
+    private func show(_ event: EventTimelineItem, inThread: Bool) {
+        service.configureMessageActionsForChecks(
+            client: FakeClient(), main: inThread ? nil : timeline, thread: inThread ? timeline : nil,
+            rootID: inThread ? "$root" : nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
+        service.projectMediaCaptionForChecks([FakeTimelineItem(event)], roomID: roomID, inThread: inThread)
+    }
+
+    private func own(redacted: Bool) -> EventTimelineItem {
+        var event = textEvent("$reply", body: "On it", sender: "@me:example.org", redacted: redacted)
+        event.isOwn = true
+        return event
+    }
+
+    // capability: message.delete
+    @Test(
+        "A deletion on its way shows the message deleted; one the server refused brings it back and says so",
+        arguments: [false, true])
+    func refusedDeletion(inThread: Bool) async throws {
+        var event = own(redacted: true)
+        event.redactionSendState = .notSentYet(progress: nil)
+        show(event, inThread: inThread)
+        // A failure the room's queue retries by itself is still on its way.
+        event.redactionSendState = .sendingFailed(error: .genericApiError(msg: "x"), isRecoverable: true)
+        show(event, inThread: inThread)
+        await drainMainActor()
+        #expect(timeline.aborted.all.isEmpty && service.errorMessage == nil)
+        #expect((inThread ? service.threadMessages : service.messages).first?.isRedacted == true)
+
+        event.redactionSendState = .sendingFailed(error: .genericApiError(msg: "x"), isRecoverable: false)
+        show(event, inThread: inThread)
+        #expect(await eventually { service.errorMessage == "Couldn’t delete this message." })
+        #expect(timeline.aborted.all == ["redaction $reply"])
+    }
+
+    // capability: message.edit
+    @Test("An edit the server refused goes back to the message as it was and says so")
+    func refusedEdit() async throws {
+        var event = own(redacted: false)
+        event.editSendState = .sendingFailed(error: .genericApiError(msg: "x"), isRecoverable: false)
+        show(event, inThread: false)
+        #expect(await eventually { service.errorMessage == "Couldn’t edit this message." })
+        #expect(timeline.aborted.all == ["edit $reply"])
+    }
+}
