@@ -74,6 +74,7 @@ struct TimelineView: View {
             jumpID: jumpTarget == nil ? nil : matrix.jump?.id, startsAtUnread: startsAtUnread,
             memoryKey: TimelineMemory.Key(
                 sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
+            timelineID: thread ? nil : matrix.timelineSelectionID,
             canLoadOlder: hasOlder && !loadingHistory,
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
@@ -192,7 +193,8 @@ struct TimelineView: View {
         let offline = matrix.connectionState == .offline
         let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
         let inputs = TimelineLayoutCache.EntryInputs(
-            rows: rows, hasOlder: hasOlder, reachedStart: reachedStart, hasNewer: hasNewer,
+            rows: rows, hasOlder: hasOlder, reachedStart: reachedStart, reading: !thread && matrix.timelineLoading,
+            hasNewer: hasNewer,
             loadingHistory: loadingHistory, welcome: welcome,
             pinned: room.pinnedEventIDs,
             canPin: canPinMessages, savedIDs: savedIDs, highlighted: highlighted,
@@ -215,7 +217,7 @@ struct TimelineView: View {
         entries.reserveCapacity(rows.count + 2)
         if hasOlder {
             entries.append(TimelineEntry(id: "older", kind: .loading(loadingHistory)))
-        } else if !thread && (reachedStart || rows.isEmpty) {
+        } else if !thread && (reachedStart || rows.isEmpty && !matrix.timelineLoading) {
             entries.append(
                 TimelineEntry(
                     id: "welcome",
@@ -395,6 +397,7 @@ struct TimelineView: View {
         var rows: [TimelineLayout.Row]
         var hasOlder: Bool
         var reachedStart: Bool
+        var reading: Bool
         var hasNewer: Bool
         var loadingHistory: Bool
         var welcome: TimelineWelcome

@@ -23,6 +23,8 @@ struct ConversationSwitchHostedTests {
         var loading: Bool
         /// Placeholder rows holding the place of rows still being read.
         var skeleton = false
+        /// The conversation's introduction, which tops one read back to its start.
+        var intro = false
         /// The timeline's table; a new one builds its cells and measures every row it shows afresh.
         var table: ObjectIdentifier?
         /// Rows measured in the pass that drew this frame.
@@ -31,7 +33,7 @@ struct ConversationSwitchHostedTests {
             let ms = Int((at / .milliseconds(1)).rounded())
             let table = table.map { String(UInt(bitPattern: $0.hashValue) % 10_000) } ?? "-"
             return
-                "\(ms) ms header=\(header ?? "-") rows=\(rows.count) of \(rooms.sorted()) loading=\(loading) skeleton=\(skeleton) table=\(table) measured=\(measured)"
+                "\(ms) ms header=\(header ?? "-") rows=\(rows.count) of \(rooms.sorted()) loading=\(loading) skeleton=\(skeleton) intro=\(intro) table=\(table) measured=\(measured)"
         }
     }
 
@@ -44,6 +46,7 @@ struct ConversationSwitchHostedTests {
         private var observer: CFRunLoopObserver?
         private var clicked = ContinuousClock.now
         private var clickDate = Date()
+        private var passes = 0
 
         init() {
             _ = NSApplication.shared
@@ -65,6 +68,8 @@ struct ConversationSwitchHostedTests {
                     })
             }
             self.rooms = rooms
+            // Older pages wait on the server throughout, so the rows only change when the switch changes them.
+            for room in rooms { room.pageGate.arm() }
             matrix.configureRoomOpenForChecks(
                 client: FakeClient(rooms: rooms), roomList: FakeRoomListService(),
                 user: ChatUser(id: "@me:example.org", name: "Me"))
@@ -87,6 +92,7 @@ struct ConversationSwitchHostedTests {
         }
 
         func close() {
+            for room in rooms { room.pageGate.release() }
             if let observer { CFRunLoopObserverInvalidate(observer) }
             window.contentView = nil
             window.close()
@@ -101,14 +107,18 @@ struct ConversationSwitchHostedTests {
             let views = Self.views(in: hosting).filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
             var rows: [String: CGFloat] = [:]
             var rooms = Set<String>()
+            var intro = false
             for case let cell as TimelineCell in views {
-                guard case .message(let entry) = cell.entry?.kind, let scroll = cell.enclosingScrollView else {
-                    continue
+                guard let scroll = cell.enclosingScrollView, cell.frame.height > 1,
+                    cell.convert(cell.bounds, to: nil).intersects(scroll.convert(scroll.bounds, to: nil))
+                else { continue }
+                switch cell.entry?.kind {
+                case .message(let entry):
+                    rows[entry.message.eventID] = cell.convert(cell.bounds, to: nil).minY
+                    rooms.insert(entry.message.roomID)
+                case .welcome: intro = true
+                default: break
                 }
-                let frame = cell.convert(cell.bounds, to: nil)
-                guard frame.intersects(scroll.convert(scroll.bounds, to: nil)), cell.frame.height > 1 else { continue }
-                rows[entry.message.eventID] = frame.minY
-                rooms.insert(entry.message.roomID)
             }
             // The timeline's own; the composer has a spinner of its own.
             let loading = views.contains { $0 is NSProgressIndicator && $0.enclosingScrollView is TimelineScrollView }
@@ -116,7 +126,7 @@ struct ConversationSwitchHostedTests {
             // and has flushed that body by the time this runs.
             return Frame(
                 at: ContinuousClock.now - clicked, header: matrix.selectedRoom?.name, rows: rows, rooms: rooms,
-                loading: loading, skeleton: matrix.timelineLoading && matrix.messages.isEmpty,
+                loading: loading, skeleton: matrix.timelineLoading && matrix.messages.isEmpty, intro: intro,
                 table: views.first { $0 is TimelineTableView }.map(ObjectIdentifier.init))
         }
 
@@ -168,6 +178,25 @@ struct ConversationSwitchHostedTests {
             RunLoop.main.add(click, forMode: .common)
         }
 
+        /// Until ten run-loop passes go by without a row measured, so the rows measured after a click are the click's
+        /// and not those the conversation on screen was still preparing for a scroll.
+        func idle() async {
+            let counter = CFRunLoopObserverCreateWithHandler(
+                nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max
+            ) { [weak self] _, _ in MainActor.assumeIsolated { self?.passes += 1 } }
+            CFRunLoopAddObserver(CFRunLoopGetMain(), counter, .commonModes)
+            defer { CFRunLoopObserverInvalidate(counter) }
+            for _ in 0..<20 {
+                let since = Date()
+                let start = passes
+                _ = await eventually { passes >= start + 10 }
+                let measured = await performanceMessages(since: since).contains {
+                    $0.message.hasPrefix("interval=rows.measure ")
+                }
+                if !measured { return }
+            }
+        }
+
         /// Until the window shows `index`'s newest message and nothing more is loading.
         func settled(on index: Int) async -> Bool {
             let newest = "$s\(index)-39"
@@ -187,6 +216,9 @@ struct ConversationSwitchHostedTests {
         for frame in frames {
             if Set([roomID(frame.header)].compactMap { $0 }).union(frame.rooms).count > 1 {
                 faults.append("mixes conversations: \(frame)")
+            }
+            if frame.intro && frame.skeleton {
+                faults.append("introduces a conversation it has not read: \(frame)")
             }
             if frame.rows.isEmpty && (held || !(frame.skeleton || frame.loading)) {
                 faults.append("empty pane: \(frame)")
@@ -214,7 +246,10 @@ struct ConversationSwitchHostedTests {
         if let shown = frames.firstIndex(where: { $0.header == to }), shown > 0 {
             faults.append("the click's frame still shows the previous conversation: \(frames[0])")
         }
-        // Rows already held come with their heights; others are measured for the first screen only.
+        // Rows already held come with their heights; others are measured for the first screen only, once they are read.
+        if let click = frames.first, click.rows.isEmpty, click.measured > 0 {
+            faults.append("measured \(click.measured) rows before any were read: \(click)")
+        }
         if let first = frames.first(where: { $0.header == to && !$0.rows.isEmpty }),
             first.measured > (held ? 0 : first.rows.count + 2)
         {
@@ -231,9 +266,10 @@ struct ConversationSwitchHostedTests {
     func heldSwitch() async throws {
         let harness = Harness()
         defer { harness.close() }
-        #expect(await harness.settled(on: 0), "\(harness.sample()) \(harness.sample().rows.keys.sorted())")
+        #expect(await harness.settled(on: 0))
         harness.menu("next-conversation")
         #expect(await harness.settled(on: 1))
+        await harness.idle()
         harness.record()
         harness.menu("back")
         #expect(await harness.settled(on: 0))
@@ -250,6 +286,7 @@ struct ConversationSwitchHostedTests {
         let harness = Harness()
         defer { harness.close() }
         #expect(await harness.settled(on: 0))
+        await harness.idle()
         harness.rooms[1].buildGate.arm()
         harness.record()
         harness.menu("next-conversation")
