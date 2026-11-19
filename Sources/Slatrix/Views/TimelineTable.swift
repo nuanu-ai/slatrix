@@ -101,6 +101,8 @@ struct TimelineTable: NSViewRepresentable {
     var focusedEventID: String?
     /// New with each jump, so jumping to the message already focused scrolls back to it.
     var jumpID: UUID?
+    /// New with each message or file you send here.
+    var sends = 0
     var startsAtUnread: Bool
     /// Where to remember the reading position across visits.
     var memoryKey: TimelineMemory.Key?
@@ -254,6 +256,10 @@ struct TimelineTable: NSViewRepresentable {
             pendingFocus = configuration.focusedEventID
         }
         inset(configuration.insets)
+        // As in Slack, what you send brings a live conversation to it, however soon the server confirms it.
+        if opened, configuration.live, let previous, previous.sends != configuration.sends {
+            preservingPosition(keeping: .bottom) {}
+        }
         apply(configuration.entries)
         // A jump within rows already shown changes none of them.
         if opened, pendingFocus != nil { afterScroll() }

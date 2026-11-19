@@ -578,6 +578,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var hasLockedMessages = false
     private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private(set) var pendingSendActions = Set<SendQueueMessageKey>()
+    /// Messages and files sent from this device into the conversation and into the open thread, so far.
+    private(set) var conversationSends = 0
+    private(set) var threadSends = 0
     private var mainSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private var threadSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     var threadMessages: [ChatMessage] = []
@@ -1938,6 +1941,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             echo?.cancel()
             throw error
         }
+        countSend(threadRootID: threadRootID)
         if let echo { copyToChannel(message, once: echo, room: room, session: session) }
         await returnToLive(after: token, threadRootID: threadRootID)
     }
@@ -1979,6 +1983,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 errorMessage = "Your reply is in the thread, but it couldn’t also be sent to the conversation."
             }
         }
+    }
+
+    private func countSend(threadRootID: String?) {
+        if threadRootID == nil { conversationSends += 1 } else { threadSends += 1 }
     }
 
     /// Any timeline sends into the room's queue; a message sent from one loaded around an older message then shows
@@ -2536,6 +2544,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             target = try requireTimeline()
         }
         let handle = try target.sendAttachment(params: parameters, attachment: kind)
+        countSend(threadRootID: threadRootID)
         await returnToLive(after: token, threadRootID: threadRootID)
         try await handle.join()
     }

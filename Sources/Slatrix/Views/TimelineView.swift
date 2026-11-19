@@ -71,7 +71,8 @@ struct TimelineView: View {
         TimelineTable(
             entries: entries, context: updatedContext, live: live, bottomAligned: !thread,
             focusedEventID: thread ? jumpTarget : jumpTarget ?? matrix.focusedEventID,
-            jumpID: jumpTarget == nil ? nil : matrix.jump?.id, startsAtUnread: startsAtUnread,
+            jumpID: jumpTarget == nil ? nil : matrix.jump?.id,
+            sends: thread ? matrix.threadSends : matrix.conversationSends, startsAtUnread: startsAtUnread,
             memoryKey: TimelineMemory.Key(
                 sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
             timelineID: thread ? nil : matrix.shownTimelineID,

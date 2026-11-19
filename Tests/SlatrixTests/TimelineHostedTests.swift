@@ -23,6 +23,9 @@ private final class HistoryTimeline: Timeline, @unchecked Sendable {
         await gate.wait()
         return await onPage?() ?? false
     }
+    override func send(msg: RoomMessageEventContentWithoutRelation) async throws -> SendHandle {
+        SendHandle(noHandle: .init())
+    }
 }
 
 /// The production timeline in a real offscreen window. These need an unlocked, awake display, so they run only
@@ -475,6 +478,26 @@ struct TimelineHostedTests {
         harness.service.messages = earlier + sent
         await settle(harness) { harness.cell(showing: "transaction-5") != nil }
         #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
+        await drainMainActor()
+        await settle(harness)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
+    }
+
+    @Test("Your send brings the conversation to it even when the server confirms it before the list shows it")
+    func confirmedSendBringsToBottom() async throws {
+        let earlier = Self.messages(0..<60)
+        let harness = Harness(messages: earlier, height: 700)
+        defer { harness.close() }
+        await settle(harness)
+        harness.scroll(toTop: harness.clip.bounds.minY - 1_500)
+        let rows = harness.rowCount
+        try await harness.service.sendMessage("On my way", roomID: Self.room.id)
+        var sent = ChatMessage(
+            id: "mine", roomID: Self.room.id, senderID: Self.user, senderName: "Reader", body: "On my way",
+            timestamp: earlier[59].timestamp.addingTimeInterval(60))
+        sent.timelineEventID = "$mine"
+        harness.service.messages = earlier + [sent]
+        await settle(harness) { harness.rowCount > rows }
         await drainMainActor()
         await settle(harness)
         #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
