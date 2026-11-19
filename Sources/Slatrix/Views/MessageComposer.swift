@@ -34,6 +34,8 @@ struct MessageComposer: View {
     var onConversationKey: ((ConversationKeys.Action) -> Bool)? = nil
     /// The composer ⌘U attaches to when no composer has focus: the conversation's, not a thread's.
     var isPrimary = false
+    /// In a thread's pane, whose messages' text starts nearer their avatars; the placeholder starts where it does.
+    var isThread = false
 
     @StateObject private var editor = ComposerEditorState()
     @State private var localAttachments: [URL] = []
@@ -95,11 +97,14 @@ struct MessageComposer: View {
                 }.padding(.horizontal, m.sp12).padding(.top, m.sp12).padding(.bottom, m.sp4)
             }
             if !attachments.isEmpty && !isEditing { attachmentStrip.padding(.top, m.sp8) }
-            // One line at rest, 40 pt, growing upward; the buttons keep to its bottom edge, so Send never moves.
-            HStack(alignment: .bottom, spacing: m.sp4) {
+            // One line at rest, 40 pt, growing upward; the buttons keep to its bottom edge, so Send never moves. The
+            // composer keeps to the messages' column, so "+" sits under their avatars and the text starts where theirs
+            // does, past the editor's own inset.
+            HStack(alignment: .bottom, spacing: 0) {
                 iconButton("plus", label: "Attach files", circular: true) { chooseFiles() }.disabled(
                     sending || isEditing || preparingAttachments
                 ).padding(.bottom, m(6))
+                    .padding(.trailing, m.conversationText(thread: isThread) - m(6) - m.iconButton - m.sp4)
                 ZStack(alignment: .topLeading) {
                     if text.isEmpty && editor.formats.block == nil {
                         Text(placeholder)
@@ -143,7 +148,7 @@ struct MessageComposer: View {
                             .help(isEditing ? "Save changes (Return)" : "Send message (Return)")
                             .accessibilityLabel(isEditing ? "Save changes" : "Send message")
                     }
-                }.padding(.bottom, m(6)).disabled(sending)
+                }.padding(.bottom, m(6)).padding(.leading, m.sp4).disabled(sending)
             }.padding(.horizontal, m(6))
         }
         .glass(

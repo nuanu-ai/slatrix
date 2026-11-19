@@ -85,8 +85,7 @@ struct TimelineView: View {
             }, insets: insets
         )
         .overlay(alignment: .top) {
-            // From macOS 26 the header's edge effect shows messages passing under it in place of a line.
-            if #unavailable(macOS 26), contentAbove.wrappedValue {
+            if contentAbove.wrappedValue {
                 Divider().overlay(colors.border).padding(.top, insets.top)
             }
         }
@@ -181,7 +180,7 @@ struct TimelineView: View {
     private var entries: [TimelineEntry] {
         let rows = layout.rows(
             messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
-            groups: appearance.density != .compact)
+            groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil)
         let context = matrix.messageActionContext
         let offline = matrix.connectionState == .offline
         let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
@@ -224,6 +223,7 @@ struct TimelineView: View {
             switch row.kind {
             case .day(let label): entries.append(TimelineEntry(id: row.id, kind: .day(label)))
             case .unread: entries.append(TimelineEntry(id: row.id, kind: .unread))
+            case .replies(let count): entries.append(TimelineEntry(id: row.id, kind: .replies(count)))
             case .message(let message, let grouped, let time):
                 let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
                 entries.append(
@@ -413,7 +413,10 @@ struct TimelineView: View {
         return entries
     }
 
-    func rows(_ messages: [ChatMessage], firstUnreadEventID: String?, groups: Bool) -> [TimelineLayout.Row] {
+    /// A cache serves one timeline, so `threadRootEventID` never changes under it.
+    func rows(_ messages: [ChatMessage], firstUnreadEventID: String?, groups: Bool, threadRootEventID: String? = nil)
+        -> [TimelineLayout.Row]
+    {
         if !opened, !messages.isEmpty {
             opened = true
             if let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID }) {
@@ -422,8 +425,8 @@ struct TimelineView: View {
         }
         if let input, input.groups == groups, input.unread == unreadBoundary, input.messages == messages { return rows }
         rows = TimelineLayout.rows(
-            messages, unreadBoundaryEventID: unreadBoundary, groups: groups, now: Date(), calendar: .current,
-            locale: .current)
+            messages, unreadBoundaryEventID: unreadBoundary, groups: groups, threadRootEventID: threadRootEventID,
+            now: Date(), calendar: .current, locale: .current)
         input = (messages, unreadBoundary, groups)
         return rows
     }
@@ -503,8 +506,7 @@ struct MessageRow: View {
             .contentShape(Rectangle())
     }
     private var layout: some View {
-        // A thread's pane is narrow, so its rows give the text more of it.
-        HStack(alignment: .top, spacing: isThread ? m.sp8 : m.sp12) {
+        HStack(alignment: .top, spacing: m(ConversationGrid.gap(thread: isThread))) {
             if !compact {
                 if grouped || !appearance.showAvatars {
                     // One line: a wrap would grow the row on hover.
@@ -606,7 +608,7 @@ struct MessageRow: View {
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(.horizontal, isThread ? m.sp16 : m.sp20)
+        }.padding(.horizontal, m.conversationInset(thread: isThread))
             // 12 above a sender and 2 around a message under them, counted from 20 pt lines: a one-line row has none of
             // that leading of its own, so it comes on top of them. Two grouped rows share both their 2s, so a sender's
             // first gap is the tightest.

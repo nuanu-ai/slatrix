@@ -17,20 +17,16 @@ extension View {
         }
     }
 
-    /// A bar over the `edge` of content that scrolls under it. From macOS 26 the content shows through the bar's inner
-    /// edge and fades out toward the window's, as Apple's scroll edge effect fades it: a header's title and a
-    /// composer's bottom margin stay on the plain canvas, and the composer's glass shows what passes under it. Before
-    /// macOS 26 the bar is `canvas`.
+    /// A bar over the `edge` of content that scrolls under it. A header is `canvas`, ruled off by the timeline once
+    /// messages pass under it, so nothing ends half cut at an edge no one can see. From macOS 26 a composer's bar lets
+    /// the content show through its inner edge and fade toward the window's, as Apple's scroll edge effect fades it, so
+    /// the composer's glass shows what passes under it; before, it is `canvas` too.
     @ViewBuilder func scrollEdge(_ edge: VerticalEdge, _ canvas: Color) -> some View {
-        if #available(macOS 26, *) {
-            let top = edge == .top
+        if #available(macOS 26, *), edge == .bottom {
             background {
                 LinearGradient(
-                    stops: [
-                        .init(color: canvas, location: top ? 0.85 : 0.3),
-                        .init(color: canvas.opacity(0), location: top ? 1 : 0.6),
-                    ],
-                    startPoint: top ? .top : .bottom, endPoint: top ? .bottom : .top
+                    stops: [.init(color: canvas, location: 0.3), .init(color: canvas.opacity(0), location: 0.6)],
+                    startPoint: .bottom, endPoint: .top
                 ).allowsHitTesting(false)
             }
         } else {

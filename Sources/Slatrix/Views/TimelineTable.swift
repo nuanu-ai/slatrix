@@ -11,6 +11,7 @@ struct TimelineEntry: Identifiable, Hashable {
         case welcome(TimelineWelcome)
         case day(String)
         case unread
+        case replies(Int)
         case message(TimelineMessageEntry)
         case end
     }
@@ -439,7 +440,7 @@ struct TimelineTable: NSViewRepresentable {
         switch entry.kind {
         case .spacer, .end, .loading: return m.sp40
         case .welcome: return m(220)
-        case .day: return m(36)
+        case .day, .replies: return m(36)
         case .unread: return m(40)
         case .message(let row):
             let line = m.lineHeight(.reading)
@@ -964,7 +965,7 @@ struct TimelineTable: NSViewRepresentable {
         // A row too short for the gap above it centers the toolbar instead.
         let inset = min(m.sp4, (rect.height - size.height) / 2)
         let y = min(max(top.y + inset, visible.minY + m.sp4), visible.maxY - size.height)
-        toolbar.frame.origin = NSPoint(x: top.x - (context.isThread ? m.sp16 : m.sp20) - size.width, y: y)
+        toolbar.frame.origin = NSPoint(x: top.x - m.conversationInset(thread: context.isThread) - size.width, y: y)
         toolbar.isHidden = false
     }
 
@@ -995,7 +996,7 @@ extension TimelineEntry {
 
     fileprivate var isDivider: Bool {
         switch kind {
-        case .day, .unread: true
+        case .day, .unread, .replies: true
         case .spacer, .loading, .welcome, .message, .end: false
         }
     }
@@ -1168,6 +1169,7 @@ struct TimelineRow: View, Equatable {
             TimelineDayDivider(label: label, isThread: context.isThread).conversationRow(
                 metrics, isThread: context.isThread)
         case .unread: TimelineUnreadDivider().conversationRow(metrics, isThread: context.isThread)
+        case .replies(let count): TimelineRepliesDivider(count: count)
         case .message(let row):
             if let matrix = context.matrix {
                 let message = row.message
@@ -1220,6 +1222,11 @@ extension View {
     /// Keeps a conversation's row to its column, centered in a wider pane. A thread's pane is narrower: its rows fill it.
     func conversationRow(_ m: Metrics, isThread: Bool) -> some View {
         frame(maxWidth: isThread ? .infinity : m.conversationRow).frame(maxWidth: .infinity)
+    }
+
+    /// Keeps this view between the edges of `ConversationGrid`'s column, as the composer does under the messages.
+    func conversationColumn(_ m: Metrics, isThread: Bool) -> some View {
+        padding(.horizontal, m.conversationInset(thread: isThread)).conversationRow(m, isThread: isThread)
     }
 }
 
@@ -1278,7 +1285,25 @@ struct TimelineDayDivider: View {
             Rectangle().fill(colors.border).frame(height: 1)
         }
         // 20 above the day and 4 below: a sender's own 12 clears that, a compact row's 2 needs 2 more.
-        .frame(height: m.sp16).padding(.horizontal, isThread ? m.sp16 : m.sp20).padding(.top, m.sp20)
+        .frame(height: m.sp16).padding(.horizontal, m.conversationInset(thread: isThread)).padding(.top, m.sp20)
+        .padding(.bottom, appearance.density == .compact ? m.sp2 : 0)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Under a thread's root, Slack's count of its replies with a rule running on to the pane's edge.
+private struct TimelineRepliesDivider: View {
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+    let count: Int
+    var body: some View {
+        let colors = appearance.colors
+        HStack(spacing: m.sp8) {
+            Text("\(count) \(count == 1 ? "reply" : "replies")").font(m.font(.subheadline, .semibold))
+                .foregroundStyle(colors.textSecondary)
+            Rectangle().fill(colors.border).frame(height: 1)
+        }
+        .frame(height: m.sp16).padding(.horizontal, m.conversationInset(thread: true)).padding(.top, m.sp12)
         .padding(.bottom, appearance.density == .compact ? m.sp2 : 0)
         .accessibilityAddTraits(.isHeader)
     }

@@ -98,10 +98,12 @@ struct Metrics: Equatable {
     var sidebarFade: CGFloat { 36 * zoom }
     /// The air under a conversation's newest message, above the composer's own margin.
     var conversationEnd: CGFloat { 22 * zoom }
-    /// The conversation's centered column: the composer, and what a hovered row fills.
-    var conversationColumn: CGFloat { 720 * zoom }
-    /// A row of that column, with the margin it keeps from the pane on each side.
-    var conversationRow: CGFloat { conversationColumn + 2 * sp12 }
+    /// A conversation's row, centered in a wider pane: the column of `ConversationGrid` with its inset on each side.
+    var conversationRow: CGFloat { ConversationGrid.rowWidth * zoom }
+    /// From a row's edge to its avatar, and from its text to its other edge.
+    func conversationInset(thread: Bool) -> CGFloat { ConversationGrid.inset(thread: thread) * zoom }
+    /// From a column's leading edge to its text: the avatar and the gap after it.
+    func conversationText(thread: Bool) -> CGFloat { avatar + ConversationGrid.gap(thread: thread) * zoom }
     var avatarLarge: CGFloat { 72 * zoom }
     /// The photo at the top of a profile.
     var profilePhoto: CGFloat { 240 * zoom }

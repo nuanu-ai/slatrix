@@ -165,10 +165,14 @@ struct WindowHostedTests {
         }
 
         /// A point in the toolbar's capsule of conversation buttons, which SwiftUI draws without views: `inset` from
-        /// its trailing end, which sits a gap short of the search field at the toolbar's end.
+        /// its trailing end, which sits a gap short of back and forward, and they of the search field, which ends on
+        /// the messages' column.
         func toolbarCapsule(inset: CGFloat) -> CGRect {
             let m = Metrics()
-            let end = window.frame.width - m.sp16 - m(RootView.searchWidth) - m.sp12 - m.sp4
+            let left = conversationLeft ?? 0
+            let column = ConversationGrid.column(width: window.frame.width - left, thread: false)
+            let history = 2 * m.iconButton + 2 * m.sp2
+            let end = left + column.trailing - m(RootView.searchWidth) - m.sp12 - history - m.sp12
             return CGRect(x: end - inset, y: window.frame.height - m.paneHeader / 2, width: 0, height: 0)
         }
 
@@ -729,6 +733,22 @@ struct WindowHostedTests {
         harness.resize(1_440)
         try harness.openThread()
         #expect(await eventually { harness.dividers == 2 && harness.sidebarShown && harness.searchFieldShown })
+    }
+
+    @Test("Too narrow for a thread beside the conversation, the thread takes its place instead of cutting it")
+    func threadTakesConversationsPlace() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        try harness.openThread()
+        harness.resize(700)
+        // The conversation's drop target and the thread's, one over the other, as wide as each other.
+        #expect(
+            await eventually {
+                let targets = harness.shown().compactMap { $0 as? UploadDropView }
+                    .map { $0.convert($0.bounds, to: nil) }
+                return targets.count == 2 && targets[0].minX == targets[1].minX && targets[0].maxX == targets[1].maxX
+            })
     }
 
     // capability: app.narrow-window

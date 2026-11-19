@@ -10,6 +10,8 @@ enum TimelineLayout {
         enum Kind: Equatable {
             case day(String)
             case unread
+            /// Under a thread's root, as Slack sets the root apart from its replies.
+            case replies(Int)
             case message(ChatMessage, grouped: Bool, time: String)
         }
         let id: String
@@ -28,10 +30,11 @@ enum TimelineLayout {
         return String(time.characters).trimmingCharacters(in: .whitespaces)
     }
 
-    /// `unreadBoundaryEventID` is the event the "New messages" line goes above; `groups` is false in compact density.
+    /// `unreadBoundaryEventID` is the event the "New messages" line goes above; `groups` is false in compact density;
+    /// `threadRootEventID` is a thread's root, which gets the line counting its replies once it has loaded.
     static func rows(
-        _ messages: [ChatMessage], unreadBoundaryEventID: String?, groups: Bool, now: Date, calendar: Calendar,
-        locale: Locale
+        _ messages: [ChatMessage], unreadBoundaryEventID: String?, groups: Bool, threadRootEventID: String? = nil,
+        now: Date, calendar: Calendar, locale: Locale
     ) -> [Row] {
         let time = Date.FormatStyle(
             date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
@@ -43,7 +46,7 @@ enum TimelineLayout {
         // The previous message's day; one calendar lookup per day rather than per message.
         var currentDay: DateInterval?
         var dayIDs = Set<String>()
-        for message in messages {
+        for (index, message) in messages.enumerated() {
             let newDay = currentDay.map { !($0.start <= message.timestamp && message.timestamp < $0.end) } ?? true
             if newDay {
                 currentDay = calendar.dateInterval(of: .day, for: message.timestamp)
@@ -62,7 +65,7 @@ enum TimelineLayout {
             let unread = unreadBoundaryEventID != nil && message.eventID == unreadBoundaryEventID
             if unread { rows.append(Row(id: "unread", kind: .unread)) }
             let grouped =
-                groups && !newDay && !unread
+                groups && !newDay && !unread && (threadRootEventID == nil || previous?.eventID != threadRootEventID)
                 && previous.map {
                     $0.senderID == message.senderID
                         && message.timestamp.timeIntervalSince($0.timestamp) < groupingInterval
@@ -70,6 +73,9 @@ enum TimelineLayout {
             rows.append(
                 Row(id: message.id, kind: .message(message, grouped: grouped, time: message.timestamp.formatted(time))))
             previous = message
+            if message.eventID == threadRootEventID {
+                rows.append(Row(id: "replies", kind: .replies(messages.count - index - 1)))
+            }
         }
         return rows
     }
