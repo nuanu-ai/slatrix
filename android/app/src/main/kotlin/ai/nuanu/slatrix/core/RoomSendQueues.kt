@@ -22,6 +22,7 @@ internal class RoomSendQueues(private val client: Client, private val connection
         data object Connected : Change
         data object RetryListener : Change
         data class Sending(val message: Message, val recoverable: Boolean) : Change
+        data class Cancelled(val message: Message) : Change
     }
 
     private val changes = Channel<Change>(Channel.UNLIMITED)
@@ -32,7 +33,7 @@ internal class RoomSendQueues(private val client: Client, private val connection
                     is RoomSendQueueUpdate.SendError ->
                         changes.trySend(Change.Sending(Message(roomId, update.transactionId), update.isRecoverable))
                     is RoomSendQueueUpdate.SentEvent -> changes.trySend(Change.Sending(Message(roomId, update.transactionId), false))
-                    is RoomSendQueueUpdate.CancelledLocalEvent -> changes.trySend(Change.Sending(Message(roomId, update.transactionId), false))
+                    is RoomSendQueueUpdate.CancelledLocalEvent -> changes.trySend(Change.Cancelled(Message(roomId, update.transactionId)))
                     else -> Unit
                 }
             } finally {
@@ -43,6 +44,10 @@ internal class RoomSendQueues(private val client: Client, private val connection
 
     private val online get() = foreground.value && connection.value == ConnectionState.Connected
     fun connected() { changes.trySend(Change.Connected) }
+
+    private suspend fun resumeRoom(room: String) = withContext(Dispatchers.Default) {
+        if (online) runCatching { client.getRoom(room)?.use { if (!it.isSendQueueEnabled()) it.enableSendQueue(true) } }
+    }
 
     suspend fun run() = coroutineScope {
         data class Retry(val failures: Int, val job: Job)
@@ -70,6 +75,12 @@ internal class RoomSendQueues(private val client: Client, private val connection
                             withContext(Dispatchers.Default) { runCatching { client.enableAllSendQueues(true) } }
                         }
                     }
+                    is Change.Cancelled -> {
+                        val previous = pending.remove(change.message) ?: continue
+                        previous.job.cancel()
+                        // SDK abort removes the head but leaves a recoverably paused room disabled.
+                        resumeRoom(change.message.room)
+                    }
                     is Change.Sending -> {
                         val previous = pending.remove(change.message)
                         previous?.job?.cancel()
@@ -77,11 +88,7 @@ internal class RoomSendQueues(private val client: Client, private val connection
                         val failures = previous?.failures ?: 0
                         val job = launch {
                             delay(minOf(300_000L, 5_000L shl failures))
-                            withContext(Dispatchers.Default) {
-                                if (online) runCatching {
-                                    client.getRoom(change.message.room)?.use { if (!it.isSendQueueEnabled()) it.enableSendQueue(true) }
-                                }
-                            }
+                            resumeRoom(change.message.room)
                         }
                         pending[change.message] = Retry(minOf(failures + 1, 6), job)
                     }

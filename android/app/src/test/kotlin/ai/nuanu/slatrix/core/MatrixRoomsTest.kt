@@ -499,7 +499,11 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
-    @Test fun aRoomPausedByATemporarySendErrorResumesWhileSyncStaysConnected() = runTest {
+    @Test fun aRoomPausedByATemporarySendErrorResumesWhileSyncStaysConnected() = recoverQueueAfterDeleting("later-message")
+
+    @Test fun deletingTheFailedHeadResumesTheRestOfTheRoomQueue() = recoverQueueAfterDeleting("local")
+
+    private fun recoverQueueAfterDeleting(transaction: String) = runTest {
         val room = TestRoom(roomInfo("!paused:example.org", "Paused"))
         val rejected = TestRoom(roomInfo("!rejected:example.org", "Rejected"))
         val client = RoomsClient(listOf(room, rejected))
@@ -510,11 +514,14 @@ class MatrixRoomsTest {
             rejected.sendQueueEnabled.value = false
             client.queueUpdates?.onUpdate(rejected.id(), RoomSendQueueUpdate.SendError(
                 "rejected", QueueWedgeError.CrossVerificationRequired, false))
+            client.queueUpdates?.onUpdate(rejected.id(), RoomSendQueueUpdate.CancelledLocalEvent("unrelated"))
+            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.NewLocalEvent("local"))
+            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.NewLocalEvent("later-message"))
             room.sendQueueEnabled.value = false
             client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.SendError(
                 "local", QueueWedgeError.GenericApiError("502 Bad Gateway"), true))
 
-            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.CancelledLocalEvent("later-message"))
+            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.CancelledLocalEvent(transaction))
             withContext(Dispatchers.Default) { withTimeout(8_000) { room.sendQueueEnabled.first { it } } }
             assertFalse("Verification failures wait for the user", rejected.sendQueueEnabled.value)
             assertEquals(ConnectionState.Connected, rooms.connection.value)
