@@ -908,6 +908,393 @@ struct Snapshots {
             size: NSSize(width: 1_280, height: 800), hovering: "Привет!")
     }
 
+    @Test("Hard cases: real names, replies, mentions, rich text, reactions and a thread", arguments: Theme.allCases)
+    func hardCases(theme: Theme) async throws {
+        try await hardWindow(theme: theme, zoom: 1.1) { matrix, window, hosting in
+            let screens = Self.hardScreens(room: try #require(matrix.selectedRoomID))
+            for (index, screen) in screens.enumerated() {
+                matrix.messages = screen.messages
+                try await hardCapture(matrix, hosting, "hard-\(screen.name)-110-\(theme.rawValue)")
+                guard index == 0 else { continue }
+                let scroll = try #require(Self.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
+                let text = try #require(
+                    Self.views(in: hosting).compactMap { $0 as? MessageTextView }.first {
+                        $0.string.hasPrefix("I’ll take the postmortem")
+                    })
+                let frame = text.convert(text.bounds, to: nil)
+                scroll.onPointer?(NSPoint(x: frame.midX, y: frame.midY))
+                try write(await settledImage(hosting), "hard-\(screen.name)-hover-110-\(theme.rawValue)")
+                scroll.onPointer?(nil)
+            }
+            try await hardThread(matrix, window, hosting, widths: [1438, 1100, 800], zoom: 1.1, theme: theme)
+        }
+    }
+
+    @Test("Hard cases at 100% and 150%: the names screen and the thread", arguments: [1, 1.5])
+    func hardCasesZoomed(zoom: Double) async throws {
+        try await hardWindow(theme: .dark, zoom: zoom) { matrix, window, hosting in
+            let screen = Self.hardScreens(room: try #require(matrix.selectedRoomID))[0]
+            matrix.messages = screen.messages
+            try await hardCapture(matrix, hosting, "hard-\(screen.name)-\(Int(zoom * 100))-dark")
+            try await hardThread(matrix, window, hosting, widths: [1438], zoom: zoom, theme: .dark)
+        }
+    }
+
+    private static let hardMe = "@ilya:harbor.example"
+    /// Invented people on harbor.example, whose names exercise initials and truncation.
+    private static let hardPeople = [
+        hardMe: "Илья Громов", "@nikita.claude:harbor.example": "Никита · Claude",
+        "@kostya-belyaev:harbor.example": "kostya-belyaev",
+        "@evgenia:harbor.example": "Евгения Красносельская-Тихомирова",
+        "@max:harbor.example": "Maximilian Hohenzollern-Sigmaringen", "@q:harbor.example": "Q",
+        "@lena:harbor.example": "🦊 Лена Морозова", "@tom:harbor.example": "Tom Reyes",
+        "@olga:harbor.example": "Ольга Соколова", "@anna:harbor.example": "Anna Kim",
+        "@sergey:harbor.example": "Сергей Петров",
+    ]
+
+    /// The owner's settings: glass with the window gradient, comfortable density, `zoom`, a 1438 × 936 window with
+    /// full-size content, on the sample workspace signed in as Илья.
+    private func hardWindow(
+        theme: Theme, zoom: Double, _ body: (MatrixService, NSWindow, NSView) async throws -> Void
+    ) async throws {
+        _ = NSApplication.shared
+        let matrix = MatrixService()
+        matrix.enterPreview()
+        matrix.user = ChatUser(id: Self.hardMe, name: Self.hardPeople[Self.hardMe]!)
+        matrix.members = Self.hardPeople.map { ChatUser(id: $0.key, name: $0.value) }
+        let room = try #require(matrix.selectedRoomID)
+        let index = try #require(matrix.rooms.firstIndex { $0.id == room })
+        matrix.rooms[index].pinnedEventIDs = ["$hard.6.pinned"]
+        matrix.savedMessages.set(roomID: room, eventID: "$hard.6.saved", saved: true)
+        let appearance = AppearanceStore()
+        let keys = ["appearance.mode", "appearance.theme", "appearance.windowGradient", "appearance.density"]
+        let saved = keys.map { ($0, UserDefaults.standard.object(forKey: $0)) }
+        defer { for (key, value) in saved { UserDefaults.standard.set(value, forKey: key) } }
+        appearance.mode = theme == .dark ? .dark : .light
+        appearance.systemIsDark = theme == .dark
+        appearance.theme = .glass
+        appearance.windowGradient = true
+        appearance.density = .comfortable
+        let hosting = NSHostingView(
+            rootView: RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom))
+        )
+        let window = offscreenWindow(
+            NSSize(width: 1438, height: 936),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        _ = try await settledImage(hosting)
+        try await body(matrix, window, hosting)
+    }
+
+    private func hardCapture(_ matrix: MatrixService, _ hosting: NSView, _ name: String) async throws {
+        _ = try await settledImage(hosting)
+        // A reply the sample workspace can't load says so in a toast, which would cover messages.
+        matrix.errorMessage = nil
+        try write(await settledImage(hosting), name)
+    }
+
+    /// Opens the reactions screen's long message in a thread through its context menu, fills the thread and captures
+    /// it at each width.
+    private func hardThread(
+        _ matrix: MatrixService, _ window: NSWindow, _ hosting: NSView, widths: [CGFloat], zoom: Double, theme: Theme
+    ) async throws {
+        let room = try #require(matrix.selectedRoomID)
+        matrix.messages = try #require(Self.hardScreens(room: room).first { $0.name == "6-reactions" }).messages
+        _ = try await settledImage(hosting)
+        let root = try #require(matrix.messages.first { $0.replyCount > 0 })
+        let text = try #require(
+            Self.views(in: hosting).compactMap { $0 as? MessageTextView }.first {
+                $0.string.hasPrefix(String(root.body.prefix(20)))
+            })
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let item = try #require(text.menu(for: event)?.items.first { $0.identifier?.rawValue == "thread" })
+        _ = item.target?.perform(item.action, with: item)
+        _ = try await settledImage(hosting)
+        matrix.threadMessages = [root] + Self.hardThreadReplies(root)
+        for width in widths {
+            window.setContentSize(NSSize(width: width, height: 936))
+            try await hardCapture(matrix, hosting, "hard-thread-\(Int(width))-\(Int(zoom * 100))-\(theme.rawValue)")
+        }
+        window.setContentSize(NSSize(width: 1438, height: 936))
+    }
+
+    private static func hardMessage(
+        _ id: String, _ sender: String, _ body: String, html: String? = nil, _ time: Date, room: String
+    ) -> ChatMessage {
+        ChatMessage(
+            id: "$hard.\(id)", roomID: room, senderID: sender, senderName: hardPeople[sender] ?? sender, body: body,
+            formattedBody: html, timestamp: time)
+    }
+
+    private static func ago(_ minutes: Double) -> Date { Date().addingTimeInterval(-minutes * 60) }
+    private static func daysAgo(_ days: Double, at hour: Double) -> Date {
+        Calendar.current.startOfDay(for: Date()).addingTimeInterval(-days * 86_400 + hour * 3_600)
+    }
+    private static func mention(_ id: String) -> String {
+        "<a href=\"https://matrix.to/#/\(id)\">\(hardPeople[id] ?? id)</a>"
+    }
+
+    /// Each screen fits the window, oldest message first.
+    private static func hardScreens(room: String) -> [(name: String, messages: [ChatMessage])] {
+        func message(_ id: String, _ sender: String, _ body: String, html: String? = nil, _ time: Date)
+            -> ChatMessage
+        { hardMessage(id, sender, body, html: html, time, room: room) }
+        let (me, nikita, kostya, evgenia, max, q, lena, tom, olga, anna, sergey) = (
+            hardMe, "@nikita.claude:harbor.example", "@kostya-belyaev:harbor.example", "@evgenia:harbor.example",
+            "@max:harbor.example", "@q:harbor.example", "@lena:harbor.example", "@tom:harbor.example",
+            "@olga:harbor.example", "@anna:harbor.example", "@sergey:harbor.example"
+        )
+
+        let names = [
+            message(
+                "1.1", nikita,
+                "Собрал сводку по вчерашним релизам: три сервиса обновлены, один откатили. Подробности ниже.",
+                ago(95)),
+            message("1.2", kostya, "откатили billing-api? что там случилось", ago(92)),
+            message(
+                "1.3", nikita,
+                "Да, billing-api 2.14.1. После миграции падал healthcheck, откат занял четыре минуты.", ago(90)),
+            message(
+                "1.4", evgenia,
+                "I’ll take the postmortem. Can someone send me the deploy logs from 14:00 to 14:30?", ago(70)),
+            message("1.5", q, "ok", ago(64)),
+            message("1.6", lena, "Логи скинула в личку 👆", ago(50)),
+            message(
+                "1.7", max, "Thanks all. Let’s go through it at the Thursday review, I’ll add it to the agenda.",
+                ago(31)),
+            message("1.8", me, "Добавил в повестку, спасибо", ago(20)),
+            message("1.9", kostya, "👍", ago(12)),
+        ]
+
+        let proposal =
+            "Proposal for the new onboarding: drop the workspace picker, send people straight to #welcome, and "
+            + "ask for a profile photo only after their first message. Numbers from the last test are in the doc."
+        var quotedLong = message("2.2", olga, "Согласна, но фото я бы вообще не просила", ago(80))
+        quotedLong.replyPreview = ChatReplyPreview(
+            state: .ready, eventID: "$hard.2.1", senderID: tom, senderName: hardPeople[tom]!, body: proposal)
+        var quotedEmpty = message("2.3", kostya, "+1 к этому", ago(75))
+        quotedEmpty.replyPreview = ChatReplyPreview(
+            state: .ready, eventID: "$hard.2.1", senderID: tom, senderName: hardPeople[tom]!, body: "")
+        var pending = message("2.4", anna, "Let me check the numbers first", ago(60))
+        pending.replyPreview = ChatReplyPreview(state: .pending, eventID: "$hard.old.1")
+        var unavailable = message("2.5", nikita, "Нашёл старое обсуждение, там то же самое решили", ago(50))
+        unavailable.replyPreview = ChatReplyPreview(state: .unavailable, eventID: "$hard.old.2")
+        var failed = message("2.6", me, "Это было до редизайна", ago(40))
+        failed.replyPreview = ChatReplyPreview(
+            state: .failed, eventID: "$hard.old.3", body: "Original message unavailable")
+        var deleted = message("2.7", q, "what did it say?", ago(30))
+        deleted.replyPreview = ChatReplyPreview(
+            state: .ready, eventID: "$hard.old.4", senderID: sergey, senderName: hardPeople[sergey]!,
+            body: "This message was deleted", kind: "m.room.message", isRedacted: true)
+        var file = message("2.8", evgenia, "В этой версии уже есть новые экраны?", ago(15))
+        file.replyPreview = ChatReplyPreview(
+            state: .ready, eventID: "$hard.old.5", senderID: anna, senderName: hardPeople[anna]!,
+            body: "onboarding-flow-v3-final.fig", kind: "m.file")
+        let replies = [message("2.1", tom, proposal, ago(90)), quotedLong, quotedEmpty, pending, unavailable]
+
+        let url =
+            "https://grafana.harbor.example/d/billing-overview/billing-api-latency?orgId=1&from=now-6h&to=now"
+            + "&var-cluster=eu-central-1&var-service=billing-api&viewPanel=42"
+        let mail = "release-team@harbor.example"
+        let mentions = [
+            message(
+                "3.1", tom, "Ольга Соколова: можешь глянуть PR до обеда?",
+                html: "\(mention(olga)): можешь глянуть PR до обеда?", ago(100)),
+            message(
+                "3.2", anna,
+                "Ревьюеры на эту неделю: Сергей Петров, kostya-belyaev, Евгения Красносельская-Тихомирова и "
+                    + "Никита · Claude",
+                html: "Ревьюеры на эту неделю: \(mention(sergey)), \(mention(kostya)), \(mention(evgenia)) и "
+                    + "\(mention(nikita))", ago(90)),
+            message(
+                "3.3", sergey, "Илья Громов, посмотри, пожалуйста, алерты",
+                html: "\(mention(me)), посмотри, пожалуйста, алерты", ago(80)),
+            message(
+                "3.4", olga, "@room релиз в 18:00, после 17:30 в main не мержим",
+                html: "@room релиз в 18:00, после 17:30 в main не мержим", ago(70)),
+            message("3.5", nikita, "Латентность выросла после 14:00: \(url)", ago(60)),
+            message(
+                "3.6", evgenia, "Release notes go to \(mail) by Friday.",
+                html: "Release notes go to <a href=\"mailto:\(mail)\">\(mail)</a> by Friday.", ago(50)),
+            message("3.7", kostya, "а вопросы тоже на \(mail) писать?", ago(40)),
+            message(
+                "3.8", lena, "Важно: дежурства на декабрь обновлены, проверьте свои даты",
+                html: "<strong>Важно: <a href=\"https://wiki.harbor.example/oncall/december\">дежурства на декабрь"
+                    + "</a> обновлены</strong>, проверьте свои даты", ago(25)),
+        ]
+
+        let longLine =
+            "kubectl -n billing rollout restart deployment/billing-api && kubectl -n billing rollout status "
+            + "deployment/billing-api --timeout=300s --watch=true | tee /tmp/rollout-billing-api-2026-11-18.log"
+        let rich = [
+            message(
+                "4.1", sergey, "Поменяй MAX_RETRIES на 5 в config/billing.yaml",
+                html: "Поменяй <code>MAX_RETRIES</code> на 5 в <code>config/billing.yaml</code>", ago(120)),
+            message(
+                "4.2", kostya, "Restart:\n\n\(longLine)",
+                html: "<p>Restart:</p><pre><code>\(longLine)</code></pre>", ago(110)),
+            message(
+                "4.3", anna, "Before the release:",
+                html: "<p>Before the release:</p><ul><li>freeze main</li><li>run the regression suite on staging, "
+                    + "including the slow payment tests that we usually skip on pull requests</li>"
+                    + "<li>update the changelog</li></ul>", ago(100)),
+            message(
+                "4.4", olga, "Порядок выката:",
+                html: "<p>Порядок выката:</p><ol><li>миграции</li><li>billing-api</li><li>веб и мобилка</li></ol>",
+                ago(90)),
+            message(
+                "4.5", tom, "> We never deploy on Fridays.\n\nExcept this Friday, apparently.",
+                html: "<blockquote><p>We never deploy on Fridays.</p></blockquote><p>Except this Friday, "
+                    + "apparently.</p>", ago(80)),
+            message(
+                "4.6", evgenia, "Итоги квартала\n\nВсё по плану, детали в отчёте.",
+                html: "<h3>Итоги квартала</h3><p>Всё по плану, детали в отчёте.</p>", ago(70)),
+            message(
+                "4.7", lena, "Не трогайте prod-конфиг руками, а если очень нужно — сначала в тред",
+                html: "<strong>Не трогайте <em>prod-конфиг</em> руками</strong>, а <em>если очень нужно — "
+                    + "<strong>сначала в тред</strong></em>", ago(60)),
+            message(
+                "4.8", q,
+                "billing_api_invoice_reconciliation_job_timeout_exceeded_after_retrying_three_times_on_eu_central_1 "
+                    + "и ещё Превысокомногорассмотрительствующий", ago(50)),
+        ]
+
+        let short = [
+            message("5.1", tom, "🎉", daysAgo(1, at: 17.5)),
+            message("5.2", anna, "👍🔥🚀", daysAgo(1, at: 17.6)),
+            message("5.3", olga, "ок", daysAgo(1, at: 17.7)),
+            message("5.4", sergey, "Смотрите", ago(10)),
+            message("5.5", sergey, "деплой застрял", ago(9.7)),
+            message("5.6", sergey, "на шаге миграций", ago(9.3)),
+            message("5.7", sergey, "лок на таблице invoices", ago(8.8)),
+            message("5.8", sergey, "кто-то держит транзакцию?", ago(8.2)),
+            message("5.9", anna, "Это мой скрипт, сейчас остановлю", ago(6)),
+        ]
+
+        var one = message("6.1", tom, "Merged, thanks for the quick review", ago(110))
+        one.reactions = [MessageReaction(key: "👍", count: 1, mine: false, senders: [anna])]
+        var three = message("6.2", anna, "Staging is green again", ago(100))
+        three.reactions = [
+            MessageReaction(key: "🎉", count: 3, mine: true, senders: [me, tom, olga]),
+            MessageReaction(key: "👀", count: 1, mine: false, senders: [sergey]),
+            MessageReaction(key: "✅", count: 2, mine: false, senders: [kostya, lena]),
+        ]
+        var root = message(
+            "6.3", olga,
+            "Предлагаю с понедельника новый процесс релизов: ветка release/* режется в среду, QA гоняет регресс в "
+                + "четверг, в пятницу до обеда выкатываем. Hotfix’ы только через дежурного. Возражения пишите в "
+                + "тред до конца недели, в понедельник зафиксирую в вики.", daysAgo(2, at: 16.6))
+        root.isEdited = true
+        root.replyCount = 8
+        root.lastReply = ThreadReply(senderID: evgenia, senderName: hardPeople[evgenia]!, timestamp: ago(15))
+        root.reactions = [
+            MessageReaction(key: "👍", count: 5, mine: true, senders: [me, tom, anna, sergey, kostya]),
+            MessageReaction(key: "🙏", count: 1, mine: false, senders: [lena]),
+        ]
+        var many = message("6.4", sergey, "Новый дашборд по латентности готов", ago(90))
+        many.reactions = ["🔥", "🚀", "👏", "😍", "💯", "🙌", "👀", "✨", "🎯", "📈", "🤯", "❤️", "🥳", "☕️"]
+            .enumerated().map { index, key in
+                MessageReaction(key: key, count: index % 3 + (index % 4 == 0 ? 4 : 1), mine: index % 4 == 0)
+            }
+        let pinned = message("6.pinned", tom, "On-call rotation for December is in the wiki, check your dates", ago(60))
+        let saved = message(
+            "6.saved", nikita, "Чек-лист релиза: https://wiki.harbor.example/releases/checklist", ago(40))
+        let reactions = [
+            root, one, three, many, pinned, saved, message("6.7", me, "Посмотрю дашборд после созвона", ago(20)),
+        ]
+
+        var pdf = message("7.1", anna, "Отчёт за третий квартал", ago(100))
+        pdf.kind = "m.file"
+        pdf.mediaCaption = "Отчёт за третий квартал, посмотрите раздел про отток до пятницы"
+        pdf.body = pdf.mediaCaption!
+        pdf.attachment = MessageAttachment(
+            name: "Квартальный отчёт Q3.pdf", url: "preview://guidelines.pdf", mimeType: "application/pdf",
+            size: 2_400_000)
+        let zipName = "harbor-web-release-4.2.0-rc.3-macos-universal-signed-notarized-with-debug-symbols-2026-11-18.zip"
+        var zip = message("7.2", tom, zipName, ago(90))
+        zip.kind = "m.file"
+        zip.attachment = MessageAttachment(
+            name: zipName, url: "preview://icons.zip", mimeType: "application/zip", size: 184_300_000)
+        var gone = message("7.3", sergey, "", ago(80))
+        gone.isRedacted = true
+        var sending = message("7.5", me, "Сейчас выложу новую сборку", Date().addingTimeInterval(-30))
+        sending.sendState = "sending"
+        let files = [
+            pdf, zip, gone, message("7.4", olga, "Кто-нибудь видел новые макеты?", ago(30)), sending,
+        ]
+
+        let own = [
+            message("8.1", anna, "Илья, как там с ревью платёжного модуля?", ago(40)),
+            message("8.2", me, "Смотрю", ago(38)),
+            message(
+                "8.3", me,
+                "Пока два замечания: в ретраях нет джиттера, и при таймауте мы не откатываем резерв. Первое мелочь, "
+                    + "второе может дать двойное списание, если провайдер ответит после таймаута. Предлагаю добавить "
+                    + "идемпотентный ключ и проверку статуса перед повтором. Остальное выглядит хорошо.", ago(37)),
+            message("8.4", me, "Через час закончу", ago(36)),
+            message("8.5", tom, "Thanks, ping me when it’s merged", ago(30)),
+            message("8.6", olga, "И мне, хочу посмотреть на ключ", ago(25)),
+        ]
+
+        return [
+            ("1-names", names), ("2-replies", replies), ("2b-replies", [failed, deleted, file]),
+            ("3-mentions", mentions), ("4-rich-text", rich), ("5-short-emoji", short), ("6-reactions", reactions),
+            ("7-files-states", files), ("8-own", own),
+        ]
+    }
+
+    private static func hardThreadReplies(_ root: ChatMessage) -> [ChatMessage] {
+        func reply(_ id: String, _ sender: String, _ body: String, _ time: Date) -> ChatMessage {
+            var message = hardMessage("t.\(id)", sender, body, time, room: root.roomID)
+            message.threadRootID = root.eventID
+            return message
+        }
+        let (me, tom, anna, sergey, nikita, q, evgenia) = (
+            hardMe, "@tom:harbor.example", "@anna:harbor.example", "@sergey:harbor.example",
+            "@nikita.claude:harbor.example", "@q:harbor.example", "@evgenia:harbor.example"
+        )
+        let mobile = "Sounds reasonable. What about mobile? App Store review can take two days."
+        var quoted = reply("3", anna, "Поддерживаю, вторник норм", daysAgo(1, at: 10.2))
+        quoted.replyPreview = ChatReplyPreview(
+            state: .ready, eventID: "$hard.t.1", senderID: tom, senderName: hardPeople[tom]!, body: mobile)
+        var reacted = reply(
+            "4", sergey,
+            "Регресс в четверг не успеем, если ветку режем в среду вечером. Давайте в среду до 12:00.",
+            daysAgo(1, at: 11))
+        reacted.reactions = [
+            MessageReaction(key: "👍", count: 4, mine: true, senders: [me, tom, anna, evgenia]),
+            MessageReaction(key: "➕", count: 2, mine: false, senders: [q, nikita]),
+        ]
+        return [
+            reply("1", tom, mobile, daysAgo(2, at: 17)),
+            reply("2", me, "Для мобилки отдельный трек, режем во вторник", daysAgo(2, at: 17.2)),
+            quoted, reacted,
+            reply(
+                "5", nikita,
+                """
+                Свёл предложения в одну схему:
+
+                Вт: режем ветку мобилки, сразу отправляем в ревью App Store. Ср до 12:00: режем release/*, QA \
+                начинает регресс. Чт: регресс и фиксы. Пт до обеда: выкат веба и бэкенда, мобилка выходит после \
+                одобрения. Hotfix’ы идут через дежурного и не ждут пятницы.
+                """, daysAgo(1, at: 15)),
+            reply("6", q, "🔥", ago(60)),
+            reply("7", me, "Зафиксировал в вики: https://wiki.harbor.example/releases/process", ago(30)),
+            reply("8", evgenia, "Thanks! Closing the thread.", ago(15)),
+        ]
+    }
+
     /// The window at 100% with `view` as its content, after `prepare`, with the pointer over a message starting `hovering`.
     private func render(
         _ view: some View, theme: Theme, name: String, size: NSSize = NSSize(width: 1440, height: 900),
