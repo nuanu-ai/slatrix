@@ -55,6 +55,34 @@ enum FileKind: CaseIterable {
     ]
 }
 
+enum FileName {
+    /// The name cut in the middle to the longest that `fits`, as Finder cuts it, but never with the ellipsis beside a
+    /// dot, where the two read as four dots.
+    static func middleTruncated(_ name: String, fits: (String) -> Bool) -> String {
+        guard !fits(name) else { return name }
+        let characters = Array(name)
+        func cut(_ kept: Int) -> String {
+            var head = characters.prefix((kept + 1) / 2)
+            var tail = characters.suffix(kept / 2)
+            while head.last == "." { head.removeLast() }
+            while tail.first == "." { tail.removeFirst() }
+            return String(head) + "…" + String(tail)
+        }
+        var best = 0
+        var (low, high) = (1, characters.count - 1)
+        while low <= high {
+            let kept = (low + high) / 2
+            if fits(cut(kept)) {
+                best = kept
+                low = kept + 1
+            } else {
+                high = kept - 1
+            }
+        }
+        return cut(best)
+    }
+}
+
 extension MessageAttachment {
     var fileKind: FileKind { FileKind(name: name, mimeType: mimeType) }
     /// "PDF", or the extension in capitals, as a file card shows it.

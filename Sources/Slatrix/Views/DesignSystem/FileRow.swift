@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// A file in a list, as Slack's Files browser shows it: a 40 pt tile, the name, a muted line such as "Shared by Alice
@@ -24,8 +25,7 @@ struct FileRow<Menu: View>: View {
             HStack(spacing: m.sp12) {
                 tileView
                 VStack(alignment: .leading, spacing: m.sp2) {
-                    Text(name).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
-                        .lineLimit(1).truncationMode(.middle)
+                    FileNameText(name, role: .reading, semibold: true).foregroundStyle(colors.textPrimary)
                     Text(caption).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -86,6 +86,34 @@ struct FileRow<Menu: View>: View {
 }
 
 /// What leads a file row.
+/// A file's name on one line, cut in the middle to fit as Finder cuts it, never with the ellipsis beside a dot.
+struct FileNameText: View {
+    let name: String
+    let role: TextRole
+    var semibold = false
+    @Environment(\.metrics) private var m
+
+    init(_ name: String, role: TextRole, semibold: Bool = false) {
+        (self.name, self.role, self.semibold) = (name, role, semibold)
+    }
+
+    var body: some View {
+        let font = NSFont.systemFont(ofSize: m.size(role), weight: semibold ? .semibold : .regular)
+        // The whole name sets the line's height and how wide it may grow; the cut is drawn over it at the width it got.
+        Text(name).lineLimit(1).hidden()
+            .overlay(alignment: .leading) {
+                GeometryReader { proxy in
+                    Text(
+                        FileName.middleTruncated(name) {
+                            NSAttributedString(string: $0, attributes: [.font: font]).size().width <= proxy.size.width
+                        }
+                    ).lineLimit(1).fixedSize()
+                }
+            }
+            .font(m.font(role, semibold ? .semibold : .regular)).accessibilityLabel(name)
+    }
+}
+
 enum FileRowTile {
     /// An image or video still; empty until it loads.
     case thumbnail(CGImage?)

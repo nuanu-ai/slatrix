@@ -171,7 +171,7 @@ private struct InlineMedia: View {
                 matrix.collapsedMedia.formSymmetricDifference([message.eventID])
             } label: {
                 HStack(spacing: m.sp4) {
-                    Text(attachment.name).lineLimit(1).truncationMode(.middle)
+                    FileNameText(attachment.name, role: .subheadline)
                     Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(
                         m.font(.subheadline, .semibold))
                 }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
@@ -367,8 +367,7 @@ private struct FileCard: View {
             HStack(spacing: m.sp12) {
                 FileTypeIcon(kind: attachment.fileKind)
                 VStack(alignment: .leading, spacing: m.sp2) {
-                    Text(attachment.name).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
-                        .lineLimit(1).truncationMode(.middle)
+                    FileNameText(attachment.name, role: .reading, semibold: true).foregroundStyle(colors.textPrimary)
                     Text(caption).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 }
                 Spacer(minLength: m.sp8)
