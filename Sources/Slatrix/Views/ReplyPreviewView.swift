@@ -56,7 +56,8 @@ struct ReplyPreviewView: View {
                     }
                 } else {
                     // Over the reserve rather than beside it: at some zooms two bars stand taller than two lines.
-                    lines(sender: " ", body: " ").hidden().overlay(alignment: .leading) { SkeletonLines() }
+                    lines(sender: " ", body: " ").hidden().frame(maxWidth: .infinity, alignment: .leading)
+                        .overlay(alignment: .leading) { SkeletonLines() }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
                 .loadingInterval(.replyLoading, while: preview.state == .pending)
