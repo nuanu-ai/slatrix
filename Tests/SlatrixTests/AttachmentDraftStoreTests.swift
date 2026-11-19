@@ -414,6 +414,18 @@ struct AttachmentDraftStoreTests {
         #expect(FileManager.default.fileExists(atPath: blob.path))
     }
 
+    @Test("A crash while writing an account's first manifest leaves garbage that the next open removes")
+    func firstManifestStagingCleared() async throws {
+        let store = store()
+        await store.close(access: try await store.open(accountID: account))
+        try FileManager.default.removeItem(at: manifest())
+        let leftover = folder().appendingPathComponent(".write-manifest.vault-" + UUID().uuidString)
+        try Data("ELADM01\npartial".utf8).write(to: leftover)
+        let access = try await store.open(accountID: account)
+        _ = try await store.save(urls: [second], address: address, access: access, revision: 1)
+        #expect(!FileManager.default.fileExists(atPath: leftover.path))
+    }
+
     @Test("Deleting the manifest of an open, empty account does not reset it")
     func missingActiveManifestRefused() async throws {
         let store = store()

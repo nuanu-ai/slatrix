@@ -152,8 +152,11 @@ actor AttachmentDraftStore {
             // Establish an empty manifest before any blob exists; a later missing manifest is never a reset.
             let contents = try FileManager.default.contentsOfDirectory(
                 at: lease.directory, includingPropertiesForKeys: nil)
-            guard contents.allSatisfy({ $0.lastPathComponent == ".lease" }) else {
-                throw AttachmentDraftError.invalidData
+            // A crash before the first manifest's rename leaves only its staging copy, which is garbage.
+            for url in contents where url.lastPathComponent != ".lease" {
+                guard url.lastPathComponent.hasPrefix(".write-manifest.vault-"), unlink(url.path) == 0 else {
+                    throw AttachmentDraftError.invalidData
+                }
             }
             let encrypted = try seal(
                 JSONEncoder().encode(Manifest()), key: key, authentication: manifestAuthentication(accountID),
