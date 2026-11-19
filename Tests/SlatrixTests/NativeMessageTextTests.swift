@@ -337,6 +337,21 @@ struct NativeMessageTextTests {
         }
     }
 
+    @Test("The padding beside a pill never splits an emoji next to it")
+    func paddingKeepsEmojiWhole() {
+        let pills = MentionPalette(
+            me: nil, text: .systemBlue, fill: .systemTeal, ownText: .systemBrown, ownFill: .systemYellow)
+        let text = NativeSelectableMessageText.attributed(
+            [
+                MessageBodyRun(text: "👍🏽"), mention("Alice"), MessageBodyRun(text: " "),
+                MessageBodyRun(text: "אבג", style: .code), MessageBodyRun(text: "🎉"),
+            ], fontSize: 15, textColor: .labelColor, linkColor: .systemBlue, mentions: pills)
+        let string = text.string as NSString
+        text.enumerateAttributes(in: NSRange(location: 0, length: text.length)) { _, range, _ in
+            #expect(string.rangeOfComposedCharacterSequence(at: range.location).location == range.location)
+        }
+    }
+
     @Test("Inline code too long for a line wraps with its fill and letters inside the column")
     func inlineCodeWraps() throws {
         let code = MessageBodyRun(text: String(repeating: "M", count: 60), style: .code)

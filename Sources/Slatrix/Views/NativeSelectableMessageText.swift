@@ -32,7 +32,11 @@ extension NSMutableAttributedString {
                     PillLayoutManager.rightToLeft(text.substring(with: range))
                     ? [range.location, NSMaxRange(range)] : [range.location - 1, NSMaxRange(range) - 1]
                 for index in ends where index >= 0 && index < length && text.character(at: index) != 0x0A {
-                    kerns[index, default: 0] += PillLayoutManager.padding(font)
+                    // All of an emoji or accented letter, so the kern never splits a character into two runs.
+                    let whole = text.rangeOfComposedCharacterSequence(at: index)
+                    for index in whole.location..<NSMaxRange(whole) {
+                        kerns[index, default: 0] += PillLayoutManager.padding(font)
+                    }
                 }
             }
         }
