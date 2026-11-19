@@ -17,9 +17,10 @@ import Foundation
     init(transport: LaterReminderTransport) { self.transport = transport }
 
     /// Queues what `list` has still to come for `accountID`, and withdraws everything else queued; a nil account,
-    /// as when signed out or notifications are off, withdraws all. `notification` reads what a reminder says.
+    /// as when signed out or notifications are off, withdraws all. `notification` reads what a reminder says, and
+    /// `preview` whether that includes the message; a change to it rewrites every reminder queued.
     func sync(
-        _ list: SavedMessages, accountID: String?,
+        _ list: SavedMessages, accountID: String?, preview: Bool,
         notification: (SavedMessageReference) async -> DesktopMessageNotification?
     ) async {
         let wanted: [(String, SavedMessageReference, Date)] =
@@ -27,7 +28,8 @@ import Foundation
                 list.reminders(after: Date()).compactMap { item in
                     item.remindAt.map {
                         let ms = Int64(($0.timeIntervalSince1970 * 1_000).rounded())
-                        return ("\(Self.prefix)\(account.utf8.count):\(account)\(item.id)@\(ms)", item, $0)
+                        let shows = preview ? "" : ".private"
+                        return ("\(Self.prefix)\(account.utf8.count):\(account)\(item.id)@\(ms)\(shows)", item, $0)
                     }
                 }
             } ?? []

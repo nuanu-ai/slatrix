@@ -19,8 +19,11 @@ struct LaterReminderTests {
     private let room = "!design:example.org"
 
     private func notification(_ item: SavedMessageReference) -> DesktopMessageNotification? {
+        notification(item, body: "Reminder")
+    }
+    private func notification(_ item: SavedMessageReference, body: String) -> DesktopMessageNotification? {
         MatrixNotificationTarget(accountID: owner, roomID: item.roomID, eventID: item.eventID).map {
-            DesktopMessageNotification(target: $0, title: "#design", body: "Reminder", playSound: true)
+            DesktopMessageNotification(target: $0, title: "#design", body: body, playSound: true)
         }
     }
 
@@ -32,12 +35,12 @@ struct LaterReminderTests {
         let due = Date().addingTimeInterval(3_600)
         var list = SavedMessages().reminding(roomID: room, eventID: "$one", at: due, now: Date())
             .reminding(roomID: room, eventID: "$past", at: Date().addingTimeInterval(-60), now: Date())
-        await schedule.sync(list, accountID: owner, notification: notification)
+        await schedule.sync(list, accountID: owner, preview: true, notification: notification)
         #expect(queue.queued.values.map(\.1.target.eventID) == ["$one"])
         #expect(abs((queue.queued.values.first?.0 ?? .distantPast).timeIntervalSince(due)) < 0.001)
 
         list = list.changing(roomID: room, eventID: "$one", to: .completed, at: Date())
-        await schedule.sync(list, accountID: owner, notification: notification)
+        await schedule.sync(list, accountID: owner, preview: true, notification: notification)
         #expect(queue.queued.isEmpty)
     }
 
@@ -47,10 +50,10 @@ struct LaterReminderTests {
         let schedule = LaterReminderSchedule(transport: queue)
         let list = SavedMessages().reminding(
             roomID: room, eventID: "$one", at: Date().addingTimeInterval(600), now: Date())
-        await schedule.sync(list, accountID: owner, notification: notification)
+        await schedule.sync(list, accountID: owner, preview: true, notification: notification)
         let later = Date().addingTimeInterval(7_200)
         await schedule.sync(
-            list.reminding(roomID: room, eventID: "$one", at: later, now: Date()), accountID: owner,
+            list.reminding(roomID: room, eventID: "$one", at: later, now: Date()), accountID: owner, preview: true,
             notification: notification)
         #expect(queue.queued.values.map { abs($0.0.timeIntervalSince(later)) < 0.001 } == [true])
     }
@@ -61,9 +64,22 @@ struct LaterReminderTests {
         let schedule = LaterReminderSchedule(transport: queue)
         let list = SavedMessages().reminding(
             roomID: room, eventID: "$one", at: Date().addingTimeInterval(600), now: Date())
-        await schedule.sync(list, accountID: owner, notification: notification)
+        await schedule.sync(list, accountID: owner, preview: true, notification: notification)
         #expect(!queue.queued.isEmpty)
-        await schedule.sync(list, accountID: nil, notification: notification)
+        await schedule.sync(list, accountID: nil, preview: true, notification: notification)
         #expect(queue.queued.isEmpty)
+    }
+
+    @Test("Turning message previews off rewrites a queued reminder without the message")
+    func previewsOff() async {
+        let queue = Queue()
+        let schedule = LaterReminderSchedule(transport: queue)
+        let list = SavedMessages().reminding(
+            roomID: room, eventID: "$one", at: Date().addingTimeInterval(600), now: Date())
+        await schedule.sync(list, accountID: owner, preview: true) {
+            notification($0, body: "Reminder: launch moves to Friday")
+        }
+        await schedule.sync(list, accountID: owner, preview: false) { notification($0) }
+        #expect(queue.queued.values.map(\.1.body) == ["Reminder"])
     }
 }

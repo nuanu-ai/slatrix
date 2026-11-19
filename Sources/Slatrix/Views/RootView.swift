@@ -568,7 +568,7 @@ struct RootView: View {
     private func syncLaterReminders() async {
         let preview = appearance.notificationPreview
         let account = reminderAccount
-        await platform.laterReminders.sync(matrix.savedMessages.list, accountID: account) { item in
+        await platform.laterReminders.sync(matrix.savedMessages.list, accountID: account, preview: preview) { item in
             guard let account,
                 let target = MatrixNotificationTarget(accountID: account, roomID: item.roomID, eventID: item.eventID)
             else { return nil }
