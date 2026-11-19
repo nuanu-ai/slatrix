@@ -137,6 +137,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private val spaceRequests = Channel<SpaceRequest>(Channel.UNLIMITED)
     private val followed = mutableMapOf<String, Followed>()
     private val syncGeneration = AtomicLong()
+    private val responseGeneration = AtomicLong()
     private var error: String? = null
     private var isOffline = false
     private var syncRunning = false
@@ -281,7 +282,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                 if (!event.running) syncResponded = false
                 updateConnection()
             }
-            is Event.SyncResponse -> if (event.generation == syncGeneration.get()) {
+            is Event.SyncResponse -> if (event.generation == syncGeneration.get() && event.observer == responseGeneration.get()) {
                 syncResponded = event.state.hasResponse
                 updateConnection()
             }
@@ -540,12 +541,20 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                     }
                 })
                 val roomListService = current.roomListService()
-                responseHandle = roomListService.state(object : RoomListServiceStateListener {
-                    override fun onUpdate(state: RoomListServiceState) {
-                        if (state.hasResponse) failureStreak.set(0)
-                        events.trySend(Event.SyncResponse(state, generation))
-                    }
-                })
+                fun observeResponses(afterStop: Boolean): TaskHandle {
+                    val observer = responseGeneration.get()
+                    return roomListService.state(object : RoomListServiceStateListener {
+                        // The first callback is a snapshot of the old sync, even when its socket has closed.
+                        private var skipSnapshot = afterStop
+                        override fun onUpdate(state: RoomListServiceState) {
+                            if (skipSnapshot) { skipSnapshot = false; return }
+                            if (observer != responseGeneration.get()) return
+                            if (state.hasResponse) failureStreak.set(0)
+                            events.trySend(Event.SyncResponse(state, generation, observer))
+                        }
+                    })
+                }
+                responseHandle = observeResponses(afterStop = false)
                 list = roomListService.allRooms()
                 // The limit truncates actual room vectors; it does not reserve that capacity.
                 entries = list.entriesWithDynamicAdapters(UInt.MAX_VALUE, object : RoomListEntriesListener {
@@ -580,14 +589,17 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                         val available = status.available
                         networkAvailableNow.set(available)
                         if (available) failureStreak.set(0)
+                        val retireRoute = !available || status.routeChanged
+                        if (retireRoute) responseGeneration.incrementAndGet()
                         events.trySend(Event.Network(available, generation, status.routeChanged))
                         // start/stop and a push's short sync share the same encryption sync.
                         syncLock.withLock {
-                            if (available && foreground.value) {
-                                // start is a no-op while running, so a new default route must release the old socket first.
-                                if (status.routeChanged) withContext(NonCancellable) { current.stop() }
-                                if (foreground.value) current.start()
-                            } else if (!available) withContext(NonCancellable) { current.stop() }
+                            if (retireRoute) {
+                                if (!available || foreground.value) withContext(NonCancellable) { current.stop() }
+                                responseHandle?.release()
+                                responseHandle = observeResponses(afterStop = true)
+                            }
+                            if (available && foreground.value) current.start()
                         }
                     } }
                     retries.receive()
@@ -651,7 +663,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         data class Info(val info: RoomInfo, val room: Followed) : Event
         data class Entries(val updates: List<RoomListEntriesUpdate>, val generation: Long) : Event
         data class Connection(val error: String?, val generation: Long, val running: Boolean = false, val offline: Boolean = false) : Event
-        data class SyncResponse(val state: RoomListServiceState, val generation: Long) : Event
+        data class SyncResponse(val state: RoomListServiceState, val generation: Long, val observer: Long) : Event
         data class Network(val available: Boolean, val generation: Long, val routeChanged: Boolean) : Event
         data class Visibility(val visible: Boolean, val generation: Long) : Event
         data class Presence(val dots: Map<String, ai.nuanu.slatrix.core.Presence>) : Event
