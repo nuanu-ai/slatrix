@@ -98,9 +98,14 @@ enum EmojiRecents {
 
     static func adding(_ emoji: String, to recent: [String]) -> [String] { [emoji] + recent.filter { $0 != emoji } }
 
-    /// The one-click reactions: three on the hover toolbar, five in Android's message sheet.
-    static func quick(_ recent: [String], count: Int = 3) -> [String] {
-        Array((recent + defaults.filter { !recent.contains($0) }).prefix(count))
+    /// The one-click reactions: three on the hover toolbar, five in Android's message sheet. Each emoji shows once,
+    /// however it was sent, and in the form the message already carries, so the button toggles that reaction.
+    static func quick(_ recent: [String], count: Int = 3, on reactions: [MessageReaction] = []) -> [String] {
+        var shown = Set<String>()
+        return Array(
+            (recent + defaults).map { emoji in
+                reactions.first { EmojiCatalog.presented($0.key) == EmojiCatalog.presented(emoji) }?.key ?? emoji
+            }.filter { shown.insert(EmojiCatalog.presented($0)).inserted }.prefix(count))
     }
 }
 
