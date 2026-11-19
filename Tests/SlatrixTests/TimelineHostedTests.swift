@@ -1480,11 +1480,13 @@ struct TimelineRowHeightTests {
         let coordinator = TimelineTableCoordinator()
         let scrollView = coordinator.makeView()
         scrollView.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
-        let welcome = TimelineWelcome(name: "Timeline", topic: "", isDirect: false, isPrivate: false, isEncrypted: false)
+        let welcome = TimelineWelcome(
+            name: "Timeline", topic: "", isDirect: false, isPrivate: false, isEncrypted: false)
         coordinator.update(
             TimelineTable(
                 entries: [
-                    TimelineEntry(id: "welcome", kind: .welcome(welcome)), TimelineEntry(id: "day", kind: .day("Today")),
+                    TimelineEntry(id: "welcome", kind: .welcome(welcome)),
+                    TimelineEntry(id: "day", kind: .day("Today")),
                 ], context: context, live: true, bottomAligned: true, focusedEventID: nil, jumpID: nil,
                 startsAtUnread: false, memoryKey: nil, canLoadOlder: false, canLoadNewer: false,
                 scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {}, onScroll: { _, _, _, _ in }))
