@@ -146,6 +146,8 @@ data class ConversationState(
     val sendError: String? = null,
     /** Says for a moment that an action on a message failed. */
     val notice: String? = null,
+    /** Messages sent from here so far. */
+    val sends: Int = 0,
     /** The message it opened at, to show and highlight. */
     val highlight: String? = null,
     /** Counts jumps within the open conversation, so a second one to the same message shows it again. */
@@ -580,7 +582,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 echo?.let { copyToChannel(message, it) }
                 currentCoroutineContext().ensureActive()
                 // Posting reads the conversation, as in Slack, even one marked unread on this visit; an edit isn't a post.
-                if (message.target !is ComposerTarget.Edit) readLock.withLock { heldUnread = false }
+                if (message.target !is ComposerTarget.Edit) {
+                    readLock.withLock { heldUnread = false }
+                    mutableState.update { it.copy(sends = it.sends + 1) }
+                }
                 // A message sent from an older place goes to the present, as sending in Slack takes you there.
                 if (shown?.focused == true) operations.launch {
                     pageLock.withLock {

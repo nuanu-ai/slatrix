@@ -141,6 +141,22 @@ class LiveChannelScreenTest {
         compose.waitUntil { drawn("Hello") }
     }
 
+    // capability: composer.send
+    // As on the Mac, what you send brings the conversation to it, even when the server confirms it before it shows.
+    @Test fun yourSendBringsTheConversationToItHoweverSoonItIsConfirmed() {
+        val rows = (1..80).map { message("Message $it", minutes = it) }
+        val state = mutableStateOf(ConversationState(rows, loading = false, hasMore = false))
+        compose.setContent {
+            SlatrixTheme { LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
+        }
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(40)
+        compose.onNodeWithText("Message 80").assertDoesNotExist()
+        compose.runOnIdle { state.value = state.value.copy(sends = 1) }
+        compose.waitForIdle()
+        compose.runOnIdle { state.value = state.value.copy(rows = rows + message("On my way", minutes = 81, sender = "Jordan")) }
+        compose.onNodeWithText("On my way").assertIsDisplayed()
+    }
+
     // capability: message.thread-summary
     @Test fun aLateThreadSummaryKeepsTheMessageBeingReadInPlace() {
         lateRowUpdateKeepsReadingPosition { it.copy(thread = MessageThread(2, "Sam", null)) }

@@ -191,7 +191,15 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     LaunchedEffect(newest?.id) {
         // Not while it opens somewhere else, which scrolls there instead.
-        if (following && jumped && !state.focused || newest?.own == true && newest.sendState == MessageSendState.Sending) list.scrollToItem(0)
+        if (following && jumped && !state.focused) list.scrollToItem(0)
+    }
+    // As on the Mac, what you send brings the conversation to its end and keeps it there, however soon the server
+    // confirms it.
+    val sendsAtOpen = remember(room) { state.sends }
+    LaunchedEffect(state.sends) {
+        if (state.sends == sendsAtOpen) return@LaunchedEffect
+        list.scrollToItem(0)
+        following = true
     }
     // A jump shows its message a third of the way up and highlights it briefly, as on the Mac, once.
     var lit by remember(opensAt, state.jump) { mutableStateOf<String?>(null) }
