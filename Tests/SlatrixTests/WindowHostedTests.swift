@@ -198,18 +198,7 @@ struct WindowHostedTests {
             NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
         }
 
-        /// What VoiceOver reaches in the window whose label or title contains `text`.
-        func accessible(_ text: String) -> [AnyObject] {
-            hosting.layoutSubtreeIfNeeded()
-            func walk(_ element: AnyObject) -> [AnyObject] {
-                [element] + (element.accessibilityChildren?() ?? []).map { $0 as AnyObject }.flatMap(walk)
-            }
-            return walk(hosting).filter { element in
-                [element.accessibilityLabel?(), element.accessibilityTitle?()].contains {
-                    ($0 ?? nil)?.contains(text) == true
-                }
-            }
-        }
+        func accessible(_ text: String) -> [AnyObject] { SlatrixTests.accessible(text, in: hosting) }
     }
 
     @Test(
@@ -872,10 +861,8 @@ struct WindowHostedTests {
         let harness = Harness()
         defer { harness.close() }
         #expect(await harness.settle())
-        // SwiftUI builds its accessibility tree only once an assistive app such as VoiceOver asks for it.
-        let enhanced = NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface")
-        NSApp.accessibilitySetValue(true, forAttribute: enhanced)
-        defer { NSApp.accessibilitySetValue(false, forAttribute: enhanced) }
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
         harness.resize(700)
         harness.menu("people")
         // Everyone with an "a" in their name, Alex and Julia among them.

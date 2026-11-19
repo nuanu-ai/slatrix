@@ -698,6 +698,8 @@ struct TimelineHostedTests {
         reply.sendState = "sending"
         let harness = Harness(width: 400, height: 600)
         defer { harness.close() }
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
         let thread = HistoryTimeline(noHandle: .init())
         thread.onPage = { true }
         harness.service.configureMessageActionsForChecks(
@@ -712,12 +714,19 @@ struct TimelineHostedTests {
             guard let top = harness.top(of: root.body), let below = harness.top(of: reply.body) else { return nil }
             return below - top
         }
+        // The table's rows don't pass their content to the accessibility tree, so each row is read on its own.
+        func counted() -> Bool {
+            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }
+                .contains { $0.window != nil && !accessible("1 reply", in: $0.content).isEmpty }
+        }
         await settle(harness) { gap() != nil }
+        #expect(counted())
         let sending = try #require(gap())
 
         reply.sendState = "sent"
         harness.service.threadMessages = [root, reply]
         harness.layout()
+        #expect(counted())
         #expect(abs(try #require(gap()) - sending) < 0.5)
     }
 
