@@ -1343,7 +1343,6 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
 /// Draws list markers in the indent, where they can't be selected or typed into, and the block of an empty last
 /// line, which has no characters to carry it.
 private final class ComposerLayoutManager: PillLayoutManager {
-    override var padded: Bool { false }
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
         guard let storage = textStorage, let view = firstTextView as? ComposerTextView else { return }

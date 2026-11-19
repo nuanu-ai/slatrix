@@ -71,8 +71,7 @@ struct NativeMessageBody: View {
                         attributes: [
                             .font: m.nsFont(.subheadline), .foregroundColor: NSColor(colors.textSecondary),
                         ]) : nil,
-                menuCommands: menuCommands, onOpenURL: { openURL($0) }
-            ).padding(.horizontal, -NativeSelectableMessageText.inset(fontSize))
+                menuCommands: menuCommands, onOpenURL: { openURL($0) })
             if showsSpoilerControl && rendered.containsSpoilers {
                 Button(revealed ? "Hide spoilers" : "Show spoilers") {
                     revealedSpoilerKey = revealed ? nil : source

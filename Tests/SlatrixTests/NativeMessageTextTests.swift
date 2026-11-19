@@ -237,7 +237,7 @@ struct NativeMessageTextTests {
     }
 
     /// `runs` laid out in a message's text system; the storage owns the layout manager.
-    private func laidOut(_ runs: [MessageBodyRun], width: CGFloat = 400, inset: CGFloat = 0) -> NSTextStorage {
+    private func laidOut(_ runs: [MessageBodyRun], width: CGFloat = 400) -> NSTextStorage {
         let pills = MentionPalette(
             me: nil, text: .systemBlue, fill: .systemTeal, ownText: .systemBrown, ownFill: .systemYellow)
         let storage = NSTextStorage(
@@ -245,7 +245,7 @@ struct NativeMessageTextTests {
                 runs, fontSize: 15, textColor: .labelColor, linkColor: .systemBlue, mentions: pills))
         let layout = PillLayoutManager()
         let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
-        container.lineFragmentPadding = inset
+        container.lineFragmentPadding = 0
         layout.addTextContainer(container)
         storage.addLayoutManager(layout)
         layout.ensureLayout(for: container)
@@ -310,46 +310,20 @@ struct NativeMessageTextTests {
         x.filter { x in y.contains { y in (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.3 } }
     }
 
-    @Test("A mention or inline code is drawn inset in the middle of its fill, in either direction")
-    func pillInset() throws {
-        let leftToRight = [
-            mention("Alice"), MessageBodyRun(text: " and ("), mention("Bob"), MessageBodyRun(text: ") or ("),
-            MessageBodyRun(text: "MAX", style: .code), MessageBodyRun(text: ")"),
-        ]
-        let rightToLeft = [
-            MessageBodyRun(text: "לפני "), MessageBodyRun(text: "אבג", style: .code), MessageBodyRun(text: " אחרי"),
-        ]
-        for runs in [leftToRight, rightToLeft] {
-            try expectInset(laidOut(runs, inset: NativeSelectableMessageText.inset(15)))
-        }
-    }
-    private func expectInset(_ storage: NSTextStorage) throws {
-        let rep = try drawn(storage, NSSize(width: 400, height: 40))
-        let found = pills(storage)
-        try #require(!found.isEmpty)
-        #expect(found[0].minX >= 0)
-        for pill in found {
-            let ink = inked(rep, x: Int(pill.minX)..<Int(pill.maxX.rounded(.up)), y: Int(pill.minY)..<Int(pill.maxY))
-            let first = try #require(ink.first)
-            let last = try #require(ink.last) + 1
-            let (left, right) = (CGFloat(first) - pill.minX, pill.maxX - CGFloat(last))
-            #expect(abs(left - right) <= 1.5 && min(left, right) >= 1)
-        }
-    }
-
-    @Test("The padding beside a pill never splits an emoji next to it")
-    func paddingKeepsEmojiWhole() {
-        let pills = MentionPalette(
-            me: nil, text: .systemBlue, fill: .systemTeal, ownText: .systemBrown, ownFill: .systemYellow)
+    @Test("A fill only paints: no character moves for it, even where many code spans border one accented letter")
+    func pillsAddNoKern() {
+        let runs = MessageBodyRenderer().render(
+            body: "", formattedBody: "a<code>\u{0301}</code>\u{0301}<code>\u{0301}</code> b"
+        ).runs
         let text = NativeSelectableMessageText.attributed(
-            [
-                MessageBodyRun(text: "👍🏽"), mention("Alice"), MessageBodyRun(text: " "),
-                MessageBodyRun(text: "אבג", style: .code), MessageBodyRun(text: "🎉"),
-            ], fontSize: 15, textColor: .labelColor, linkColor: .systemBlue, mentions: pills)
-        let string = text.string as NSString
-        text.enumerateAttributes(in: NSRange(location: 0, length: text.length)) { _, range, _ in
-            #expect(string.rangeOfComposedCharacterSequence(at: range.location).location == range.location)
+            runs, fontSize: 15, textColor: .labelColor, linkColor: .systemBlue,
+            mentions: MentionPalette(
+                me: nil, text: .systemBlue, fill: .systemTeal, ownText: .systemBrown, ownFill: .systemYellow))
+        var kerned = false
+        text.enumerateAttribute(.kern, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+            kerned = kerned || value != nil
         }
+        #expect(!kerned)
     }
 
     @Test("Inline code too long for a line wraps with its fill and letters inside the column")
@@ -394,25 +368,6 @@ struct NativeMessageTextTests {
         #expect(try size("🎉") > reading)
         #expect(try size("Nice 🎉") == reading)
         #expect(try size("🎉", large: false) == reading)
-    }
-
-    @Test("A message's first letter lines up with the column, with the fill of a mention there in the margin")
-    func textLinesUp() throws {
-        let html =
-            "<a href=\"https://matrix.to/#/@alice:example.org\">Alice</a> "
-            + String(repeating: "thanks for the review, it reads well now. ", count: 4)
-        let hosting = NSHostingView(
-            rootView: NativeMessageBody(body: "", formattedBody: html).environmentObject(AppearanceStore()))
-        hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 200)
-        hosting.layoutSubtreeIfNeeded()
-        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
-        let text = try #require(views(hosting).compactMap { $0 as? MessageTextView }.first)
-        let layout = try #require(text.layoutManager as? PillLayoutManager)
-        let fragment = layout.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)
-        let letter = text.textContainerOrigin.x + fragment.minX + layout.location(forGlyphAt: 0).x
-        let pill = try #require(layout.pills(forCharacterRange: NSRange(location: 0, length: 1)).first)
-        #expect(abs(text.convert(NSPoint(x: letter, y: 0), to: hosting).x) < 0.5)
-        #expect(pill.rect.minX + text.textContainerOrigin.x < letter - 1)
     }
 
     @Test("A menu item runs only its own enabled command")
