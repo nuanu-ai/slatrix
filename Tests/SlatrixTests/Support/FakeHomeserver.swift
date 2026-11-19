@@ -6,6 +6,7 @@ final class FakeHomeserver: @unchecked Sendable {
     let room: String
     private var messages: [[String: Any]]
     private let dropFirstSendResponse: Bool
+    private let refusesDeletions: Bool
     private var sent: [String: String] = [:]
     private var dropped: String?
     private var replayed = false
@@ -14,8 +15,11 @@ final class FakeHomeserver: @unchecked Sendable {
     private let queue = DispatchQueue(label: "FakeHomeserver")
     private(set) var url = ""
 
-    init(room: String, messages: [[String: Any]], dropFirstSendResponse: Bool = false) async throws {
+    init(
+        room: String, messages: [[String: Any]], dropFirstSendResponse: Bool = false, refusesDeletions: Bool = false
+    ) async throws {
         self.dropFirstSendResponse = dropFirstSendResponse
+        self.refusesDeletions = refusesDeletions
         self.room = room
         self.messages = messages
         let parameters = NWParameters.tcp
@@ -95,6 +99,12 @@ final class FakeHomeserver: @unchecked Sendable {
                 return nil
             }
             return (200, ["event_id": eventID])
+        }
+        // PUT /_matrix/client/v3/rooms/{room}/redact/{event}/{transaction}
+        if method == "PUT", segments.count == 8, segments[4] == room, segments[5] == "redact" {
+            return refusesDeletions
+                ? (403, ["errcode": "M_FORBIDDEN", "error": "Not allowed"])
+                : (200, ["event_id": "$redaction-\(segments[7])"])
         }
         // GET /_matrix/client/v3/rooms/{room}/messages: everything in one page, then the start of the room.
         if segments.count == 6, segments[4] == room, segments[5] == "messages" {
