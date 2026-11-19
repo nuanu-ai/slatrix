@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// A side pane's title bar, for a thread, pinned messages, files or a profile: one inset, type and close button,
-/// so moving from one pane to another changes only the words.
+/// so moving from one pane to another changes only the words. It keeps to a thread's column, over the avatars and the
+/// end of the text.
 struct PaneHeader: View {
     let title: String
     var subtitle: String? = nil
@@ -21,7 +22,7 @@ struct PaneHeader: View {
             }.lineLimit(1)
             Spacer()
             CloseButton(label: closeLabel, action: onClose)
-        }.padding(.leading, m.sp16).padding(.trailing, m.sp12).frame(height: m.paneHeader)
+        }.padding(.horizontal, m.conversationInset(thread: true)).frame(height: m.paneHeader)
             .background(WindowDragArea())
     }
 }

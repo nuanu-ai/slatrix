@@ -147,8 +147,9 @@ struct RootView: View {
     private var windowButtonsWidth: CGFloat { (m.paneHeader - 14) / 2 + 54 }
     static let searchWidth: CGFloat = 180
     private var paneOpen: Bool { profilePane != nil || (room != nil && (threadRoot != nil || channelPanel != nil)) }
-    /// Whether an open pane sits beside the conversation; otherwise it lies over it.
+    /// Whether an open pane sits beside the conversation; otherwise it takes the conversation's place.
     private var paneBeside: Bool { sidebarCollapsed ? arrangement.paneFitsAlone : arrangement.paneFitsBesideSidebar }
+    private var paneCovers: Bool { paneOpen && !paneBeside }
     /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
     /// open pane.
     private var sidebarCollapsed: Bool {
@@ -747,15 +748,16 @@ struct RootView: View {
                             }
                             // A composer that grows or a message that arrives lays out this column, not the window.
                             .layoutIsolated()
-                            // Banners float over the conversation instead of pushing it down.
-                            .overlay(alignment: .top) { banners.padding(.top, m.paneHeader) }
-                            // Too narrow to sit beside: the pane lies over the conversation's right side.
-                            .overlay(alignment: .trailing) {
-                                if paneOpen && !paneBeside {
-                                    inspector(room).frame(maxWidth: m(Self.paneWidth))
-                                        .elevation(.e3, cornerRadius: 0)
+                            // Too narrow for both: the pane takes the conversation's place under the toolbar, as Slack
+                            // shows one or the other, until it closes.
+                            .overlay {
+                                if paneCovers {
+                                    inspector(room).overlay(alignment: .top) { Divider().overlay(colors.border) }
+                                        .padding(.top, m.paneHeader)
                                 }
                             }
+                            // Banners float over the conversation instead of pushing it down.
+                            .overlay(alignment: .top) { banners.padding(.top, m.paneHeader) }
                             if paneOpen && paneBeside {
                                 WithWidths(widths) { widths in
                                     ResizeHandle(
@@ -946,7 +948,8 @@ struct RootView: View {
             route: screen.route, workspaceID: workspaceID, visibleBottomRoomID: visibleBottomRoomID,
             windowCanRead: windowCanRead, hasPresentedSheet: hasPresentedSheet, threadRootID: threadRoot?.eventID,
             threadReadyID: threadReadyID, openingThreadID: openingThreadID, threadLoadFailed: threadLoadError != nil,
-            localReady: localReady, threadReadViewport: threadReadViewport, readHold: readHold)
+            localReady: localReady, threadReadViewport: threadReadViewport, readHold: readHold,
+            conversationCovered: paneCovers)
     }
     private var readContext: ReadStateContext { readInputs.readContext(matrix) }
     private var automaticReadTarget: ReadReceiptTarget? { ReadStatePolicy.automaticTarget(readContext, hold: readHold) }
@@ -1042,39 +1045,44 @@ struct RootView: View {
         .animation(Motion.pane, value: shown)
     }
 
-    /// The toolbar over the conversation or a page: the sidebar's button while it is folded, back and forward, the
-    /// title, the page's own buttons, and search.
+    /// The toolbar over the conversation or a page: the sidebar's button while it is folded, the title, the page's own
+    /// buttons, then back and forward beside search, as Slack has them. Over a conversation the title and search keep
+    /// to the messages' column.
     private func toolbar<Title: View, Trailing: View>(
-        @ViewBuilder title: () -> Title, @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+        grid: Bool = false, @ViewBuilder title: () -> Title, @ViewBuilder trailing: () -> Trailing = { EmptyView() }
     ) -> some View {
-        HStack(spacing: m.sp12) {
+        // The window buttons are AppKit chrome and do not zoom.
+        ToolbarGrid(
+            chromeStart: windowButtonsWidth + m.sp16, spacing: m.sp12, margin: m.conversationInset(thread: false),
+            zoom: m.zoom, grid: grid
+        ) {
             if sidebarCollapsed { SidebarToggle(matrix: matrix) { handleMenu("toggle-sidebar") } }
-            ToolbarCapsule {
-                IconButton(symbol: "chevron.left", label: "Back", role: .body) { navigateHistory(-1) }
-                    .disabled(historyIndex <= 0)
-                IconButton(symbol: "chevron.right", label: "Forward", role: .body) { navigateHistory(1) }
-                    .disabled(historyIndex >= history.count - 1)
-            }
-            .contextMenu {
-                ForEach(Array(history.enumerated()).reversed(), id: \.offset) { index, id in
-                    Button(matrix.rooms.first { $0.id == id }?.name ?? "Conversation") {
-                        historyIndex = index
-                        selectRoom(history[index], record: false)
+            HStack(spacing: m.sp12) {
+                title().frame(maxWidth: .infinity, alignment: .leading)
+                trailing()
+                ToolbarCapsule {
+                    IconButton(symbol: "chevron.left", label: "Back", role: .body) { navigateHistory(-1) }
+                        .disabled(historyIndex <= 0)
+                    IconButton(symbol: "chevron.right", label: "Forward", role: .body) { navigateHistory(1) }
+                        .disabled(historyIndex >= history.count - 1)
+                }
+                .contextMenu {
+                    ForEach(Array(history.enumerated()).reversed(), id: \.offset) { index, id in
+                        Button(matrix.rooms.first { $0.id == id }?.name ?? "Conversation") {
+                            historyIndex = index
+                            selectRoom(history[index], record: false)
+                        }
                     }
                 }
+                TitleSearch(bar: searchBar, widths: widths, fits: searchFits) {
+                    SearchBarField(
+                        bar: searchBar,
+                        prompt: WorkspaceRail.searchPrompt(workspaceID: workspaceID, workspaces: matrix.workspaces),
+                        matrix: matrix, recents: recentSearches, visited: history, onPick: pickSearch
+                    ).frame(width: m(Self.searchWidth))
+                }.disabled(matrix.user == nil)
             }
-            title().frame(maxWidth: .infinity, alignment: .leading).padding(.leading, m.sp4)
-            trailing()
-            TitleSearch(bar: searchBar, widths: widths, fits: searchFits) {
-                SearchBarField(
-                    bar: searchBar,
-                    prompt: WorkspaceRail.searchPrompt(workspaceID: workspaceID, workspaces: matrix.workspaces),
-                    matrix: matrix, recents: recentSearches, visited: history, onPick: pickSearch
-                ).frame(width: m(Self.searchWidth))
-            }.disabled(matrix.user == nil)
         }
-        // The window buttons are AppKit chrome and do not zoom.
-        .padding(.leading, sidebarCollapsed ? windowButtonsWidth + m.sp16 : m.sp20).padding(.trailing, m.sp20)
         .frame(height: m.paneHeader).background(WindowDragArea())
         .foregroundStyle(colors.textSecondary)
     }
@@ -1176,8 +1184,7 @@ struct RootView: View {
                                 drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil)
                         }.alignmentGuide(.top) { $0[.bottom] }
                     }
-                    .frame(maxWidth: m.conversationColumn).frame(maxWidth: .infinity).padding(.horizontal, m.sp12)
-                    .scrollEdge(.bottom, colors.canvas)
+                    .conversationColumn(m, isThread: false).scrollEdge(.bottom, colors.canvas)
                 }
             }
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
@@ -1192,7 +1199,7 @@ struct RootView: View {
         channelPanel = panel
     }
     private func channelHeader(_ room: ChatRoom) -> some View {
-        toolbar {
+        toolbar(grid: true) {
             ChannelHeader.Title(matrix: matrix, room: room) { headerAction($0, room: room) }
         } trailing: {
             // In the toolbar, so it never covers or moves a message.
@@ -1275,13 +1282,11 @@ struct RootView: View {
         } footer: {
             VStack(spacing: 0) {
                 if room.canPostMessages == false {
-                    ComposerNotice(text: Self.cannotPost).padding(.horizontal, m.sp16).padding(.top, m.sp4)
-                        .padding(.bottom, m.sp16)
+                    ComposerNotice(text: Self.cannotPost).padding(.top, m.sp4).padding(.bottom, m.sp16)
                 } else if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
                 {
-                    editComposer(target, room: room).padding(.horizontal, m.sp16).padding(.top, m.sp4)
-                        .padding(.bottom, m.sp16)
+                    editComposer(target, room: room, isThread: true).padding(.top, m.sp4).padding(.bottom, m.sp16)
                 } else {
                     BindingScope({ threadDraftBinding(root.eventID, roomID: room.id) }) { text in
                         MessageComposer(
@@ -1326,11 +1331,11 @@ struct RootView: View {
                                 && replyAllowsSend(roomID: room.id, threadID: root.eventID),
                             onDiscardAttachments: attachmentDrafts.discard,
                             requiresTextForSend: scopedReply(roomID: room.id, threadID: root.eventID) != nil,
-                            onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) }
+                            onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) },
+                            isThread: true
                         )
                     }
-                    .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(.horizontal, m.sp16)
-                    .padding(.top, m.sp4)
+                    .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(.top, m.sp4)
                     .disabled(
                         !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
                             || matrix.selectedRoomID != root.roomID)
@@ -1346,13 +1351,10 @@ struct RootView: View {
                         if room.isDirect {
                             Text("Also send as direct message")
                         } else {
-                            Text(
-                                "Also send to \(Image(systemName: room.channelSymbol))\(Text(room.name).fontWeight(.semibold))"
-                            )
+                            Text("Also send to \(Text(room.writtenName).fontWeight(.semibold))")
                         }
                     }.toggleStyle(.checkbox).font(m.font(.body)).foregroundStyle(colors.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, m.sp16 + m.sp12)
-                        .padding(.top, m.sp8).padding(.bottom, m.sp16)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, m.sp8).padding(.bottom, m.sp16)
                         .disabled(threadReadyID != root.eventID || withFiles)
                 }
             }
@@ -1361,9 +1363,9 @@ struct RootView: View {
                     reply: replyTarget.flatMap { $0.belongsTo(roomID: room.id, threadID: root.eventID) ? $0 : nil },
                     drafts: editTarget == nil
                         ? AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID) : nil
-                ).padding(.horizontal, m.sp12).alignmentGuide(.top) { $0[.bottom] }
+                ).alignmentGuide(.top) { $0[.bottom] }
             }
-            .scrollEdge(.bottom, colors.canvas)
+            .conversationColumn(m, isThread: true).scrollEdge(.bottom, colors.canvas)
         }.background(colors.canvas).dropToUpload("Upload to thread")
     }
     private var browsedWorkspace: Workspace? { matrix.workspaces.first { $0.id == workspaceID } }
@@ -2239,7 +2241,7 @@ struct RootView: View {
                 target.write(value, current: editTarget, context: editContext, text: &editText)
             })
     }
-    private func editComposer(_ target: MessageEditTarget, room: ChatRoom) -> some View {
+    private func editComposer(_ target: MessageEditTarget, room: ChatRoom, isThread: Bool = false) -> some View {
         let context = composerContext
         return BindingScope({ editBinding(target, context: context) }) { text in
             MessageComposer(
@@ -2260,7 +2262,7 @@ struct RootView: View {
                 onError: { error in
                     guard isCurrentEdit(target, context: context) else { return }
                     matrix.errorMessage = error
-                }, allowsSend: isCurrentEdit(target, context: context)
+                }, allowsSend: isCurrentEdit(target, context: context), isThread: isThread
             )
         }
         .id("edit-\(composerGeneration)-\(target.id)").disabled(!isCurrentEdit(target, context: context))
@@ -2830,6 +2832,8 @@ private struct ReadInputs {
     var localReady: Bool
     var threadReadViewport: ThreadReadViewport
     var readHold: ReadStateHold
+    /// A pane has taken the conversation's place, so none of it is on screen.
+    var conversationCovered: Bool
 
     @MainActor static var hasNativeModal: Bool {
         NSApp.modalWindow != nil
@@ -2847,7 +2851,8 @@ private struct ReadInputs {
             isPreview: matrix.isPreview, isJoined: shownRoom(matrix, workspaceID: workspaceID)?.membership == "join",
             isMainTimeline: route == .home,
             isLiveTimeline: matrix.focusedEventID == nil && matrix.status == .ready,
-            isAtBottom: visibleBottomRoomID == matrix.selectedRoomID && visibleBottomRoomID != nil,
+            isAtBottom: visibleBottomRoomID == matrix.selectedRoomID && visibleBottomRoomID != nil
+                && !conversationCovered,
             isWindowActive: visible, isWindowVisible: visible, isWindowUnoccluded: visible,
             hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented
         )
@@ -2970,6 +2975,41 @@ private struct TitleSearch<Field: View>: View {
         }
         .onChange(of: bar.focusRequests) { _, _ in if !fits { open = true } }
         .onChange(of: bar.menuOpen) { _, menuOpen in if !menuOpen { open = false } }
+    }
+}
+
+/// The toolbar's sidebar button, when there is one, `chromeStart` from its leading edge, and then the rest. On the grid
+/// the rest keeps to the conversation's column, starting past the button where the column would put it under the
+/// button; off it, it fills the toolbar inside `margin`.
+private struct ToolbarGrid: Layout {
+    let chromeStart: CGFloat
+    let spacing: CGFloat
+    let margin: CGFloat
+    let zoom: CGFloat
+    let grid: Bool
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let height = subviews.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+        return CGSize(width: proposal.width ?? 0, height: proposal.height ?? height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let rest = subviews.last else { return }
+        var chromeEnd: CGFloat = 0
+        if subviews.count > 1 {
+            let size = subviews[0].sizeThatFits(.unspecified)
+            subviews[0].place(
+                at: CGPoint(x: bounds.minX + chromeStart, y: bounds.midY), anchor: .leading,
+                proposal: ProposedViewSize(size))
+            chromeEnd = chromeStart + size.width + spacing
+        }
+        let column =
+            grid
+            ? ConversationGrid.column(width: bounds.width / zoom, thread: false, chrome: chromeEnd / zoom)
+            : (leading: max(margin, chromeEnd) / zoom, trailing: (bounds.width - margin) / zoom)
+        rest.place(
+            at: CGPoint(x: bounds.minX + column.leading * zoom, y: bounds.midY), anchor: .leading,
+            proposal: ProposedViewSize(width: max(0, column.trailing - column.leading) * zoom, height: bounds.height))
     }
 }
 

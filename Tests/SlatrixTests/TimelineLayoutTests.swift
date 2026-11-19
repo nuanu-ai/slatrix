@@ -29,14 +29,17 @@ struct TimelineLayoutTests {
             timestamp: Self.now.addingTimeInterval(-minutesBeforeNow * 60))
     }
 
-    private func layout(_ messages: [ChatMessage], unread: String? = nil, groups: Bool = true) -> [String] {
+    private func layout(
+        _ messages: [ChatMessage], unread: String? = nil, groups: Bool = true, threadRoot: String? = nil
+    ) -> [String] {
         TimelineLayout.rows(
-            messages, unreadBoundaryEventID: unread, groups: groups, now: Self.now, calendar: Self.calendar,
-            locale: Self.locale
+            messages, unreadBoundaryEventID: unread, groups: groups, threadRootEventID: threadRoot, now: Self.now,
+            calendar: Self.calendar, locale: Self.locale
         ).map { row in
             switch row.kind {
             case .day(let label): "day \(label)"
             case .unread: "unread"
+            case .replies(let count): "\(count) replies"
             case .message(let message, let grouped, let time): "\(message.id)\(grouped ? " grouped" : "") \(time)"
             }
         }.map { $0.replacingOccurrences(of: "\u{202F}", with: " ") }
@@ -113,6 +116,18 @@ struct TimelineLayoutTests {
         local.timelineEventID = "$event"
         let rows = layout([message("a", "@alice", at: 2), local], unread: "$event")
         #expect(rows == ["day Today", "a 11:58 AM", "unread", "txn 11:59 AM"])
+    }
+
+    @Test("In a thread a line counting the replies sets the root apart, and the first reply starts its own group")
+    func repliesDivider() {
+        let rows = layout(
+            [message("root", "@alice", at: 3), message("a", "@alice", at: 2), message("b", "@alice", at: 1)],
+            threadRoot: "root")
+        #expect(rows == ["day Today", "root 11:57 AM", "2 replies", "a 11:58 AM", "b grouped 11:59 AM"])
+        // Older replies still to load sit above the newest, with the root not yet among them: no line.
+        #expect(
+            layout([message("a", "@alice", at: 2), message("b", "@alice", at: 1)], threadRoot: "root")
+                == ["day Today", "a 11:58 AM", "b grouped 11:59 AM"])
     }
 
     @MainActor @Test("A message that arrives while the conversation is open adds no unread line")
