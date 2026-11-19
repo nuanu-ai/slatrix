@@ -174,14 +174,17 @@ async def crash_case(http, sender, reader, binary, store, messages, target, comm
                 stderr=asyncio.subprocess.DEVNULL,
             )
 
-        async def enqueued(child):
-            if await child.stdout.readline() != b"ENQUEUED\n":
-                raise RuntimeError("SDK sender exited before accepting its messages")
+        async def enqueued(child, stage):
+            line = await child.stdout.readline()
+            if not line:
+                raise RuntimeError(f"SDK sender exited during {stage} (status {await child.wait()})")
+            if line != b"ENQUEUED\n":
+                raise RuntimeError(f"Unexpected SDK sender output during {stage}")
 
         process = await launch("queue", messages)
         try:
             async with asyncio.timeout(45):
-                await asyncio.gather(enqueued(process), at_cut.wait())
+                await asyncio.gather(enqueued(process, "initial enqueue"), at_cut.wait())
         except TimeoutError as error:
             raise TimeoutError(
                 f"Did not reach the selected crash point (cut reached: {at_cut.is_set()})"
@@ -198,7 +201,7 @@ async def crash_case(http, sender, reader, binary, store, messages, target, comm
         process = await launch("restore", new_messages)
         try:
             async with asyncio.timeout(45):
-                await enqueued(process)
+                await enqueued(process, "queue restore")
                 while marker not in (seen := await history()):
                     await asyncio.sleep(0.1)
         except TimeoutError as error:
