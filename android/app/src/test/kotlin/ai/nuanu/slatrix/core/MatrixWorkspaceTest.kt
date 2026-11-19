@@ -227,21 +227,19 @@ class MatrixWorkspaceTest {
             runCurrent()
             val thread = requireNotNull(workspace.selected.value?.conversation)
             assertTrue(thread.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)))
-            val sent = listOf(TimelineDiff.PushBack(conversationItem("reply", "reply", "On it", local = true, editable = true)),
-                TimelineDiff.Set(0u, conversationItem("reply", "\$reply", "On it", editable = true)))
 
             if (signedOut) {
                 // Signing out closes the workspace before the reply is sent, so the copy's wait ends and lets go of the room.
                 workspace.close()
                 runCurrent()
                 assertTrue(client.handles.all { it.uniffiIsDestroyed })
-                client.emit(sent)
+                client.queue(RoomSendQueueUpdate.SentEvent("txn", "\$reply"))
                 runCurrent()
                 assertTrue(client.raw.isEmpty)
             } else {
                 workspace.back()
                 runCurrent()
-                client.emit(sent)
+                client.queue(RoomSendQueueUpdate.SentEvent("txn", "\$reply"))
                 assertTrue("\"event_id\":\"\$reply\"" in client.raw.receive())
                 workspace.close()
             }
@@ -353,6 +351,9 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
     var failSaves = false
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<TimelineListener>()
     fun emit(diff: List<TimelineDiff>) = listeners.forEach { it.onUpdate(diff) }
+    private val queueListeners =java.util.concurrent.CopyOnWriteArrayList<SendQueueListener>()
+    /** Tells whoever follows a room's send queue about [update]. */
+    fun queue(update: RoomSendQueueUpdate) = queueListeners.forEach { it.onUpdate(update) }
     /** The content of events sent straight to a room, past its send queue. */
     val raw = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
     override suspend fun getRecentEmojis(): List<RecentEmoji> = emptyList()
@@ -371,7 +372,9 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
                     object : RoomMessageEventContentWithoutRelation(NoHandle) {
                         override fun withMentions(mentions: Mentions): RoomMessageEventContentWithoutRelation = this
                     }
-                override suspend fun send(msg: RoomMessageEventContentWithoutRelation): SendHandle = object : SendHandle(NoHandle) {}
+                override suspend fun send(msg: RoomMessageEventContentWithoutRelation): SendHandle = object : SendHandle(NoHandle) {
+                    override fun transactionId(): String = "txn"
+                }
             } }
         override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = drafts["$roomId $threadRoot"]
         override suspend fun saveComposerDraft(draft: ComposerDraft, threadRoot: String?) {
@@ -384,6 +387,10 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
             override fun threadRootEventId(): String? = threadRoots[eventId]
         }
         override suspend fun clearComposerDraft(threadRoot: String?) { drafts.remove("$roomId $threadRoot") }
+        override suspend fun subscribeToSendQueueUpdates(listener: SendQueueListener): TaskHandle {
+            queueListeners += listener
+            return object : TaskHandle(NoHandle) { override fun cancel() { queueListeners -= listener } }
+        }
         override suspend fun sendRaw(eventType: String, content: String): String {
             // As the bindings refuse a call on a closed room.
             check(!uniffiIsDestroyed) { "Room object has already been destroyed" }

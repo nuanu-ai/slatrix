@@ -405,60 +405,54 @@ class MatrixConversationTest {
         }
     }
 
+    /** The reply the channel's copy quotes, from the copy sent straight to the room. */
+    private suspend fun ConversationRoom.copyQuotes(): String {
+        val (type, json) = raw.receive()
+        assertEquals("m.room.message", type)
+        val content = com.google.gson.JsonParser.parseString(json).asJsonObject
+        assertEquals("On it", content["body"].asString)
+        return content["m.relates_to"].asJsonObject["m.in_reply_to"].asJsonObject["event_id"].asString
+    }
+
     // capability: thread.send-to-channel
     @Test fun aReplyAlsoSentToTheChannelGoesToItsThreadThenToTheChannelOnceSentEvenWithTheThreadClosed() = runTest {
-        // The reader's own reply, still sending under a transaction ID or sent under an event ID; its row keeps its ID.
-        fun own(key: String, id: String, body: String, local: Boolean = false) =
-            conversationItem(key, id, body, local = local, editable = true)
         for (sentAtOnce in listOf(false, true)) {
-            // The same words, said before in the thread, are not this reply.
-            val timeline = ConversationTimeline(listOf(own("said", "\$said", "On it")))
+            val timeline = ConversationTimeline(emptyList())
             val room = ConversationRoom(timeline)
             val conversation = MatrixConversation(backgroundScope, room, threadRoot = "\$root")
             runCurrent()
             val sending = async { conversation.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)) }
             assertEquals("On it", (timeline.submissions.receive().type as MessageType.Text).content.body)
-            timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
+            // The server can confirm the reply before its send hands out the transaction.
+            if (sentAtOnce) room.queue(RoomSendQueueUpdate.SentEvent("txn-reply", "\$reply"))
+            timeline.sendResults.send(Result.success(SentHandle("txn-reply")))
             assertTrue(sending.await())
             // Leaving the thread closes it; the copy still goes.
             conversation.close()
 
-            // An earlier reply's echo that lands only now must not be taken for this one.
-            timeline.emit(listOf(TimelineDiff.PushBack(own("earlier", "earlier", "First", local = true))))
-            if (sentAtOnce) timeline.emit(listOf(TimelineDiff.Set(1u, own("earlier", "\$earlier", "First")),
-                TimelineDiff.PushBack(own("this", "this", "On it", local = true)), TimelineDiff.Set(2u, own("this", "\$reply", "On it"))))
-            else {
-                timeline.emit(listOf(TimelineDiff.PushBack(own("this", "this", "On it", local = true))))
-                timeline.emit(listOf(TimelineDiff.Set(1u, own("earlier", "\$earlier", "First"))))
-                timeline.emit(listOf(TimelineDiff.Set(2u, own("this", "\$reply", "On it"))))
-            }
-
-            val (type, json) = room.raw.receive()
-            assertEquals("m.room.message", type)
-            val content = com.google.gson.JsonParser.parseString(json).asJsonObject
-            assertEquals("On it", content["body"].asString)
-            assertEquals("\$reply", content["m.relates_to"].asJsonObject["m.in_reply_to"].asJsonObject["event_id"].asString)
+            // Another message's confirmation isn't this one's.
+            room.queue(RoomSendQueueUpdate.SentEvent("txn-earlier", "\$earlier"))
+            if (!sentAtOnce) room.queue(RoomSendQueueUpdate.SentEvent("txn-reply", "\$reply"))
+            assertEquals("\$reply", room.copyQuotes())
         }
     }
 
     // capability: thread.send-to-channel
-    @Test fun theCopyQuotesThisPhonesReplyNotTheSameWordsSentFromAnotherDevice() = runTest {
-        fun own(key: String, id: String, local: Boolean = false) = conversationItem(key, id, "On it", local = local, editable = true)
+    @Test fun theCopyQuotesTheReplyItsOwnSendQueuedNotTheSameWordsSentJustBefore() = runTest {
         val timeline = ConversationTimeline(emptyList())
         val room = ConversationRoom(timeline)
         val conversation = MatrixConversation(backgroundScope, room, threadRoot = "\$root")
         runCurrent()
-        val sending = async { conversation.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)) }
-        timeline.submissions.receive()
-        timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
-        assertTrue(sending.await())
+        for ((transaction, toChannel) in listOf("txn-first" to false, "txn-second" to true)) {
+            val sending = async { conversation.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = toChannel)) }
+            timeline.submissions.receive()
+            timeline.sendResults.send(Result.success(SentHandle(transaction)))
+            assertTrue(sending.await())
+        }
+        room.queue(RoomSendQueueUpdate.SentEvent("txn-first", "\$first"))
+        room.queue(RoomSendQueueUpdate.SentEvent("txn-second", "\$second"))
 
-        timeline.emit(listOf(TimelineDiff.PushBack(own("elsewhere", "\$elsewhere"))))
-        timeline.emit(listOf(TimelineDiff.PushBack(own("this", "this", local = true)), TimelineDiff.Set(1u, own("this", "\$here"))))
-
-        val (_, json) = room.raw.receive()
-        val content = com.google.gson.JsonParser.parseString(json).asJsonObject
-        assertEquals("\$here", content["m.relates_to"].asJsonObject["m.in_reply_to"].asJsonObject["event_id"].asString)
+        assertEquals("\$second", room.copyQuotes())
         conversation.close()
     }
 
@@ -469,13 +463,12 @@ class MatrixConversationTest {
         runCurrent()
         val sending = async { conversation.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)) }
         timeline.submissions.receive()
-        timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
+        timeline.sendResults.send(Result.success(SentHandle("txn-reply")))
         assertTrue(sending.await())
         conversation.close()
 
-        // Deleting the reply while it's still sending takes its echo away.
-        timeline.emit(listOf(TimelineDiff.PushBack(conversationItem("this", "this", "On it", local = true, editable = true))))
-        timeline.emit(listOf(TimelineDiff.Remove(0u)))
+        // Deleting the reply while it's still sending cancels it in the queue.
+        room.queue(RoomSendQueueUpdate.CancelledLocalEvent("txn-reply"))
         runCurrent()
         assertTrue(room.uniffiIsDestroyed)
         assertTrue(room.raw.isEmpty)
@@ -613,6 +606,31 @@ class MatrixConversationTest {
             ThumbnailInfo(360u, 640u, "image/jpeg", 1_024u), null, null), (video as AttachmentKind.Video).videoInfo)
         assertEquals("The poster goes up with the video", UploadSource.File("/cache/poster.jpg"), video.thumbnailSource)
         conversation.close()
+    }
+
+    // capability: composer.send
+    @Test fun aMessageOrFileSentFromAnOlderMessageGoesToTheNewestToShowIt() = runTest {
+        val sends = listOf<suspend (MatrixConversation, ConversationTimeline) -> Unit>(
+            { conversation, around ->
+                around.sendResults.send(Result.success(SentHandle("txn")))
+                assertTrue(conversation.send(ComposerMessage("On my way", null, emptyList(), false)))
+            },
+            { conversation, _ ->
+                conversation.sendAttachments(listOf({ OutgoingAttachment("/cache/a.txt", "a.txt", "text/plain", 1, null, null) }))
+            },
+        )
+        for (send in sends) {
+            val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
+            val around = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier")))
+            val conversation = MatrixConversation(backgroundScope, JumpRoom(live, around), at = "\$old")
+            assertTrue(conversation.state.first { !it.loading }.focused)
+            send(conversation, around)
+            val shown = withContext(Dispatchers.Default) {
+                withTimeout(5_000) { conversation.state.first { !it.focused && it.sendToShow } }
+            }
+            assertEquals(listOf("Latest"), shown.rows.messages.map { it.body })
+            conversation.close()
+        }
     }
 
     @Test fun anAttachmentInAThreadGoesToTheThread() = runTest {
@@ -1051,9 +1069,10 @@ class MatrixConversationTest {
         conversation.close()
     }
 
-    @Test fun aThreadShowsItsRootWithTheChannelsEditsSinceTheThreadKeepsItAsFirstSent() = runTest {
-        fun channelCopy(body: String, edited: Boolean = true) = ConversationMessage("channel-row", "\$root", "@mira:example.org",
-            "Mira Chen", body, null, 1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0, edited = edited)
+    @Test fun aThreadShowsItsRootWithTheChannelsEditsAndDeletionSinceTheThreadKeepsItAsFirstSent() = runTest {
+        fun channelCopy(body: String, edited: Boolean = true, kind: MessageKind = MessageKind.Text) = ConversationMessage(
+            "channel-row", "\$root", "@mira:example.org", "Mira Chen", body, null, 1_700_000_000_000L, kind, MessageSendState.Sent,
+            false, "MC", 0, edited = edited)
         val channel = MutableStateFlow(ConversationState(rows = listOf(channelCopy("Plan for Friday"))))
         val timeline = ConversationTimeline(emptyList())
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root",
@@ -1071,6 +1090,11 @@ class MatrixConversationTest {
         // An edit the server refused goes back in the channel, and so in the thread.
         channel.value = ConversationState(rows = listOf(channelCopy("Plan?", edited = false)))
         assertFalse(conversation.state.first { it.rows.messages.first().body == "Plan?" }.rows.messages.first().edited)
+        // capability: message.delete
+        channel.value = ConversationState(rows = listOf(channelCopy("This message was deleted", false, MessageKind.Deleted)))
+        val deleted = conversation.state.first { it.rows.messages.first().kind == MessageKind.Deleted }.rows.messages.first()
+        assertEquals("This message was deleted", deleted.body)
+        assertEquals("It keeps its row", loaded.id, deleted.id)
         conversation.close()
     }
 }
@@ -1114,6 +1138,13 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
         override fun close() {}
     }
     override suspend fun matrixToEventPermalink(eventId: String): String = "https://matrix.to/#/!design:example.org/$eventId"
+    private val queueListeners = java.util.concurrent.CopyOnWriteArrayList<SendQueueListener>()
+    override suspend fun subscribeToSendQueueUpdates(listener: SendQueueListener): TaskHandle {
+        queueListeners += listener
+        return object : TaskHandle(NoHandle) { override fun cancel() { queueListeners -= listener } }
+    }
+    /** Tells whoever follows the room's send queue about [update]. */
+    fun queue(update: RoomSendQueueUpdate) = queueListeners.forEach { it.onUpdate(update) }
     /** Events sent straight to the room, past its send queue, as their type and JSON content. */
     val raw = Channel<Pair<String, String>>(Channel.UNLIMITED)
     override suspend fun sendRaw(eventType: String, content: String): String {
@@ -1128,6 +1159,11 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
         this.configuration = configuration
         return value
     }
+}
+
+/** A send's handle, naming its transaction. */
+private class SentHandle(private val transaction: String) : SendHandle(NoHandle) {
+    override fun transactionId(): String = transaction
 }
 
 private class ConversationTimeline(private val cached: List<TimelineItem>) : Timeline(NoHandle) {

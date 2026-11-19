@@ -18,6 +18,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import org.junit.Test
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -501,45 +502,49 @@ class MatrixRoomsTest {
 
     @Test fun aRoomPausedByATemporarySendErrorResumesWhileSyncStaysConnected() = recoverQueueAfterDeleting("later-message")
 
+    private val refusedDeletion = RefusedChange("!a:example.org", "\$refused", RefusedChangeKind.REDACTION)
+
     // capability: message.delete
-    @Test fun aDeletionTheServerRefusedIsCancelledThoughNoConversationIsOpen() = runTest {
-        val room = TestRoom(roomInfo("!a:example.org", "Alpha"))
-        room.queueTimeline = QueueTimeline(listOf(
-            conversationItem("waiting", "\$waiting", "Still deleting", deletion = failed(recoverable = true)),
-            conversationItem("refused", "\$refused", "Refused", deletion = failed(recoverable = false))))
-        val client = RoomsClient(listOf(room))
+    @Test fun aDeletionTheServerRefusesIsCancelledThoughNoConversationIsOpen() = runTest {
+        val client = RoomsClient(emptyList())
         client.services.trySend(RoomsSync())
         val rooms = MatrixRooms(backgroundScope, client)
         try {
-            client.sendQueuesEnabled.first { it }
-            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.NewLocalEvent("deletion"))
-            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.SendError(
+            client.lookedOnline.first { it }
+            client.wedged.value = listOf(refusedDeletion)
+            client.queueUpdates?.onUpdate(refusedDeletion.roomId, RoomSendQueueUpdate.SendError(
                 "deletion", QueueWedgeError.GenericApiError("403"), false))
-            assertEquals(EventOrTransactionId.EventId("\$refused") to SendTarget.Redaction,
-                withContext(Dispatchers.Default) { withTimeout(5_000) { room.queueTimeline.aborted.receive() } })
+            withContext(Dispatchers.Default) { withTimeout(5_000) { client.wedged.first { it.isEmpty() } } }
         } finally {
             rooms.close()
         }
     }
 
     // capability: message.edit
-    @Test fun anEditTheServerRefusedBeforeTheAppStartedIsCancelledAtLaunch() = runTest {
-        val room = TestRoom(roomInfo("!a:example.org", "Alpha"))
-        room.queueTimeline = QueueTimeline(listOf(
-            conversationItem("refused", "\$refused", "Edited", editState = failed(recoverable = false))))
-        val client = RoomsClient(listOf(room))
-        client.queued = listOf(room.id() to "edit")
-        client.services.trySend(RoomsSync())
+    @Test fun anEditTheServerRefusedBeforeTheAppStartedIsCancelledAtLaunchEvenOffline() = runTest {
+        val client = RoomsClient(emptyList())
+        client.wedged.value = listOf(RefusedChange("!a:example.org", "\$refused", RefusedChangeKind.EDIT))
         val rooms = MatrixRooms(backgroundScope, client)
         try {
-            assertEquals(EventOrTransactionId.EventId("\$refused") to SendTarget.Edit,
-                withContext(Dispatchers.Default) { withTimeout(5_000) { room.queueTimeline.aborted.receive() } })
+            withContext(Dispatchers.Default) { withTimeout(5_000) { client.wedged.first { it.isEmpty() } } }
         } finally {
             rooms.close()
         }
     }
 
-    private fun failed(recoverable: Boolean) = EventSendState.SendingFailed(QueueWedgeError.GenericApiError("x"), recoverable)
+    // capability: message.delete
+    @Test fun aDeletionRefusedWhileOfflineIsCancelledOnceTheQueuesResume() = runTest {
+        val client = RoomsClient(emptyList())
+        val rooms = MatrixRooms(backgroundScope, client)
+        try {
+            client.lookedOffline.first { it }
+            client.wedged.value = listOf(refusedDeletion)
+            client.services.trySend(RoomsSync())
+            withContext(Dispatchers.Default) { withTimeout(5_000) { client.wedged.first { it.isEmpty() } } }
+        } finally {
+            rooms.close()
+        }
+    }
 
     @Test fun deletingTheFailedHeadResumesTheRestOfTheRoomQueue() = recoverQueueAfterDeleting("local")
 
@@ -900,10 +905,16 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
         }
     }
     @Volatile var queueUpdates: SendQueueRoomUpdateListener? = null
-    /** What the rooms' send queues held when the app started, by room and transaction. */
-    var queued = emptyList<Pair<String, String>>()
+    /** Changes the server refused, still at the head of their rooms' send queues. */
+    val wedged = MutableStateFlow(emptyList<RefusedChange>())
+    /** Whether the app has looked for refused changes while the send queues were held, and once they ran. */
+    val lookedOffline = MutableStateFlow(false)
+    val lookedOnline = MutableStateFlow(false)
+    override suspend fun abortRefusedChanges(): List<RefusedChange> {
+        (if (sendQueuesEnabled.value) lookedOnline else lookedOffline).value = true
+        return wedged.getAndUpdate { emptyList() }
+    }
     override suspend fun subscribeToSendQueueUpdates(listener: SendQueueRoomUpdateListener): TaskHandle {
-        queued.forEach { (room, transaction) -> listener.onUpdate(room, RoomSendQueueUpdate.NewLocalEvent(transaction)) }
         queueUpdates = listener
         return RoomsHandle()
     }
@@ -924,9 +935,6 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
 }
 
 private class TestRoom(var info: RoomInfo, var latest: LatestEventValue = LatestEventValue.None) : Room(NoHandle) {
-    var queueTimeline = QueueTimeline(emptyList())
-    override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline = queueTimeline
-    override fun close() = Unit
     val sendQueueEnabled = MutableStateFlow(true)
     override fun isSendQueueEnabled() = sendQueueEnabled.value
     override fun enableSendQueue(enable: Boolean) { sendQueueEnabled.value = enable }
@@ -1052,21 +1060,6 @@ internal class TestPowers(private val post: Boolean = true, private val name: Bo
     }
     override fun canOwnUserInvite(): Boolean = invite
     override fun canOwnUserPinUnpin(): Boolean = pin
-}
-
-/** The timeline a room opens to look for what its send queue holds. */
-private class QueueTimeline(private val items: List<TimelineItem>) : Timeline(NoHandle) {
-    val aborted = Channel<Pair<EventOrTransactionId, SendTarget>>(Channel.UNLIMITED)
-    override suspend fun addListener(listener: TimelineListener): TaskHandle {
-        listener.onUpdate(listOf(TimelineDiff.Reset(items)))
-        return RoomsHandle()
-    }
-    override suspend fun abortSend(itemId: EventOrTransactionId, target: SendTarget): Boolean {
-        aborted.send(itemId to target)
-        return true
-    }
-    override suspend fun paginateBackwards(numEvents: UShort): Boolean = true
-    override fun close() = Unit
 }
 
 private class RoomsHandle : TaskHandle(NoHandle) {

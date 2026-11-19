@@ -438,7 +438,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { attachment, width, height, full -> media.picture(attachment, width, height, full) },
             { openAttachment(context, media, it) }, { media.file(it) }, { counterpart?.let { onPerson(it.id, it.name) } ?: run { details = true } },
             typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty(), onPerson = profile,
-            loadThreadOrigin = { conversation?.threadOrigin(it) })
+            loadThreadOrigin = { conversation?.threadOrigin(it) }, onSendShown = { conversation?.sendShown() })
         }
         }
         forwarding?.let { (message, content) ->

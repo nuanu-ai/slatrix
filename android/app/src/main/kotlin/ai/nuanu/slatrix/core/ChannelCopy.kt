@@ -1,14 +1,12 @@
 package ai.nuanu.slatrix.core
 
 import kotlinx.coroutines.CompletableDeferred
-import org.matrix.rustcomponents.sdk.EventOrTransactionId
-import org.matrix.rustcomponents.sdk.MsgLikeKind
+import org.matrix.rustcomponents.sdk.Room
+import org.matrix.rustcomponents.sdk.RoomSendQueueUpdate
+import org.matrix.rustcomponents.sdk.SendQueueListener
 import org.matrix.rustcomponents.sdk.TaskHandle
-import org.matrix.rustcomponents.sdk.Timeline
 import org.matrix.rustcomponents.sdk.TimelineDiff
 import org.matrix.rustcomponents.sdk.TimelineItem
-import org.matrix.rustcomponents.sdk.TimelineItemContent
-import org.matrix.rustcomponents.sdk.TimelineListener
 
 /**
  * Slack's "Also send to #channel" for a thread reply: the channel gets a rich reply to it without rel_type m.thread,
@@ -25,33 +23,39 @@ object ChannelCopy {
 }
 
 /**
- * Waits for the reader's message with [body] to show up in a timeline and reach the server, for its event ID: the copy
- * needs it, and the send queue hands out none. Its listener keeps reading the timeline until it [cancel]s.
+ * Follows the reader's message through its room's send queue to the server, for its event ID: the copy needs it, and
+ * the send hands out only its transaction. It listens from before the send, so one confirmed at once is heard too, until
+ * it [cancel]s.
  *
  * shortcut: the wait lives in memory, so a reply still queued when the app quits reaches its thread without its copy;
  * keep pending copies with the drafts if that turns out to matter.
  */
-internal class SentEcho private constructor(private val body: String) : TimelineListener {
+internal class SentEcho private constructor() : SendQueueListener {
     /** The message's event ID once sent, or null if it never will be. */
     val sent = CompletableDeferred<String?>()
-    private class Seen(val id: String, val match: Boolean, val local: Boolean, val eventId: String?)
-    private val items = mutableListOf<Seen>()
-    private var before: Set<String>? = null
-    private var echo: String? = null
+    private var transaction: String? = null
+    /** What the queue said, by transaction, before the send handed out its own. */
+    private val heard = mutableMapOf<String, String?>()
     private var handle: TaskHandle? = null
 
-    @Synchronized override fun onUpdate(diff: List<TimelineDiff>) {
-        if (sent.isCompleted) return
-        diff.forEach { items.applyDiff(it, ::seen) }
-        // The listener's first update is the timeline as it was before the send.
-        val before = before ?: return run { before = items.mapTo(HashSet()) { it.id } }
-        // Its local echo, even when the sent event replaces it in the same update. Only this device's queue makes one,
-        // so the same words sent from another device are never taken for it.
-        val echo = echo ?: diff.flatMap { it.items() }.map(::seen).firstOrNull { it.match && it.local && it.id !in before }
-            ?.id?.also { echo = it } ?: return
-        // Gone means its sending was cancelled.
-        val item = items.firstOrNull { it.id == echo } ?: return finish(null)
-        item.eventId?.let(::finish)
+    @Synchronized override fun onUpdate(update: RoomSendQueueUpdate) {
+        try {
+            val (id, eventId) = when (update) {
+                is RoomSendQueueUpdate.SentEvent -> update.transactionId to update.eventId
+                is RoomSendQueueUpdate.CancelledLocalEvent -> update.transactionId to null
+                else -> return
+            }
+            if (transaction == null) heard[id] = eventId else if (id == transaction) finish(eventId)
+        } finally {
+            update.destroy()
+        }
+    }
+
+    /** The send's [transaction], as its handle names it. */
+    @Synchronized fun follow(transaction: String) {
+        this.transaction = transaction
+        if (transaction in heard) finish(heard[transaction])
+        heard.clear()
     }
 
     /** For a message that never made it into the send queue, or a session that ended. */
@@ -71,19 +75,11 @@ internal class SentEcho private constructor(private val body: String) : Timeline
         handle.close()
     }
 
-    private fun seen(item: TimelineItem): Seen {
-        val event = item.asEvent()
-        val message = ((event?.content as? TimelineItemContent.MsgLike)?.content?.kind as? MsgLikeKind.Message)?.content
-        val id = event?.eventOrTransactionId
-        return Seen(item.uniqueId().id, event?.isOwn == true && message?.body == body,
-            id is EventOrTransactionId.TransactionId, (id as? EventOrTransactionId.EventId)?.eventId)
-    }
-
     companion object {
-        /** Starts watching before the message is sent, so a message already there is never taken for it. */
-        suspend fun watch(timeline: Timeline, body: String): SentEcho {
-            val echo = SentEcho(body)
-            echo.listening(timeline.addListener(echo))
+        /** Starts listening before the message is sent. */
+        suspend fun watch(room: Room): SentEcho {
+            val echo = SentEcho()
+            echo.listening(room.subscribeToSendQueueUpdates(echo))
             return echo
         }
     }

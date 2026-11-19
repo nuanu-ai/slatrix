@@ -141,20 +141,50 @@ class LiveChannelScreenTest {
         compose.waitUntil { drawn("Hello") }
     }
 
+    /** The screen over [state], which takes back its ask to show a send once the screen has. */
+    private fun sendingScreen(state: androidx.compose.runtime.MutableState<ConversationState>,
+        summary: androidx.compose.runtime.State<RoomSummary> = mutableStateOf(room)) = compose.setContent {
+        SlatrixTheme {
+            LiveChannelScreen(summary.value, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                onSendShown = { state.value = state.value.copy(sendToShow = false) })
+        }
+    }
+
     // capability: composer.send
-    // As on the Mac, what you send brings the conversation to it, even when the server confirms it before it shows.
+    // As on the Mac, what you send brings the conversation to it, even when the server confirms it before it shows and
+    // the conversation's summary changes with it.
     @Test fun yourSendBringsTheConversationToItHoweverSoonItIsConfirmed() {
         val rows = (1..80).map { message("Message $it", minutes = it) }
         val state = mutableStateOf(ConversationState(rows, loading = false, hasMore = false))
-        compose.setContent {
-            SlatrixTheme { LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}) }
-        }
+        val summary = mutableStateOf(room)
+        sendingScreen(state, summary)
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(40)
         compose.onNodeWithText("Message 80").assertDoesNotExist()
-        compose.runOnIdle { state.value = state.value.copy(sends = 1) }
+        compose.runOnIdle {
+            state.value = state.value.copy(sendToShow = true)
+            summary.value = summary.value.copy(topic = "Ship on Friday")
+        }
         compose.waitForIdle()
         compose.runOnIdle { state.value = state.value.copy(rows = rows + message("On my way", minutes = 81, sender = "Jordan")) }
         compose.onNodeWithText("On my way").assertIsDisplayed()
+    }
+
+    // capability: composer.send
+    // Sent while reading older messages, it waits for the newest to load, and only then goes there.
+    @Test fun aSendFromOlderMessagesLeavesTheViewAloneUntilTheNewestAreBack() {
+        val rows = (1..80).map { message("Message $it", minutes = it) }
+        val state = mutableStateOf(ConversationState(rows, loading = false, hasMore = false, focused = true))
+        sendingScreen(state)
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(40)
+        val before = compose.onNodeWithText("Message 39", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { state.value = state.value.copy(sendToShow = true) }
+        compose.waitForIdle()
+        assertEquals(before, compose.onNodeWithText("Message 39", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot)
+
+        val newest = (81..160).map { message("Message $it", minutes = it) } + message("On my way", minutes = 161, sender = "Jordan")
+        compose.runOnIdle { state.value = state.value.copy(rows = newest, focused = false) }
+        compose.onNodeWithText("On my way").assertIsDisplayed()
+        compose.runOnIdle { assertFalse(state.value.sendToShow) }
     }
 
     // capability: message.thread-summary

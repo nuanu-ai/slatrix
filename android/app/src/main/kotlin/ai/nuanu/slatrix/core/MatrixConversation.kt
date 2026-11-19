@@ -146,8 +146,8 @@ data class ConversationState(
     val sendError: String? = null,
     /** Says for a moment that an action on a message failed. */
     val notice: String? = null,
-    /** Messages sent from here so far. */
-    val sends: Int = 0,
+    /** Something the reader sent from here that the screen hasn't brought into view yet. */
+    val sendToShow: Boolean = false,
     /** The message it opened at, to show and highlight. */
     val highlight: String? = null,
     /** Counts jumps within the open conversation, so a second one to the same message shows it again. */
@@ -520,10 +520,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             }
     }
 
-    /** Its text as the channel shows it, an edit the server refused and the channel took back included. */
-    private fun ConversationMessage.withEdit(channel: ConversationMessage) =
-        if (channel.kind == MessageKind.Deleted) this
-        else copy(body = channel.body, formattedBody = channel.formattedBody, edited = channel.edited)
+    /** It as the channel shows it, deleted, or with an edit the server refused and the channel took back. */
+    private fun ConversationMessage.withEdit(channel: ConversationMessage) = copy(kind = channel.kind, body = channel.body,
+        formattedBody = channel.formattedBody, edited = channel.edited, attachment = channel.attachment)
 
     /** The thread's rows topped by its root, which keeps the channel's row so it never redraws when the thread loads it. */
     private fun withRoot(rows: List<ConversationRow>): List<ConversationRow> {
@@ -562,16 +561,17 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val formatted = message.html?.let { FormattedBody(MessageFormat.Html, it) }
                 val content = checkNotNull(timeline.createMessageContent(MessageType.Text(TextMessageContent(message.body, formatted))))
                 val echo = if (message.alsoToChannel && threadRoot != null && message.target !is ComposerTarget.Edit) {
-                    SentEcho.watch(timeline, message.body)
+                    SentEcho.watch(room)
                 } else null
                 try {
                     content.use { raw ->
                         raw.withMentions(Mentions(message.mentions, message.mentionsRoom)).use { outgoing ->
                             when (val target = message.target) {
-                                is ComposerTarget.Reply -> timeline.sendReply(outgoing, target.eventId).close()
+                                is ComposerTarget.Reply ->
+                                    timeline.sendReply(outgoing, target.eventId).use { echo?.follow(it.transactionId()) }
                                 is ComposerTarget.Edit ->
                                     timeline.edit(EventOrTransactionId.EventId(target.eventId), EditedContent.RoomMessage(outgoing))
-                                null -> timeline.send(outgoing).close()
+                                null -> timeline.send(outgoing).use { echo?.follow(it.transactionId()) }
                             }
                         }
                     }
@@ -584,19 +584,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 // Posting reads the conversation, as in Slack, even one marked unread on this visit; an edit isn't a post.
                 if (message.target !is ComposerTarget.Edit) {
                     readLock.withLock { heldUnread = false }
-                    mutableState.update { it.copy(sends = it.sends + 1) }
-                }
-                // A message sent from an older place goes to the present, as sending in Slack takes you there.
-                if (shown?.focused == true) operations.launch {
-                    pageLock.withLock {
-                        try {
-                            if (shown?.focused == true && pending == null) goLive(null)
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) {
-                            // The message is queued either way; reaching the newest one turns live later.
-                        }
-                    }
+                    showSend()
                 }
                 true
             } catch (cancelled: CancellationException) {
@@ -612,6 +600,25 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
         return try { task.await() } finally { task.cancel() }
     }
+
+    /** Brings what the reader just sent into view; a message sent from an older place goes to the present, as in Slack. */
+    private fun showSend() {
+        mutableState.update { it.copy(sendToShow = true) }
+        if (shown?.focused == true) operations.launch {
+            pageLock.withLock {
+                try {
+                    if (shown?.focused == true && pending == null) goLive(null)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // The message is queued either way; reaching the newest one turns live later.
+                }
+            }
+        }
+    }
+
+    /** The screen shows the newest messages, what the reader sent among them. */
+    fun sendShown() = mutableState.update { it.copy(sendToShow = false) }
 
     /**
      * The channel's copy of a thread reply, sent once the reply has an event ID to quote. The send queue only takes
@@ -699,7 +706,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                         java.io.File(attachment.path).parentFile?.deleteRecursively()
                     }
                 }
-                if (sent == null) announce("Couldn’t send this file.")
+                if (sent == null) announce("Couldn’t send this file.") else showSend()
             }
         }
     }
