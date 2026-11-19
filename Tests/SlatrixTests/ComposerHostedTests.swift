@@ -453,6 +453,24 @@ struct ComposerHostedTests {
         #expect(await !eventually(timeout: .milliseconds(500)) { window.firstResponder !== focused })
     }
 
+    // AppKit reads `isEditable` before it lets a drop, a paste or a service put text in.
+    @Test("A covered composer takes no dropped text, and takes it again once uncovered")
+    func coveredTakesNoDrop() throws {
+        let cover = Cover()
+        let (hosting, window) = host(Covered(cover: cover, sent: Gate()))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let editor = try editor(in: hosting)
+        cover.covered = true
+        hosting.layoutSubtreeIfNeeded()
+        #expect(!editor.isEditable)
+        cover.covered = false
+        hosting.layoutSubtreeIfNeeded()
+        #expect(editor.isEditable)
+    }
+
     /// Whether any pixel has the fixture images' red; nothing else in the composer is red.
     private func showsRed(_ view: NSView) -> Bool {
         view.layoutSubtreeIfNeeded()

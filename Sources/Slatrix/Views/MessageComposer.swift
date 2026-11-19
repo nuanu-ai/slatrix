@@ -785,7 +785,7 @@ private struct ComposerNativeEditor: NSViewRepresentable {
             // After this update, which mustn't publish.
             Task { @MainActor in view.publishFormats() }
         }
-        view.isEditable = enabled
+        view.isEditable = enabled && reachable
         view.isEnabled = reachable
     }
 
