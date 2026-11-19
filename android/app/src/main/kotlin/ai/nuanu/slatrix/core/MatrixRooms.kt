@@ -145,6 +145,8 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private var hasConnected = false
     private var networkAvailable: Boolean? = null
     private val sendQueues = RoomSendQueues(client, connection, foreground)
+    /** Deletions, edits and reactions the server refused, as they're cancelled out of the send queues. */
+    val refusedChanges get() = sendQueues.undone
 
     // Room calls block on the SDK, so the list never builds on the main thread.
     private val worker = scope.launch {

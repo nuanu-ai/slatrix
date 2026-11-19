@@ -30,6 +30,12 @@ struct MessagePermalinkTarget: Identifiable {
     fileprivate let owner: MessageActionTarget.Context
 }
 
+/// A room's channel, or one of its threads.
+struct Conversation: Hashable {
+    let roomID: String
+    var threadRootID: String?
+}
+
 struct SendQueueMessageKey: Hashable {
     let roomID: String
     let messageID: String
@@ -545,6 +551,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var isRetryingConnection = false
     private(set) var canRetryConnection = false
     private let connectionRecovery = ConnectionRecovery()
+    private var refusedChanges: RefusedChanges?
     private var profileLoadTask: Task<Void, Never>?
     private var profileRevision: UInt64 = 0
     private var avatarRevision: UInt64 = 0
@@ -578,6 +585,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var hasLockedMessages = false
     private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private(set) var pendingSendActions = Set<SendQueueMessageKey>()
+    /// Messages and files sent from this device so far, by the room and the thread they went to.
+    private(set) var sends: [Conversation: Int] = [:]
     private var mainSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private var threadSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     var threadMessages: [ChatMessage] = []
@@ -694,6 +703,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             presentationID: messageActionThreadPresentationID)
     }
     private var visibleActionThreadID: String?
+    /// Whether the selected room's conversation is on screen, rather than Activity or another list.
+    var showsConversation = true
     private(set) var messageActionThreadPresentationID = UUID()
 
     // Closing a pane invalidates its actions and read acknowledgements without cancelling the SDK's
@@ -812,6 +823,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadSelection = threadID
         setMessageActionThread(rootID: rootID)
     }
+    /// Starts the session as signing in does, for a client already signed in.
+    func startForChecks(_ client: Client) async throws {
+        try await start(
+            client, delegate: SessionPersistence(storeID: "", storeKey: Data(), initialSession: nil, failure: {}))
+    }
+    func stopForChecks() async { await stop() }
     func configureRoomOpenForChecks(client: Client, roomList: RoomListService, user: ChatUser) {
         self.client = client
         self.user = user
@@ -1090,10 +1107,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let service = try await newClient.syncService().withOfflineMode().finish()
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         roomSubscriptions.attach(service.roomListService())
-        try await connectionRecovery.attach(service, client: newClient) { [weak self] feedback in
-            guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
-            self.applyConnection(feedback)
-        }
+        try await connectionRecovery.attach(
+            service, client: newClient,
+            onSendingResumed: { [weak self] in self?.refusedChanges?.cancel() },
+            onUpdate: { [weak self] feedback in
+                guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
+                self.applyConnection(feedback)
+            })
+        guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        try await watchRefusedChanges(newClient)
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         let allRooms = try await service.roomListService().allRooms()
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
@@ -1216,6 +1238,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         forwardLoadID = nil
         recentEmoji = []
         await connectionRecovery.stop()
+        refusedChanges?.stop()
+        refusedChanges = nil
         mainSendFailures = [:]
         threadSendFailures = [:]
         sendFailures = [:]
@@ -1875,15 +1899,40 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         return projected
     }
 
+    /// As Slack keeps a message it couldn't delete or edit: it goes back to how the server has it, and you hear why
+    /// if its conversation is the one on screen. Deleting or editing it again is the retry.
+    private func watchRefusedChanges(_ client: Client) async throws {
+        let session = sessionGeneration
+        let watcher = RefusedChanges(client: client) { [weak self] undone in
+            guard let self, session == sessionGeneration, showsConversation else { return }
+            let thread = visibleActionThreadID != nil && visibleActionThreadID == loadedThreadRootID
+            let shown = Set((messages + (thread ? threadMessages : [])).compactMap(\.eventID))
+            let room = selectedRoomID
+            // A reaction goes back quietly.
+            guard
+                let change = undone.last(where: {
+                    $0.kind != .reaction && $0.roomId == room && shown.contains($0.eventId)
+                })
+            else { return }
+            errorMessage =
+                change.kind == .redaction ? "Couldn’t delete this message." : "Couldn’t edit this message."
+        }
+        refusedChanges?.stop()
+        refusedChanges = watcher
+        try await watcher.start()
+    }
+
     /// `draft` is the composer's Matrix HTML. `alsoToChannel` copies a thread reply to the channel once it's sent.
     func sendMessage(
         _ draft: String, threadRootID: String? = nil, replyToID: String? = nil, roomID: String? = nil,
         alsoToChannel: Bool = false
     ) async throws {
         try assertDestination(roomID)
+        let destination = roomID ?? selectedRoomID
         let message = ComposerFormat.message(draft: draft)
         guard !message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let token = selection
+        let session = sessionGeneration
         let target: Timeline
         if let threadRootID {
             _ = try requireClient()
@@ -1897,20 +1946,30 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let room = try requireRoom(roomID)
         let content = try MatrixMapping.content(message).withMentions(
             mentions: mentions(message))
-        let echo = alsoToChannel && threadRootID != nil ? await SentEcho(target, body: message.body) : nil
+        let echo = alsoToChannel && threadRootID != nil ? try await SentEcho(room) : nil
         // Thread timelines infer their own relation. Extra JSON cannot override
         // that fallback relation, so an explicit quote must use sendReply.
         do {
-            if let reply = replyToID {
-                _ = try await target.sendReply(msg: content, eventId: reply)
-            } else {
-                _ = try await target.send(msg: content)
-            }
+            let handle =
+                if let reply = replyToID {
+                    try await target.sendReply(msg: content, eventId: reply)
+                } else {
+                    try await target.send(msg: content)
+                }
+            echo?.follow(handle.transactionId())
         } catch {
             echo?.cancel()
             throw error
         }
-        if let echo { copyToChannel(message, once: echo, room: room) }
+        if let destination { sends[Conversation(roomID: destination, threadRootID: threadRootID), default: 0] += 1 }
+        if let echo {
+            // A session that ended while the send was out has already let go of its copies.
+            if session == sessionGeneration {
+                copyToChannel(message, once: echo, room: room, session: session)
+            } else {
+                echo.cancel()
+            }
+        }
         await returnToLive(after: token, threadRootID: threadRootID)
     }
 
@@ -1935,8 +1994,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// The channel's copy of a thread reply, sent once the reply has an event ID to quote. The send queue only takes
     /// replies that stay in the replied-to event's thread, so the copy goes out directly.
-    private func copyToChannel(_ message: ComposerFormat.Message, once echo: SentEcho, room: Room) {
-        let session = sessionGeneration
+    /// `session` is the one the reply was sent in: a copy never goes out through a session that has since ended.
+    private func copyToChannel(_ message: ComposerFormat.Message, once echo: SentEcho, room: Room, session: UUID) {
         pendingCopies.append(echo)
         Task {
             let replyID = await echo.sentEventID()
@@ -2089,17 +2148,21 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
         }
     }
-    /// The SDK's thread timeline keeps its root as first sent: an edit to the root arrives in the main timeline.
+    /// The SDK's thread timeline keeps its root as first sent: an edit or deletion of the root, or one the server
+    /// refused and the channel took back, arrives in the main timeline.
     private func showEditedThreadRoot() {
         guard let rootID = loadedThreadRootID,
-            let current = messages.first(where: { $0.eventID == rootID }), current.isEdited,
+            let current = messages.first(where: { $0.eventID == rootID }),
             let index = threadMessages.firstIndex(where: { $0.eventID == rootID })
         else { return }
         var root = threadMessages[index]
         root.body = current.body
         root.formattedBody = current.formattedBody
+        root.kind = current.kind
+        root.attachment = current.attachment
         root.mediaCaption = current.mediaCaption
-        root.isEdited = true
+        root.isEdited = current.isEdited
+        root.isRedacted = current.isRedacted
         if root != threadMessages[index] { threadMessages[index] = root }
     }
 
@@ -2460,6 +2523,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     func uploadFile(_ url: URL, threadRootID: String? = nil, roomID: String? = nil) async throws {
         try assertDestination(roomID)
+        let destination = roomID ?? selectedRoomID
         let token = selection
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
@@ -2496,13 +2560,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     mimetype: mime, size: values.fileSize.map(UInt64.init), thumbnailInfo: nil, thumbnailSource: nil))
         }
         let target: Timeline
-        if let threadRootID, threadRootID == loadedThreadRootID, let threadTimeline {
+        if let threadRootID {
             _ = try requireClient()
+            // A thread closed while the file was prepared fails the send; the file never goes anywhere else.
+            guard threadRootID == loadedThreadRootID, let threadTimeline else {
+                throw MatrixServiceError.request("Reopen the thread to reply.")
+            }
             target = threadTimeline
         } else {
             target = try requireTimeline()
         }
         let handle = try target.sendAttachment(params: parameters, attachment: kind)
+        if let destination { sends[Conversation(roomID: destination, threadRootID: threadRootID), default: 0] += 1 }
         await returnToLive(after: token, threadRootID: threadRootID)
         try await handle.join()
     }

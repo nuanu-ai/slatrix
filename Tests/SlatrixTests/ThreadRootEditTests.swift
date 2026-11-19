@@ -43,4 +43,31 @@ struct ThreadRootEditTests {
         main.emit([.reset(values: [edited])])
         #expect(await eventually { service.threadMessages.first?.body == "After the edit" })
     }
+
+    // capability: message.edit
+    @Test("An edit of the root the server refused goes back in the open thread as in the channel")
+    func followsRefusedEdit() async throws {
+        await service.selectRoom(room.id())
+        try await service.loadThread(try #require(service.messages.first))
+        #expect(await eventually { service.threadMessages.first?.body == "After the edit" })
+        let main = try #require(room.timelines.all.first)
+        main.emit([.reset(values: [FakeTimelineItem(textEvent("$root", body: "Before the edit"), uniqueID: "root")])])
+        #expect(await eventually { service.messages.first?.body == "Before the edit" })
+        let root = try #require(service.threadMessages.first)
+        #expect(root.body == "Before the edit" && !root.isEdited)
+    }
+
+    // capability: message.delete
+    @Test("Deleting the root while its thread is open shows it deleted in the thread too, in the same row")
+    func followsDeletion() async throws {
+        await service.selectRoom(room.id())
+        try await service.loadThread(try #require(service.messages.first))
+        #expect(await eventually { service.threadMessages.count == 2 })
+        let row = service.threadMessages.first?.id
+        let main = try #require(room.timelines.all.first)
+        main.emit([.reset(values: [FakeTimelineItem(textEvent("$root", body: "", redacted: true), uniqueID: "root")])])
+        #expect(await eventually { service.messages.first?.isRedacted == true })
+        let root = try #require(service.threadMessages.first)
+        #expect(root.isRedacted && root.body == ChatMessage.deletedBody && root.id == row)
+    }
 }

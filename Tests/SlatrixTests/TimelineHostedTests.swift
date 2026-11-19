@@ -23,6 +23,12 @@ private final class HistoryTimeline: Timeline, @unchecked Sendable {
         await gate.wait()
         return await onPage?() ?? false
     }
+    /// Holds a send before the queue takes it.
+    let sendGate = Gate()
+    override func send(msg: RoomMessageEventContentWithoutRelation) async throws -> SendHandle {
+        await sendGate.wait()
+        return SendHandle(noHandle: .init())
+    }
 }
 
 /// The production timeline in a real offscreen window. These need an unlocked, awake display, so they run only
@@ -478,6 +484,55 @@ struct TimelineHostedTests {
         await drainMainActor()
         await settle(harness)
         #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
+    }
+
+    @Test("Your send brings the conversation to it even when the server confirms it before the list shows it")
+    func confirmedSendBringsToBottom() async throws {
+        let earlier = Self.messages(0..<60)
+        let harness = Harness(messages: earlier, height: 700)
+        defer { harness.close() }
+        await settle(harness)
+        harness.scroll(toTop: harness.clip.bounds.minY - 1_500)
+        let rows = harness.rowCount
+        try await harness.service.sendMessage("On my way", roomID: Self.room.id)
+        var sent = ChatMessage(
+            id: "mine", roomID: Self.room.id, senderID: Self.user, senderName: "Reader", body: "On my way",
+            timestamp: earlier[59].timestamp.addingTimeInterval(60))
+        sent.timelineEventID = "$mine"
+        harness.service.messages = earlier + [sent]
+        await settle(harness) { harness.rowCount > rows }
+        await drainMainActor()
+        await settle(harness)
+        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
+    }
+
+    @Test("A send finishing after you moved to another conversation leaves what you read there in place")
+    func sendElsewhereLeavesReadingInPlace() async throws {
+        let harness = Harness(messages: Self.messages(0..<60), height: 700)
+        defer { harness.close() }
+        await settle(harness)
+        harness.timeline.sendGate.arm()
+        let sending = Task { try await harness.service.sendMessage("On my way", roomID: Self.room.id) }
+        #expect(await eventually { harness.timeline.sendGate.isWaiting })
+        let other = ChatRoom(id: "!other:example.org", name: "Other")
+        harness.service.rooms.append(other)
+        harness.service.selectedRoomID = other.id
+        harness.service.messages = Self.messages(0..<60).map { message in
+            var message = message
+            message.roomID = other.id
+            return message
+        }
+        harness.hosting.rootView = harness.fixture(other)
+        await settle(harness)
+        harness.scroll(toTop: harness.clip.bounds.minY - 1_500)
+        let reading = try #require(harness.firstVisibleBody)
+        let before = try #require(harness.top(of: reading))
+
+        harness.timeline.sendGate.release()
+        try await sending.value
+        await drainMainActor()
+        await settle(harness)
+        #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
     }
 
     @Test("New messages do not move what you are reading further up")

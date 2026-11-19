@@ -68,9 +68,13 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     }
     /// Messages sent through this timeline into the room's send queue.
     let sent = Recorder<Void>()
+    /// Holds a send before the queue takes it.
+    let sendGate = Gate()
+    /// Each send's transaction is "txn-" and how many this timeline has sent.
     override func send(msg: RoomMessageEventContentWithoutRelation) async throws -> SendHandle {
+        await sendGate.wait()
         sent.append(())
-        return SendHandle(noHandle: .init())
+        return FakeSendHandle("txn-\(sent.all.count)")
     }
     func emit(_ diff: [TimelineDiff]) {
         let added = diff.flatMap { change -> [TimelineItem] in
@@ -140,6 +144,19 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
         guard let root = threadRoots[eventId] else { throw URLError(.resourceUnavailable) }
         return FakeThreadReply(root: root)
     }
+    private let queueLock = NSLock()
+    private var queueListeners: [(listener: SendQueueListener, handle: FakeCancellableHandle)] = []
+    override func subscribeToSendQueueUpdates(listener: SendQueueListener) async throws -> TaskHandle {
+        let handle = FakeCancellableHandle(noHandle: .init())
+        queueLock.withLock { queueListeners.append((listener, handle)) }
+        return handle
+    }
+    /// Tells whoever follows the room's send queue about `update`.
+    func queue(_ update: RoomSendQueueUpdate) {
+        for (listener, _) in queueLock.withLock({ queueListeners }) { listener.onUpdate(update: update) }
+    }
+    /// Whether everyone who followed the room's send queue has let go of it.
+    var queueReleased: Bool { queueLock.withLock { queueListeners.allSatisfy(\.handle.isCancelled) } }
     /// Events sent straight to the room, past its send queue, as their type and JSON content.
     let raw = Recorder<(type: String, content: String)>()
     override func sendRaw(eventType: String, content: String) async throws -> String {
@@ -198,4 +215,15 @@ final class FakeRoomListService: RoomListService, @unchecked Sendable {
     init() { super.init(noHandle: .init()) }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
     override func setRoomSubscriptions(roomIds: [String]) async throws { subscriptions.append(roomIds) }
+}
+
+/// A send's handle, carrying its transaction.
+final class FakeSendHandle: SendHandle, @unchecked Sendable {
+    private let transaction: String
+    init(_ transaction: String) {
+        self.transaction = transaction
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func transactionId() -> String { transaction }
 }

@@ -132,7 +132,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Opens someone's profile, from a sender's name or picture or a mention. */
     onPerson: (userId: String) -> Unit = {},
     /** The thread a copy of a thread reply came from, which its row names; null when the reply isn't in a thread. */
-    loadThreadOrigin: suspend (replyEventId: String) -> ThreadOrigin? = { null }) {
+    loadThreadOrigin: suspend (replyEventId: String) -> ThreadOrigin? = { null },
+    /** Told once what the reader sent is in view. */
+    onSendShown: () -> Unit = {}) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val videos = rememberVideoPlayback(loadFile)
@@ -191,7 +193,15 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     LaunchedEffect(newest?.id) {
         // Not while it opens somewhere else, which scrolls there instead.
-        if (following && jumped && !state.focused || newest?.own == true && newest.sendState == MessageSendState.Sending) list.scrollToItem(0)
+        if (following && jumped && !state.focused) list.scrollToItem(0)
+    }
+    // As on the Mac, what you send brings the conversation to its end and keeps it there, however soon the server
+    // confirms it; sent from older messages, once the newest are back.
+    LaunchedEffect(state.sendToShow, state.focused) {
+        if (!state.sendToShow || state.focused) return@LaunchedEffect
+        list.scrollToItem(0)
+        following = true
+        onSendShown()
     }
     // A jump shows its message a third of the way up and highlights it briefly, as on the Mac, once.
     var lit by remember(opensAt, state.jump) { mutableStateOf<String?>(null) }

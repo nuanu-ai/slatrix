@@ -18,6 +18,7 @@ import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ai.nuanu.slatrix.TestMediaSource
 import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode
 
@@ -405,40 +406,55 @@ class MatrixConversationTest {
         }
     }
 
+    /** The reply the channel's copy quotes, from the copy sent straight to the room. */
+    private suspend fun ConversationRoom.copyQuotes(): String {
+        val (type, json) = raw.receive()
+        assertEquals("m.room.message", type)
+        val content = com.google.gson.JsonParser.parseString(json).asJsonObject
+        assertEquals("On it", content["body"].asString)
+        return content["m.relates_to"].asJsonObject["m.in_reply_to"].asJsonObject["event_id"].asString
+    }
+
     // capability: thread.send-to-channel
     @Test fun aReplyAlsoSentToTheChannelGoesToItsThreadThenToTheChannelOnceSentEvenWithTheThreadClosed() = runTest {
-        // The reader's own reply, still sending under a transaction ID or sent under an event ID; its row keeps its ID.
-        fun own(key: String, id: String, body: String, local: Boolean = false) =
-            conversationItem(key, id, body, local = local, editable = true)
         for (sentAtOnce in listOf(false, true)) {
-            // The same words, said before in the thread, are not this reply.
-            val timeline = ConversationTimeline(listOf(own("said", "\$said", "On it")))
+            val timeline = ConversationTimeline(emptyList())
             val room = ConversationRoom(timeline)
             val conversation = MatrixConversation(backgroundScope, room, threadRoot = "\$root")
             runCurrent()
             val sending = async { conversation.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)) }
             assertEquals("On it", (timeline.submissions.receive().type as MessageType.Text).content.body)
-            timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
+            // The server can confirm the reply before its send hands out the transaction.
+            if (sentAtOnce) room.queue(RoomSendQueueUpdate.SentEvent("txn-reply", "\$reply"))
+            timeline.sendResults.send(Result.success(SentHandle("txn-reply")))
             assertTrue(sending.await())
             // Leaving the thread closes it; the copy still goes.
             conversation.close()
 
-            // An earlier reply's echo that lands only now must not be taken for this one.
-            timeline.emit(listOf(TimelineDiff.PushBack(own("earlier", "earlier", "First", local = true))))
-            if (sentAtOnce) timeline.emit(listOf(TimelineDiff.Set(1u, own("earlier", "\$earlier", "First")),
-                TimelineDiff.PushBack(own("this", "\$reply", "On it"))))
-            else {
-                timeline.emit(listOf(TimelineDiff.PushBack(own("this", "this", "On it", local = true))))
-                timeline.emit(listOf(TimelineDiff.Set(1u, own("earlier", "\$earlier", "First"))))
-                timeline.emit(listOf(TimelineDiff.Set(2u, own("this", "\$reply", "On it"))))
-            }
-
-            val (type, json) = room.raw.receive()
-            assertEquals("m.room.message", type)
-            val content = com.google.gson.JsonParser.parseString(json).asJsonObject
-            assertEquals("On it", content["body"].asString)
-            assertEquals("\$reply", content["m.relates_to"].asJsonObject["m.in_reply_to"].asJsonObject["event_id"].asString)
+            // Another message's confirmation isn't this one's.
+            room.queue(RoomSendQueueUpdate.SentEvent("txn-earlier", "\$earlier"))
+            if (!sentAtOnce) room.queue(RoomSendQueueUpdate.SentEvent("txn-reply", "\$reply"))
+            assertEquals("\$reply", room.copyQuotes())
         }
+    }
+
+    // capability: thread.send-to-channel
+    @Test fun theCopyQuotesTheReplyItsOwnSendQueuedNotTheSameWordsSentJustBefore() = runTest {
+        val timeline = ConversationTimeline(emptyList())
+        val room = ConversationRoom(timeline)
+        val conversation = MatrixConversation(backgroundScope, room, threadRoot = "\$root")
+        runCurrent()
+        for ((transaction, toChannel) in listOf("txn-first" to false, "txn-second" to true)) {
+            val sending = async { conversation.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = toChannel)) }
+            timeline.submissions.receive()
+            timeline.sendResults.send(Result.success(SentHandle(transaction)))
+            assertTrue(sending.await())
+        }
+        room.queue(RoomSendQueueUpdate.SentEvent("txn-first", "\$first"))
+        room.queue(RoomSendQueueUpdate.SentEvent("txn-second", "\$second"))
+
+        assertEquals("\$second", room.copyQuotes())
+        conversation.close()
     }
 
     @Test fun aReplyWhoseSendIsCancelledIsNotCopiedAndItsClosedThreadLetsGoOfTheRoom() = runTest {
@@ -448,16 +464,34 @@ class MatrixConversationTest {
         runCurrent()
         val sending = async { conversation.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)) }
         timeline.submissions.receive()
-        timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
+        timeline.sendResults.send(Result.success(SentHandle("txn-reply")))
         assertTrue(sending.await())
         conversation.close()
 
-        // Deleting the reply while it's still sending takes its echo away.
-        timeline.emit(listOf(TimelineDiff.PushBack(conversationItem("this", "this", "On it", local = true, editable = true))))
-        timeline.emit(listOf(TimelineDiff.Remove(0u)))
+        // Deleting the reply while it's still sending cancels it in the queue.
+        room.queue(RoomSendQueueUpdate.CancelledLocalEvent("txn-reply"))
         runCurrent()
         assertTrue(room.uniffiIsDestroyed)
         assertTrue(room.raw.isEmpty)
+    }
+
+    // capability: message.delete
+    @Test fun aDeletionSaysItFailedOnlyOnceTheQueueCancelsItNotForAnExpiredTokenTheQueueStillSends() = runTest {
+        fun failed(error: QueueWedgeError) = EventSendState.SendingFailed(error, false)
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Plan", editable = true)))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.isNotEmpty() }
+        // The SDK shows the message deleted while its deletion waits for the refreshed token.
+        timeline.emit(listOf(TimelineDiff.Set(0u, conversationItem("a", "\$a", "", editable = true,
+            content = TimelineItemContent.MsgLike(MsgLikeContent(MsgLikeKind.Redacted, null, null, null)),
+            deletion = failed(QueueWedgeError.ExpiredAccessToken)))))
+        conversation.state.first { it.rows.messages.single().kind == MessageKind.Deleted }
+        runCurrent()
+        assertNull(conversation.state.value.notice)
+
+        conversation.refused(listOf(RefusedChange("!design:example.org", "\$a", RefusedChangeKind.REDACTION)))
+        assertEquals("Couldn’t delete this message.", conversation.state.first { it.notice != null }.notice)
+        conversation.close()
     }
 
     // capability: thread.send-to-channel
@@ -594,6 +628,31 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: composer.send
+    @Test fun aMessageOrFileSentFromAnOlderMessageGoesToTheNewestToShowIt() = runTest {
+        val sends = listOf<suspend (MatrixConversation, ConversationTimeline) -> Unit>(
+            { conversation, around ->
+                around.sendResults.send(Result.success(SentHandle("txn")))
+                assertTrue(conversation.send(ComposerMessage("On my way", null, emptyList(), false)))
+            },
+            { conversation, _ ->
+                conversation.sendAttachments(listOf({ OutgoingAttachment("/cache/a.txt", "a.txt", "text/plain", 1, null, null) }))
+            },
+        )
+        for (send in sends) {
+            val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
+            val around = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier")))
+            val conversation = MatrixConversation(backgroundScope, JumpRoom(live, around), at = "\$old")
+            assertTrue(conversation.state.first { !it.loading }.focused)
+            send(conversation, around)
+            val shown = withContext(Dispatchers.Default) {
+                withTimeout(5_000) { conversation.state.first { !it.focused && it.sendToShow } }
+            }
+            assertEquals(listOf("Latest"), shown.rows.messages.map { it.body })
+            conversation.close()
+        }
+    }
+
     @Test fun anAttachmentInAThreadGoesToTheThread() = runTest {
         val timeline = ConversationTimeline(emptyList())
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root")
@@ -686,6 +745,21 @@ class MatrixConversationTest {
         assertEquals("Couldn’t delete this message.", conversation.state.first { it.notice != null }.notice)
         conversation.state.first { it.notice == null }
         assertEquals(listOf("Hello"), conversation.state.value.rows.messages.map { it.body })
+        conversation.close()
+    }
+
+    // capability: message.edit
+    @Test fun aRefusedChangeSaysSoOnlyForAMessageShownHereAndNotForAReaction() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Edited")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.isNotEmpty() }
+        conversation.refused(listOf(RefusedChange("!other:example.org", "\$a", RefusedChangeKind.EDIT),
+            RefusedChange("!design:example.org", "\$elsewhere", RefusedChangeKind.EDIT),
+            RefusedChange("!design:example.org", "\$a", RefusedChangeKind.REACTION)))
+        runCurrent()
+        assertNull(conversation.state.value.notice)
+        conversation.refused(listOf(RefusedChange("!design:example.org", "\$a", RefusedChangeKind.EDIT)))
+        assertEquals("Couldn’t edit this message.", conversation.state.first { it.notice != null }.notice)
         conversation.close()
     }
 
@@ -1005,9 +1079,10 @@ class MatrixConversationTest {
         conversation.close()
     }
 
-    @Test fun aThreadShowsItsRootWithTheChannelsEditsSinceTheThreadKeepsItAsFirstSent() = runTest {
-        fun channelCopy(body: String) = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", body, null,
-            1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0, edited = true)
+    @Test fun aThreadShowsItsRootWithTheChannelsEditsAndDeletionSinceTheThreadKeepsItAsFirstSent() = runTest {
+        fun channelCopy(body: String, edited: Boolean = true, kind: MessageKind = MessageKind.Text) = ConversationMessage(
+            "channel-row", "\$root", "@mira:example.org", "Mira Chen", body, null, 1_700_000_000_000L, kind, MessageSendState.Sent,
+            false, "MC", 0, edited = edited)
         val channel = MutableStateFlow(ConversationState(rows = listOf(channelCopy("Plan for Friday"))))
         val timeline = ConversationTimeline(emptyList())
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root",
@@ -1022,6 +1097,35 @@ class MatrixConversationTest {
 
         channel.value = ConversationState(rows = listOf(channelCopy("Plan for Saturday")))
         conversation.state.first { it.rows.messages.first().body == "Plan for Saturday" }
+        // An edit the server refused goes back in the channel, and so in the thread.
+        channel.value = ConversationState(rows = listOf(channelCopy("Plan?", edited = false)))
+        assertFalse(conversation.state.first { it.rows.messages.first().body == "Plan?" }.rows.messages.first().edited)
+        // capability: message.delete
+        channel.value = ConversationState(rows = listOf(channelCopy("This message was deleted", false, MessageKind.Deleted)))
+        val deleted = conversation.state.first { it.rows.messages.first().kind == MessageKind.Deleted }.rows.messages.first()
+        assertEquals("This message was deleted", deleted.body)
+        assertEquals("It keeps its row", loaded.id, deleted.id)
+        conversation.close()
+    }
+
+    // capability: message.delete
+    @Test fun aRootTheChannelNoLongerHoldsShowsAsTheThreadHasItDeletedIncluded() = runTest {
+        val file = MessageAttachment(MessageAttachment.Kind.File, "plan.pdf", "application/pdf", 17, null, null,
+            TestMediaSource("mxc://example.org/plan"))
+        val channelRow = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", "plan.pdf", null,
+            1_700_000_000_000L, MessageKind.Attachment, MessageSendState.Sent, false, "MC", 0, attachment = file)
+        val channel = MutableStateFlow(ConversationState(rows = listOf(channelRow)))
+        val timeline = ConversationTimeline(emptyList())
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root", root = channelRow)
+        backgroundScope.launch { conversation.followRoot(channel) }
+        runCurrent()
+        // The channel lets the row go from its loaded history; then the thread hears it was deleted.
+        channel.value = ConversationState(rows = emptyList())
+        runCurrent()
+        timeline.emit(listOf(TimelineDiff.Reset(listOf(conversationItem("thread-root", "\$root", "",
+            content = TimelineItemContent.MsgLike(MsgLikeContent(MsgLikeKind.Redacted, null, null, null)))))))
+        val root = conversation.state.first { it.rows.messages.firstOrNull()?.kind == MessageKind.Deleted }.rows.messages.first()
+        assertNull(root.attachment)
         conversation.close()
     }
 }
@@ -1055,6 +1159,7 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
     val sendQueueEnabled = CompletableDeferred<Boolean>()
     override fun enableSendQueue(enable: Boolean) { sendQueueEnabled.complete(enable) }
     override fun ownUserId(): String = "@me:example.org"
+    override fun id(): String = "!design:example.org"
     override suspend fun setUnreadFlag(newValue: Boolean) { markedUnread = newValue }
     override suspend fun timeline(): Timeline = value
     /** The members the device knows; the conversation reads them again once the server's list is in. */
@@ -1065,6 +1170,13 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
         override fun close() {}
     }
     override suspend fun matrixToEventPermalink(eventId: String): String = "https://matrix.to/#/!design:example.org/$eventId"
+    private val queueListeners = java.util.concurrent.CopyOnWriteArrayList<SendQueueListener>()
+    override suspend fun subscribeToSendQueueUpdates(listener: SendQueueListener): TaskHandle {
+        queueListeners += listener
+        return object : TaskHandle(NoHandle) { override fun cancel() { queueListeners -= listener } }
+    }
+    /** Tells whoever follows the room's send queue about [update]. */
+    fun queue(update: RoomSendQueueUpdate) = queueListeners.forEach { it.onUpdate(update) }
     /** Events sent straight to the room, past its send queue, as their type and JSON content. */
     val raw = Channel<Pair<String, String>>(Channel.UNLIMITED)
     override suspend fun sendRaw(eventType: String, content: String): String {
@@ -1079,6 +1191,11 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
         this.configuration = configuration
         return value
     }
+}
+
+/** A send's handle, naming its transaction. */
+private class SentHandle(private val transaction: String) : SendHandle(NoHandle) {
+    override fun transactionId(): String = transaction
 }
 
 private class ConversationTimeline(private val cached: List<TimelineItem>) : Timeline(NoHandle) {
@@ -1206,6 +1323,7 @@ internal fun conversationItem(
     editable: Boolean = false,
     editState: EventSendState? = null,
     deleting: Boolean = false,
+    deletion: EventSendState? = if (deleting) EventSendState.NotSentYet(null) else null,
     readBy: List<String> = emptyList(),
     onMap: () -> Unit = {},
 ): TimelineItem {
@@ -1222,7 +1340,7 @@ internal fun conversationItem(
         )),
         reactions = reactions, eventTypeRaw = "m.room.message", timestamp = timestamp,
         localSendState = sendState, editSendState = editState,
-        redactionSendState = if (deleting) EventSendState.NotSentYet(null) else null, localCreatedAt = null,
+        redactionSendState = deletion, localCreatedAt = null,
         readReceipts = readBy.associateWith { Receipt(null) }, origin = null, canBeRepliedTo = true,
         lazyProvider = object : LazyTimelineItemProvider(NoHandle) {},
     )

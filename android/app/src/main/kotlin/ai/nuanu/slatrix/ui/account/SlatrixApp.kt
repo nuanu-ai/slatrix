@@ -357,6 +357,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     }
     val conversation = open.conversation
     val composer = open.composer
+    LaunchedEffect(conversation, rooms) { rooms?.refusedChanges?.collect { conversation?.refused(it) } }
     val timeline = conversation?.state?.collectAsState()?.value ?: open.waiting()
     val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
     val scope = rememberCoroutineScope()
@@ -438,7 +439,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { attachment, width, height, full -> media.picture(attachment, width, height, full) },
             { openAttachment(context, media, it) }, { media.file(it) }, { counterpart?.let { onPerson(it.id, it.name) } ?: run { details = true } },
             typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty(), onPerson = profile,
-            loadThreadOrigin = { conversation?.threadOrigin(it) })
+            loadThreadOrigin = { conversation?.threadOrigin(it) }, onSendShown = { conversation?.sendShown() })
         }
         }
         forwarding?.let { (message, content) ->

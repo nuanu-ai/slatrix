@@ -7,10 +7,13 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.RefusedChange
 import org.matrix.rustcomponents.sdk.RoomSendQueueUpdate
 import org.matrix.rustcomponents.sdk.SendQueueRoomUpdateListener
 import org.matrix.rustcomponents.sdk.TaskHandle
@@ -22,16 +25,21 @@ internal class RoomSendQueues(private val client: Client, private val connection
         data object Connected : Change
         data object RetryListener : Change
         data class Sending(val message: Message, val recoverable: Boolean) : Change
+        data class Refused(val message: Message) : Change
         data class Cancelled(val message: Message) : Change
     }
 
     private val changes = Channel<Change>(Channel.UNLIMITED)
+    private val mutableUndone = MutableSharedFlow<List<RefusedChange>>(extraBufferCapacity = 16)
+    /** What each abort took back out of the queues: refused deletions, edits and reactions. */
+    val undone: SharedFlow<List<RefusedChange>> = mutableUndone
     private val listener = object : SendQueueRoomUpdateListener {
         override fun onUpdate(roomId: String, update: RoomSendQueueUpdate) {
             try {
                 when (update) {
-                    is RoomSendQueueUpdate.SendError ->
-                        changes.trySend(Change.Sending(Message(roomId, update.transactionId), update.isRecoverable))
+                    is RoomSendQueueUpdate.SendError -> changes.trySend(Message(roomId, update.transactionId).let {
+                        if (update.isRecoverable) Change.Sending(it, true) else Change.Refused(it)
+                    })
                     is RoomSendQueueUpdate.SentEvent -> changes.trySend(Change.Sending(Message(roomId, update.transactionId), false))
                     is RoomSendQueueUpdate.CancelledLocalEvent -> changes.trySend(Change.Cancelled(Message(roomId, update.transactionId)))
                     else -> Unit
@@ -54,6 +62,16 @@ internal class RoomSendQueues(private val client: Client, private val connection
         val pending = mutableMapOf<Message, Retry>()
         var handle: TaskHandle? = null
         var retryListener: Job? = null
+        /**
+         * A deletion, edit or reaction the server refused stays at the head of its room's send queue, and everything sent
+         * there after it waits. As Slack keeps a message it couldn't delete or edit, it's cancelled whichever conversation
+         * is open, and goes back to how the server has it.
+         */
+        fun abortRefused() = launch(Dispatchers.Default) {
+            runCatching { client.abortRefusedChanges() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let(mutableUndone::tryEmit)
+        }
+        // One refused before the app last closed.
+        abortRefused()
         try {
             for (change in changes) {
                 when (change) {
@@ -73,7 +91,13 @@ internal class RoomSendQueues(private val client: Client, private val connection
                         }
                         if (online && (change == Change.Connected || handle != null)) {
                             withContext(Dispatchers.Default) { runCatching { client.enableAllSendQueues(true) } }
+                            // One refused while the queues were held is heard only now.
+                            abortRefused()
                         }
+                    }
+                    is Change.Refused -> {
+                        pending.remove(change.message)?.job?.cancel()
+                        abortRefused()
                     }
                     is Change.Cancelled -> {
                         val previous = pending.remove(change.message) ?: continue

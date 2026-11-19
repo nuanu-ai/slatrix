@@ -18,6 +18,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import org.junit.Test
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -501,6 +502,53 @@ class MatrixRoomsTest {
 
     @Test fun aRoomPausedByATemporarySendErrorResumesWhileSyncStaysConnected() = recoverQueueAfterDeleting("later-message")
 
+    private val refusedDeletion = RefusedChange("!a:example.org", "\$refused", RefusedChangeKind.REDACTION)
+
+    // capability: message.delete
+    @Test fun aDeletionTheServerRefusesIsCancelledThoughNoConversationIsOpen() = runTest {
+        val client = RoomsClient(emptyList())
+        client.services.trySend(RoomsSync())
+        val rooms = MatrixRooms(backgroundScope, client)
+        try {
+            client.lookedOnline.first { it }
+            val undone = backgroundScope.async { rooms.refusedChanges.first() }
+            runCurrent()
+            client.wedged.value = listOf(refusedDeletion)
+            client.queueUpdates?.onUpdate(refusedDeletion.roomId, RoomSendQueueUpdate.SendError(
+                "deletion", QueueWedgeError.GenericApiError("403"), false))
+            // What the queue took back is what the conversation on screen hears about.
+            assertEquals(listOf(refusedDeletion), withContext(Dispatchers.Default) { withTimeout(5_000) { undone.await() } })
+        } finally {
+            rooms.close()
+        }
+    }
+
+    // capability: message.edit
+    @Test fun anEditTheServerRefusedBeforeTheAppStartedIsCancelledAtLaunchEvenOffline() = runTest {
+        val client = RoomsClient(emptyList())
+        client.wedged.value = listOf(RefusedChange("!a:example.org", "\$refused", RefusedChangeKind.EDIT))
+        val rooms = MatrixRooms(backgroundScope, client)
+        try {
+            withContext(Dispatchers.Default) { withTimeout(5_000) { client.wedged.first { it.isEmpty() } } }
+        } finally {
+            rooms.close()
+        }
+    }
+
+    // capability: message.delete
+    @Test fun aDeletionRefusedWhileOfflineIsCancelledOnceTheQueuesResume() = runTest {
+        val client = RoomsClient(emptyList())
+        val rooms = MatrixRooms(backgroundScope, client)
+        try {
+            client.lookedOffline.first { it }
+            client.wedged.value = listOf(refusedDeletion)
+            client.services.trySend(RoomsSync())
+            withContext(Dispatchers.Default) { withTimeout(5_000) { client.wedged.first { it.isEmpty() } } }
+        } finally {
+            rooms.close()
+        }
+    }
+
     @Test fun deletingTheFailedHeadResumesTheRestOfTheRoomQueue() = recoverQueueAfterDeleting("local")
 
     private fun recoverQueueAfterDeleting(transaction: String) = runTest {
@@ -860,6 +908,15 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
         }
     }
     @Volatile var queueUpdates: SendQueueRoomUpdateListener? = null
+    /** Changes the server refused, still at the head of their rooms' send queues. */
+    val wedged = MutableStateFlow(emptyList<RefusedChange>())
+    /** Whether the app has looked for refused changes while the send queues were held, and once they ran. */
+    val lookedOffline = MutableStateFlow(false)
+    val lookedOnline = MutableStateFlow(false)
+    override suspend fun abortRefusedChanges(): List<RefusedChange> {
+        (if (sendQueuesEnabled.value) lookedOnline else lookedOffline).value = true
+        return wedged.getAndUpdate { emptyList() }
+    }
     override suspend fun subscribeToSendQueueUpdates(listener: SendQueueRoomUpdateListener): TaskHandle {
         queueUpdates = listener
         return RoomsHandle()

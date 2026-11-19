@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -46,6 +45,8 @@ import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.ProfileDetails
 import org.matrix.rustcomponents.sdk.QueueWedgeError
 import org.matrix.rustcomponents.sdk.ReceiptType
+import org.matrix.rustcomponents.sdk.RefusedChange
+import org.matrix.rustcomponents.sdk.RefusedChangeKind
 import org.matrix.rustcomponents.sdk.SendTarget
 import org.matrix.rustcomponents.sdk.Room
 import org.matrix.rustcomponents.sdk.TaskHandle
@@ -146,6 +147,8 @@ data class ConversationState(
     val sendError: String? = null,
     /** Says for a moment that an action on a message failed. */
     val notice: String? = null,
+    /** Something the reader sent from here that the screen hasn't brought into view yet. */
+    val sendToShow: Boolean = false,
     /** The message it opened at, to show and highlight. */
     val highlight: String? = null,
     /** Counts jumps within the open conversation, so a second one to the same message shows it again. */
@@ -204,6 +207,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val resume: Boolean = false,
     private val view: ConversationView = ConversationView.Timeline) {
     @Volatile private var root = root?.asThreadRoot()
+    /** The root's row as the channel holds it now; while the channel holds none, the thread's own row stands. */
+    @Volatile private var mirror = this.root
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
     /** Thread replies waiting to be copied to the channel: they outlast the thread, and end with the session's [scope]. */
@@ -502,8 +507,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     suspend fun followRoot(channel: Flow<ConversationState>) {
         val id = threadRoot ?: return
         channel.map { state -> state.rows.firstOrNull { (it as? ConversationMessage)?.eventId == id } as? ConversationMessage }
-            .filterNotNull().distinctUntilChanged().collect { copy ->
+            .distinctUntilChanged().collect { copy ->
                 operations.launch {
+                    mirror = copy
+                    if (copy == null) return@launch
                     root = copy.asThreadRoot()
                     mutableState.update { state ->
                         state.copy(rows = state.rows.map { if (it is ConversationMessage && it.id == ROOT_KEY) it.withEdit(copy) else it })
@@ -512,14 +519,16 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             }
     }
 
-    private fun ConversationMessage.withEdit(channel: ConversationMessage) =
-        if (channel.edited) copy(body = channel.body, formattedBody = channel.formattedBody, edited = true) else this
+    /** It as the channel shows it, deleted, or with an edit the server refused and the channel took back. */
+    private fun ConversationMessage.withEdit(channel: ConversationMessage) = copy(kind = channel.kind, body = channel.body,
+        formattedBody = channel.formattedBody, edited = channel.edited, attachment = channel.attachment)
 
     /** The thread's rows topped by its root, which keeps the channel's row so it never redraws when the thread loads it. */
     private fun withRoot(rows: List<ConversationRow>): List<ConversationRow> {
         val root = root ?: return rows
         val index = rows.indexOfFirst { (it as? ConversationMessage)?.eventId == root.eventId }
-        val shown = (rows.getOrNull(index) as? ConversationMessage)?.copy(id = ROOT_KEY)?.withEdit(root) ?: root
+        val own = (rows.getOrNull(index) as? ConversationMessage)?.copy(id = ROOT_KEY)
+        val shown = own?.let { row -> mirror?.let { row.withEdit(it) } ?: row } ?: root
         // Nothing sits above the root, as in Slack, and a reply on the root's day needs no divider under it either, so
         // the root never moves when the thread loads it.
         val rest = rows.drop(index + 1)
@@ -552,16 +561,17 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val formatted = message.html?.let { FormattedBody(MessageFormat.Html, it) }
                 val content = checkNotNull(timeline.createMessageContent(MessageType.Text(TextMessageContent(message.body, formatted))))
                 val echo = if (message.alsoToChannel && threadRoot != null && message.target !is ComposerTarget.Edit) {
-                    SentEcho.watch(timeline, message.body)
+                    SentEcho.watch(room)
                 } else null
                 try {
                     content.use { raw ->
                         raw.withMentions(Mentions(message.mentions, message.mentionsRoom)).use { outgoing ->
                             when (val target = message.target) {
-                                is ComposerTarget.Reply -> timeline.sendReply(outgoing, target.eventId).close()
+                                is ComposerTarget.Reply ->
+                                    timeline.sendReply(outgoing, target.eventId).use { echo?.follow(it.transactionId()) }
                                 is ComposerTarget.Edit ->
                                     timeline.edit(EventOrTransactionId.EventId(target.eventId), EditedContent.RoomMessage(outgoing))
-                                null -> timeline.send(outgoing).close()
+                                null -> timeline.send(outgoing).use { echo?.follow(it.transactionId()) }
                             }
                         }
                     }
@@ -572,18 +582,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 echo?.let { copyToChannel(message, it) }
                 currentCoroutineContext().ensureActive()
                 // Posting reads the conversation, as in Slack, even one marked unread on this visit; an edit isn't a post.
-                if (message.target !is ComposerTarget.Edit) readLock.withLock { heldUnread = false }
-                // A message sent from an older place goes to the present, as sending in Slack takes you there.
-                if (shown?.focused == true) operations.launch {
-                    pageLock.withLock {
-                        try {
-                            if (shown?.focused == true && pending == null) goLive(null)
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) {
-                            // The message is queued either way; reaching the newest one turns live later.
-                        }
-                    }
+                if (message.target !is ComposerTarget.Edit) {
+                    readLock.withLock { heldUnread = false }
+                    showSend()
                 }
                 true
             } catch (cancelled: CancellationException) {
@@ -599,6 +600,25 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         }
         return try { task.await() } finally { task.cancel() }
     }
+
+    /** Brings what the reader just sent into view; a message sent from an older place goes to the present, as in Slack. */
+    private fun showSend() {
+        mutableState.update { it.copy(sendToShow = true) }
+        if (shown?.focused == true) operations.launch {
+            pageLock.withLock {
+                try {
+                    if (shown?.focused == true && pending == null) goLive(null)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // The message is queued either way; reaching the newest one turns live later.
+                }
+            }
+        }
+    }
+
+    /** The screen shows the newest messages, what the reader sent among them. */
+    fun sendShown() = mutableState.update { it.copy(sendToShow = false) }
 
     /**
      * The channel's copy of a thread reply, sent once the reply has an event ID to quote. The send queue only takes
@@ -686,7 +706,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                         java.io.File(attachment.path).parentFile?.deleteRecursively()
                     }
                 }
-                if (sent == null) announce("Couldn’t send this file.")
+                if (sent == null) announce("Couldn’t send this file.") else showSend()
             }
         }
     }
@@ -735,6 +755,20 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     suspend fun link(message: ConversationMessage): String? {
         val id = message.eventId ?: return null
         return quietly { room.matrixToEventPermalink(id) }
+    }
+
+    /**
+     * Says why a message came back when its deletion or edit, refused by the server, was cancelled out of the send
+     * queue, if the message is shown here; a reaction goes back quietly.
+     */
+    fun refused(changes: List<RefusedChange>) {
+        if (!lifetime.isActive) return
+        val roomId = room.id()
+        val shown = mutableState.value.rows.mapNotNullTo(HashSet()) { (it as? ConversationMessage)?.eventId }
+        val change = changes.lastOrNull { it.kind != RefusedChangeKind.REACTION && it.roomId == roomId && it.eventId in shown } ?: return
+        operations.launch {
+            announce(if (change.kind == RefusedChangeKind.REDACTION) "Couldn’t delete this message." else "Couldn’t edit this message.")
+        }
     }
 
     private suspend fun announce(notice: String) {

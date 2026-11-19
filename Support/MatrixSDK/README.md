@@ -12,6 +12,7 @@ applied in order:
 - `0005-focused-initialization-retry`: lets a failed or cancelled event-focused timeline initialization be retried instead of failing with `CacheStateAlreadyExists`.
 - `0006-custom-account-data`: lets the bindings observe and fetch account data of a custom type, which Later syncs through.
 - `0007-unread-counts-catch-up-with-stored-receipts`: while a room counts anything as unread, the event cache also checks the store for the user's newer receipts, so a room read on another device clears.
+- `0010-abort-refused-changes`: lets the bindings abort every deletion, edit or reaction the server refused, straight from the send queues, so it stops holding up what was sent after it; and gives a send's handle its transaction ID.
 
 Send each patch upstream and drop it once an SDK release includes it.
 

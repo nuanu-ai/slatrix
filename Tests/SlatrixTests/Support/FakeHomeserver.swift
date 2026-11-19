@@ -6,6 +6,18 @@ final class FakeHomeserver: @unchecked Sendable {
     let room: String
     private var messages: [[String: Any]]
     private let dropFirstSendResponse: Bool
+    private let refusesDeletions: Bool
+    private let refusesEdits: Bool
+    /// Answers deletions as if the access token had expired.
+    private let rejectsTokenOnDeletions: Bool
+    /// Deletions whose response waits for `releaseDeletions()`.
+    private var heldDeletions: [() -> Void] = []
+    private var holdsDeletions: Bool
+    var deletionsHeld: Int { queue.sync { heldDeletions.count } }
+    /// The bodies of the messages the room holds, oldest first.
+    var bodies: [String] {
+        queue.sync { messages.reversed().compactMap { ($0["content"] as? [String: Any])?["body"] as? String } }
+    }
     private var sent: [String: String] = [:]
     private var dropped: String?
     private var replayed = false
@@ -14,8 +26,15 @@ final class FakeHomeserver: @unchecked Sendable {
     private let queue = DispatchQueue(label: "FakeHomeserver")
     private(set) var url = ""
 
-    init(room: String, messages: [[String: Any]], dropFirstSendResponse: Bool = false) async throws {
+    init(
+        room: String, messages: [[String: Any]], dropFirstSendResponse: Bool = false, refusesDeletions: Bool = false,
+        holdsDeletions: Bool = false, refusesEdits: Bool = false, rejectsTokenOnDeletions: Bool = false
+    ) async throws {
+        self.rejectsTokenOnDeletions = rejectsTokenOnDeletions
         self.dropFirstSendResponse = dropFirstSendResponse
+        self.refusesDeletions = refusesDeletions
+        self.holdsDeletions = holdsDeletions
+        self.refusesEdits = refusesEdits
         self.room = room
         self.messages = messages
         let parameters = NWParameters.tcp
@@ -41,6 +60,15 @@ final class FakeHomeserver: @unchecked Sendable {
 
     deinit { listener.cancel() }
 
+    /// Answers the deletions held so far, and every later one at once.
+    func releaseDeletions() {
+        queue.sync {
+            holdsDeletions = false
+            for answer in heldDeletions { answer() }
+            heldDeletions = []
+        }
+    }
+
     private func read(_ connection: NWConnection, _ received: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [self] data, _, done, error in
             guard error == nil else { return connection.cancel() }
@@ -54,13 +82,20 @@ final class FakeHomeserver: @unchecked Sendable {
                 let payload = Data(buffer[end.upperBound..<(end.upperBound + length)])
                 buffer = Data(buffer[(end.upperBound + length)...])
                 let request = lines.first?.split(separator: " ").map(String.init) ?? []
-                guard let (status, body) = respond(request.first ?? "", request.count > 1 ? request[1] : "", payload)
-                else { return connection.cancel() }
-                let json = try! JSONSerialization.data(withJSONObject: body)
-                let head =
-                    "HTTP/1.1 \(status) \(status == 200 ? "OK" : "Not Found")\r\n"
-                    + "Content-Type: application/json\r\nContent-Length: \(json.count)\r\n\r\n"
-                connection.send(content: Data(head.utf8) + json, completion: .idempotent)
+                let (method, target) = (request.first ?? "", request.count > 1 ? request[1] : "")
+                let answer = { [self] in
+                    guard let (status, body) = respond(method, target, payload) else { return connection.cancel() }
+                    let json = try! JSONSerialization.data(withJSONObject: body)
+                    let head =
+                        "HTTP/1.1 \(status) \(status == 200 ? "OK" : "Not Found")\r\n"
+                        + "Content-Type: application/json\r\nContent-Length: \(json.count)\r\n\r\n"
+                    connection.send(content: Data(head.utf8) + json, completion: .idempotent)
+                }
+                if holdsDeletions, method == "PUT", target.contains("/redact/") {
+                    heldDeletions.append(answer)
+                } else {
+                    answer()
+                }
             }
             if done { connection.cancel() } else { read(connection, buffer) }
         }
@@ -70,6 +105,8 @@ final class FakeHomeserver: @unchecked Sendable {
         let path = target.split(separator: "?", maxSplits: 1).first.map(String.init) ?? ""
         let segments = path.split(separator: "/").map { $0.removingPercentEncoding ?? String($0) }
         if path == "/_matrix/client/versions" { return (200, ["versions": ["v1.11"]]) }
+        // GET /_matrix/client/v3/profile/{user}[/{field}], which the app reads once signed in.
+        if method == "GET", segments.count >= 5, segments[3] == "profile" { return (200, ["displayname": "Me"]) }
         // POST /_matrix/client/v3/rooms/{room}/join
         if method == "POST", segments.count == 6, segments[4] == room, segments[5] == "join" {
             return (200, ["room_id": room])
@@ -79,6 +116,9 @@ final class FakeHomeserver: @unchecked Sendable {
             let content = try? JSONSerialization.jsonObject(with: payload) as? [String: Any]
         {
             let transaction = segments[7]
+            if refusesEdits, content["m.new_content"] != nil {
+                return (403, ["errcode": "M_FORBIDDEN", "error": "Not allowed"])
+            }
             if let eventID = sent[transaction] {
                 if transaction == dropped { replayed = true }
                 return (200, ["event_id": eventID])
@@ -95,6 +135,13 @@ final class FakeHomeserver: @unchecked Sendable {
                 return nil
             }
             return (200, ["event_id": eventID])
+        }
+        // PUT /_matrix/client/v3/rooms/{room}/redact/{event}/{transaction}
+        if method == "PUT", segments.count == 8, segments[4] == room, segments[5] == "redact" {
+            if rejectsTokenOnDeletions { return (401, ["errcode": "M_UNKNOWN_TOKEN", "error": "Expired"]) }
+            return refusesDeletions
+                ? (403, ["errcode": "M_FORBIDDEN", "error": "Not allowed"])
+                : (200, ["event_id": "$redaction-\(segments[7])"])
         }
         // GET /_matrix/client/v3/rooms/{room}/messages: everything in one page, then the start of the room.
         if segments.count == 6, segments[4] == room, segments[5] == "messages" {
