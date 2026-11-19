@@ -227,19 +227,21 @@ class MatrixWorkspaceTest {
             runCurrent()
             val thread = requireNotNull(workspace.selected.value?.conversation)
             assertTrue(thread.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)))
+            val sent = listOf(TimelineDiff.PushBack(conversationItem("reply", "reply", "On it", local = true, editable = true)),
+                TimelineDiff.Set(0u, conversationItem("reply", "\$reply", "On it", editable = true)))
 
             if (signedOut) {
                 // Signing out closes the workspace before the reply is sent, so the copy's wait ends and lets go of the room.
                 workspace.close()
                 runCurrent()
                 assertTrue(client.handles.all { it.uniffiIsDestroyed })
-                client.emit(listOf(TimelineDiff.PushBack(conversationItem("reply", "\$reply", "On it", editable = true))))
+                client.emit(sent)
                 runCurrent()
                 assertTrue(client.raw.isEmpty)
             } else {
                 workspace.back()
                 runCurrent()
-                client.emit(listOf(TimelineDiff.PushBack(conversationItem("reply", "\$reply", "On it", editable = true))))
+                client.emit(sent)
                 assertTrue("\"event_id\":\"\$reply\"" in client.raw.receive())
                 workspace.close()
             }

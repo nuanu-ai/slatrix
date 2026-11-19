@@ -34,7 +34,7 @@ object ChannelCopy {
 internal class SentEcho private constructor(private val body: String) : TimelineListener {
     /** The message's event ID once sent, or null if it never will be. */
     val sent = CompletableDeferred<String?>()
-    private class Seen(val id: String, val match: Boolean, val eventId: String?)
+    private class Seen(val id: String, val match: Boolean, val local: Boolean, val eventId: String?)
     private val items = mutableListOf<Seen>()
     private var before: Set<String>? = null
     private var echo: String? = null
@@ -45,8 +45,10 @@ internal class SentEcho private constructor(private val body: String) : Timeline
         diff.forEach { items.applyDiff(it, ::seen) }
         // The listener's first update is the timeline as it was before the send.
         val before = before ?: return run { before = items.mapTo(HashSet()) { it.id } }
-        // Its local echo, or the sent event when both arrive in one update.
-        val echo = echo ?: items.firstOrNull { it.match && it.id !in before }?.id?.also { echo = it } ?: return
+        // Its local echo, even when the sent event replaces it in the same update. Only this device's queue makes one,
+        // so the same words sent from another device are never taken for it.
+        val echo = echo ?: diff.flatMap { it.items() }.map(::seen).firstOrNull { it.match && it.local && it.id !in before }
+            ?.id?.also { echo = it } ?: return
         // Gone means its sending was cancelled.
         val item = items.firstOrNull { it.id == echo } ?: return finish(null)
         item.eventId?.let(::finish)
@@ -72,8 +74,9 @@ internal class SentEcho private constructor(private val body: String) : Timeline
     private fun seen(item: TimelineItem): Seen {
         val event = item.asEvent()
         val message = ((event?.content as? TimelineItemContent.MsgLike)?.content?.kind as? MsgLikeKind.Message)?.content
+        val id = event?.eventOrTransactionId
         return Seen(item.uniqueId().id, event?.isOwn == true && message?.body == body,
-            (event?.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId)
+            id is EventOrTransactionId.TransactionId, (id as? EventOrTransactionId.EventId)?.eventId)
     }
 
     companion object {
@@ -84,6 +87,17 @@ internal class SentEcho private constructor(private val body: String) : Timeline
             return echo
         }
     }
+}
+
+/** The items [this] adds or replaces. */
+internal fun TimelineDiff.items(): List<TimelineItem> = when (this) {
+    is TimelineDiff.Append -> values
+    is TimelineDiff.Reset -> values
+    is TimelineDiff.PushFront -> listOf(value)
+    is TimelineDiff.PushBack -> listOf(value)
+    is TimelineDiff.Insert -> listOf(value)
+    is TimelineDiff.Set -> listOf(value)
+    else -> emptyList()
 }
 
 /** Applies [diff] to a timeline's [items], each made by [map]. */

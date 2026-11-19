@@ -828,16 +828,6 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     private fun Source.apply(diff: TimelineDiff) = items.applyDiff(diff, ::row)
 
-    private fun TimelineDiff.items(): List<TimelineItem> = when (this) {
-        is TimelineDiff.Append -> values
-        is TimelineDiff.Reset -> values
-        is TimelineDiff.PushFront -> listOf(value)
-        is TimelineDiff.PushBack -> listOf(value)
-        is TimelineDiff.Insert -> listOf(value)
-        is TimelineDiff.Set -> listOf(value)
-        else -> emptyList()
-    }
-
     private suspend fun countThreads() {
         val list = quietly { room.threadListService() } ?: return
         try {

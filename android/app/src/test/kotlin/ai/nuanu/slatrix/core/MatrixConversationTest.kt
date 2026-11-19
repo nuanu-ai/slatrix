@@ -426,7 +426,7 @@ class MatrixConversationTest {
             // An earlier reply's echo that lands only now must not be taken for this one.
             timeline.emit(listOf(TimelineDiff.PushBack(own("earlier", "earlier", "First", local = true))))
             if (sentAtOnce) timeline.emit(listOf(TimelineDiff.Set(1u, own("earlier", "\$earlier", "First")),
-                TimelineDiff.PushBack(own("this", "\$reply", "On it"))))
+                TimelineDiff.PushBack(own("this", "this", "On it", local = true)), TimelineDiff.Set(2u, own("this", "\$reply", "On it"))))
             else {
                 timeline.emit(listOf(TimelineDiff.PushBack(own("this", "this", "On it", local = true))))
                 timeline.emit(listOf(TimelineDiff.Set(1u, own("earlier", "\$earlier", "First"))))
@@ -439,6 +439,27 @@ class MatrixConversationTest {
             assertEquals("On it", content["body"].asString)
             assertEquals("\$reply", content["m.relates_to"].asJsonObject["m.in_reply_to"].asJsonObject["event_id"].asString)
         }
+    }
+
+    // capability: thread.send-to-channel
+    @Test fun theCopyQuotesThisPhonesReplyNotTheSameWordsSentFromAnotherDevice() = runTest {
+        fun own(key: String, id: String, local: Boolean = false) = conversationItem(key, id, "On it", local = local, editable = true)
+        val timeline = ConversationTimeline(emptyList())
+        val room = ConversationRoom(timeline)
+        val conversation = MatrixConversation(backgroundScope, room, threadRoot = "\$root")
+        runCurrent()
+        val sending = async { conversation.send(ComposerMessage("On it", null, emptyList(), false, alsoToChannel = true)) }
+        timeline.submissions.receive()
+        timeline.sendResults.send(Result.success(object : SendHandle(NoHandle) {}))
+        assertTrue(sending.await())
+
+        timeline.emit(listOf(TimelineDiff.PushBack(own("elsewhere", "\$elsewhere"))))
+        timeline.emit(listOf(TimelineDiff.PushBack(own("this", "this", local = true)), TimelineDiff.Set(1u, own("this", "\$here"))))
+
+        val (_, json) = room.raw.receive()
+        val content = com.google.gson.JsonParser.parseString(json).asJsonObject
+        assertEquals("\$here", content["m.relates_to"].asJsonObject["m.in_reply_to"].asJsonObject["event_id"].asString)
+        conversation.close()
     }
 
     @Test fun aReplyWhoseSendIsCancelledIsNotCopiedAndItsClosedThreadLetsGoOfTheRoom() = runTest {
