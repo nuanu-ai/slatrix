@@ -150,6 +150,16 @@ struct RootView: View {
     /// Whether an open pane sits beside the conversation; otherwise it takes the conversation's place.
     private var paneBeside: Bool { sidebarCollapsed ? arrangement.paneFitsAlone : arrangement.paneFitsBesideSidebar }
     private var paneCovers: Bool { paneOpen && !paneBeside }
+    /// A thread in the conversation's place.
+    private var threadCovers: Bool { paneCovers && profilePane == nil && threadRoot != nil }
+    /// The open thread couldn't load.
+    @ViewBuilder private var threadNotice: some View {
+        if let threadLoadError, let root = threadRoot {
+            Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
+                Button("Retry") { [open = openThreadAction] in open(root) }
+            }
+        }
+    }
     private var coverage: Coverage {
         Coverage(
             pane: paneCovers, viewer: viewer.message != nil, dialog: modalShown,
@@ -764,8 +774,14 @@ struct RootView: View {
                                 }
                             }
                             // Banners float over the conversation instead of pushing it down, under whichever header is
-                            // on top: a pane in the conversation's place brings its own, with its close button.
-                            .overlay(alignment: .top) { banners.padding(.top, (paneCovers ? 2 : 1) * m.paneHeader) }
+                            // on top: a pane in the conversation's place brings its own, with its close button. A thread
+                            // there floats its own notice in the same column, first, so neither lies over the other.
+                            .overlay(alignment: .top) {
+                                VStack(spacing: 0) {
+                                    if threadCovers { threadNotice }
+                                    banners
+                                }.padding(.top, (paneCovers ? 2 : 1) * m.paneHeader)
+                            }
                             if paneOpen && paneBeside {
                                 WithWidths(widths) { widths in
                                     ResizeHandle(
@@ -1286,11 +1302,7 @@ struct RootView: View {
             VStack(spacing: 0) {
                 PaneHeader(
                     title: "Thread", subtitle: room.writtenName, closeLabel: "Close thread", onClose: closeThread)
-                if let threadLoadError {
-                    Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
-                        Button("Retry") { [open = openThreadAction] in open(root) }
-                    }
-                }
+                if !threadCovers { threadNotice }
             }.scrollEdge(.top, colors.canvas)
         } footer: {
             VStack(spacing: 0) {
