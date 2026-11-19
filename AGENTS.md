@@ -45,6 +45,8 @@ The README and anything else a visitor reads should sound like a person wrote it
 - Open the pull request as a draft with the first fix, and when the series is done mark it ready with auto-merge on (`gh pr ready` then `gh pr merge --auto --squash`), so green CI merges it.
 - Match the process to the change. Small fixes (a visual tweak, a wrong condition, a few lines) go together in one pull request: one red test and the fix for each, the protected line mutated once by hand, and no mutation runs, hosted runs, snapshots or review skills unless the fix is in their area. New features, hard bugs and anything touching sync, storage or encryption get the full process.
 - Review a larger diff with `code-review` and `ponytail-review` before it merges. Hard bugs go through `diagnosing-bugs`.
+- A pull request larger than a small fix also gets an adversarial review from a second model before it merges: `codex exec -s read-only` in a clean worktree, asked to break the change. Check every finding against the code before acting on it, and decline the ones that don't hold or that object to something Slack itself does.
+- A change gets at most three review rounds. If the third still finds something important, stop patching finding by finding: find the rule that removes the whole class, or change the approach.
 - Subagents run on Opus. Give open-ended work high effort: architecture, cross-cutting refactors, hard bugs, UI that needs judgment. Narrow tasks with a known shape get medium: a bug with a known cause, a mechanical sweep, a port.
 - Never send messages, invitations or reactions from a real account unless the owner set up that account and room for testing.
 
