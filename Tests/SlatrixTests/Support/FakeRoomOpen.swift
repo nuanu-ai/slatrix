@@ -35,7 +35,14 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         listener.onUpdate(diff: [.reset(values: cached)])
         return handle
     }
+    private var paging = false
+    /// One older page at a time: asking for another while one is on its way fails, as a busy paginator would.
     override func paginateBackwards(numEvents: UInt16) async throws -> Bool {
+        try lock.withLock {
+            if paging { throw URLError(.cancelled) }
+            paging = true
+        }
+        defer { lock.withLock { paging = false } }
         await pageGate.wait()
         return startReached
     }
@@ -89,6 +96,8 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     let eventGate = Gate()
     /// What a timeline opened at an older message loads; the cache when nil.
     var focusedItems: [TimelineItem]?
+    /// Why a timeline opened at an older message fails to load, as a lost connection would make it.
+    var focusedError: Error?
     /// What a thread's timeline loads; the cache when nil.
     var threadItems: [TimelineItem]?
     /// Thread replies the room can load, by event ID, with their thread's root.
@@ -110,7 +119,10 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
         focuses.append(configuration.focus)
         await buildGate.wait()
-        if case .event = configuration.focus { await eventGate.wait() }
+        if case .event = configuration.focus {
+            await eventGate.wait()
+            if let focusedError { throw focusedError }
+        }
         var items = cached
         if case .event = configuration.focus, let focusedItems { items = focusedItems }
         if case .thread = configuration.focus, let threadItems { items = threadItems }
