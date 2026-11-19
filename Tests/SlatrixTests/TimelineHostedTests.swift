@@ -23,8 +23,11 @@ private final class HistoryTimeline: Timeline, @unchecked Sendable {
         await gate.wait()
         return await onPage?() ?? false
     }
+    /// Holds a send before the queue takes it.
+    let sendGate = Gate()
     override func send(msg: RoomMessageEventContentWithoutRelation) async throws -> SendHandle {
-        SendHandle(noHandle: .init())
+        await sendGate.wait()
+        return SendHandle(noHandle: .init())
     }
 }
 
@@ -501,6 +504,35 @@ struct TimelineHostedTests {
         await drainMainActor()
         await settle(harness)
         #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
+    }
+
+    @Test("A send finishing after you moved to another conversation leaves what you read there in place")
+    func sendElsewhereLeavesReadingInPlace() async throws {
+        let harness = Harness(messages: Self.messages(0..<60), height: 700)
+        defer { harness.close() }
+        await settle(harness)
+        harness.timeline.sendGate.arm()
+        let sending = Task { try await harness.service.sendMessage("On my way", roomID: Self.room.id) }
+        #expect(await eventually { harness.timeline.sendGate.isWaiting })
+        let other = ChatRoom(id: "!other:example.org", name: "Other")
+        harness.service.rooms.append(other)
+        harness.service.selectedRoomID = other.id
+        harness.service.messages = Self.messages(0..<60).map { message in
+            var message = message
+            message.roomID = other.id
+            return message
+        }
+        harness.hosting.rootView = harness.fixture(other)
+        await settle(harness)
+        harness.scroll(toTop: harness.clip.bounds.minY - 1_500)
+        let reading = try #require(harness.firstVisibleBody)
+        let before = try #require(harness.top(of: reading))
+
+        harness.timeline.sendGate.release()
+        try await sending.value
+        await drainMainActor()
+        await settle(harness)
+        #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
     }
 
     @Test("New messages do not move what you are reading further up")

@@ -30,6 +30,12 @@ struct MessagePermalinkTarget: Identifiable {
     fileprivate let owner: MessageActionTarget.Context
 }
 
+/// A room's channel, or one of its threads.
+struct Conversation: Hashable {
+    let roomID: String
+    var threadRootID: String?
+}
+
 struct SendQueueMessageKey: Hashable {
     let roomID: String
     let messageID: String
@@ -579,9 +585,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var hasLockedMessages = false
     private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private(set) var pendingSendActions = Set<SendQueueMessageKey>()
-    /// Messages and files sent from this device into the conversation and into the open thread, so far.
-    private(set) var conversationSends = 0
-    private(set) var threadSends = 0
+    /// Messages and files sent from this device so far, by the room and the thread they went to.
+    private(set) var sends: [Conversation: Int] = [:]
     private var mainSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private var threadSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     var threadMessages: [ChatMessage] = []
@@ -1906,6 +1911,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         alsoToChannel: Bool = false
     ) async throws {
         try assertDestination(roomID)
+        let destination = roomID ?? selectedRoomID
         let message = ComposerFormat.message(draft: draft)
         guard !message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let token = selection
@@ -1936,7 +1942,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             echo?.cancel()
             throw error
         }
-        countSend(threadRootID: threadRootID)
+        if let destination { sends[Conversation(roomID: destination, threadRootID: threadRootID), default: 0] += 1 }
         if let echo { copyToChannel(message, once: echo, room: room, session: session) }
         await returnToLive(after: token, threadRootID: threadRootID)
     }
@@ -1977,10 +1983,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 errorMessage = "Your reply is in the thread, but it couldn’t also be sent to the conversation."
             }
         }
-    }
-
-    private func countSend(threadRootID: String?) {
-        if threadRootID == nil { conversationSends += 1 } else { threadSends += 1 }
     }
 
     /// Any timeline sends into the room's queue; a message sent from one loaded around an older message then shows
@@ -2491,6 +2493,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     func uploadFile(_ url: URL, threadRootID: String? = nil, roomID: String? = nil) async throws {
         try assertDestination(roomID)
+        let destination = roomID ?? selectedRoomID
         let token = selection
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
@@ -2538,7 +2541,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             target = try requireTimeline()
         }
         let handle = try target.sendAttachment(params: parameters, attachment: kind)
-        countSend(threadRootID: threadRootID)
+        if let destination { sends[Conversation(roomID: destination, threadRootID: threadRootID), default: 0] += 1 }
         await returnToLive(after: token, threadRootID: threadRootID)
         try await handle.join()
     }
