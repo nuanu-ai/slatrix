@@ -30,17 +30,36 @@ struct SkeletonRows: View {
                     HStack(alignment: .top, spacing: m.sp12) {
                         Circle().fill(fill).frame(
                             width: m.avatar, height: m.avatar)
-                        VStack(alignment: .leading, spacing: m.sp8) {
-                            RoundedRectangle(cornerRadius: m.radiusSmall).fill(fill).frame(
-                                width: m(120), height: m.sp12)
-                            // Varied widths read as text rather than as a grid.
-                            RoundedRectangle(cornerRadius: m.radiusSmall).fill(fill)
-                                .frame(width: m([320, 240, 280][index % 3]), height: m.sp12)
-                        }
+                        // Varied widths read as text rather than as a grid.
+                        SkeletonBars(widths: [120, [320, 240, 280][index % 3]])
                     }
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(m.sp20)
                 .accessibilityHidden(true)
+        }
+    }
+}
+
+/// Bars where a few lines of text will be, such as a quote's while its original loads. They wait like the spinner.
+struct SkeletonLines: View {
+    var widths: [CGFloat] = [120, 240]
+    var body: some View {
+        AfterLoadingDelay(active: true, hasContent: false, offline: false, interval: nil) {
+            SkeletonBars(widths: widths).accessibilityHidden(true)
+        }
+    }
+}
+
+private struct SkeletonBars: View {
+    let widths: [CGFloat]
+    @Environment(\.metrics) private var m
+    @ThemeColors private var colors
+    var body: some View {
+        VStack(alignment: .leading, spacing: m.sp8) {
+            ForEach(widths.indices, id: \.self) { index in
+                RoundedRectangle(cornerRadius: m.radiusSmall).fill(colors.sunken)
+                    .frame(width: m(widths[index]), height: m.sp12)
+            }
         }
     }
 }

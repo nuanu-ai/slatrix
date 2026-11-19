@@ -17,7 +17,8 @@ struct ReplyPreviewView: View {
     var body: some View {
         HStack(spacing: m.sp8) {
             RoundedRectangle(cornerRadius: m(2)).fill(appearance.colors.textSecondary.opacity(0.4)).frame(width: m(3))
-            // Every state takes the loaded preview's two lines, so the row keeps its height when the original lands.
+            // Every state takes the loaded preview's two lines, so the row keeps its height when the original lands; one
+            // line of content sits centered in them.
             ZStack(alignment: .leading) {
                 lines(sender: " ", body: " ").hidden()
                 if message.repliedToThread && !notInThread {
@@ -28,15 +29,19 @@ struct ReplyPreviewView: View {
                         VStack(alignment: .leading, spacing: m.sp4) {
                             Text("replied to a thread:").font(m.font(.subheadline))
                                 .foregroundStyle(appearance.colors.textSecondary)
-                            Text(thread?.preview ?? " ").font(m.font(.subheadline, .medium))
-                                .foregroundStyle(appearance.colors.accent)
+                            if let thread {
+                                Text(thread.preview).font(m.font(.subheadline, .medium))
+                                    .foregroundStyle(appearance.colors.accent)
+                            } else {
+                                SkeletonLines(widths: [240])
+                            }
                         }.lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }.buttonStyle(.row).disabled(thread == nil || onOpenThread == nil).help("View thread")
                 } else if preview.state == .ready {
                     Button {
                         onOpen?(preview.eventID)
                     } label: {
-                        lines(sender: preview.senderName, body: preview.body).frame(
+                        lines(sender: preview.senderName, body: preview.body, deleted: preview.isRedacted).frame(
                             maxWidth: .infinity, alignment: .leading
                         ).contentShape(Rectangle())
                     }.buttonStyle(.row).disabled(onOpen == nil).help("Show original message")
@@ -49,6 +54,8 @@ struct ReplyPreviewView: View {
                             Task { await matrix.loadReplyPreview(for: target) }
                         }.buttonStyle(.textLink).font(m.font(.subheadline)).disabled(origin == nil)
                     }
+                } else {
+                    SkeletonLines()
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
                 .loadingInterval(.replyLoading, while: preview.state == .pending)
@@ -69,10 +76,13 @@ struct ReplyPreviewView: View {
             }
     }
 
-    private func lines(sender: String, body: String) -> some View {
+    private func lines(sender: String, body: String, deleted: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: m.sp4) {
             Text(sender).font(m.font(.subheadline, .semibold)).lineLimit(1)
-            Text(body).font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary).lineLimit(1)
+            if !body.isEmpty {
+                Text(body).italic(deleted).font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary)
+                    .lineLimit(1)
+            }
         }
     }
 }
