@@ -83,7 +83,7 @@ struct MessageRowTests {
     }
 
     @Test("A quote takes the same height while its original loads as once it has, at a fractional zoom too")
-    func quoteKeepsHeight() async {
+    func quoteKeepsHeight() async throws {
         let zoom = Metrics(zoom: 1.25)
         func cell(_ state: ChatReplyPreview.State) -> TimelineCell {
             var message = message([])
@@ -102,12 +102,26 @@ struct MessageRowTests {
         let pending = cell(.pending)
         pending.frame = NSRect(x: 0, y: 0, width: 600, height: ceil(pending.height(width: 600)))
         window.contentView = pending
-        // A skeleton started after the quote's draws after it, so once it shows, the quote's bars are in the row.
-        let later = NSHostingController(
-            rootView: SkeletonLines().environment(\.metrics, zoom).environmentObject(AppearanceStore()))
-        pending.addSubview(later.view)
-        #expect(await eventually { later.sizeThatFits(in: CGSize(width: 400, height: 0)).height > 0 })
-        later.view.removeFromSuperview()
+        pending.layoutSubtreeIfNeeded()
+        func pixels() -> NSBitmapImageRep? {
+            guard let image = pending.bitmapImageRepForCachingDisplay(in: pending.bounds) else { return nil }
+            pending.cacheDisplay(in: pending.bounds, to: image)
+            return image
+        }
+        let before = try #require(pixels())
+        // The bars, once the loading delay has passed: how wide a span of the row they changed.
+        func bars() -> CGFloat {
+            guard let after = pixels(), let old = before.bitmapData, let new = after.bitmapData else { return 0 }
+            let row = after.bytesPerRow
+            var (first, last) = (row, -1)
+            for y in 0..<after.pixelsHigh where memcmp(old + y * row, new + y * row, row) != 0 {
+                first = min(first, (0..<row).first { old[y * row + $0] != new[y * row + $0] }!)
+                last = max(last, (0..<row).last { old[y * row + $0] != new[y * row + $0] }!)
+            }
+            let pixel = after.bitsPerPixel / 8
+            return CGFloat(last / pixel - first / pixel + 1) * pending.bounds.width / CGFloat(after.pixelsWide)
+        }
+        #expect(await eventually { bars() >= zoom(240) }, "The bars take the column's width, as the quote's lines will")
         #expect(pending.height(width: 600) == cell(.ready).height(width: 600))
     }
 
