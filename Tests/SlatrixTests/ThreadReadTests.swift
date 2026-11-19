@@ -65,6 +65,19 @@ struct ThreadReadPolicyTests {
         viewport.record(false, from: old, current: reopened)
         #expect(viewport.isAtBottom(reopened))
     }
+
+    @Test("A thread whose newest reply showed before it was ready to read is at its bottom once it is, unless it left")
+    func shownBeforeReady() {
+        var viewport = ThreadReadViewport()
+        viewport.record(true, from: nil, current: nil)
+        viewport.observe(Self.identity)
+        #expect(viewport.isAtBottom(Self.identity))
+        var scrolledAway = ThreadReadViewport()
+        scrolledAway.record(true, from: nil, current: nil)
+        scrolledAway.record(false, from: nil, current: nil)
+        scrolledAway.observe(Self.identity)
+        #expect(!scrolledAway.isAtBottom(Self.identity))
+    }
 }
 
 @MainActor

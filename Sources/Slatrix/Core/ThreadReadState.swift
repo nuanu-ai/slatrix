@@ -53,13 +53,20 @@ enum ThreadReadPolicy {
 struct ThreadReadViewport {
     private var current: ThreadReadIdentity?
     private var bottom: ThreadReadIdentity?
+    /// The pane reports only changes, so its newest reply showing before the thread was ready counts once it is.
+    private var shownBeforeReady = false
     mutating func observe(_ identity: ThreadReadIdentity?) {
         if current != identity {
+            bottom = current == nil && shownBeforeReady ? identity : nil
             current = identity
-            bottom = nil
+            shownBeforeReady = false
         }
     }
     mutating func record(_ visible: Bool, from identity: ThreadReadIdentity?, current: ThreadReadIdentity?) {
+        if identity == nil, current == nil {
+            observe(nil)
+            shownBeforeReady = visible
+        }
         guard let identity, identity == current else { return }
         observe(current)
         if visible { bottom = identity } else if bottom == identity { bottom = nil }
