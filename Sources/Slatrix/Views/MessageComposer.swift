@@ -170,8 +170,9 @@ struct MessageComposer: View {
             floating.alignmentGuide(.top) { $0[.bottom] + m.sp8 }
         }
         .onAppear { isActive = true }
-        .task(id: (isEditing || requiresTextForSend) && isEnabled) {
-            guard isEditing || requiresTextForSend, isEnabled else { return }
+        // Once as an edit opens; opened under a cover, the editor takes the keyboard as it would after any cover.
+        .task(id: isEditing || requiresTextForSend) {
+            guard isEditing || requiresTextForSend else { return }
             for _ in 0..<20 {
                 guard !Task.isCancelled, isActive, !sending else { return }
                 if let view = editor.textView, let window = view.window,

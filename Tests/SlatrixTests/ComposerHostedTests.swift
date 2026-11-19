@@ -4,9 +4,11 @@ import Testing
 
 @testable import Slatrix
 
-/// The composer in a real offscreen window; opt-in like the timeline's hosted tests.
+/// The composer in a real offscreen window; opt-in like the timeline's hosted tests. One at a time: a window that says
+/// it is key takes text editing from the others.
 @MainActor
-@Suite(.tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
+@Suite(
+    .serialized, .tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
 struct ComposerHostedTests {
     private struct Fixture: View {
         @State var text = ""
@@ -18,9 +20,9 @@ struct ComposerHostedTests {
         }
     }
 
-    private func host(_ view: some View) -> (NSHostingView<AnyView>, NSWindow) {
+    private func host(_ view: some View, key: Bool = false) -> (NSHostingView<AnyView>, NSWindow) {
         let hosting = NSHostingView(rootView: AnyView(view.environmentObject(AppearanceStore())))
-        let window = offscreenWindow(NSSize(width: 400, height: 400))
+        let window = offscreenWindow(NSSize(width: 400, height: 400), key: key)
         window.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
         return (hosting, window)
@@ -381,13 +383,14 @@ struct ComposerHostedTests {
     private struct Covered: View {
         @ObservedObject var cover: Cover
         let sent: Gate
+        var editing = false
         @State private var text = ""
         @State private var other = ""
         var body: some View {
             VStack {
                 MessageComposer(
-                    text: $text, placeholder: "Message #team", members: [], onSend: { _, _ in await sent.wait() },
-                    onTyping: { _ in }
+                    text: $text, placeholder: "Message #team", members: [], isEditing: editing,
+                    onSend: { _, _ in await sent.wait() }, onTyping: { _ in }
                 ).covered(cover.covered)
                 TextField("Reply…", text: $other)
             }.frame(width: 360)
@@ -424,6 +427,30 @@ struct ComposerHostedTests {
         #expect(await eventually { editor.string.isEmpty })
         await drainMainActor()
         #expect(window.firstResponder === focused && focused !== editor)
+    }
+
+    @Test("An edit uncovered leaves the keyboard where it went meanwhile")
+    func uncoveredEditKeepsFocus() async throws {
+        let cover = Cover()
+        let (hosting, window) = host(Covered(cover: cover, sent: Gate(), editing: true), key: true)
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let editor = try editor(in: hosting)
+        // An edit takes the keyboard as it opens.
+        #expect(await eventually { window.firstResponder === editor })
+
+        cover.covered = true
+        hosting.layoutSubtreeIfNeeded()
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        let reply = try #require(views(hosting).first { ($0 as? NSTextField)?.placeholderString == "Reply…" })
+        #expect(await eventually { window.firstResponder !== editor })
+        #expect(window.makeFirstResponder(reply))
+        let focused = window.firstResponder
+        cover.covered = false
+        hosting.layoutSubtreeIfNeeded()
+        #expect(await !eventually(timeout: .milliseconds(500)) { window.firstResponder !== focused })
     }
 
     /// Whether any pixel has the fixture images' red; nothing else in the composer is red.
