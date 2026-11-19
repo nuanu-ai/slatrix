@@ -10,7 +10,17 @@ struct LaterReminderTests {
         var queued: [String: (Date, DesktopMessageNotification)] = [:]
         /// Holds a request on its way into the queue while armed.
         let arriving = Gate()
-        func scheduled() async -> [String] { Array(queued.keys) }
+        /// Holds the next read of the queue, with what it read, while armed.
+        let reading = Gate()
+        var holdNextRead = false
+        func scheduled() async -> [String] {
+            let keys = Array(queued.keys)
+            if holdNextRead {
+                holdNextRead = false
+                await reading.wait()
+            }
+            return keys
+        }
         func schedule(_ identifier: String, at date: Date, notification: DesktopMessageNotification) async throws {
             await arriving.wait()
             queued[identifier] = (date, notification)
@@ -100,5 +110,27 @@ struct LaterReminderTests {
         queue.arriving.release()
         await signedIn.value
         #expect(queue.queued.isEmpty)
+    }
+
+    @Test("A sync overtaken by a newer one leaves the queue as the newer one left it")
+    func overtaken() async {
+        let queue = Queue()
+        let schedule = LaterReminderSchedule(transport: queue)
+        let list = SavedMessages().reminding(
+            roomID: room, eventID: "$one", at: Date().addingTimeInterval(600), now: Date())
+        await schedule.sync(list, accountID: owner, preview: true, notification: notification)
+        queue.reading.arm()
+        queue.holdNextRead = true
+        let previewsOff = Task {
+            await schedule.sync(list, accountID: owner, preview: false, notification: notification)
+        }
+        #expect(await eventually { queue.reading.isWaiting })
+        previewsOff.cancel()
+        await schedule.sync(list, accountID: owner, preview: true, notification: notification)
+        let kept = queue.queued.keys.sorted()
+        queue.reading.release()
+        await previewsOff.value
+        #expect(kept.count == 1)
+        #expect(queue.queued.keys.sorted() == kept)
     }
 }
