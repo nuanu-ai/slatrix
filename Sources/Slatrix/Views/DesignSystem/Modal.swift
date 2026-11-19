@@ -13,6 +13,9 @@ import SwiftUI
 }
 
 extension View {
+    /// Out of reach under something that covers it: no clicks, keys or drops, and hidden from VoiceOver.
+    func covered(_ covered: Bool) -> some View { disabled(covered).accessibilityHidden(covered) }
+
     /// Shows `content` as a modal over the window while `item` is set, like `.sheet(item:)`. A click outside closes it
     /// only when `closesOnClickOutside`, so a form never loses what was typed into it.
     func modal<Item: Identifiable, Content: View>(
@@ -83,7 +86,7 @@ struct ModalHost<Content: View>: View {
     @State private var covered = false
 
     var body: some View {
-        content.disabled(covered).accessibilityHidden(covered)
+        content.covered(covered)
             .onPreferenceChange(PresentedModals.self) { modals in
                 guard covered != !modals.isEmpty else { return }
                 covered = !modals.isEmpty

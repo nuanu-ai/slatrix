@@ -387,7 +387,8 @@ struct ComposerHostedTests {
             VStack {
                 MessageComposer(
                     text: $text, placeholder: "Message #team", members: [], onSend: { _, _ in await sent.wait() },
-                    onTyping: { _ in }, isCovered: cover.covered)
+                    onTyping: { _ in }
+                ).covered(cover.covered)
                 TextField("Reply…", text: $other)
             }.frame(width: 360)
         }

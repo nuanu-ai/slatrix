@@ -150,11 +150,11 @@ struct RootView: View {
     /// Whether an open pane sits beside the conversation; otherwise it takes the conversation's place.
     private var paneBeside: Bool { sidebarCollapsed ? arrangement.paneFitsAlone : arrangement.paneFitsBesideSidebar }
     private var paneCovers: Bool { paneOpen && !paneBeside }
-    /// The media viewer or a dialog lies over the whole window.
-    private var windowCovered: Bool { viewer.message != nil || modalShown }
-    /// What something covers takes no keyboard input and marks nothing read: the conversation under a pane in its
-    /// place, and it and a thread under the media viewer or a dialog.
-    private var conversationCovered: Bool { paneCovers || windowCovered }
+    private var coverage: Coverage {
+        Coverage(
+            pane: paneCovers, viewer: viewer.message != nil, dialog: modalShown,
+            drawer: sidebarCollapsed && sidebarDrawer)
+    }
     /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
     /// open pane.
     private var sidebarCollapsed: Bool {
@@ -316,6 +316,7 @@ struct RootView: View {
                 item: Binding(get: { modals.current }, set: { if $0 == nil { closeModal() } }),
                 closesOnClickOutside: true, content: modal)
         }
+        .covered(coverage.viewer)
         .overlay {
             MediaViewer(matrix: matrix, viewer: viewer, onForward: startForward)
         }
@@ -784,6 +785,7 @@ struct RootView: View {
                             }
                         }.frameCard(colors.theme.framed, leading: sidebarCollapsed)
                     }
+                    .covered(coverage.drawer)
                     .overlay(alignment: .leading) { drawer }
                     .animation(Motion.pane, value: sidebarCollapsed)
                 }
@@ -956,7 +958,7 @@ struct RootView: View {
             windowCanRead: windowCanRead, hasPresentedSheet: hasPresentedSheet, threadRootID: threadRoot?.eventID,
             threadReadyID: threadReadyID, openingThreadID: openingThreadID, threadLoadFailed: threadLoadError != nil,
             localReady: localReady, threadReadViewport: threadReadViewport, readHold: readHold,
-            conversationCovered: conversationCovered, threadCovered: windowCovered)
+            conversationCovered: coverage.conversation, threadCovered: coverage.thread)
     }
     private var readContext: ReadStateContext { readInputs.readContext(matrix) }
     private var automaticReadTarget: ReadReceiptTarget? { ReadStatePolicy.automaticTarget(readContext, hold: readHold) }
@@ -1120,7 +1122,10 @@ struct RootView: View {
                         onEditCaption: startCaption,
                         onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
                         inlineVideo: viewer.inlineVideo, contentAbove: $conversationContentAbove, insets: insets
-                    ).id("\(room.id):\(matrix.shownTimelineID)")
+                    )
+                    .id("\(room.id):\(matrix.shownTimelineID)")
+                    // A pane in its place covers all but the toolbar.
+                    .covered(coverage.pane)
                 } header: {
                     channelHeader(room).scrollEdge(.top, colors.canvas)
                 } footer: {
@@ -1169,7 +1174,7 @@ struct RootView: View {
                                     onDiscardAttachments: attachmentDrafts.discard,
                                     requiresTextForSend: scopedReply(roomID: room.id) != nil,
                                     onConversationKey: { conversationKey($0, room: room, threadRootID: nil) },
-                                    isPrimary: true, isCovered: conversationCovered
+                                    isPrimary: true
                                 )
                             }
                             .disabled(!localReady || !attachmentDrafts.ready).id(
@@ -1192,6 +1197,7 @@ struct RootView: View {
                         }.alignmentGuide(.top) { $0[.bottom] }
                     }
                     .conversationColumn(m, isThread: false).scrollEdge(.bottom, colors.canvas)
+                    .covered(coverage.pane)
                 }
             }
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
@@ -1339,7 +1345,7 @@ struct RootView: View {
                             onDiscardAttachments: attachmentDrafts.discard,
                             requiresTextForSend: scopedReply(roomID: room.id, threadID: root.eventID) != nil,
                             onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) },
-                            isThread: true, isCovered: windowCovered
+                            isThread: true
                         )
                     }
                     .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(.top, m.sp4)
@@ -2271,8 +2277,7 @@ struct RootView: View {
                 onError: { error in
                     guard isCurrentEdit(target, context: context) else { return }
                     matrix.errorMessage = error
-                }, allowsSend: isCurrentEdit(target, context: context), isThread: isThread,
-                isCovered: isThread ? windowCovered : conversationCovered
+                }, allowsSend: isCurrentEdit(target, context: context), isThread: isThread
             )
         }
         .id("edit-\(composerGeneration)-\(target.id)").disabled(!isCurrentEdit(target, context: context))
@@ -2695,11 +2700,20 @@ struct RootView: View {
         threadReadyID = nil
         openingThreadID = nil
     }
+    /// The profile, or else a thread or channel panel.
+    private func closePane() {
+        if profilePane != nil {
+            profilePane = nil
+            return
+        }
+        if route == .home, threadRoot != nil { closeThread() }
+        channelPanel = nil
+    }
     /// Slack's plain-key shortcuts from a composer; false lets the key do its usual thing.
     private func conversationKey(_ action: ConversationKeys.Action, room: ChatRoom, threadRootID: String?) -> Bool {
         switch action {
-        // Esc closes the profile first, then marks read.
-        case .markRead: if profilePane != nil { profilePane = nil } else { markReadState(room, unread: false) }
+        // Esc as the window has it: it closes the profile, or a pane in the conversation's place, before marking read.
+        case .markRead: handleMenu("mark-read")
         case .markAllRead: handleMenu("mark-all-read")
         case .editLastMessage:
             let messages = threadRootID == nil ? matrix.messages : matrix.threadMessages
@@ -2782,27 +2796,21 @@ struct RootView: View {
                 sidebarHidden.toggle()
                 sidebarDrawer = false
             }
-        case "toggle-pane":
-            if profilePane != nil {
-                profilePane = nil
-                return
-            }
-            if route == .home, threadRoot != nil { closeThread() }
-            channelPanel = nil
+        case "toggle-pane": closePane()
         case "mark-read":
             if sidebarCollapsed && sidebarDrawer {
                 sidebarDrawer = false
-            } else if profilePane != nil {
-                profilePane = nil
+            } else if profilePane != nil || coverage.conversation {
+                closePane()
             } else if route == .home, let room {
-                _ = conversationKey(.markRead, room: room, threadRootID: nil)
+                markReadState(room, unread: false)
             }
         case "mark-all-read":
             for room in matrix.rooms where room.membership == "join" && room.hasUnread {
                 markReadState(room, unread: false)
             }
         case "react-last":
-            guard route == .home, editTarget == nil,
+            guard route == .home, editTarget == nil, !coverage.conversation,
                 let last = matrix.messages.last(where: { $0.sendState == "sent" && !$0.isRedacted }),
                 let target = matrix.captureMessageAction(message: last, surface: .conversation)
             else { return }

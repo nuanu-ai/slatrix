@@ -755,21 +755,30 @@ struct WindowHostedTests {
             })
     }
 
-    @Test("What covers the conversation keeps the keyboard and ⌘U from its composer, which has the keyboard back after")
+    @Test(
+        "What covers the conversation keeps keys, drops and commands from it, and its composer has the keyboard back after"
+    )
     func coveredComposer() async throws {
         let harness = Harness()
         defer { harness.close() }
         #expect(await harness.settle())
         let window = harness.window
-        func composer() -> NSView? { harness.shown().first { ($0 as? NSTextView)?.isEditable == true } }
-        // The window takes the keyboard itself when the view refuses it, and still says yes.
-        func takesKeyboard() -> Bool {
-            window.makeFirstResponder(composer())
-            return window.firstResponder === composer()
+        let composer = try #require(
+            harness.shown().first { ($0 as? NSTextView)?.isEditable == true } as? NSTextView)
+        let drop = try #require(harness.shown().first { $0 is UploadDropView } as? UploadDropView)
+        let files = FakeDrag(files: [URL(fileURLWithPath: #filePath)], over: window)
+        #expect(await eventually { drop.draggingEntered(files) == .copy })
+        #expect(window.makeFirstResponder(composer))
+        // Whatever has the keyboard gets the text; nothing hands it the keyboard first.
+        func types(_ text: String) -> Bool {
+            window.firstResponder?.insertText(text)
+            return composer.string.hasSuffix(text)
         }
-        #expect(takesKeyboard())
+        func backAndTypes(_ text: String) async -> Bool {
+            await eventually { window.firstResponder === composer } && types(text)
+        }
 
-        // The media viewer over the window: it has the keyboard, and gives it back on closing.
+        // The media viewer over the window.
         var photo = ChatMessage(
             id: "$photo", roomID: try #require(harness.matrix.selectedRoomID), senderID: "@ana:example.org",
             senderName: "ana", body: "photo.png", timestamp: Date(timeIntervalSince1970: 1_762_700_000))
@@ -797,35 +806,52 @@ struct WindowHostedTests {
         try await harness.click(CGRect(origin: try #require(photoPoint()), size: .zero))
         func stage() -> NSView? { harness.shown().first { $0 is MediaStageView } }
         #expect(await eventually { stage() != nil })
-        #expect(!takesKeyboard())
+        #expect(await eventually { drop.draggingEntered(files) == [] })
+        #expect(!types("a"))
         stage()?.keyDown(
             with: try #require(
                 NSEvent.keyEvent(
                     with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
                     characters: "\u{1B}", charactersIgnoringModifiers: "\u{1B}", isARepeat: false, keyCode: 53)))
         #expect(await eventually { stage() == nil })
-        #expect(takesKeyboard())
+        #expect(await backAndTypes("b"))
 
-        // A thread in its place, in a narrow window.
-        let focused = try #require(composer())
-        try harness.openThread()
+        // A dialog, and one closed as soon as it opened.
+        harness.menu("preferences")
+        #expect(await eventually { harness.shown().contains { $0 is NSSwitch } })
+        #expect(await eventually { window.firstResponder !== composer })
+        #expect(!types("c"))
+        harness.menu("mark-read")
+        #expect(await backAndTypes("d"))
+        harness.menu("preferences")
+        harness.menu("mark-read")
+        #expect(await backAndTypes("e"))
+
+        // The sidebar drawer, in a narrow window, which Esc closes.
         harness.resize(700)
+        #expect(await eventually { !harness.sidebarShown })
+        harness.menu("toggle-sidebar")
+        #expect(await eventually { window.firstResponder !== composer })
+        #expect(!types("f"))
+        #expect(drop.draggingEntered(files) == [])
+        harness.menu("mark-read")
+        #expect(await backAndTypes("g"))
+
+        // A thread in its place, which Esc closes without marking the conversation read.
+        try harness.openThread()
         #expect(await eventually { harness.shown().compactMap { $0 as? UploadDropView }.count == 2 })
-        #expect(await eventually { window.firstResponder !== focused })
-        #expect(!takesKeyboard())
+        #expect(await eventually { window.firstResponder !== composer })
+        #expect(!types("h"))
+        #expect(drop.draggingEntered(files) == [])
         // ⌘U with neither composer focused attaches to neither.
         window.makeFirstResponder(nil)
         harness.menu("attach")
         await drainMainActor()
         // Required: the file panel a failure leaves open can't be dismissed from here.
         try #require(window.attachedSheet == nil)
-        harness.menu("toggle-pane")
-        #expect(await eventually { window.firstResponder === focused })
-
-        // A dialog over the window.
-        harness.menu("preferences")
-        #expect(await eventually { harness.shown().contains { $0 is NSSwitch } })
-        #expect(await eventually { !takesKeyboard() })
+        harness.menu("mark-read")
+        #expect(await eventually { harness.shown().compactMap { $0 as? UploadDropView }.count == 1 })
+        #expect(await backAndTypes("i"))
     }
 
     @Test("In a narrow window an error sits under the thread's header, so Close thread still closes the thread")
