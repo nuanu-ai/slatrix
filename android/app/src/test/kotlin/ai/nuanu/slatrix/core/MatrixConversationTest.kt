@@ -18,6 +18,7 @@ import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ai.nuanu.slatrix.TestMediaSource
 import org.matrix.rustcomponents.sdk.*
 import uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode
 
@@ -474,6 +475,25 @@ class MatrixConversationTest {
         assertTrue(room.raw.isEmpty)
     }
 
+    // capability: message.delete
+    @Test fun aDeletionSaysItFailedOnlyOnceTheQueueCancelsItNotForAnExpiredTokenTheQueueStillSends() = runTest {
+        fun failed(error: QueueWedgeError) = EventSendState.SendingFailed(error, false)
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Plan", editable = true)))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.isNotEmpty() }
+        // The SDK shows the message deleted while its deletion waits for the refreshed token.
+        timeline.emit(listOf(TimelineDiff.Set(0u, conversationItem("a", "\$a", "", editable = true,
+            content = TimelineItemContent.MsgLike(MsgLikeContent(MsgLikeKind.Redacted, null, null, null)),
+            deletion = failed(QueueWedgeError.ExpiredAccessToken)))))
+        conversation.state.first { it.rows.messages.single().kind == MessageKind.Deleted }
+        runCurrent()
+        assertNull(conversation.state.value.notice)
+
+        conversation.refused(listOf(RefusedChange("!design:example.org", "\$a", RefusedChangeKind.REDACTION)))
+        assertEquals("Couldn’t delete this message.", conversation.state.first { it.notice != null }.notice)
+        conversation.close()
+    }
+
     // capability: thread.send-to-channel
     @Test fun aChannelsCopyOfAThreadReplyNamesItsThreadByTheThreadsFirstMessage() = runTest {
         val live = ConversationTimeline(listOf(conversationItem("root", "\$root", "Can we ship Friday?")))
@@ -728,30 +748,20 @@ class MatrixConversationTest {
         conversation.close()
     }
 
-    // capability: message.delete
-    @Test fun aDeleteTheServerRefusedSaysSoWhereItsMessageIsShown() = runTest {
-        // A failure the room's queue retries by itself is still on its way.
-        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$deleting", "Deleting", deletion = failed(recoverable = true))))
+    // capability: message.edit
+    @Test fun aRefusedChangeSaysSoOnlyForAMessageShownHereAndNotForAReaction() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Edited")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        conversation.state.first { !it.loading }
+        conversation.state.first { it.rows.isNotEmpty() }
+        conversation.refused(listOf(RefusedChange("!other:example.org", "\$a", RefusedChangeKind.EDIT),
+            RefusedChange("!design:example.org", "\$elsewhere", RefusedChangeKind.EDIT),
+            RefusedChange("!design:example.org", "\$a", RefusedChangeKind.REACTION)))
         runCurrent()
         assertNull(conversation.state.value.notice)
-        timeline.emit(listOf(TimelineDiff.Set(0u, conversationItem("a", "\$deleting", "Deleting", deletion = failed(recoverable = false)))))
-        assertEquals("Couldn’t delete this message.", conversation.state.first { it.notice != null }.notice)
-        conversation.close()
-    }
-
-    // capability: message.edit
-    @Test fun anEditTheServerRefusedSaysSoWhereItsMessageIsShown() = runTest {
-        val timeline = ConversationTimeline(listOf(
-            conversationItem("a", "\$refused", "Edited", editState = failed(recoverable = false))))
-        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.refused(listOf(RefusedChange("!design:example.org", "\$a", RefusedChangeKind.EDIT)))
         assertEquals("Couldn’t edit this message.", conversation.state.first { it.notice != null }.notice)
         conversation.close()
     }
-
-    private fun failed(recoverable: Boolean) =
-        EventSendState.SendingFailed(QueueWedgeError.GenericApiError("x"), recoverable)
 
     // capability: message.forward
     @Test fun aMessageForwardsAsItsTextOrItsMediaButNotWhileAnEditOrDeleteIsPending() = runTest {
@@ -1097,6 +1107,27 @@ class MatrixConversationTest {
         assertEquals("It keeps its row", loaded.id, deleted.id)
         conversation.close()
     }
+
+    // capability: message.delete
+    @Test fun aRootTheChannelNoLongerHoldsShowsAsTheThreadHasItDeletedIncluded() = runTest {
+        val file = MessageAttachment(MessageAttachment.Kind.File, "plan.pdf", "application/pdf", 17, null, null,
+            TestMediaSource("mxc://example.org/plan"))
+        val channelRow = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", "plan.pdf", null,
+            1_700_000_000_000L, MessageKind.Attachment, MessageSendState.Sent, false, "MC", 0, attachment = file)
+        val channel = MutableStateFlow(ConversationState(rows = listOf(channelRow)))
+        val timeline = ConversationTimeline(emptyList())
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root", root = channelRow)
+        backgroundScope.launch { conversation.followRoot(channel) }
+        runCurrent()
+        // The channel lets the row go from its loaded history; then the thread hears it was deleted.
+        channel.value = ConversationState(rows = emptyList())
+        runCurrent()
+        timeline.emit(listOf(TimelineDiff.Reset(listOf(conversationItem("thread-root", "\$root", "",
+            content = TimelineItemContent.MsgLike(MsgLikeContent(MsgLikeKind.Redacted, null, null, null)))))))
+        val root = conversation.state.first { it.rows.messages.firstOrNull()?.kind == MessageKind.Deleted }.rows.messages.first()
+        assertNull(root.attachment)
+        conversation.close()
+    }
 }
 
 private class JumpRoom(private val live: Timeline, private val around: Timeline,
@@ -1128,6 +1159,7 @@ private class ConversationRoom(private val value: Timeline) : Room(NoHandle) {
     val sendQueueEnabled = CompletableDeferred<Boolean>()
     override fun enableSendQueue(enable: Boolean) { sendQueueEnabled.complete(enable) }
     override fun ownUserId(): String = "@me:example.org"
+    override fun id(): String = "!design:example.org"
     override suspend fun setUnreadFlag(newValue: Boolean) { markedUnread = newValue }
     override suspend fun timeline(): Timeline = value
     /** The members the device knows; the conversation reads them again once the server's list is in. */

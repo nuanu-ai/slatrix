@@ -357,6 +357,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
     }
     val conversation = open.conversation
     val composer = open.composer
+    LaunchedEffect(conversation, rooms) { rooms?.refusedChanges?.collect { conversation?.refused(it) } }
     val timeline = conversation?.state?.collectAsState()?.value ?: open.waiting()
     val draft = composer?.state?.collectAsState()?.value ?: ComposerState()
     val scope = rememberCoroutineScope()

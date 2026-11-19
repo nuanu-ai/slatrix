@@ -85,17 +85,6 @@ internal class SentEcho private constructor() : SendQueueListener {
     }
 }
 
-/** The items [this] adds or replaces. */
-internal fun TimelineDiff.items(): List<TimelineItem> = when (this) {
-    is TimelineDiff.Append -> values
-    is TimelineDiff.Reset -> values
-    is TimelineDiff.PushFront -> listOf(value)
-    is TimelineDiff.PushBack -> listOf(value)
-    is TimelineDiff.Insert -> listOf(value)
-    is TimelineDiff.Set -> listOf(value)
-    else -> emptyList()
-}
-
 /** Applies [diff] to a timeline's [items], each made by [map]. */
 internal fun <T> MutableList<T>.applyDiff(diff: TimelineDiff, map: (TimelineItem) -> T) {
     when (diff) {

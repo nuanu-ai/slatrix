@@ -511,10 +511,13 @@ class MatrixRoomsTest {
         val rooms = MatrixRooms(backgroundScope, client)
         try {
             client.lookedOnline.first { it }
+            val undone = backgroundScope.async { rooms.refusedChanges.first() }
+            runCurrent()
             client.wedged.value = listOf(refusedDeletion)
             client.queueUpdates?.onUpdate(refusedDeletion.roomId, RoomSendQueueUpdate.SendError(
                 "deletion", QueueWedgeError.GenericApiError("403"), false))
-            withContext(Dispatchers.Default) { withTimeout(5_000) { client.wedged.first { it.isEmpty() } } }
+            // What the queue took back is what the conversation on screen hears about.
+            assertEquals(listOf(refusedDeletion), withContext(Dispatchers.Default) { withTimeout(5_000) { undone.await() } })
         } finally {
             rooms.close()
         }

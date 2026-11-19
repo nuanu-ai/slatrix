@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -46,6 +45,8 @@ import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.ProfileDetails
 import org.matrix.rustcomponents.sdk.QueueWedgeError
 import org.matrix.rustcomponents.sdk.ReceiptType
+import org.matrix.rustcomponents.sdk.RefusedChange
+import org.matrix.rustcomponents.sdk.RefusedChangeKind
 import org.matrix.rustcomponents.sdk.SendTarget
 import org.matrix.rustcomponents.sdk.Room
 import org.matrix.rustcomponents.sdk.TaskHandle
@@ -206,6 +207,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val resume: Boolean = false,
     private val view: ConversationView = ConversationView.Timeline) {
     @Volatile private var root = root?.asThreadRoot()
+    /** The root's row as the channel holds it now; while the channel holds none, the thread's own row stands. */
+    @Volatile private var mirror = this.root
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
     /** Thread replies waiting to be copied to the channel: they outlast the thread, and end with the session's [scope]. */
@@ -281,12 +284,6 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 // asEvent blocks on the SDK, so a batch is mapped off the main thread.
                 val (rows, unread) = withContext(Dispatchers.Default) {
                     batch.forEach { source.apply(it) }
-                    // RoomSendQueues cancels it, whichever conversation is open; this one says why its message came back.
-                    batch.flatMap { it.items() }.firstNotNullOfOrNull(::refusedChange)?.let { (_, target) ->
-                        operations.launch {
-                            announce(if (target == SendTarget.Redaction) "Couldn’t delete this message." else "Couldn’t edit this message.")
-                        }
-                    }
                     source.rows() to source.unread().takeIf { threadRoot == null }
                 }
                 var swapped = false
@@ -510,8 +507,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     suspend fun followRoot(channel: Flow<ConversationState>) {
         val id = threadRoot ?: return
         channel.map { state -> state.rows.firstOrNull { (it as? ConversationMessage)?.eventId == id } as? ConversationMessage }
-            .filterNotNull().distinctUntilChanged().collect { copy ->
+            .distinctUntilChanged().collect { copy ->
                 operations.launch {
+                    mirror = copy
+                    if (copy == null) return@launch
                     root = copy.asThreadRoot()
                     mutableState.update { state ->
                         state.copy(rows = state.rows.map { if (it is ConversationMessage && it.id == ROOT_KEY) it.withEdit(copy) else it })
@@ -528,7 +527,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private fun withRoot(rows: List<ConversationRow>): List<ConversationRow> {
         val root = root ?: return rows
         val index = rows.indexOfFirst { (it as? ConversationMessage)?.eventId == root.eventId }
-        val shown = (rows.getOrNull(index) as? ConversationMessage)?.copy(id = ROOT_KEY)?.withEdit(root) ?: root
+        val own = (rows.getOrNull(index) as? ConversationMessage)?.copy(id = ROOT_KEY)
+        val shown = own?.let { row -> mirror?.let { row.withEdit(it) } ?: row } ?: root
         // Nothing sits above the root, as in Slack, and a reply on the root's day needs no divider under it either, so
         // the root never moves when the thread loads it.
         val rest = rows.drop(index + 1)
@@ -755,6 +755,20 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     suspend fun link(message: ConversationMessage): String? {
         val id = message.eventId ?: return null
         return quietly { room.matrixToEventPermalink(id) }
+    }
+
+    /**
+     * Says why a message came back when its deletion or edit, refused by the server, was cancelled out of the send
+     * queue, if the message is shown here; a reaction goes back quietly.
+     */
+    fun refused(changes: List<RefusedChange>) {
+        if (!lifetime.isActive) return
+        val roomId = room.id()
+        val shown = mutableState.value.rows.mapNotNullTo(HashSet()) { (it as? ConversationMessage)?.eventId }
+        val change = changes.lastOrNull { it.kind != RefusedChangeKind.REACTION && it.roomId == roomId && it.eventId in shown } ?: return
+        operations.launch {
+            announce(if (change.kind == RefusedChangeKind.REDACTION) "Couldn’t delete this message." else "Couldn’t edit this message.")
+        }
     }
 
     private suspend fun announce(notice: String) {
