@@ -2815,12 +2815,11 @@ struct RootView: View {
             }
         case "toggle-pane": closePane()
         case "mark-read":
-            if sidebarCollapsed && sidebarDrawer {
-                sidebarDrawer = false
-            } else if profilePane != nil || coverage.conversation {
-                closePane()
-            } else if route == .home, let room {
-                markReadState(room, unread: false)
+            switch coverage.escape(profile: profilePane != nil, inConversation: route == .home && room != nil) {
+            case .closeDrawer: sidebarDrawer = false
+            case .closePane: closePane()
+            case .markRead: if let room { markReadState(room, unread: false) }
+            case .nothing: break
             }
         case "mark-all-read":
             for room in matrix.rooms where room.membership == "join" && room.hasUnread {
