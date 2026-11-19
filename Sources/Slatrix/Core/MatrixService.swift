@@ -1969,7 +1969,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// replies that stay in the replied-to event's thread, so the copy goes out directly.
     /// `session` is the one the reply was sent in: a copy never goes out through a session that has since ended.
     private func copyToChannel(_ message: ComposerFormat.Message, once echo: SentEcho, room: Room, session: UUID) {
-        guard session == sessionGeneration else { return echo.cancel() }
         pendingCopies.append(echo)
         Task {
             let replyID = await echo.sentEventID()
