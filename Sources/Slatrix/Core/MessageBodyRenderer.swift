@@ -36,11 +36,13 @@ struct RenderedMessageBody: Sendable {
     var usedPlainTextFallback: Bool
     var plainText: String { runs.map(\.text).joined() }
 
-    /// Slack shows a message of nothing but emoji, up to 23 of them, large.
+    /// Slack shows a message of nothing but emoji, up to 23 of them in plain paragraphs, large.
     var isJumbomoji: Bool {
         var count = 0
         for run in runs {
-            guard run.link == nil, run.mention == nil, !run.style.contains(.code), !run.marker else { return false }
+            guard run.link == nil, run.mention == nil, !run.style.contains(.code), run.block == MessageBlock() else {
+                return false
+            }
             for character in run.text where !character.isWhitespace {
                 guard count < 23, character.isEmoji else { return false }
                 count += 1

@@ -305,6 +305,7 @@ struct MessageBodyRendererTests {
             (String(repeating: "🔥", count: 23), nil, true), (String(repeating: "🔥", count: 24), nil, false),
             ("ок", nil, false), ("🔥 nice", nil, false), ("1", nil, false), ("#", nil, false), ("", nil, false),
             ("🎉", "<code>🎉</code>", false), ("🎉", "<a href=\"https://example.org\">🎉</a>", false),
+            ("🎉", "<h1>🎉</h1>", false), ("🎉", "<blockquote>🎉</blockquote>", false),
         ] as [(String, String?, Bool)])
     func jumbomoji(body: String, html: String?, large: Bool) {
         #expect(render(html, body: body).isJumbomoji == large)
