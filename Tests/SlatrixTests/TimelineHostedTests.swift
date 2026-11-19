@@ -704,8 +704,6 @@ struct TimelineHostedTests {
             client: harness.client, main: harness.timeline, thread: thread, rootID: root.eventID, sessionID: UUID(),
             selectionID: UUID(), threadID: UUID())
         harness.service.threadMessages = [root, reply]
-        // Loaded back to its start, so nothing is left to count.
-        _ = try await harness.service.loadMoreThread(rootID: root.eventID)
         var fixture = harness.fixture(Self.room)
         fixture.thread = true
         fixture.threadRootID = root.eventID
