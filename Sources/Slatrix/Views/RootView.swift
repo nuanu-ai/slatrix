@@ -697,9 +697,9 @@ struct RootView: View {
                     Task {
                         guard appearance.notifications, composerIdentity == identity,
                             matrix.notificationSessionID == session,
-                            !(platform.conversationWindowIsVisible && route == .home
-                                && matrix.focusedEventID == nil && matrix.selectedRoomID == notification.target.roomID
-                                && !hasModal && !hasNativeModal && !matrix.verification.isPresented)
+                            !ReadStatePolicy.isOnScreen(
+                                roomID: notification.target.roomID, threadRootID: notification.threadRootID,
+                                conversation: readContext, thread: threadReadContext)
                         else { return }
                         let value = notification.applyingPreviewPreference(appearance.notificationPreview)
                         do { try await platform.notify(value) } catch {

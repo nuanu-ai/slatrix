@@ -36,6 +36,7 @@ struct DesktopMessageNotification {
     var title: String
     var body: String
     var playSound: Bool
+    var threadRootID: String? = nil
 
     /// The title and one-line text of a message, as the cases in `spec/notification-text.json` say.
     static func message(room: String, sender: String, direct: Bool, body: String) -> (title: String, text: String) {

@@ -1099,7 +1099,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                         }
                         self.notificationHandler?(
                             DesktopMessageNotification(
-                                target: target, title: title, body: body, playSound: notification.isNoisy == true))
+                                target: target, title: title, body: body, playSound: notification.isNoisy == true,
+                                threadRootID: item.threadRootID))
                     }
                 }
             })

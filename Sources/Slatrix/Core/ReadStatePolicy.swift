@@ -76,13 +76,30 @@ struct ReadStateHold: Equatable {
     }
 }
 
+/// A message is either seen or announced: read receipts go only for what is on screen, and a desktop notification
+/// holds back only for it.
 enum ReadStatePolicy {
+    /// The conversation is on screen: the one shown, live and at its newest rows, in a window that can read, with
+    /// nothing over it.
+    static func isOnScreen(_ context: ReadStateContext) -> Bool {
+        context.isJoined && context.isMainTimeline && context.isLiveTimeline && context.isAtBottom
+            && context.isWindowActive && context.isWindowVisible && context.isWindowUnoccluded && !context.hasModal
+            && !context.isCovered && context.roomID == context.selectedRoomID
+    }
+
+    /// Whether a message in `roomID`, in the thread on `threadRootID` when it has one, is on screen.
+    static func isOnScreen(
+        roomID: String, threadRootID: String?, conversation: ReadStateContext, thread: ThreadReadContext
+    ) -> Bool {
+        guard let threadRootID else { return conversation.roomID == roomID && isOnScreen(conversation) }
+        return thread.identity?.roomID == roomID && thread.identity?.rootID == threadRootID
+            && ThreadReadPolicy.isOnScreen(thread)
+    }
+
     static func automaticTarget(_ context: ReadStateContext, hold: ReadStateHold = ReadStateHold())
         -> ReadReceiptTarget?
     {
-        guard !context.isPreview, context.isJoined, context.isMainTimeline, context.isLiveTimeline,
-            context.isAtBottom, context.isWindowActive, context.isWindowVisible, context.isWindowUnoccluded,
-            !context.hasModal, !context.isCovered, context.roomID == context.selectedRoomID, !hold.blocks(context),
+        guard !context.isPreview, isOnScreen(context), !hold.blocks(context),
             let account = context.accountID, valid(account, prefix: "@"), account.contains(":"),
             valid(context.roomID, prefix: "!"), let eventID = context.latestVisibleEventID, valid(eventID, prefix: "$"),
             let session = context.sessionGeneration, let timeline = context.timelineGeneration

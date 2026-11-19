@@ -29,10 +29,14 @@ struct ThreadReadContext: Equatable {
 }
 
 enum ThreadReadPolicy {
+    /// The thread is on screen: open and ready, at its newest rows, in a window that can read, with nothing over it.
+    static func isOnScreen(_ context: ThreadReadContext) -> Bool {
+        context.identity != nil && context.isPresented && context.isReady && context.isAtBottom
+            && context.isWindowActive && context.isWindowVisible && context.isWindowUnoccluded && !context.hasModal
+            && !context.isCovered
+    }
     static func target(_ context: ThreadReadContext) -> ThreadReadReceiptTarget? {
-        guard let identity = context.identity, context.isPresented, context.isReady,
-            context.isAtBottom, context.isWindowActive, context.isWindowVisible, context.isWindowUnoccluded,
-            !context.hasModal, !context.isCovered, !context.manualUnreadHeld,
+        guard let identity = context.identity, isOnScreen(context), !context.manualUnreadHeld,
             identity.accountID.hasPrefix("@"), identity.accountID.contains(":"), identity.roomID.hasPrefix("!"),
             UnreadNavigation.isRemoteEventID(identity.rootID),
             let event = context.eventID, UnreadNavigation.isRemoteEventID(event)

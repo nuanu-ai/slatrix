@@ -90,6 +90,56 @@ struct ReadStatePolicyTests {
         #expect(!ReadStatePolicy.isCurrent(target, in: context))
     }
 
+    struct Shown: CustomTestStringConvertible, Sendable {
+        var testDescription: String
+        var roomID = "!room:example.org"
+        var threadRootID: String?
+        var conversation: Change = { _ in }
+        var thread: @Sendable (inout ThreadReadContext) -> Void = { _ in }
+        var onScreen: Bool
+    }
+    static let shown: [Shown] = [
+        Shown(testDescription: "a message at the conversation's newest rows", onScreen: true),
+        Shown(
+            testDescription: "the conversation scrolled up", conversation: { $0.isAtBottom = false }, onScreen: false),
+        Shown(
+            testDescription: "a pane in the conversation's place", conversation: { $0.isCovered = true },
+            onScreen: false),
+        Shown(testDescription: "another conversation", roomID: "!other:example.org", onScreen: false),
+        Shown(testDescription: "a reply in the open thread at its newest rows", threadRootID: "$root", onScreen: true),
+        Shown(
+            testDescription: "a reply to a closed thread, its conversation at its newest rows", threadRootID: "$root",
+            thread: {
+                $0.identity = nil
+                $0.isPresented = false
+            }, onScreen: false),
+        Shown(testDescription: "a reply to another thread", threadRootID: "$other", onScreen: false),
+        Shown(
+            testDescription: "the open thread scrolled up", threadRootID: "$root", thread: { $0.isAtBottom = false },
+            onScreen: false),
+        Shown(
+            testDescription: "the media viewer over the open thread", threadRootID: "$root",
+            thread: { $0.isCovered = true }, onScreen: false),
+    ]
+
+    // capability: notifications.alert
+    @Test("A message is on screen, so it needs no notification, only where the reader sees it", arguments: shown)
+    func messageOnScreen(shown: Shown) {
+        var conversation = Self.visible
+        shown.conversation(&conversation)
+        var thread = ThreadReadContext(
+            identity: ThreadReadIdentity(
+                accountID: "@reader:example.org", sessionID: UUID(), roomID: "!room:example.org", timelineID: UUID(),
+                rootID: "$root", threadSelectionID: UUID(), presentationID: UUID()),
+            eventID: "$reply", isPresented: true, isReady: true, isAtBottom: true, isWindowActive: true,
+            isWindowVisible: true, isWindowUnoccluded: true)
+        shown.thread(&thread)
+        #expect(
+            ReadStatePolicy.isOnScreen(
+                roomID: shown.roomID, threadRootID: shown.threadRootID, conversation: conversation, thread: thread)
+                == shown.onScreen)
+    }
+
     // capability: conversation.mark-unread
     @Test("Mark unread holds even while the bottom is visible and new messages arrive")
     func holdSurvivesNewMessages() throws {
