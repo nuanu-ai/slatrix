@@ -1179,6 +1179,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         for copy in pendingCopies { copy.cancel() }
         threadOrigins = [:]
         TimelineMemory.positions = TimelineMemory.positions.filter { $0.key.sessionID != sessionGeneration }
+        TimelineMemory.heights.removeAll { $0.key.sessionID == sessionGeneration }
         sessionGeneration = UUID()
         selection = UUID()
         notificationRetries.reset()

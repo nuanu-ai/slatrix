@@ -154,15 +154,6 @@ struct TimelineTable: NSViewRepresentable {
     private static let spareCells = 20
     private static let recycledCells = 40
     private static var recycled: [TimelineCell] = []
-    /// The rows the last few timelines showed, with their measured heights and what they were measured for, so
-    /// coming back to one measures none of the rows it still shows the same way. As many as stay open to come back to.
-    private struct Held {
-        var thread: Bool
-        var width: CGFloat
-        var settings: Settings
-        var rows: [String: (entry: TimelineEntry, height: CGFloat)]
-    }
-    private static var held: [(key: TimelineMemory.Key, rows: Held)] = []
 
     private var configuration: TimelineTable?
     private var rows: [TimelineEntry] = []
@@ -928,23 +919,35 @@ struct TimelineTable: NSViewRepresentable {
 
     /// Keeps what this table measured for the next table on the same timeline.
     func holdHeights() {
-        guard let configuration, let key = configuration.memoryKey, let settings, width > 0 else { return }
-        var heights: [String: (entry: TimelineEntry, height: CGFloat)] = [:]
-        for (id, height) in known { if let row = index[id] { heights[id] = (rows[row], height) } }
-        Self.held.removeAll { $0.key == key }
-        let held = Held(thread: configuration.context.isThread, width: width, settings: settings, rows: heights)
-        Self.held.append((key, held))
+        // A session signed out has nothing to come back to.
+        guard let configuration, let key = configuration.memoryKey, width > 0,
+            key.sessionID == configuration.context.matrix?.notificationSessionID
+        else { return }
+        var heights: [String: (fingerprint: Int, height: CGFloat)] = [:]
+        for (id, height) in known { if let row = index[id] { heights[id] = (fingerprint(rows[row]), height) } }
+        TimelineMemory.heights.removeAll { $0.key == key }
+        TimelineMemory.heights.append((key, heights))
         // The open conversations, their threads and a few left behind.
-        if Self.held.count > 8 { Self.held.removeFirst() }
+        if TimelineMemory.heights.count > 8 { TimelineMemory.heights.removeFirst() }
     }
 
     /// Rows this timeline showed last, unchanged and at the same width, keep the heights they were measured at.
     private func restoreHeights() {
-        guard let configuration, let key = configuration.memoryKey,
-            let held = Self.held.first(where: { $0.key == key })?.rows, held.thread == configuration.context.isThread,
-            held.width == width, held.settings == settings
+        guard let key = configuration?.memoryKey, let held = TimelineMemory.heights.first(where: { $0.key == key })
         else { return }
-        for row in rows { if let kept = held.rows[row.id], kept.entry == row { known[row.id] = kept.height } }
+        for row in rows {
+            if let kept = held.rows[row.id], kept.fingerprint == fingerprint(row) { known[row.id] = kept.height }
+        }
+    }
+
+    /// What a row's height depends on: the row, and the table's width, settings and pane.
+    private func fingerprint(_ row: TimelineEntry) -> Int {
+        var hasher = Hasher()
+        hasher.combine(row)
+        hasher.combine(width)
+        hasher.combine(settings)
+        hasher.combine(configuration?.context.isThread)
+        return hasher.finalize()
     }
 
     private var restoresReadingPosition: Bool {
