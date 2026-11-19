@@ -56,7 +56,8 @@ struct NativeMessageBody: View {
         VStack(alignment: .leading, spacing: m.sp4) {
             NativeSelectableMessageText(
                 runs: MessageBodyRenderer.named(rendered.runs) { id in mentions.members.first { $0.id == id }?.name },
-                fontSize: m.size(.reading), textColor: NSColor(colors.textBody), linkColor: NSColor(colors.accent),
+                fontSize: m.size(rendered.isJumbomoji ? .largeTitle : .reading), textColor: NSColor(colors.textBody),
+                linkColor: NSColor(colors.accent),
                 mentions: MentionPalette(
                     me: mentions.me, text: NSColor(colors.mentionText), fill: NSColor(colors.mentionFill),
                     ownText: NSColor(colors.mentionYouText), ownFill: NSColor(colors.mentionYouFill)),

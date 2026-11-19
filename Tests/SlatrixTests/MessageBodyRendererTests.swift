@@ -296,4 +296,17 @@ struct MessageBodyRendererTests {
         #expect(runs.map(\.text).joined() == "Alice" && runs.allSatisfy { $0.mention == nil })
         #expect(runs.allSatisfy { $0.link == nil || $0.link?.host == "evil.example" })
     }
+
+    @Test(
+        "A message of only emoji, up to 23 of them, shows them large, as Slack does",
+        arguments: [
+            ("🎉", nil, true), ("👍🔥🚀", nil, true), (" 👍 🔥\n🚀 ", nil, true), ("❤️", nil, true),
+            ("👨‍👩‍👧", nil, true), ("🇷🇺", nil, true), ("👍🏽", nil, true), ("🎉", "<p>🎉</p>", true),
+            (String(repeating: "🔥", count: 23), nil, true), (String(repeating: "🔥", count: 24), nil, false),
+            ("ок", nil, false), ("🔥 nice", nil, false), ("1", nil, false), ("#", nil, false), ("", nil, false),
+            ("🎉", "<code>🎉</code>", false), ("🎉", "<a href=\"https://example.org\">🎉</a>", false),
+        ] as [(String, String?, Bool)])
+    func jumbomoji(body: String, html: String?, large: Bool) {
+        #expect(render(html, body: body).isJumbomoji == large)
+    }
 }

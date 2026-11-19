@@ -33,6 +33,27 @@ struct RenderedMessageBody: Sendable {
     var containsSpoilers: Bool
     var usedPlainTextFallback: Bool
     var plainText: String { runs.map(\.text).joined() }
+
+    /// Slack shows a message of nothing but emoji, up to 23 of them, large.
+    var isJumbomoji: Bool {
+        var count = 0
+        for run in runs {
+            guard run.link == nil, run.mention == nil, !run.style.contains(.code), !run.marker else { return false }
+            for character in run.text where !character.isWhitespace {
+                guard count < 23, character.isEmoji else { return false }
+                count += 1
+            }
+        }
+        return count > 0
+    }
+}
+
+extension Character {
+    /// Drawn as an emoji, as by default or by a variation selector or keycap, unlike a digit or ©.
+    fileprivate var isEmoji: Bool {
+        unicodeScalars.contains { $0.properties.isEmojiPresentation || $0 == "\u{FE0F}" || $0 == "\u{20E3}" }
+            && unicodeScalars.first?.properties.isEmoji == true
+    }
 }
 
 /// Renders Matrix HTML bodies into styled runs. The cache is shared by every thread, so a timeline renders its
