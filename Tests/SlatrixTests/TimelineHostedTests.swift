@@ -1470,6 +1470,39 @@ struct MessageRowLayoutTests {
     }
 }
 
+/// The timeline's table on its own: no window needed.
+@MainActor
+struct TimelineRowHeightTests {
+    @Test("A day line keeps its height when its cell reports the height of the message it showed last")
+    func reusedCellKeepsRowHeight() async throws {
+        let context = TimelineRowContext()
+        context.appearance = AppearanceStore()
+        let coordinator = TimelineTableCoordinator()
+        let scrollView = coordinator.makeView()
+        scrollView.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        let welcome = TimelineWelcome(
+            name: "Timeline", topic: "", isDirect: false, isPrivate: false, isEncrypted: false)
+        coordinator.update(
+            TimelineTable(
+                entries: [
+                    TimelineEntry(id: "welcome", kind: .welcome(welcome)),
+                    TimelineEntry(id: "day", kind: .day("Today")),
+                ], context: context, live: true, bottomAligned: true, focusedEventID: nil, jumpID: nil,
+                startsAtUnread: false, memoryKey: nil, canLoadOlder: false, canLoadNewer: false,
+                scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {}, onScroll: { _, _, _, _ in }))
+        scrollView.tile()
+        let table = try #require(scrollView.documentView as? NSTableView)
+        // Under the spacer and the welcome.
+        let row = 2
+        #expect((table.view(atColumn: 0, row: row, makeIfNecessary: true) as? TimelineCell)?.entry?.id == "day")
+        let height = table.rect(ofRow: row).height
+        // As SwiftUI reports from a cell the table reused and has already sized for the day line.
+        context.onHeight("day", height + 150)
+        await drainMainActor()
+        #expect(table.rect(ofRow: row).height == height)
+    }
+}
+
 /// The timeline's pointer tracking on its own: no window needed.
 @MainActor
 struct TimelineHoverTests {
