@@ -530,19 +530,19 @@ struct TimelineTable: NSViewRepresentable {
 
     /// A row's own state (a revealed spoiler, an error under an attachment) changed its height.
     private func reported(_ reported: CGFloat, for id: String) {
-        let height = ceil(reported)
-        // Only a row laid out at its measured height says something about its content: a reused cell reports its
-        // old row's height first. At some zooms the table gives a row's cell half a point more than the row.
-        guard let row = index[id], let measured = known[id],
-            abs(height - measured) > 0.5,
-            let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell,
-            cell.entry?.id == id, abs(cell.frame.height - measured) < 1
-        else { return }
-        known[id] = height
+        guard let measured = known[id], abs(ceil(reported) - measured) > 0.5 else { return }
         // Not inside the SwiftUI update that reported it.
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.index[id] == row else { return }
-            self.preservingPosition { self.noteHeights([row]) }
+            guard let self, let row = index[id], known[id] == measured,
+                let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell,
+                cell.entry?.id == id
+            else { return }
+            // The report only says to look: a reused cell, already sized for this row, first reports the height of
+            // the row it showed last.
+            let height = max(1, ceil(cell.height(width: width)))
+            guard height != measured else { return }
+            known[id] = height
+            preservingPosition { self.noteHeights([row]) }
         }
     }
 
