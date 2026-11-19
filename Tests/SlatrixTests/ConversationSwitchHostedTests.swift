@@ -230,16 +230,18 @@ struct ConversationSwitchHostedTests {
         #expect(faults.isEmpty, Self.report(faults, frames))
     }
 
-    @Test("Opening a conversation not held shows it at once, and its rows land where they stay")
-    func coldSwitch() async throws {
+    /// A cache read of a few frames, as on disk, and a slow one.
+    @Test(
+        "Opening a conversation not held shows it at once, and its rows land where they stay",
+        arguments: [200, 600])
+    func coldSwitch(read milliseconds: Int) async throws {
         let harness = Harness()
         defer { harness.close() }
         #expect(await harness.settled(on: 0))
-        // Reading the event cache takes a few frames, as on disk.
         harness.rooms[1].buildGate.arm()
         harness.record()
         harness.menu("next-conversation")
-        let read = ContinuousClock.now + .milliseconds(200)
+        let read = ContinuousClock.now + .milliseconds(milliseconds)
         _ = await eventually { ContinuousClock.now >= read }
         harness.rooms[1].buildGate.release()
         #expect(await harness.settled(on: 1))
