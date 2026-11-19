@@ -213,17 +213,33 @@ struct ThreadReadTests {
         #expect(f.thread.writes.all.isEmpty)
     }
 
-    @Test("A thread receipt the SDK rejected is sent again on the next attempt")
-    func failedReceiptIsRetried() async throws {
+    // capability: conversation.read
+    @Test("A receipt the server turned down goes again by itself while it's still the one to send", arguments: [false, true])
+    func failedReceiptIsRetried(inThread: Bool) async throws {
         let f = fixture()
-        let target = try target(f)
-        f.thread.failsWrites = true
-        await #expect(throws: MatrixServiceError.self) {
-            try await f.service.markVisibleThreadRead(target, isVisible: { true })
+        let timeline = inThread ? f.thread : f.main
+        let thread = try target(f)
+        let conversation = ReadReceiptTarget(
+            accountID: "@reader:example.org", sessionGeneration: f.session, timelineGeneration: f.selection,
+            roomID: f.roomID, eventID: f.rootID)
+        timeline.failsWrites = true
+        timeline.gate.arm()
+        let reading = Task {
+            if inThread {
+                try await f.service.markVisibleThreadRead(thread, isVisible: { true })
+            } else {
+                try await f.service.markVisibleRead(conversation)
+            }
         }
-        f.thread.failsWrites = false
-        try await f.service.markVisibleThreadRead(target, isVisible: { true })
-        #expect(f.thread.writes.all == ["mark-read", "mark-read"])
+        #expect(await eventually { timeline.gate.isWaiting })
+        // The server turns the first write down; the next waits here, and goes through.
+        timeline.gate.release()
+        timeline.gate.arm()
+        #expect(await eventually { timeline.gate.isWaiting && timeline.writes.all.count == 2 })
+        timeline.failsWrites = false
+        timeline.gate.release()
+        try await reading.value
+        #expect(timeline.writes.all == ["mark-read", "mark-read"] + (inThread ? [] : ["fully:\(f.rootID)"]))
     }
 
     @Test("A receipt in flight when the thread is reopened finishes once and is not credited to the new pane")

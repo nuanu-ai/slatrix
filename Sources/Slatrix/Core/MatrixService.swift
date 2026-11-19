@@ -2723,18 +2723,30 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     {
         guard isVisible() else { throw CancellationError() }
         let original = try validatedThreadReadTimeline(target)
-        try await readDelivery.perform(roomID: target.identity.roomID) { [weak self] in
-            guard let self else { throw CancellationError() }
-            guard isVisible() else { throw CancellationError() }
-            _ = try self.validatedThreadReadTimeline(target)
-            guard self.lastThreadReceipt != target else { return }
-            // The thread timeline adds the thread ID to the receipt, on its latest event as a channel's is.
-            try await original.markAsRead(receiptType: .read)
-            guard isVisible() else { throw CancellationError() }
-            _ = try self.validatedThreadReadTimeline(target)
-            self.lastThreadReceipt = target
-            self.requestRefresh()
+        try await retryingReceipt {
+            try await readDelivery.perform(roomID: target.identity.roomID) { [weak self] in
+                guard let self else { throw CancellationError() }
+                guard isVisible() else { throw CancellationError() }
+                _ = try self.validatedThreadReadTimeline(target)
+                guard self.lastThreadReceipt != target else { return }
+                // The thread timeline adds the thread ID to the receipt, on its latest event as a channel's is.
+                try await original.markAsRead(receiptType: .read)
+                guard isVisible() else { throw CancellationError() }
+                _ = try self.validatedThreadReadTimeline(target)
+                self.lastThreadReceipt = target
+                self.requestRefresh()
+            }
         }
+    }
+    /// A receipt the server turns down goes again, a few times and further apart each time. One that stopped being
+    /// the one to send fails its checks with CancellationError, which ends it, as leaving the view does.
+    private func retryingReceipt(_ send: () async throws -> Void) async throws {
+        for delay in [1, 5, 25] {
+            do { return try await send() } catch let error as CancellationError { throw error } catch {
+                try await Task.sleep(for: .seconds(delay))
+            }
+        }
+        try await send()
     }
     private func validatedThreadReadTimeline(_ target: ThreadReadReceiptTarget) throws -> Timeline {
         try Task.checkCancellation()
@@ -2763,17 +2775,19 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard lastAutomaticReceipt != target else { return }
         let originalTimeline = try validatedReadTimeline(target)
         let originalRoom = try requireRoom(target.roomID)
-        try await readDelivery.perform(roomID: target.roomID) { [weak self] in
-            guard let self else { throw CancellationError() }
-            try await UnreadSDKActions.acknowledge(timeline: originalTimeline, eventID: target.eventID) {
-                _ = try self.validatedReadTimeline(target)
+        try await retryingReceipt {
+            try await readDelivery.perform(roomID: target.roomID) { [weak self] in
+                guard let self else { throw CancellationError() }
+                try await UnreadSDKActions.acknowledge(timeline: originalTimeline, eventID: target.eventID) {
+                    _ = try self.validatedReadTimeline(target)
+                }
+                if self.rooms.first(where: { $0.id == target.roomID })?.isMarkedUnread == true {
+                    try await originalRoom.setUnreadFlag(newValue: false)
+                    _ = try self.validatedReadTimeline(target)
+                }
+                self.lastAutomaticReceipt = target
+                self.requestRefresh()
             }
-            if self.rooms.first(where: { $0.id == target.roomID })?.isMarkedUnread == true {
-                try await originalRoom.setUnreadFlag(newValue: false)
-                _ = try self.validatedReadTimeline(target)
-            }
-            self.lastAutomaticReceipt = target
-            self.requestRefresh()
         }
     }
 
