@@ -204,6 +204,57 @@ struct ConnectionRecoveryTests {
         network.continuation.finish()
     }
 
+    enum Interruption: CaseIterable {
+        case noNetwork, wifi, ethernet, wake, offlineSync, failedSync, endedSync, oldReply
+    }
+
+    @Test(
+        "A network restored while an earlier SDK start is suspended still resumes the queue",
+        arguments: Interruption.allCases, Interruption.allCases)
+    func handoffDuringStart(first: Interruption, second: Interruption) async throws {
+        let network = AsyncStream<NetworkRoute>.makeStream()
+        let wake = NotificationCenter()
+        let recovery = ConnectionRecovery(networkChanges: { network.stream }, wakeNotifications: wake)
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        let ethernet = NetworkRoute.online(interface: 7, gateways: [])
+        network.continuation.yield(wifiRoute)
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { client.enabled.all.last == true })
+
+        let oldReply = service.roomSync.pendingUpdate(.running)
+        service.startGate.arm()
+        defer { service.startGate.release() }
+        wake.post(name: NSWorkspace.didWakeNotification, object: nil)
+        try #require(await eventually { service.startGate.isWaiting })
+        for event in [first, second] {
+            switch event {
+            case .noNetwork: network.continuation.yield(.offline)
+            case .wifi: network.continuation.yield(wifiRoute)
+            case .ethernet: network.continuation.yield(ethernet)
+            case .wake: wake.post(name: NSWorkspace.didWakeNotification, object: nil)
+            case .offlineSync: service.emit(.offline)
+            case .failedSync: service.emit(.error)
+            case .endedSync: service.emit(.terminated)
+            case .oldReply: oldReply()
+            }
+        }
+
+        network.continuation.yield(.offline)
+        try #require(await eventually { recovery.feedback.errorMessage == "You’re offline" })
+        await client.enableAllSendQueues(enable: false)
+        network.continuation.yield(ethernet)
+        try #require(await eventually { recovery.feedback.errorMessage != "You’re offline" })
+        await drainMainActor()
+        service.startGate.release()
+        #expect(
+            await eventually {
+                recovery.feedback.state == .running && !recovery.feedback.isRetrying && client.enabled.all.last == true
+            })
+        await recovery.stop()
+        network.continuation.finish()
+    }
+
     enum ReplyTiming: CaseIterable { case offline, stopping, restarted }
 
     @Test(
