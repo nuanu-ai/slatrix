@@ -1096,7 +1096,7 @@ struct Snapshots {
         var deleted = message("2.7", q, "what did it say?", ago(30))
         deleted.replyPreview = ChatReplyPreview(
             state: .ready, eventID: "$hard.old.4", senderID: sergey, senderName: hardPeople[sergey]!,
-            body: "This message was deleted", kind: "m.room.message", isRedacted: true)
+            body: "This message was deleted.", kind: "m.room.message", isRedacted: true)
         var file = message("2.8", evgenia, "В этой версии уже есть новые экраны?", ago(15))
         file.replyPreview = ChatReplyPreview(
             state: .ready, eventID: "$hard.old.5", senderID: anna, senderName: hardPeople[anna]!,

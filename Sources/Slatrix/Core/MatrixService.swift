@@ -184,7 +184,7 @@ enum MatrixMapping {
                 }
             case .sticker(let text, _, _): body = text
             case .poll(let question, _, _, _, _, _, _): body = question
-            case .redacted: body = "This message was deleted"
+            case .redacted: body = ChatMessage.deletedBody
             case .unableToDecrypt: body = "Waiting for this message"
             case .liveLocation, .other: body = nil
             }
@@ -227,7 +227,7 @@ enum MatrixMapping {
                 case .other(let kind, _): preview.kind = kind
                 }
             case .redacted:
-                preview.body = "This message was deleted"
+                preview.body = ChatMessage.deletedBody
                 preview.kind = "m.room.message"
                 preview.isRedacted = true
             case .unableToDecrypt:
@@ -318,7 +318,7 @@ enum MatrixMapping {
             case .other(let kind, _): message.kind = kind
             }
         case .redacted:
-            message.body = "This message was deleted"
+            message.body = ChatMessage.deletedBody
             message.isRedacted = true
         case .unableToDecrypt:
             message.body = "Waiting for this message"

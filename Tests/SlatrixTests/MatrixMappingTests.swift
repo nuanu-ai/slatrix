@@ -65,7 +65,7 @@ struct MatrixMappingTests {
     @Test("A deleted message keeps none of its original body, formatting or attachment")
     func redaction() {
         let message = project(redactedContent)
-        #expect(message.isRedacted && message.body == "This message was deleted")
+        #expect(message.isRedacted && message.body == "This message was deleted.")
         #expect(message.attachment == nil && message.formattedBody == nil)
     }
 
@@ -168,7 +168,7 @@ struct ReplyPreviewMappingTests {
     @Test("A deleted quote keeps none of its original content")
     func redactedQuote() {
         let preview = MatrixMapping.replyPreview(eventID: "$quoted", details: ready(redactedContent))
-        #expect(preview.isRedacted && preview.body == "This message was deleted")
+        #expect(preview.isRedacted && preview.body == "This message was deleted.")
     }
 
     @Test("Quote and Activity previews show a mention as @Name, never its link or raw ID")

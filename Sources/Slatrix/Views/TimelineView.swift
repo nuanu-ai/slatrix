@@ -555,7 +555,7 @@ struct MessageRow: View {
                     }
                 }
                 if message.isRedacted {
-                    Text("This message was deleted.").italic().font(m.font(.reading)).foregroundStyle(
+                    Text(ChatMessage.deletedBody).italic().font(m.font(.reading)).foregroundStyle(
                         colors.textSecondary
                     )
                 } else {

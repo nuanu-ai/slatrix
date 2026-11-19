@@ -196,7 +196,7 @@ struct PinnedMessagesTests {
         await open()
         room.pins.emit([.set(index: 0, value: item("$later", redacted: true))])
         #expect(await eventually { service.messages.first?.isRedacted == true })
-        #expect(service.messages[0].body == "This message was deleted")
+        #expect(service.messages[0].body == "This message was deleted.")
     }
 
     @Test("An unpin from the room state removes the message at once")

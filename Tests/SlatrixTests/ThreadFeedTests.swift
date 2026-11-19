@@ -27,7 +27,7 @@ struct ThreadFeedMappingTests {
     @Test("A deleted thread root keeps none of its original text")
     func redactedRoot() throws {
         let item = try #require(ThreadFeedMapping.project([thread()], room: room).first)
-        #expect(item.root.isRedacted && item.root.body == "This message was deleted")
+        #expect(item.root.isRedacted && item.root.body == "This message was deleted.")
     }
 
     @Test("An older page of the same thread cannot replace its newer summary")
