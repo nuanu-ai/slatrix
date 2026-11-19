@@ -1962,7 +1962,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             throw error
         }
         if let destination { sends[Conversation(roomID: destination, threadRootID: threadRootID), default: 0] += 1 }
-        if let echo { copyToChannel(message, once: echo, room: room, session: session) }
+        if let echo {
+            // A session that ended while the send was out has already let go of its copies.
+            if session == sessionGeneration {
+                copyToChannel(message, once: echo, room: room, session: session)
+            } else {
+                echo.cancel()
+            }
+        }
         await returnToLive(after: token, threadRootID: threadRootID)
     }
 

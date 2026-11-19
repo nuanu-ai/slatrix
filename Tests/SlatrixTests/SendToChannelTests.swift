@@ -130,7 +130,9 @@ struct SendToChannelServiceTests {
         #expect(try copy()["m.relates_to"] == .object(["m.in_reply_to": .object(["event_id": .string("$second")])]))
     }
 
-    @Test("A reply whose send was cancelled, or returned after the session changed, copies nothing to the channel")
+    @Test(
+        "A reply whose send was cancelled, or returned after the session changed, copies nothing and lets go of its queue"
+    )
     func noCopy() async throws {
         let thread = FakeLiveTimeline([])
         configure(thread: thread)
@@ -142,9 +144,12 @@ struct SendToChannelServiceTests {
         configure(thread: thread)
         thread.sendGate.release()
         try await stale.value
+        // Neither waits on the queue: one went out in a session that has ended, the other was cancelled.
+        #expect(await eventually { room.queueReleased })
         room.queue(.sentEvent(transactionId: "txn-1", eventId: "$stale"))
         try await service.sendMessage("Never mind", threadRootID: "$root", roomID: room.id(), alsoToChannel: true)
         room.queue(.cancelledLocalEvent(transactionId: "txn-2"))
+        #expect(await eventually { room.queueReleased })
 
         // The new session's own copy goes out after the others would have.
         try await service.sendMessage("Later", threadRootID: "$root", roomID: room.id(), alsoToChannel: true)

@@ -22,6 +22,22 @@ private final class SendQueueClient: Client, @unchecked Sendable {
         return FakeCancellableHandle(noHandle: .init())
     }
     override func getRoom(roomId: String) throws -> Room? { roomId == "!room" ? stopped : nil }
+
+    /// Changes the server refused, still at the head of their rooms' queues, and each time the app looked for them.
+    private let lock = NSLock()
+    private var refused: [RefusedChange] = []
+    var wedged: [RefusedChange] {
+        get { lock.withLock { refused } }
+        set { lock.withLock { refused = newValue } }
+    }
+    let looks = Recorder<Void>()
+    override func abortRefusedChanges() async throws -> [RefusedChange] {
+        looks.append(())
+        return lock.withLock {
+            defer { refused = [] }
+            return refused
+        }
+    }
 }
 
 final class StoppedQueueRoom: Room, @unchecked Sendable {
@@ -153,16 +169,26 @@ struct ConnectionRecoveryTests {
     }
 
     // capability: message.delete
-    @Test("Once sending resumes after a reconnect, a change refused while it was held is looked for again")
-    func resumedSendingLooksForRefusedChanges() async throws {
-        let recovery = onlineRecovery()
+    @Test("A change refused while offline is cancelled once sending resumes on reconnecting")
+    func reconnectCancelsRefusedChanges() async throws {
+        let network = AsyncStream<NetworkRoute>.makeStream()
+        network.continuation.yield(wifiRoute)
+        let recovery = ConnectionRecovery(networkChanges: { network.stream })
         let client = SendQueueClient()
-        let looked = Recorder<Bool>()
+        let refused = RefusedChanges(client: client) { _ in }
         try await recovery.attach(
-            FakeSyncService(state: .running), client: client,
-            onSendingResumed: { looked.append(client.enabled.all.last == true) }, onUpdate: { _ in })
-        #expect(await eventually { looked.all.contains(true) })
+            FakeSyncService(state: .running), client: client, onSendingResumed: { refused.cancel() },
+            onUpdate: { _ in })
+        try #require(await eventually { !client.looks.all.isEmpty })
+
+        network.continuation.yield(.offline)
+        try #require(await eventually { recovery.feedback.state == .offline })
+        await client.enableAllSendQueues(enable: false)
+        client.wedged = [RefusedChange(roomId: "!room", eventId: "$refused", kind: .redaction)]
+        network.continuation.yield(wifiRoute)
+        #expect(await eventually { client.enabled.all.last == true && client.wedged.isEmpty })
         await recovery.stop()
+        network.continuation.finish()
     }
 
     @Test("Network loss says offline, and a returned network reconnects without a click")

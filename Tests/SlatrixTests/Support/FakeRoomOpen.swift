@@ -145,15 +145,18 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
         return FakeThreadReply(root: root)
     }
     private let queueLock = NSLock()
-    private var queueListeners: [SendQueueListener] = []
+    private var queueListeners: [(listener: SendQueueListener, handle: FakeCancellableHandle)] = []
     override func subscribeToSendQueueUpdates(listener: SendQueueListener) async throws -> TaskHandle {
-        queueLock.withLock { queueListeners.append(listener) }
-        return FakeCancellableHandle(noHandle: .init())
+        let handle = FakeCancellableHandle(noHandle: .init())
+        queueLock.withLock { queueListeners.append((listener, handle)) }
+        return handle
     }
     /// Tells whoever follows the room's send queue about `update`.
     func queue(_ update: RoomSendQueueUpdate) {
-        for listener in queueLock.withLock({ queueListeners }) { listener.onUpdate(update: update) }
+        for (listener, _) in queueLock.withLock({ queueListeners }) { listener.onUpdate(update: update) }
     }
+    /// Whether everyone who followed the room's send queue has let go of it.
+    var queueReleased: Bool { queueLock.withLock { queueListeners.allSatisfy(\.handle.isCancelled) } }
     /// Events sent straight to the room, past its send queue, as their type and JSON content.
     let raw = Recorder<(type: String, content: String)>()
     override func sendRaw(eventType: String, content: String) async throws -> String {
