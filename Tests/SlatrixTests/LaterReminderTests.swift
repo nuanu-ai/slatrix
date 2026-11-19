@@ -138,4 +138,20 @@ struct LaterReminderTests {
         #expect(kept.count == 1)
         #expect(queue.queued.keys.sorted() == kept)
     }
+
+    @Test("A reminder an older build queued is rebuilt once, so it says what the preview setting says now")
+    func olderBuildRebuilt() async throws {
+        let queue = Queue()
+        let schedule = LaterReminderSchedule(transport: queue)
+        let due = Date(timeIntervalSince1970: 4_000_000_000)
+        let list = SavedMessages().reminding(roomID: room, eventID: "$one", at: due, now: Date())
+        let item = try #require(list.reminders(after: Date()).first)
+        let generic = try #require(notification(item))
+        // How builds before the preview marker named a reminder.
+        queue.queued["later.18:@owner:example.org19:!design:example.org$one@4000000000000"] = (due, generic)
+        await schedule.sync(list, accountID: owner, preview: true) {
+            notification($0, body: "Reminder: launch moves to Friday")
+        }
+        #expect(queue.queued.values.map(\.1.body) == ["Reminder: launch moves to Friday"])
+    }
 }

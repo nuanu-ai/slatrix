@@ -32,7 +32,7 @@ import Foundation
                 list.reminders(after: Date()).compactMap { item in
                     item.remindAt.map {
                         let ms = Int64(($0.timeIntervalSince1970 * 1_000).rounded())
-                        let shows = preview ? "" : ".private"
+                        let shows = preview ? ".preview" : ".private"
                         return ("\(Self.prefix)\(account.utf8.count):\(account)\(item.id)@\(ms)\(shows)", item, $0)
                     }
                 }
