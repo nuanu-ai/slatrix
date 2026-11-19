@@ -24,11 +24,48 @@ struct MessageRowTests {
         ).fittingSize.height
     }
 
+    /// The row as the timeline builds it, from the message alone.
+    private func row(_ message: ChatMessage, hovered: Bool = false, context: TimelineRowContext) -> TimelineRow {
+        context.matrix = context.matrix ?? MatrixService()
+        context.appearance = context.appearance ?? AppearanceStore()
+        let entry = TimelineEntry(
+            id: message.id,
+            kind: .message(
+                TimelineMessageEntry(
+                    message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false, canPin: false,
+                    highlighted: false, sendBusy: false)))
+        return TimelineRow(entry: entry, hovered: hovered, context: context)
+    }
+
     // capability: message.reactions.show
     @Test("Reactions that don't fit the column wrap onto more lines, and the row grows to hold them")
     func reactionsWrap() {
         let many = ["🔥", "🚀", "👏", "😍", "💯", "🙌", "👀", "✨", "🎯", "📈", "🤯", "❤️", "🥳", "☕️"]
         let one = height(message(["🔥"]), width: 360)
         #expect(height(message(many), width: 360) >= one + 2 * m.sp24)
+    }
+
+    @Test("A reaction with a very long key stays inside a narrow thread's column")
+    func longReactionKey() async throws {
+        let key = String(repeating: "W", count: 80)
+        var message = message([])
+        message.reactions = [MessageReaction(key: key, count: 2, mine: false)]
+        let context = TimelineRowContext()
+        context.isThread = true
+        var frames: [String: CGRect] = [:]
+        context.onReactionFrame = { _, key, frame in frames[key] = frame }
+        let width: CGFloat = 280
+        let window = offscreenWindow(NSSize(width: width, height: 400))
+        defer { window.close() }
+        let cell = TimelineCell(identifier: .init("cell"))
+        cell.show(row(message, hovered: true, context: context), commands: nil)
+        cell.frame = NSRect(x: 0, y: 0, width: width, height: ceil(cell.height(width: width)))
+        window.contentView = cell
+        #expect(
+            await eventually {
+                cell.layoutSubtreeIfNeeded()
+                return frames[key] != nil
+            })
+        #expect(try #require(frames[key]).maxX <= width - m.conversationInset(thread: true))
     }
 }

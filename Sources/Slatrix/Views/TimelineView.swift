@@ -636,8 +636,8 @@ struct MessageRow: View {
                     actions.react?(reaction.key)
                 } label: {
                     ReactionChip(mine: reaction.mine) {
-                        Text(EmojiCatalog.presented(reaction.key)).font(m.font(.subheadline))
-                        Text("\(reaction.count)").font(m.font(.subheadline, .semibold))
+                        Text(EmojiCatalog.presented(reaction.key)).font(m.font(.subheadline)).lineLimit(1)
+                        Text("\(reaction.count)").font(m.font(.subheadline, .semibold)).fixedSize()
                             .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
                     }
                 }.buttonStyle(.row).disabled(actions.react == nil)
@@ -733,7 +733,9 @@ private struct WrappingRow: Layout {
         var origin = CGPoint.zero
         var size = CGSize.zero
         for view in subviews {
-            let fit = view.sizeThatFits(.unspecified)
+            // Never wider than the column: a pill with a long custom key truncates it instead.
+            let ideal = view.sizeThatFits(.unspecified).width
+            let fit = view.sizeThatFits(ProposedViewSize(width: min(ideal, width), height: nil))
             if origin.x > 0, origin.x + fit.width > width { origin = CGPoint(x: 0, y: size.height + spacing) }
             frames.append(CGRect(origin: origin, size: fit))
             origin.x += fit.width + spacing
