@@ -225,7 +225,7 @@ struct AppColors {
     /// dark mode.
     var mentionYouText: Color { dark ? onAccent : deepAccent }
     var mentionYouFill: Color { accentFill.opacity(dark ? 0.42 : 0.24) }
-    private var deepAccent: Color { Color(nsColor: accentBase.blended(withFraction: 0.35, of: .black) ?? accentBase) }
+    private var deepAccent: Color { Color(nsColor: accentBase.blended(withFraction: 0.5, of: .black) ?? accentBase) }
     /// Inline code in a message.
     var code: Color { sunken }
     var presenceActive: Color { Color(hex: dark ? 0x30d158 : 0x34c759) }
