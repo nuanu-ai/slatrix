@@ -1035,8 +1035,8 @@ class MatrixConversationTest {
     }
 
     @Test fun aThreadShowsItsRootWithTheChannelsEditsSinceTheThreadKeepsItAsFirstSent() = runTest {
-        fun channelCopy(body: String) = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", body, null,
-            1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0, edited = true)
+        fun channelCopy(body: String, edited: Boolean = true) = ConversationMessage("channel-row", "\$root", "@mira:example.org",
+            "Mira Chen", body, null, 1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0, edited = edited)
         val channel = MutableStateFlow(ConversationState(rows = listOf(channelCopy("Plan for Friday"))))
         val timeline = ConversationTimeline(emptyList())
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root",
@@ -1051,6 +1051,9 @@ class MatrixConversationTest {
 
         channel.value = ConversationState(rows = listOf(channelCopy("Plan for Saturday")))
         conversation.state.first { it.rows.messages.first().body == "Plan for Saturday" }
+        // An edit the server refused goes back in the channel, and so in the thread.
+        channel.value = ConversationState(rows = listOf(channelCopy("Plan?", edited = false)))
+        assertFalse(conversation.state.first { it.rows.messages.first().body == "Plan?" }.rows.messages.first().edited)
         conversation.close()
     }
 }

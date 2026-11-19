@@ -514,8 +514,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             }
     }
 
+    /** Its text as the channel shows it, an edit the server refused and the channel took back included. */
     private fun ConversationMessage.withEdit(channel: ConversationMessage) =
-        if (channel.edited) copy(body = channel.body, formattedBody = channel.formattedBody, edited = true) else this
+        if (channel.kind == MessageKind.Deleted) this
+        else copy(body = channel.body, formattedBody = channel.formattedBody, edited = channel.edited)
 
     /** The thread's rows topped by its root, which keeps the channel's row so it never redraws when the thread loads it. */
     private fun withRoot(rows: List<ConversationRow>): List<ConversationRow> {

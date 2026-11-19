@@ -2125,14 +2125,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// The SDK's thread timeline keeps its root as first sent: an edit to the root arrives in the main timeline.
     private func showEditedThreadRoot() {
         guard let rootID = loadedThreadRootID,
-            let current = messages.first(where: { $0.eventID == rootID }), current.isEdited,
+            let current = messages.first(where: { $0.eventID == rootID }), !current.isRedacted,
             let index = threadMessages.firstIndex(where: { $0.eventID == rootID })
         else { return }
+        // An edit the server refused goes back in the channel, and so here.
         var root = threadMessages[index]
         root.body = current.body
         root.formattedBody = current.formattedBody
         root.mediaCaption = current.mediaCaption
-        root.isEdited = true
+        root.isEdited = current.isEdited
         if root != threadMessages[index] { threadMessages[index] = root }
     }
 
