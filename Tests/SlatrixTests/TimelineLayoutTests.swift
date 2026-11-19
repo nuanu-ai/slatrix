@@ -145,7 +145,8 @@ struct TimelineLayoutTests {
     func repliesLine(spec: RepliesCase) {
         let replies = spec.replies.enumerated().map { index, state in
             var reply = message("r\(index)", "@alice", at: 1)
-            reply.sendState = state
+            reply.sendState = state == "deleted" ? "sent" : state
+            reply.isRedacted = state == "deleted"
             return reply
         }
         var root = message("root", "@alice", at: 2)

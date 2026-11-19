@@ -352,7 +352,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 val root = rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot }
                 (rows.getOrNull(root) as? ConversationMessage)?.let { message ->
                     ThreadReplies.divider(message.thread?.replies ?: 0,
-                        rows.drop(root + 1).filterIsInstance<ConversationMessage>().map { it.sendState })
+                        rows.drop(root + 1).filterIsInstance<ConversationMessage>())
                 }
             }
             val firstReply = remember(rows, threadRoot) {

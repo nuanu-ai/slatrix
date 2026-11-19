@@ -84,9 +84,10 @@ enum TimelineLayout {
 
     /// The words under a thread's root, as the channel counts its replies, and nil for no line. The root's count can
     /// lag behind, or already include, a reply of this device's, so the replies held that haven't failed count when
-    /// they're more. The cases are in spec/thread-replies.json.
+    /// they're more. A deleted reply isn't one, as the server's count leaves it out. The cases are in
+    /// spec/thread-replies.json.
     private static func repliesLabel(_ rootCount: Int, replies: ArraySlice<ChatMessage>) -> String? {
-        let count = max(rootCount, replies.count { $0.sendState != "failed" })
+        let count = max(rootCount, replies.count { $0.sendState != "failed" && !$0.isRedacted })
         return count == 0 ? nil : count == 1 ? "1 reply" : "\(count) replies"
     }
 }
