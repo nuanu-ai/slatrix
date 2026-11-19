@@ -375,6 +375,56 @@ struct ComposerHostedTests {
         #expect(hosting.fittingSize.height == before)
     }
 
+    @MainActor private final class Cover: ObservableObject { @Published var covered = false }
+
+    /// A composer that a pane can cover, beside a field the keyboard can go to instead, like a thread's reply.
+    private struct Covered: View {
+        @ObservedObject var cover: Cover
+        let sent: Gate
+        @State private var text = ""
+        @State private var other = ""
+        var body: some View {
+            VStack {
+                MessageComposer(
+                    text: $text, placeholder: "Message #team", members: [], onSend: { _, _ in await sent.wait() },
+                    onTyping: { _ in }, isCovered: cover.covered)
+                TextField("Reply…", text: $other)
+            }.frame(width: 360)
+        }
+    }
+
+    @Test("A send that finishes once the composer is covered leaves the keyboard where it went meanwhile")
+    func coveredSendKeepsFocus() async throws {
+        let cover = Cover()
+        let sent = Gate()
+        sent.arm()
+        let (hosting, window) = host(Covered(cover: cover, sent: sent))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let editor = try editor(in: hosting)
+        window.makeFirstResponder(editor)
+        editor.insertText("Hello", replacementRange: editor.selectedRange())
+        editor.keyDown(
+            with: try #require(
+                NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                    characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)))
+        #expect(await eventually { sent.isWaiting })
+
+        cover.covered = true
+        hosting.layoutSubtreeIfNeeded()
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        let reply = try #require(views(hosting).first { ($0 as? NSTextField)?.placeholderString == "Reply…" })
+        #expect(window.makeFirstResponder(reply))
+        let focused = window.firstResponder
+        sent.release()
+        #expect(await eventually { editor.string.isEmpty })
+        await drainMainActor()
+        #expect(window.firstResponder === focused && focused !== editor)
+    }
+
     /// Whether any pixel has the fixture images' red; nothing else in the composer is red.
     private func showsRed(_ view: NSView) -> Bool {
         view.layoutSubtreeIfNeeded()

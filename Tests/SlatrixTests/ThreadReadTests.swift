@@ -21,7 +21,7 @@ struct ThreadReadPolicyTests {
 
     enum Hidden: String, CaseIterable, CustomTestStringConvertible {
         case paneClosed, stillLoading, scrolledUp, appInactive, windowHidden, windowOccluded, sheetOpen
-        case markedUnread, noReadyThread, localEcho, noEvent
+        case markedUnread, noReadyThread, localEcho, noEvent, covered
         var testDescription: String { rawValue }
         func apply(to context: inout ThreadReadContext) {
             switch self {
@@ -36,6 +36,7 @@ struct ThreadReadPolicyTests {
             case .noReadyThread: context.identity = nil
             case .localEcho: context.eventID = "transaction"
             case .noEvent: context.eventID = nil
+            case .covered: context.isCovered = true
             }
         }
     }

@@ -755,6 +755,79 @@ struct WindowHostedTests {
             })
     }
 
+    @Test("What covers the conversation keeps the keyboard and ⌘U from its composer, which has the keyboard back after")
+    func coveredComposer() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let window = harness.window
+        func composer() -> NSView? { harness.shown().first { ($0 as? NSTextView)?.isEditable == true } }
+        // The window takes the keyboard itself when the view refuses it, and still says yes.
+        func takesKeyboard() -> Bool {
+            window.makeFirstResponder(composer())
+            return window.firstResponder === composer()
+        }
+        #expect(takesKeyboard())
+
+        // The media viewer over the window: it has the keyboard, and gives it back on closing.
+        var photo = ChatMessage(
+            id: "$photo", roomID: try #require(harness.matrix.selectedRoomID), senderID: "@ana:example.org",
+            senderName: "ana", body: "photo.png", timestamp: Date(timeIntervalSince1970: 1_762_700_000))
+        photo.kind = "m.image"
+        photo.attachment = MessageAttachment(
+            name: "photo.png", url: "mxc://example.org/photo", mimeType: "image/png", width: 400, height: 300)
+        harness.matrix.messages.append(photo)
+        let m = Metrics()
+        // Hit-testing takes a point in the frame around the content, which is the window's own.
+        let frame = try #require(window.contentView?.superview)
+        // In the photo's row, in the text's column, halfway down, on the photo.
+        func photoPoint() -> NSPoint? {
+            guard let cell = harness.shown().first(where: { ($0 as? TimelineCell)?.entry?.id == photo.id }) else {
+                return nil
+            }
+            let row = cell.convert(cell.bounds, to: nil)
+            let point = NSPoint(
+                x: row.midX - min(row.width, m.conversationRow) / 2 + m.conversationInset(thread: false)
+                    + m.conversationText(thread: false) + 40, y: row.midY)
+            var view = frame.hitTest(point)
+            while let shown = view, !(shown is TimelineCell) { view = shown.superview }
+            return view === cell ? point : nil
+        }
+        #expect(await eventually { photoPoint() != nil })
+        try await harness.click(CGRect(origin: try #require(photoPoint()), size: .zero))
+        func stage() -> NSView? { harness.shown().first { $0 is MediaStageView } }
+        #expect(await eventually { stage() != nil })
+        #expect(!takesKeyboard())
+        stage()?.keyDown(
+            with: try #require(
+                NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                    characters: "\u{1B}", charactersIgnoringModifiers: "\u{1B}", isARepeat: false, keyCode: 53)))
+        #expect(await eventually { stage() == nil })
+        #expect(takesKeyboard())
+
+        // A thread in its place, in a narrow window.
+        let focused = try #require(composer())
+        try harness.openThread()
+        harness.resize(700)
+        #expect(await eventually { harness.shown().compactMap { $0 as? UploadDropView }.count == 2 })
+        #expect(await eventually { window.firstResponder !== focused })
+        #expect(!takesKeyboard())
+        // ⌘U with neither composer focused attaches to neither.
+        window.makeFirstResponder(nil)
+        harness.menu("attach")
+        await drainMainActor()
+        // Required: the file panel a failure leaves open can't be dismissed from here.
+        try #require(window.attachedSheet == nil)
+        harness.menu("toggle-pane")
+        #expect(await eventually { window.firstResponder === focused })
+
+        // A dialog over the window.
+        harness.menu("preferences")
+        #expect(await eventually { harness.shown().contains { $0 is NSSwitch } })
+        #expect(await eventually { !takesKeyboard() })
+    }
+
     // capability: app.narrow-window
     @Test("In a narrow window the sidebar opens as a drawer, and picking a conversation or Esc closes it")
     func drawer() async {

@@ -36,6 +36,8 @@ struct MessageComposer: View {
     var isPrimary = false
     /// In a thread's pane, whose messages' text starts nearer their avatars; the placeholder starts where it does.
     var isThread = false
+    /// Under a pane in the conversation's place, the media viewer or a dialog: it takes no keyboard focus and no ⌘U.
+    var isCovered = false
 
     @StateObject private var editor = ComposerEditorState()
     @State private var localAttachments: [URL] = []
@@ -115,7 +117,7 @@ struct MessageComposer: View {
                     ComposerNativeEditor(
                         text: $text, state: editor, members: members, mentionText: NSColor(colors.mentionText),
                         mentionFill: NSColor(colors.mentionFill), textColor: NSColor(colors.textBody),
-                        linkColor: NSColor(colors.accent), enabled: !sending,
+                        linkColor: NSColor(colors.accent), enabled: !sending, covered: isCovered,
                         acceptsAttachments: !sending && !isEditing && !preparingAttachments, onTextChange: changed,
                         onSelectionChange: { text, range in
                             if hasSelection != (range.length > 0) { hasSelection = range.length > 0 }
@@ -189,7 +191,9 @@ struct MessageComposer: View {
             onTyping(false)
         }
         .onReceive(NotificationCenter.default.publisher(for: .menuAction)) { notification in
-            guard notification.userInfo?["action"] as? String == "attach", !isEditing, isEnabled else { return }
+            guard notification.userInfo?["action"] as? String == "attach", !isEditing, isEnabled, !isCovered else {
+                return
+            }
             let focused = NSApp.keyWindow?.firstResponder
             if focused === editor.textView || (isPrimary && !(focused is ComposerTextView)) { chooseFiles() }
         }
@@ -613,7 +617,8 @@ private struct ComposerLinkDraft: Equatable {
     @Published var formats = ComposerFormats()
     weak var textView: ComposerTextView?
 
-    func focus() { if let textView { textView.window?.makeFirstResponder(textView) } }
+    /// Not while covered: asking the window would take the keyboard from where it is, even though this refuses it.
+    func focus() { if let textView, textView.acceptsFirstResponder { textView.window?.makeFirstResponder(textView) } }
 
     func insert(_ string: String, replacing range: NSRange? = nil, selection: NSRange? = nil) {
         guard let textView, textView.isEditable else { return }
@@ -694,6 +699,7 @@ private struct ComposerNativeEditor: NSViewRepresentable {
     var textColor: NSColor
     var linkColor: NSColor
     var enabled: Bool
+    var covered: Bool
     var acceptsAttachments: Bool
     var onTextChange: (String, NSRange) -> Void
     var onSelectionChange: (String, NSRange) -> Void
@@ -773,6 +779,7 @@ private struct ComposerNativeEditor: NSViewRepresentable {
             Task { @MainActor in view.publishFormats() }
         }
         view.isEditable = enabled
+        view.isCovered = covered
     }
 
     private func configure(_ view: ComposerTextView, context: Context) {
@@ -847,6 +854,27 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
     var acceptsAttachments = true
     var onAttachments: ((ComposerAttachmentInput) -> Bool)?
     var onAttachmentError: ((String) -> Void)?
+    /// Under a pane, the media viewer or a dialog, so a focus it would take, such as after a send, stays where it is.
+    var isCovered = false {
+        didSet {
+            // After this pass, once whatever covers it has taken the keyboard or not.
+            if isCovered != oldValue { DispatchQueue.main.async { [weak self] in self?.coverChanged() } }
+        }
+    }
+    /// It had the keyboard when covered, and gets it back when uncovered if nothing else took it.
+    private var coveredWithFocus = false
+    override var acceptsFirstResponder: Bool { !isCovered && super.acceptsFirstResponder }
+    // `makeFirstResponder` asks only this.
+    override func becomeFirstResponder() -> Bool { !isCovered && super.becomeFirstResponder() }
+    private func coverChanged() {
+        guard let window else { return }
+        if isCovered, window.firstResponder === self {
+            coveredWithFocus = window.makeFirstResponder(nil)
+        } else if !isCovered, coveredWithFocus {
+            coveredWithFocus = false
+            if window.firstResponder === window { window.makeFirstResponder(self) }
+        }
+    }
     private var fontSize: CGFloat = 0
     private var mentionText = NSColor.linkColor
     private var mentionFill = NSColor.clear

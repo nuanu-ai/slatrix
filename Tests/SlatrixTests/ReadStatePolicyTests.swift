@@ -17,6 +17,7 @@ struct ReadStatePolicyTests {
         ("reading older messages", { $0.isAtBottom = false }), ("inactive app", { $0.isWindowActive = false }),
         ("closed or minimized window", { $0.isWindowVisible = false }),
         ("occluded window", { $0.isWindowUnoccluded = false }), ("modal sheet", { $0.hasModal = true }),
+        ("covered by a pane, the media viewer or a dialog", { $0.isCovered = true }),
         ("different selected room", { $0.selectedRoomID = "!other:example.org" }),
         ("no selected room", { $0.selectedRoomID = nil }), ("signed out", { $0.accountID = nil }),
         ("invalid account", { $0.accountID = "reader:example.org" }),

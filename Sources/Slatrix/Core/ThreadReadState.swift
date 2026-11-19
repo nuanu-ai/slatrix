@@ -23,6 +23,8 @@ struct ThreadReadContext: Equatable {
     var isWindowVisible = false
     var isWindowUnoccluded = false
     var hasModal = false
+    /// Something lies over the thread: the media viewer or a dialog.
+    var isCovered = false
     var manualUnreadHeld = false
 }
 
@@ -30,7 +32,7 @@ enum ThreadReadPolicy {
     static func target(_ context: ThreadReadContext) -> ThreadReadReceiptTarget? {
         guard let identity = context.identity, context.isPresented, context.isReady,
             context.isAtBottom, context.isWindowActive, context.isWindowVisible, context.isWindowUnoccluded,
-            !context.hasModal, !context.manualUnreadHeld,
+            !context.hasModal, !context.isCovered, !context.manualUnreadHeld,
             identity.accountID.hasPrefix("@"), identity.accountID.contains(":"), identity.roomID.hasPrefix("!"),
             UnreadNavigation.isRemoteEventID(identity.rootID),
             let event = context.eventID, UnreadNavigation.isRemoteEventID(event)

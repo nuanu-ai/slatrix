@@ -150,6 +150,11 @@ struct RootView: View {
     /// Whether an open pane sits beside the conversation; otherwise it takes the conversation's place.
     private var paneBeside: Bool { sidebarCollapsed ? arrangement.paneFitsAlone : arrangement.paneFitsBesideSidebar }
     private var paneCovers: Bool { paneOpen && !paneBeside }
+    /// The media viewer or a dialog lies over the whole window.
+    private var windowCovered: Bool { viewer.message != nil || modalShown }
+    /// What something covers takes no keyboard input and marks nothing read: the conversation under a pane in its
+    /// place, and it and a thread under the media viewer or a dialog.
+    private var conversationCovered: Bool { paneCovers || windowCovered }
     /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
     /// open pane.
     private var sidebarCollapsed: Bool {
@@ -950,7 +955,7 @@ struct RootView: View {
             windowCanRead: windowCanRead, hasPresentedSheet: hasPresentedSheet, threadRootID: threadRoot?.eventID,
             threadReadyID: threadReadyID, openingThreadID: openingThreadID, threadLoadFailed: threadLoadError != nil,
             localReady: localReady, threadReadViewport: threadReadViewport, readHold: readHold,
-            conversationCovered: paneCovers)
+            conversationCovered: conversationCovered, threadCovered: windowCovered)
     }
     private var readContext: ReadStateContext { readInputs.readContext(matrix) }
     private var automaticReadTarget: ReadReceiptTarget? { ReadStatePolicy.automaticTarget(readContext, hold: readHold) }
@@ -1163,7 +1168,7 @@ struct RootView: View {
                                     onDiscardAttachments: attachmentDrafts.discard,
                                     requiresTextForSend: scopedReply(roomID: room.id) != nil,
                                     onConversationKey: { conversationKey($0, room: room, threadRootID: nil) },
-                                    isPrimary: true
+                                    isPrimary: true, isCovered: conversationCovered
                                 )
                             }
                             .disabled(!localReady || !attachmentDrafts.ready).id(
@@ -1333,7 +1338,7 @@ struct RootView: View {
                             onDiscardAttachments: attachmentDrafts.discard,
                             requiresTextForSend: scopedReply(roomID: room.id, threadID: root.eventID) != nil,
                             onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) },
-                            isThread: true
+                            isThread: true, isCovered: windowCovered
                         )
                     }
                     .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(.top, m.sp4)
@@ -2260,7 +2265,8 @@ struct RootView: View {
                 onError: { error in
                     guard isCurrentEdit(target, context: context) else { return }
                     matrix.errorMessage = error
-                }, allowsSend: isCurrentEdit(target, context: context), isThread: isThread
+                }, allowsSend: isCurrentEdit(target, context: context), isThread: isThread,
+                isCovered: isThread ? windowCovered : conversationCovered
             )
         }
         .id("edit-\(composerGeneration)-\(target.id)").disabled(!isCurrentEdit(target, context: context))
@@ -2837,8 +2843,9 @@ private struct ReadInputs {
     var localReady: Bool
     var threadReadViewport: ThreadReadViewport
     var readHold: ReadStateHold
-    /// A pane has taken the conversation's place, so none of it is on screen.
+    /// Something lies over the conversation, or over the thread, so it isn't on screen.
     var conversationCovered: Bool
+    var threadCovered: Bool
 
     @MainActor static var hasNativeModal: Bool {
         NSApp.modalWindow != nil
@@ -2856,10 +2863,10 @@ private struct ReadInputs {
             isPreview: matrix.isPreview, isJoined: shownRoom(matrix, workspaceID: workspaceID)?.membership == "join",
             isMainTimeline: route == .home,
             isLiveTimeline: matrix.focusedEventID == nil && matrix.status == .ready,
-            isAtBottom: visibleBottomRoomID == matrix.selectedRoomID && visibleBottomRoomID != nil
-                && !conversationCovered,
+            isAtBottom: visibleBottomRoomID == matrix.selectedRoomID && visibleBottomRoomID != nil,
             isWindowActive: visible, isWindowVisible: visible, isWindowUnoccluded: visible,
-            hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented
+            hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented,
+            isCovered: conversationCovered
         )
     }
 
@@ -2876,7 +2883,7 @@ private struct ReadInputs {
             isAtBottom: threadReadViewport.isAtBottom(identity), isWindowActive: visible, isWindowVisible: visible,
             isWindowUnoccluded: visible,
             hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented,
-            manualUnreadHeld: readHold.blocks(readContext(matrix)))
+            isCovered: threadCovered, manualUnreadHeld: readHold.blocks(readContext(matrix)))
     }
 }
 
