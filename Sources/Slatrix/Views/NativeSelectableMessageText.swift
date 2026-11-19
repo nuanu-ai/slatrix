@@ -18,26 +18,43 @@ extension NSAttributedString.Key {
 }
 
 extension NSMutableAttributedString {
-    /// Reserves each pill's padding on both sides as real space, kerning after its last character, so the text around
-    /// a pill never touches its fill. Run again after the font size changes.
+    /// Reserves each pill's padding as real space, kerning the characters that end beside it, so the text around a
+    /// pill never touches its fill and layout measures what is drawn. Owns `.kern`: run again after the text or the
+    /// font size changes.
     func padMentionPills() {
+        var kerns: [Int: CGFloat] = [:]
+        let text = string as NSString
         for key in PillLayoutManager.keys {
             enumerateAttribute(key, in: NSRange(location: 0, length: length)) { value, range, _ in
                 guard value != nil, let font = attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
                 else { return }
-                let last = NSMaxRange(range) - 1
-                let kern = 2 * PillLayoutManager.padding(font)
-                // Setting an equal value still counts as an edit, and a text view puts the caret after its last edit.
-                guard attribute(.kern, at: last, effectiveRange: nil) as? CGFloat != kern else { return }
-                addAttribute(.kern, value: kern, range: NSRange(location: last, length: 1))
+                // A kern widens its character on the right as drawn: after it left to right, before it right to left.
+                let ends =
+                    PillLayoutManager.rightToLeft(text.substring(with: range))
+                    ? [range.location, NSMaxRange(range)] : [range.location - 1, NSMaxRange(range) - 1]
+                for index in ends where index >= 0 && index < length && text.character(at: index) != 0x0A {
+                    kerns[index, default: 0] += PillLayoutManager.padding(font)
+                }
             }
+        }
+        var stale: [NSRange] = []
+        enumerateAttribute(.kern, in: NSRange(location: 0, length: length)) { value, range, _ in
+            guard value != nil else { return }
+            stale += (range.location..<NSMaxRange(range)).filter { kerns[$0] == nil }.map {
+                NSRange(location: $0, length: 1)
+            }
+        }
+        for range in stale { removeAttribute(.kern, range: range) }
+        // Setting an equal value still counts as an edit, and a text view puts the caret after its last edit.
+        for (index, kern) in kerns where attribute(.kern, at: index, effectiveRange: nil) as? CGFloat != kern {
+            addAttribute(.kern, value: kern, range: NSRange(location: index, length: 1))
         }
     }
 }
 
 /// Draws `.mentionPill` and `.codeSpan` runs as Slack's inline mentions and code: a rounded fill as tall as the font,
-/// whatever the line holds, around text inset by the padding that `padMentionPills()` reserves. A mention that fits on
-/// the next line wraps there whole.
+/// whatever the line holds, around the letters and the padding that `padMentionPills()` reserves beside them. A
+/// mention that fits on the next line wraps there whole.
 class PillLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
     static let keys: [NSAttributedString.Key] = [.mentionPill, .codeSpan]
 
@@ -68,6 +85,14 @@ class PillLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
     /// In proportion to the font, so pills scale with zoom: 2 pt at 15 pt.
     static func padding(_ font: NSFont) -> CGFloat { font.pointSize * 0.13 }
 
+    /// Whether a pill's text runs right to left, by its first letter: Hebrew, Arabic and the scripts beside them.
+    static func rightToLeft(_ text: String) -> Bool {
+        guard let letter = text.unicodeScalars.first(where: \.properties.isAlphabetic)?.value else { return false }
+        return [0x0590...0x08FF, 0xFB1D...0xFDFF, 0xFE70...0xFEFF, 0x10800...0x10FFF, 0x1E800...0x1EFFF].contains {
+            $0.contains(letter)
+        }
+    }
+
     func pills(forCharacterRange characters: NSRange) -> [Pill] {
         guard let storage = textStorage else { return [] }
         var pills: [Pill] = []
@@ -79,49 +104,41 @@ class PillLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
                 // The small radius at the reading size, scaled with the font, and a hair more than the font's height.
                 let radius = font.pointSize * Metrics().radiusSmall / TextRole.reading.points
                 let bleed = font.pointSize * 0.05
+                let padding = Self.padding(font)
                 let text = storage.string as NSString
+                // The letter `padMentionPills()` kerns, widening the pill's rightmost letter on the line that holds it.
+                let kerned = Self.rightToLeft(text.substring(with: range)) ? range.location : NSMaxRange(range) - 1
                 var glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-                // One fill per line the mention spans, from its first glyph there to where the next glyph starts, which
-                // takes in the kerning after its last character. (Glyph bounding rects run wide on lines with emoji.)
+                // One fill per line the pill spans, around its letters there as a selection encloses them, in either
+                // direction, and the padding reserved before its first letter and after its last.
                 while glyphs.length > 0 {
                     var line = NSRange()
                     let fragment = lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: &line)
+                    guard let container = textContainer(forGlyphAt: glyphs.location, effectiveRange: nil) else { break }
                     let part = NSIntersectionRange(glyphs, line)
                     glyphs = NSRange(location: NSMaxRange(part), length: NSMaxRange(glyphs) - NSMaxRange(part))
-                    // A mention that wraps ends the line at its last word, padded as its end is.
+                    // A pill that wraps ends the line at its last word, padded there as its end is.
                     var words = characterRange(forGlyphRange: part, actualGlyphRange: nil)
                     while words.length > 1, text.character(at: NSMaxRange(words) - 1) == 0x20 { words.length -= 1 }
-                    let next = NSMaxRange(glyphRange(forCharacterRange: words, actualCharacterRange: nil))
-                    let start = location(forGlyphAt: part.location)
-                    let end =
-                        next < NSMaxRange(line)
-                        ? fragment.minX + location(forGlyphAt: next).x
-                        : lineFragmentUsedRect(forGlyphAt: part.location, effectiveRange: nil).maxX
+                    var box = NSRect.null
+                    enumerateEnclosingRects(
+                        forGlyphRange: glyphRange(forCharacterRange: words, actualCharacterRange: nil),
+                        withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: container
+                    ) { rect, _ in box = box.union(rect) }
+                    guard !box.isNull else { continue }
+                    let right = NSLocationInRange(kerned, words) ? 0 : padding
+                    let minX = max(fragment.minX, box.minX - padding)
+                    let maxX = min(fragment.maxX, box.maxX + right)
                     // From the baseline, so taller glyphs elsewhere on the line or line spacing never stretch it.
+                    let baseline = fragment.minY + location(forGlyphAt: part.location).y
                     let rect = NSRect(
-                        x: fragment.minX + start.x, y: fragment.minY + start.y - font.ascender - bleed,
-                        width: end - fragment.minX - start.x + (glyphs.length > 0 ? 2 * Self.padding(font) : 0),
+                        x: minX, y: baseline - font.ascender - bleed, width: maxX - minX,
                         height: font.ascender - font.descender + 2 * bleed)
                     pills.append(Pill(rect: rect, radius: radius, fill: fill))
                 }
             }
         }
         return pills
-    }
-
-    /// A pill's text sits in the middle of its reserved space.
-    override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
-        guard let storage = textStorage else { return super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin) }
-        let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
-        storage.enumerateAttribute(.mentionPill, in: characters) { mention, range, _ in
-            storage.enumerateAttribute(.codeSpan, in: range) { code, range, _ in
-                let glyphs = NSIntersectionRange(
-                    glyphRange(forCharacterRange: range, actualCharacterRange: nil), glyphsToShow)
-                let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
-                let shift = mention != nil || code != nil ? font.map(Self.padding) ?? 0 : 0
-                super.drawGlyphs(forGlyphRange: glyphs, at: NSPoint(x: origin.x + shift, y: origin.y))
-            }
-        }
     }
 
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
@@ -141,6 +158,9 @@ class PillLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
 struct NativeSelectableMessageText: NSViewRepresentable {
     /// Layout width until SwiftUI proposes one; never seen on screen.
     private static let fallbackWidth: CGFloat = 480
+    /// Room at each end of a line for a pill's padding. The view reaches this far into its margins, so the text itself
+    /// lines up with the column.
+    static func inset(_ fontSize: Double) -> CGFloat { PillLayoutManager.padding(.systemFont(ofSize: fontSize)) }
     var runs: [MessageBodyRun]
     var fontSize: Double
     var textColor: NSColor
@@ -183,6 +203,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
 
     func updateNSView(_ view: MessageTextView, context: Context) {
         context.coordinator.sizes = [:]
+        view.textContainer?.lineFragmentPadding = Self.inset(fontSize)
         context.coordinator.onOpenURL = onOpenURL
         view.menuCommands = menuCommands
         view.textContainer?.maximumNumberOfLines = max(0, lineLimit ?? 0)

@@ -46,8 +46,9 @@ enum MessageBlocks {
         let indent =
             (quote ? quoteIndent(fontSize) : 0) + CGFloat(list) * listIndent(fontSize)
             + (code ? codePadding(fontSize) : 0)
-        style.headIndent = indent
-        style.firstLineHeadIndent = max(0, indent - marker)
+        // A marker wider than its list's indent pushes the item's text over, clear of what is outside the list.
+        style.firstLineHeadIndent = indent - min(marker, listIndent(fontSize))
+        style.headIndent = max(indent, style.firstLineHeadIndent + marker)
         if code { style.tailIndent = -codePadding(fontSize) }
         if heading { style.paragraphSpacingBefore = fontSize * Metrics().sp8 / TextRole.reading.points }
         return style

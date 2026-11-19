@@ -22,6 +22,8 @@ struct NativeMessageBody: View {
     /// Ends the text with Slack's inline "(edited)".
     private var edited: Bool
     private var showsSpoilerControl: Bool
+    /// Off where a placeholder holds the row at text size until the body arrives, such as a Threads preview.
+    private var largeEmoji: Bool
     private var menuCommands: () -> [MessageMenuCommand]
     @EnvironmentObject private var appearance: AppearanceStore
     @Environment(\.metrics) private var m
@@ -35,12 +37,14 @@ struct NativeMessageBody: View {
     }
     init(
         body: String, formattedBody: String?, edited: Bool = false, showsSpoilerControl: Bool = true,
+        largeEmoji: Bool = true,
         menuCommands: @escaping () -> [MessageMenuCommand] = { [] }
     ) {
         messageBody = body
         self.formattedBody = formattedBody
         self.edited = edited
         self.showsSpoilerControl = showsSpoilerControl
+        self.largeEmoji = largeEmoji
         self.menuCommands = menuCommands
     }
 
@@ -53,11 +57,11 @@ struct NativeMessageBody: View {
         let rendered = MessageBodyRenderer.shared.render(
             body: messageBody, formattedBody: formattedBody, revealSpoilers: revealed)
         let colors = appearance.colors
+        let fontSize = m.size(largeEmoji && rendered.isJumbomoji ? .largeTitle : .reading)
         VStack(alignment: .leading, spacing: m.sp4) {
             NativeSelectableMessageText(
                 runs: MessageBodyRenderer.named(rendered.runs) { id in mentions.members.first { $0.id == id }?.name },
-                fontSize: m.size(rendered.isJumbomoji ? .largeTitle : .reading), textColor: NSColor(colors.textBody),
-                linkColor: NSColor(colors.accent),
+                fontSize: fontSize, textColor: NSColor(colors.textBody), linkColor: NSColor(colors.accent),
                 mentions: MentionPalette(
                     me: mentions.me, text: NSColor(colors.mentionText), fill: NSColor(colors.mentionFill),
                     ownText: NSColor(colors.mentionYouText), ownFill: NSColor(colors.mentionYouFill)),
@@ -67,7 +71,8 @@ struct NativeMessageBody: View {
                         attributes: [
                             .font: m.nsFont(.subheadline), .foregroundColor: NSColor(colors.textSecondary),
                         ]) : nil,
-                menuCommands: menuCommands, onOpenURL: { openURL($0) })
+                menuCommands: menuCommands, onOpenURL: { openURL($0) }
+            ).padding(.horizontal, -NativeSelectableMessageText.inset(fontSize))
             if showsSpoilerControl && rendered.containsSpoilers {
                 Button(revealed ? "Hide spoilers" : "Show spoilers") {
                     revealedSpoilerKey = revealed ? nil : source
