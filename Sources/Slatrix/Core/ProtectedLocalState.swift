@@ -60,7 +60,7 @@ struct ProtectedLocalState: Codable, Equatable {
         guard drafts.count <= 4_096, threadDrafts.count <= 4_096, saved.count <= 10_000,
             (savedRemovals ?? []).count <= 1_000,
             (recentSearches ?? []).count <= RecentSearches.limit,
-            (recentSearches ?? []).allSatisfy({ $0.utf8.count <= 1_024 })
+            (recentSearches ?? []).allSatisfy({ $0.utf8.count <= RecentSearches.maximumBytes })
         else { throw ProtectedLocalStateError.invalidData }
         for (id, text) in drafts {
             guard Self.validID(id), text.utf8.count <= 131_072 else { throw ProtectedLocalStateError.invalidData }
