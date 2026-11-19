@@ -269,15 +269,26 @@ extension Color {
 }
 
 func initials(_ value: String) -> String {
-    let parts = value.trimmingCharacters(in: CharacterSet(charactersIn: "@#!")).split(whereSeparator: {
-        $0.isWhitespace || $0 == "." || $0 == "_" || $0 == "-"
-    })
-    return parts.prefix(2).compactMap(\.first).map { String($0).uppercased() }.joined()
+    let parts = value.split(whereSeparator: { $0.isWhitespace || $0 == "." || $0 == "_" || $0 == "-" })
+    return parts.compactMap { $0.first(where: isLetterOrDigit) }.prefix(2).map { String($0).uppercased() }.joined()
 }
+
+/// Unicode letters and decimal digits, as Android's `Character.isLetterOrDigit` reads them, so both apps agree.
+private func isLetterOrDigit(_ character: Character) -> Bool {
+    switch character.unicodeScalars.first?.properties.generalCategory {
+    case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter, .decimalNumber: true
+    default: false
+    }
+}
+
+private let avatarColors: [UInt32] = [
+    0x9c5f68, 0x9b624e, 0x90693b, 0x7b7137, 0x5f7845, 0x407c5e,
+    0x267c78, 0x2e798f, 0x4b749d, 0x686ca0, 0x816596, 0x936082,
+]
 
 func avatarColor(_ name: String) -> Color {
     let hash = name.utf8.reduce(UInt64(5381)) { ($0 &* 33) &+ UInt64($1) }
-    return Color(hex: [0x78669d, 0x447389, 0x9a6d4c, 0x5d7f5a, 0xa16576, 0x5d78a0][Int(hash % 6)])
+    return Color(hex: avatarColors[Int(hash % UInt64(avatarColors.count))])
 }
 
 private struct OnFrameKey: EnvironmentKey { static let defaultValue = false }
