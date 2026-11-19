@@ -72,30 +72,6 @@ class ThreadScreenTest {
         compose.runOnIdle { assertTrue(back) }
     }
 
-    @Test fun aFirstReplyKeepsItsPlaceUnderTheRootAsTheServerConfirmsIt() {
-        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
-        // A local echo has no event ID until the server takes it; its row keeps one identity throughout.
-        fun message(id: String, body: String, minutes: Int, state: MessageSendState) = ConversationMessage(id,
-            "\$$id".takeIf { state == MessageSendState.Sent }, "@sam:example.org", "Sam", body, null, minutes * 60_000L,
-            MessageKind.Text, state, false, "S", 0)
-        val state = mutableStateOf(ConversationState(
-            listOf(message("root", "Ship on Friday?", 0, MessageSendState.Sent), message("a", "Yes, after QA", 1, MessageSendState.Sending)),
-            loading = false, hasMore = false))
-        compose.setContent {
-            SlatrixTheme {
-                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root")
-            }
-        }
-        fun gap() = compose.onNodeWithText("Yes, after QA").getUnclippedBoundsInRoot().top -
-            compose.onNodeWithText("Ship on Friday?").getUnclippedBoundsInRoot().bottom
-        val sending = gap()
-        compose.runOnIdle {
-            state.value = state.value.copy(rows = listOf(state.value.rows[0], message("a", "Yes, after QA", 1, MessageSendState.Sent)))
-        }
-        compose.waitForIdle()
-        assertEquals(sending, gap())
-    }
-
     // capability: thread.send-to-channel
     @Test fun theThreadComposerOffersToAlsoSendTheReplyToItsChannel() {
         val channel = RoomSummary("!ops:example.org", "ops", false, "", UnreadBadge.None, "O", 0, isPrivate = true)

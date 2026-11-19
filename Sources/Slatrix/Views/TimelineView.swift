@@ -234,7 +234,7 @@ struct TimelineView: View {
             switch row.kind {
             case .day(let label): entries.append(TimelineEntry(id: row.id, kind: .day(label)))
             case .unread: entries.append(TimelineEntry(id: row.id, kind: .unread))
-            case .replies(let label): entries.append(TimelineEntry(id: row.id, kind: .replies(label)))
+            case .replies(let count): entries.append(TimelineEntry(id: row.id, kind: .replies(count)))
             case .message(let message, let grouped, let time):
                 let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
                 entries.append(
@@ -609,9 +609,9 @@ struct MessageRow: View {
                     // A reused cell shows another message: a download or preview in flight must not carry over.
                     if let attachment { attachment.padding(.top, m(6)).id(message.id) }
                     if !message.reactions.isEmpty { reactions.padding(.top, m(3)) }
-                    if !isThread, let count = message.replyCount, count > 0 {
+                    if !isThread && message.replyCount > 0 {
                         ThreadRepliesBar(
-                            count: count, lastReply: message.lastReply, avatar: replierAvatar,
+                            count: message.replyCount, lastReply: message.lastReply, avatar: replierAvatar,
                             prepare: actions.prepareThread, action: actions.thread
                         ).padding(.top, m.sp4)
                     }

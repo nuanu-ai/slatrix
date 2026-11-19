@@ -117,8 +117,7 @@ struct ChatMessage: Identifiable, Hashable {
     var timestamp: Date
     var kind: String = "m.text"
     var reactions: [MessageReaction] = []
-    /// From the thread summary the event carries; nil without one, which says nothing of how many replies there are.
-    var replyCount: Int? = nil
+    var replyCount = 0
     /// Who replied last in this message's thread, and when, from the thread summary.
     var lastReply: ThreadReply? = nil
     var threadRootID: String? = nil

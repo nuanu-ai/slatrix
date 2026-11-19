@@ -519,22 +519,16 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             }
     }
 
-    /**
-     * It as the channel shows it, deleted, or with an edit the server refused and the channel took back, and with the
-     * channel's reply count, since only the channel's timeline follows the thread's summary.
-     */
+    /** It as the channel shows it, deleted, or with an edit the server refused and the channel took back. */
     private fun ConversationMessage.withEdit(channel: ConversationMessage) = copy(kind = channel.kind, body = channel.body,
-        formattedBody = channel.formattedBody, edited = channel.edited, attachment = channel.attachment,
-        thread = channel.thread ?: thread)
+        formattedBody = channel.formattedBody, edited = channel.edited, attachment = channel.attachment)
 
     /** The thread's rows topped by its root, which keeps the channel's row so it never redraws when the thread loads it. */
     private fun withRoot(rows: List<ConversationRow>): List<ConversationRow> {
         val root = root ?: return rows
         val index = rows.indexOfFirst { (it as? ConversationMessage)?.eventId == root.eventId }
         val own = (rows.getOrNull(index) as? ConversationMessage)?.copy(id = ROOT_KEY)
-        // The thread's root without a summary has no count, not zero: it keeps the one the thread knew.
-        val shown = own?.let { row -> (mirror?.let { row.withEdit(it) } ?: row).let { it.copy(thread = it.thread ?: root.thread) } }
-            ?: root
+        val shown = own?.let { row -> mirror?.let { row.withEdit(it) } ?: row } ?: root
         // Nothing sits above the root, as in Slack, and a reply on the root's day needs no divider under it either, so
         // the root never moves when the thread loads it.
         val rest = rows.drop(index + 1)
@@ -1052,7 +1046,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     latest?.let { it.senderProfile.nameOf(it.sender) },
                     latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong(),
                     (latest?.senderProfile as? ProfileDetails.Ready)?.avatarUrl)
-            },
+            }?.takeIf { it.replies > 0 },
             replyTo = content.inReplyTo?.let { replyPreview(it, (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId) },
             repliedToThread = content.threadRoot == null && content.inReplyTo?.let { quotesOwnWords(event.sender, content.kind, it) } == true,
             attachment = shown.attachment?.let { if (event.isOwn) it.copy(own = true) else it },

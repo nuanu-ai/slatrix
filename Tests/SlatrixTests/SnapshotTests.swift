@@ -1015,7 +1015,7 @@ struct Snapshots {
         let room = try #require(matrix.selectedRoomID)
         matrix.messages = try #require(Self.hardScreens(room: room).first { $0.name == "6-reactions" }).messages
         _ = try await settledImage(hosting)
-        let root = try #require(matrix.messages.first { ($0.replyCount ?? 0) > 0 })
+        let root = try #require(matrix.messages.first { $0.replyCount > 0 })
         let text = try #require(
             Self.views(in: hosting).compactMap { $0 as? MessageTextView }.first {
                 $0.string.hasPrefix(String(root.body.prefix(20)))

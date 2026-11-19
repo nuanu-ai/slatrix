@@ -39,7 +39,7 @@ struct TimelineLayoutTests {
             switch row.kind {
             case .day(let label): "day \(label)"
             case .unread: "unread"
-            case .replies(let label): label
+            case .replies(let count): "\(count) replies"
             case .message(let message, let grouped, let time): "\(message.id)\(grouped ? " grouped" : "") \(time)"
             }
         }.map { $0.replacingOccurrences(of: "\u{202F}", with: " ") }
@@ -128,33 +128,6 @@ struct TimelineLayoutTests {
         #expect(
             layout([message("a", "@alice", at: 2), message("b", "@alice", at: 1)], threadRoot: "root")
                 == ["day Today", "a 11:58 AM", "b grouped 11:59 AM"])
-    }
-
-    struct RepliesCase: Decodable, CustomTestStringConvertible {
-        var name: String
-        var count: Int
-        var replies: [String]
-        var divider: String?
-        var testDescription: String { name }
-    }
-    struct RepliesSpec: Decodable { var cases: [RepliesCase] }
-
-    @Test(
-        "Shared case: the line counting a thread's replies",
-        arguments: try SharedSpec.decode("spec/thread-replies.json", as: RepliesSpec.self).cases)
-    func repliesLine(spec: RepliesCase) {
-        let replies = spec.replies.enumerated().map { index, state in
-            var reply = message("r\(index)", "@alice", at: 1)
-            reply.sendState = state == "deleted" ? "sent" : state
-            reply.isRedacted = state == "deleted"
-            return reply
-        }
-        var root = message("root", "@alice", at: 2)
-        root.replyCount = spec.count
-        let rows = TimelineLayout.rows(
-            [root] + replies, unreadBoundaryEventID: nil, groups: true, threadRootEventID: "root", now: Self.now,
-            calendar: Self.calendar, locale: Self.locale)
-        #expect(rows.compactMap { if case .replies(let label) = $0.kind { label } else { nil } }.first == spec.divider)
     }
 
     @MainActor @Test("A message that arrives while the conversation is open adds no unread line")

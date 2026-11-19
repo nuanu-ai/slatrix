@@ -10,8 +10,8 @@ enum TimelineLayout {
         enum Kind: Equatable {
             case day(String)
             case unread
-            /// Under a thread's root, as Slack sets the root apart from its replies: the words that count them.
-            case replies(String)
+            /// Under a thread's root, as Slack sets the root apart from its replies.
+            case replies(Int)
             case message(ChatMessage, grouped: Bool, time: String)
         }
         let id: String
@@ -31,7 +31,7 @@ enum TimelineLayout {
     }
 
     /// `unreadBoundaryEventID` is the event the "New messages" line goes above; `groups` is false in compact density;
-    /// `threadRootEventID` is a thread's root, which gets the line counting its replies.
+    /// `threadRootEventID` is a thread's root, which gets the line counting its replies once it has loaded.
     static func rows(
         _ messages: [ChatMessage], unreadBoundaryEventID: String?, groups: Bool, threadRootEventID: String? = nil,
         now: Date, calendar: Calendar, locale: Locale
@@ -73,21 +73,10 @@ enum TimelineLayout {
             rows.append(
                 Row(id: message.id, kind: .message(message, grouped: grouped, time: message.timestamp.formatted(time))))
             previous = message
-            if message.eventID == threadRootEventID,
-                let label = repliesLabel(message.replyCount ?? 0, replies: messages[(index + 1)...])
-            {
-                rows.append(Row(id: "replies", kind: .replies(label)))
+            if message.eventID == threadRootEventID {
+                rows.append(Row(id: "replies", kind: .replies(messages.count - index - 1)))
             }
         }
         return rows
-    }
-
-    /// The words under a thread's root, as the channel counts its replies, and nil for no line. The root's count can
-    /// lag behind, or already include, a reply of this device's, so the replies held that haven't failed count when
-    /// they're more. A deleted reply isn't one, as the server's count leaves it out. The cases are in
-    /// spec/thread-replies.json.
-    private static func repliesLabel(_ rootCount: Int, replies: ArraySlice<ChatMessage>) -> String? {
-        let count = max(rootCount, replies.count { $0.sendState != "failed" && !$0.isRedacted })
-        return count == 0 ? nil : count == 1 ? "1 reply" : "\(count) replies"
     }
 }

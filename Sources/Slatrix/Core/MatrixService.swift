@@ -2137,10 +2137,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     revision > self.threadRevision
                 else { return }
                 self.threadRevision = revision
-                let messages = Performance.measure(.timelineProject, ["items": items.count]) {
+                var messages = Performance.measure(.timelineProject, ["items": items.count]) {
                     self.project(items, roomID: root.roomID, inThread: true)
                 }
-                self.threadMessages = self.threadRows(messages, rootID: root.eventID)
+                if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
+                    messages[index].id = root.eventID
+                }
+                self.threadMessages = messages
                 self.showEditedThreadRoot()
             }
         }
@@ -2160,20 +2163,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         root.mediaCaption = current.mediaCaption
         root.isEdited = current.isEdited
         root.isRedacted = current.isRedacted
-        // The count too: only the channel's timeline follows the thread's summary.
-        if let count = current.replyCount { root.replyCount = count }
         if root != threadMessages[index] { threadMessages[index] = root }
-    }
-    /// The thread's timeline rows, its root kept as the pane has it: one identity, and the count it had when this root
-    /// carries none.
-    private func threadRows(_ projected: [ChatMessage], rootID: String) -> [ChatMessage] {
-        var rows = projected
-        guard let index = rows.firstIndex(where: { $0.eventID == rootID }) else { return rows }
-        rows[index].id = rootID
-        if rows[index].replyCount == nil {
-            rows[index].replyCount = threadMessages.first { $0.eventID == rootID }?.replyCount
-        }
-        return rows
     }
 
     func loadMoreThread(rootID: String) async throws -> Bool {
@@ -2231,8 +2221,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             // Updates that came before the pane opened were dropped; its snapshot holds them.
             let snapshot = ready.observer.snapshot
             threadRevision = snapshot.revision
-            let messages = threadRows(
-                project(snapshot.items, roomID: root.roomID, inThread: true), rootID: root.eventID)
+            var messages = project(snapshot.items, roomID: root.roomID, inThread: true)
+            if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
+                messages[index].id = root.eventID
+            }
             if !messages.isEmpty { threadMessages = messages }
             showEditedThreadRoot()
             return

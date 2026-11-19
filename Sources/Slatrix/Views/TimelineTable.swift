@@ -11,7 +11,7 @@ struct TimelineEntry: Identifiable, Hashable {
         case welcome(TimelineWelcome)
         case day(String)
         case unread
-        case replies(String)
+        case replies(Int)
         case message(TimelineMessageEntry)
         case end
     }
@@ -475,7 +475,7 @@ struct TimelineTable: NSViewRepresentable {
             if !row.message.reactions.isEmpty { height += m(30) }
             if row.message.attachment != nil { height += m(300) }
             if row.message.replyPreview != nil { height += m(48) }
-            if (row.message.replyCount ?? 0) > 0 { height += m(28) }
+            if row.message.replyCount > 0 { height += m(28) }
             return height
         }
     }
@@ -1233,7 +1233,7 @@ struct TimelineRow: View, Equatable {
             TimelineDayDivider(label: label, isThread: context.isThread).conversationRow(
                 metrics, isThread: context.isThread)
         case .unread: TimelineUnreadDivider().conversationRow(metrics, isThread: context.isThread)
-        case .replies(let label): TimelineRepliesDivider(label: label)
+        case .replies(let count): TimelineRepliesDivider(count: count)
         case .message(let row):
             if let matrix = context.matrix {
                 let message = row.message
@@ -1351,11 +1351,11 @@ struct TimelineDayDivider: View {
 private struct TimelineRepliesDivider: View {
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
-    let label: String
+    let count: Int
     var body: some View {
         let colors = appearance.colors
         HStack(spacing: m.sp8) {
-            Text(label).font(m.font(.subheadline, .semibold))
+            Text("\(count) \(count == 1 ? "reply" : "replies")").font(m.font(.subheadline, .semibold))
                 .foregroundStyle(colors.textSecondary)
             Rectangle().fill(colors.border).frame(height: 1)
         }
