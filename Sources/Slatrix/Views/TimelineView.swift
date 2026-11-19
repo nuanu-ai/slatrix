@@ -622,7 +622,7 @@ struct MessageRow: View {
                     actions.react?(reaction.key)
                 } label: {
                     ReactionChip(mine: reaction.mine) {
-                        Text(reaction.key).font(m.font(.subheadline))
+                        Text(EmojiCatalog.presented(reaction.key)).font(m.font(.subheadline))
                         Text("\(reaction.count)").font(m.font(.subheadline, .semibold))
                             .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
                     }
@@ -797,7 +797,8 @@ struct MessageToolbar: View {
                         Button {
                             react(emoji)
                         } label: {
-                            Text(emoji).font(m.font(.body)).frame(width: m(Self.button), height: m(Self.button))
+                            Text(EmojiCatalog.presented(emoji)).font(m.font(.body))
+                                .frame(width: m(Self.button), height: m(Self.button))
                         }.buttonStyle(.icon).help("React with \(EmojiCatalog.shortcode(for: emoji))")
                     }
                 }

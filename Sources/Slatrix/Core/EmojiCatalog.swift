@@ -57,6 +57,14 @@ enum EmojiCatalog {
         return ":\(code):" + tone
     }
 
+    /// A lone symbol such as ➕ or ❤ in color: the system font has its own gray glyph for many of them.
+    static func presented(_ value: String) -> String {
+        guard value.unicodeScalars.count == 1, let scalar = value.unicodeScalars.first, !scalar.isASCII,
+            scalar.properties.isEmoji
+        else { return value }
+        return value + "\u{FE0F}"
+    }
+
     /// Exact shortcodes first, then shortcodes the query starts, then words that start with it, then anything
     /// that contains it; picker order within each.
     static func search(_ query: String) -> [Emoji] {

@@ -115,6 +115,16 @@ struct EmojiTests {
         #expect(tooltip(["@zoe:example.org"]) == "zoe reacted with :+1:")
     }
 
+    @Test("A reaction sent as a bare symbol, such as a plus sign, draws as a color emoji; text stays text")
+    func colorPresentation() {
+        #expect(EmojiCatalog.presented("➕") == "➕\u{FE0F}")
+        #expect(EmojiCatalog.presented("❤") == "❤\u{FE0F}")
+        #expect(EmojiCatalog.presented("❤️") == "❤️")
+        #expect(EmojiCatalog.presented("👍🏽") == "👍🏽")
+        #expect(EmojiCatalog.presented("1") == "1")
+        #expect(EmojiCatalog.presented("lgtm") == "lgtm")
+    }
+
     // capability: message.thread-summary
     @Test("The replies bar says how long ago the last reply came")
     func lastReply() {
