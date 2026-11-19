@@ -58,7 +58,7 @@ private struct SkeletonBars: View {
         VStack(alignment: .leading, spacing: m.sp8) {
             ForEach(widths.indices, id: \.self) { index in
                 RoundedRectangle(cornerRadius: m.radiusSmall).fill(colors.sunken)
-                    .frame(width: m(widths[index]), height: m.sp12)
+                    .frame(minWidth: 0, idealWidth: m(widths[index]), maxWidth: m(widths[index])).frame(height: m.sp12)
             }
         }
     }

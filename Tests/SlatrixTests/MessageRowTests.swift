@@ -80,4 +80,17 @@ struct MessageRowTests {
             })
         #expect(try #require(frames[key]).maxX <= width - m.conversationInset(thread: true))
     }
+
+    @Test("A skeleton's bars never run past the width they are offered")
+    func skeletonFits() async {
+        let window = offscreenWindow(NSSize(width: 400, height: 200))
+        defer { window.close() }
+        let host = NSHostingController(
+            rootView: SkeletonLines().environment(\.metrics, m).environmentObject(AppearanceStore()))
+        window.contentView = host.view
+        let offered = CGSize(width: 150, height: 0)
+        // It draws once the loading delay has passed.
+        #expect(await eventually { host.sizeThatFits(in: offered).height > 0 })
+        #expect(host.sizeThatFits(in: offered).width <= offered.width)
+    }
 }
