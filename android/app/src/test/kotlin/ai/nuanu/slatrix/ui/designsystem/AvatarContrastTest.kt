@@ -25,9 +25,10 @@ class AvatarContrastTest {
             }
         }
         compose.runOnIdle {
-            for (colors in themes) for (background in DesignTokens.avatarColors) {
+            // On the tile's shading as drawn, not only its flat color.
+            for (colors in themes) for (color in DesignTokens.avatarColors) for (background in AvatarStyle.shades(color)) {
                 val ratio = contrast(colors.onAvatar, background)
-                assertTrue("Avatar initials need 4.5:1 contrast, got $ratio", ratio >= 4.5f)
+                assertTrue("Avatar initials need 4.5:1 contrast on $background, got $ratio", ratio >= 4.5f)
             }
         }
     }

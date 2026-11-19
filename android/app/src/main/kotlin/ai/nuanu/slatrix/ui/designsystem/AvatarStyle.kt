@@ -14,8 +14,14 @@ object AvatarStyle {
     /** Shrinks two wide initials to fit a fixed tile rather than widen it. */
     val fit = TextAutoSize.StepBased(minFontSize = 6.sp, maxFontSize = label.fontSize)
 
-    /** An avatar color shaded from a little lighter at the top down to itself, so a tile has some depth. */
-    fun fill(color: Color): Brush = Brush.verticalGradient(listOf(lerp(color, Color.White, TopLift), color))
+    /**
+     * An avatar color shaded from itself at the top down to a little darker, so a tile has some depth. Darker, not
+     * lighter: the palette sits just past the initials' contrast requirement.
+     */
+    fun fill(color: Color): Brush = Brush.verticalGradient(shades(color))
 
-    private const val TopLift = 0.16f
+    /** The fill's colors, top to bottom; the initials sit on all of them. */
+    fun shades(color: Color): List<Color> = listOf(color, lerp(color, Color.Black, BottomShade))
+
+    private const val BottomShade = 0.16f
 }
