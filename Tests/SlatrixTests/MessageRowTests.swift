@@ -81,6 +81,35 @@ struct MessageRowTests {
         #expect(try #require(frames[key]).maxX <= width - m.conversationInset(thread: true))
     }
 
+    @Test("A quote takes the same height while its original loads as once it has, at a fractional zoom too")
+    func quoteKeepsHeight() async {
+        let zoom = Metrics(zoom: 1.25)
+        func cell(_ state: ChatReplyPreview.State) -> TimelineCell {
+            var message = message([])
+            message.replyToID = "$quoted"
+            message.replyPreview = ChatReplyPreview(
+                state: state, eventID: "$quoted", senderID: "@bo:example.org", senderName: "Bo",
+                body: "The deploy is out")
+            let context = TimelineRowContext()
+            context.metrics = zoom
+            let cell = TimelineCell(identifier: .init("cell"))
+            cell.show(row(message, context: context), commands: nil)
+            return cell
+        }
+        let window = offscreenWindow(NSSize(width: 600, height: 400))
+        defer { window.close() }
+        let pending = cell(.pending)
+        pending.frame = NSRect(x: 0, y: 0, width: 600, height: ceil(pending.height(width: 600)))
+        window.contentView = pending
+        // A skeleton started after the quote's draws after it, so once it shows, the quote's bars are in the row.
+        let later = NSHostingController(
+            rootView: SkeletonLines().environment(\.metrics, zoom).environmentObject(AppearanceStore()))
+        pending.addSubview(later.view)
+        #expect(await eventually { later.sizeThatFits(in: CGSize(width: 400, height: 0)).height > 0 })
+        later.view.removeFromSuperview()
+        #expect(pending.height(width: 600) == cell(.ready).height(width: 600))
+    }
+
     @Test("A skeleton's bars never run past the width they are offered")
     func skeletonFits() async {
         let window = offscreenWindow(NSSize(width: 400, height: 200))
