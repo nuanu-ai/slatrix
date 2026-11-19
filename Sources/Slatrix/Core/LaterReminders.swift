@@ -20,8 +20,9 @@ import Foundation
     init(transport: LaterReminderTransport) { self.transport = transport }
 
     /// Queues what `list` has still to come for `accountID`, and withdraws everything else queued; a nil account,
-    /// as when signed out or notifications are off, withdraws all. `notification` reads what a reminder says, and
-    /// `preview` whether that includes the message; a change to it rewrites every reminder queued.
+    /// as when signed out or notifications are off, withdraws all. With `preview` on, `notification` reads what a
+    /// reminder says; with it off the reminder is generic and the message is never read. A change to it rewrites
+    /// every reminder queued.
     func sync(
         _ list: SavedMessages, accountID: String?, preview: Bool,
         notification: (SavedMessageReference) async -> DesktopMessageNotification?
@@ -43,9 +44,12 @@ import Foundation
         guard newest == sync else { return }
         transport.cancel(Array(queued.subtracting(wanted.map(\.0))))
         for (identifier, item, date) in wanted where !queued.contains(identifier) {
-            guard !Task.isCancelled, let message = await notification(item), newest == sync, !Task.isCancelled else {
-                return
-            }
+            let generic = accountID.flatMap {
+                MatrixNotificationTarget(accountID: $0, roomID: item.roomID, eventID: item.eventID)
+            }.map { DesktopMessageNotification(target: $0, title: "Slatrix", body: "Reminder", playSound: true) }
+            guard !Task.isCancelled, let message = preview ? await notification(item) : generic, newest == sync,
+                !Task.isCancelled
+            else { return }
             try? await transport.schedule(identifier, at: date, notification: message)
             // A newer sync that read the queue before this landed couldn't withdraw it, so this one does.
             if !latest.contains(identifier) { transport.cancel([identifier]) }

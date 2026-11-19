@@ -92,8 +92,13 @@ struct LaterReminderTests {
         await schedule.sync(list, accountID: owner, preview: true) {
             notification($0, body: "Reminder: launch moves to Friday")
         }
-        await schedule.sync(list, accountID: owner, preview: false) { notification($0) }
-        #expect(queue.queued.values.map(\.1.body) == ["Reminder"])
+        var read = false
+        await schedule.sync(list, accountID: owner, preview: false) {
+            read = true
+            return notification($0, body: "Reminder: launch moves to Friday")
+        }
+        #expect(!read)
+        #expect(queue.queued.values.map { [$0.1.title, $0.1.body] } == [["Slatrix", "Reminder"]])
     }
 
     @Test("A reminder still on its way into the queue at sign-out is withdrawn when it lands")
