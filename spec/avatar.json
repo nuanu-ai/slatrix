@@ -1,5 +1,5 @@
 {
-  "about": "A person or conversation without a photo shows initials on a color, both from its display name. Initials: split at whitespace, dots, underscores and hyphens, skip parts with no letter or digit (Unicode letters and decimal digits), and take the first letter or digit of each of the first two remaining parts, uppercased, so symbols, punctuation and emoji never become initials. A name with no letter or digit has no initials. Color: the index into avatarColors in design/tokens.json is the djb2 hash of the name's UTF-8 bytes (start at 5381, then hash * 33 + byte, wrapping at 64 bits, unsigned) modulo the number of avatarColors.",
+  "about": "A person or conversation without a photo shows initials on a color, both from its display name. Initials: split at whitespace, dots, underscores and hyphens, skip parts with no letter or digit (Unicode letters and decimal digits, but not one carrying an enclosing mark, such as the keycap 1️⃣), and take the first letter or digit of each of the first two remaining parts, uppercased, so symbols, punctuation and emoji never become initials. A name with no letter or digit has no initials. Color: the index into avatarColors in design/tokens.json is the djb2 hash of the name's UTF-8 bytes (start at 5381, then hash * 33 + byte, wrapping at 64 bits, unsigned) modulo the number of avatarColors.",
   "cases": [
     { "value": "Alice Liddell", "initials": "AL", "color": 1 },
     { "value": "bob", "initials": "B", "color": 8 },
@@ -25,6 +25,8 @@
     { "value": "···", "initials": "", "color": 0 },
     { "value": "kostya-belyaev", "initials": "KB", "color": 9 },
     { "value": "@kostya-belyaev:matrix.org", "initials": "KB", "color": 6 },
-    { "value": "2fa-bot", "initials": "2B", "color": 8 }
+    { "value": "2fa-bot", "initials": "2B", "color": 8 },
+    { "value": "1️⃣ Alice Bob", "initials": "AB", "color": 5 },
+    { "value": "B", "initials": "B", "color": 3 }
   ]
 }

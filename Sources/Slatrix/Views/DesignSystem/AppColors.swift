@@ -273,9 +273,11 @@ func initials(_ value: String) -> String {
     return parts.compactMap { $0.first(where: isLetterOrDigit) }.prefix(2).map { String($0).uppercased() }.joined()
 }
 
-/// Unicode letters and decimal digits, as Android's `Character.isLetterOrDigit` reads them, so both apps agree.
+/// Unicode letters and decimal digits, as Android's `Character.isLetterOrDigit` reads them, so both apps agree; a keycap
+/// such as 1️⃣ is a digit in an enclosing mark, a symbol.
 private func isLetterOrDigit(_ character: Character) -> Bool {
-    switch character.unicodeScalars.first?.properties.generalCategory {
+    if character.unicodeScalars.contains(where: { $0.properties.generalCategory == .enclosingMark }) { return false }
+    return switch character.unicodeScalars.first?.properties.generalCategory {
     case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter, .decimalNumber: true
     default: false
     }
