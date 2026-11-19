@@ -50,11 +50,11 @@ private final class SendQueueErrorObserver: SendQueueRoomErrorListener, @uncheck
 @MainActor
 final class ConnectionRecovery {
     private static let logger = Logger(subsystem: "ai.nuanu.slatrix", category: "connection")
-    private let networkChanges: @Sendable () -> AsyncStream<Bool>
+    private let networkChanges: @Sendable () -> AsyncStream<NetworkRoute>
     private let wakeNotifications: NotificationCenter
     private let sendQueueResumeDelay: (Int) -> Duration
     init(
-        networkChanges: @escaping @Sendable () -> AsyncStream<Bool> = NetworkConnectivity.changes,
+        networkChanges: @escaping @Sendable () -> AsyncStream<NetworkRoute> = { NetworkConnectivity.changes() },
         wakeNotifications: NotificationCenter? = nil,
         sendQueueResumeDelay: @escaping (Int) -> Duration = { .seconds(min(300, 5 << min($0, 6))) }
     ) {
@@ -72,13 +72,15 @@ final class ConnectionRecovery {
     private var client: Client?
     private var handle: TaskHandle?
     private var responseHandle: TaskHandle?
+    private var responseObservation = UUID()
     private var attempt: Attempt?
     private var restartRequested = false
     private var revision = 0
     private var responseRevision = 0
     private var syncResponded = false
     private var hasConnected = false
-    private var networkAvailable: Bool?
+    private var networkRoute: NetworkRoute?
+    private var networkAvailable: Bool? { networkRoute.map { $0 != .offline } }
     private var networkTask: Task<Void, Never>?
     private var sdkState: SyncServiceState?
     private var onUpdate: ((MatrixConnectionFeedback) -> Void)?
@@ -116,16 +118,7 @@ final class ConnectionRecovery {
                     self.scheduleAutomaticRetry()
                 }
             })
-        responseHandle = service.roomListService().state(
-            listener: RoomSyncStateObserver { [weak self] state, revision in
-                Task { @MainActor [weak self] in
-                    guard let self, self.generation == account, self.service != nil, revision > self.responseRevision
-                    else { return }
-                    self.responseRevision = revision
-                    self.syncResponded = state == .settingUp || state == .recovering || state == .running
-                    self.publish()
-                }
-            })
+        observeRoomSync(service, acceptSnapshot: true)
         sendQueueHandle = client?.subscribeToSendQueueStatus(
             listener: SendQueueErrorObserver { [weak self] roomID in
                 Task { @MainActor [weak self] in
@@ -144,14 +137,15 @@ final class ConnectionRecovery {
             }
         }
         networkTask = Task { @MainActor [weak self, networkChanges] in
-            for await available in networkChanges() {
+            for await route in networkChanges() {
+                let available = route != .offline
                 guard let self, !Task.isCancelled, self.generation == account else { return }
-                // The monitor reports every path change; only a network back after a loss needs a fresh sync.
-                let returned = self.networkAvailable == false && available
-                self.networkAvailable = available
-                if !available || returned { self.syncResponded = false }
+                // A live socket can still belong to the previous route after a handoff without an offline notice.
+                let reconnect = available && self.networkRoute != nil && self.networkRoute != route
+                self.networkRoute = route
+                if !available || reconnect { self.stopObservingResponses() }
                 self.publish()
-                if returned {
+                if reconnect {
                     self.failures = 0
                     Task { @MainActor [weak self] in
                         guard let self, self.generation == account else { return }
@@ -160,6 +154,30 @@ final class ConnectionRecovery {
                 }
             }
         }
+    }
+
+    private func observeRoomSync(_ service: SyncService, acceptSnapshot: Bool) {
+        let observation = UUID()
+        responseObservation = observation
+        // The first callback is a snapshot. After a restart, only a later response belongs to the new connection.
+        responseRevision = acceptSnapshot ? 0 : 1
+        responseHandle = service.roomListService().state(
+            listener: RoomSyncStateObserver { [weak self] state, revision in
+                Task { @MainActor [weak self] in
+                    guard let self, self.responseHandle != nil, self.responseObservation == observation,
+                        revision > self.responseRevision
+                    else { return }
+                    self.responseRevision = revision
+                    self.syncResponded = state == .settingUp || state == .recovering || state == .running
+                    self.publish()
+                }
+            })
+    }
+
+    private func stopObservingResponses() {
+        responseHandle?.cancel()
+        responseHandle = nil
+        syncResponded = false
     }
 
     // A failed send stops its room's queue, and everything sent there after it waits. A reconnect resumes every room,
@@ -231,12 +249,13 @@ final class ConnectionRecovery {
                 let shouldStop = self.restartRequested
                 self.restartRequested = false
                 if shouldStop {
-                    self.syncResponded = false
+                    self.stopObservingResponses()
                     self.publish()
                     await service.stop()
                 }
                 guard self.generation == account else { throw CancellationError() }
                 guard self.networkAvailable != false else { return }
+                if self.responseHandle == nil { self.observeRoomSync(service, acceptSnapshot: false) }
                 await service.start()
                 guard self.generation == account else { throw CancellationError() }
             } while self.restartRequested
@@ -260,8 +279,7 @@ final class ConnectionRecovery {
         generation = UUID()
         handle?.cancel()
         handle = nil
-        responseHandle?.cancel()
-        responseHandle = nil
+        stopObservingResponses()
         automaticRetry?.cancel()
         automaticRetry = nil
         sendQueueHandle?.cancel()
@@ -271,7 +289,7 @@ final class ConnectionRecovery {
         sendQueueFailures = [:]
         networkTask?.cancel()
         networkTask = nil
-        networkAvailable = nil
+        networkRoute = nil
         failures = 0
         if let wakeObserver { wakeNotifications.removeObserver(wakeObserver) }
         wakeObserver = nil
@@ -280,8 +298,6 @@ final class ConnectionRecovery {
         attempt = nil
         restartRequested = false
         revision = 0
-        responseRevision = 0
-        syncResponded = false
         hasConnected = false
         sdkState = nil
         feedback = MatrixConnectionFeedback(

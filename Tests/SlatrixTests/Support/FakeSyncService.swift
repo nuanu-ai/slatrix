@@ -12,6 +12,7 @@ final class FakeSyncService: SyncService, @unchecked Sendable {
     var confirmsSync = true
     let roomSync: FakeConnectionRoomList
     let startGate = Gate()
+    let stopGate = Gate()
     var startCount: Int { lock.withLock { starts } }
     var stopCount: Int { lock.withLock { stops } }
 
@@ -38,6 +39,7 @@ final class FakeSyncService: SyncService, @unchecked Sendable {
         if let stateOnStart { emit(stateOnStart) }
     }
     override func stop() async {
+        await stopGate.wait()
         lock.withLock { stops += 1 }
         emit(.idle)
     }
@@ -71,11 +73,13 @@ final class FakeConnectionRoomList: RoomListService, @unchecked Sendable {
         listener.onUpdate(state: initial)
         return FakeCancellableHandle(noHandle: .init())
     }
-    func emit(_ state: RoomListServiceState) {
+    func emit(_ state: RoomListServiceState) { pendingUpdate(state)() }
+
+    func pendingUpdate(_ state: RoomListServiceState) -> () -> Void {
         let callbacks = lock.withLock {
             current = state
             return observers
         }
-        for observer in callbacks { observer.onUpdate(state: state) }
+        return { for observer in callbacks { observer.onUpdate(state: state) } }
     }
 }
