@@ -279,8 +279,12 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 // asEvent blocks on the SDK, so a batch is mapped off the main thread.
                 val (rows, unread) = withContext(Dispatchers.Default) {
                     batch.forEach { source.apply(it) }
-                    val refused = batch.flatMap { it.items() }.mapNotNull(::refused)
-                    if (refused.isNotEmpty()) operations.launch { undo(source.timeline, refused) }
+                    // RoomSendQueues cancels it, whichever conversation is open; this one says why its message came back.
+                    batch.flatMap { it.items() }.firstNotNullOfOrNull(::refusedChange)?.let { (_, target) ->
+                        operations.launch {
+                            announce(if (target == SendTarget.Redaction) "Couldn’t delete this message." else "Couldn’t edit this message.")
+                        }
+                    }
                     source.rows() to source.unread().takeIf { threadRoot == null }
                 }
                 var swapped = false
@@ -971,25 +975,6 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         val quoted = reply.event() as? EmbeddedEventDetails.Ready ?: return false
         val original = (quoted.content as? TimelineItemContent.MsgLike)?.content?.kind as? MsgLikeKind.Message ?: return false
         return quoted.sender == sender && (kind as? MsgLikeKind.Message)?.content?.body == original.content.body
-    }
-
-    /** Your deletion or edit of this sent message, if the server refused it; one the queue retries itself is still on its way. */
-    private fun refused(item: TimelineItem): Pair<EventOrTransactionId, SendTarget>? {
-        val event = item.asEvent() ?: return null
-        fun refused(state: EventSendState?) = (state as? EventSendState.SendingFailed)?.isRecoverable == false
-        val target = when {
-            refused(event.redactionSendState) -> SendTarget.Redaction
-            refused(event.editSendState) -> SendTarget.Edit
-            else -> return null
-        }
-        return event.eventOrTransactionId to target
-    }
-
-    /** As Slack keeps a message it couldn't delete or edit: it goes back to how the server has it, and you hear why. */
-    private suspend fun undo(timeline: Timeline, changes: List<Pair<EventOrTransactionId, SendTarget>>) {
-        for ((id, target) in changes) if (quietly { timeline.abortSend(id, target) } == true) {
-            announce(if (target == SendTarget.Redaction) "Couldn’t delete this message." else "Couldn’t edit this message.")
-        }
     }
 
     private fun row(item: TimelineItem): Any? {

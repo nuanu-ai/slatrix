@@ -711,27 +711,23 @@ class MatrixConversationTest {
     }
 
     // capability: message.delete
-    @Test fun aDeleteTheServerRefusedBringsTheMessageBackAndSaysSo() = runTest {
-        val timeline = ConversationTimeline(listOf(
-            // A failure the room's queue retries by itself is still on its way.
-            conversationItem("a", "\$waiting", "Still deleting", deletion = failed(recoverable = true)),
-            conversationItem("b", "\$refused", "Refused", deletion = failed(recoverable = false)),
-        ))
+    @Test fun aDeleteTheServerRefusedSaysSoWhereItsMessageIsShown() = runTest {
+        // A failure the room's queue retries by itself is still on its way.
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$deleting", "Deleting", deletion = failed(recoverable = true))))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        assertEquals(EventOrTransactionId.EventId("\$refused") to SendTarget.Redaction,
-            timeline.aborted.receive() to timeline.abortTargets.receive())
+        conversation.state.first { !it.loading }
+        runCurrent()
+        assertNull(conversation.state.value.notice)
+        timeline.emit(listOf(TimelineDiff.Set(0u, conversationItem("a", "\$deleting", "Deleting", deletion = failed(recoverable = false)))))
         assertEquals("Couldn’t delete this message.", conversation.state.first { it.notice != null }.notice)
-        assertTrue(timeline.aborted.isEmpty)
         conversation.close()
     }
 
     // capability: message.edit
-    @Test fun anEditTheServerRefusedGoesBackAndSaysSo() = runTest {
+    @Test fun anEditTheServerRefusedSaysSoWhereItsMessageIsShown() = runTest {
         val timeline = ConversationTimeline(listOf(
             conversationItem("a", "\$refused", "Edited", editState = failed(recoverable = false))))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
-        assertEquals(EventOrTransactionId.EventId("\$refused") to SendTarget.Edit,
-            timeline.aborted.receive() to timeline.abortTargets.receive())
         assertEquals("Couldn’t edit this message.", conversation.state.first { it.notice != null }.notice)
         conversation.close()
     }
@@ -1146,12 +1142,7 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     val retried = Channel<EventOrTransactionId>(Channel.UNLIMITED)
     val aborted = Channel<EventOrTransactionId>(Channel.UNLIMITED)
     override suspend fun retrySend(itemId: EventOrTransactionId, target: SendTarget): Boolean { retried.send(itemId); return true }
-    val abortTargets = Channel<SendTarget>(Channel.UNLIMITED)
-    override suspend fun abortSend(itemId: EventOrTransactionId, target: SendTarget): Boolean {
-        aborted.send(itemId)
-        abortTargets.send(target)
-        return true
-    }
+    override suspend fun abortSend(itemId: EventOrTransactionId, target: SendTarget): Boolean { aborted.send(itemId); return true }
     val reactions = Channel<Pair<EventOrTransactionId, String>>(Channel.UNLIMITED)
     var reactionAdded = true
     override suspend fun toggleReaction(itemId: EventOrTransactionId, key: String): Boolean { reactions.send(itemId to key); return reactionAdded }
