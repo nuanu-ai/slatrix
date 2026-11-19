@@ -16,6 +16,12 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         set { lock.withLock { reachedStart = newValue } }
     }
     private var reachedStart = false
+    /// What the next older pages answer, in order, before `startReached` does.
+    var pageAnswers: [Bool] {
+        get { lock.withLock { answers } }
+        set { lock.withLock { answers = newValue } }
+    }
+    private var answers: [Bool] = []
     /// Read receipts sent through this timeline, as "read:" or "fully:" and the event.
     let receipts = Recorder<String>()
     /// False until a listener is added: a timeline still being set up is not closed.
@@ -44,7 +50,7 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         }
         defer { lock.withLock { paging = false } }
         await pageGate.wait()
-        return startReached
+        return lock.withLock { answers.isEmpty ? reachedStart : answers.removeFirst() }
     }
     /// Loaded around an older message, it already reaches the newest one.
     override func paginateForwards(numEvents: UInt16) async throws -> Bool { true }

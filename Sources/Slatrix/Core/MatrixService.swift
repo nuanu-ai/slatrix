@@ -672,8 +672,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         case .failed, nil: false
         }
     }
-    /// The open on its way, until it returns.
-    private var inFlight: UUID?
     private var readingOlder: Bool { timeline.map { olderPages[ObjectIdentifier($0)] != nil } ?? false }
     private var typingHandle: TaskHandle?
     private var threadTimeline: Timeline?
@@ -1517,12 +1515,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func setupRoom(_ id: String, focus: TimelineFocus, eventID: String?, containing anchor: String? = nil)
         async -> Bool
     {
-        // The conversation on screen, opening or open at this message, is not opened again.
-        if anchor == nil, selection == shownSelection, selectedRoomID == id, focusedEventID == eventID,
-            openState == .ready || openState == .opening && inFlight == selection
-        {
-            return true
-        }
         let ahead: (token: UUID, task: Task<PreparedRoom?, Never>)?
         if case .live = focus, eventID == nil, let prepared, prepared.roomID == id {
             ahead = (prepared.token, prepared.task)
@@ -1533,12 +1525,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         let token = ahead?.token ?? UUID()
         selection = token
-        inFlight = token
-        defer { if inFlight == token { inFlight = nil } }
         updateSubscriptions(id)
-        // Another conversation goes up as it is chosen and its rows follow, so the one being left is never redrawn in
-        // between; a jump within the one on screen keeps its rows until the ones it needs arrive.
-        if selectedRoomID != id || messages.isEmpty { showConversation(id, eventID: eventID, token: token) }
+        // A conversation goes up as it is chosen and its rows follow, so the one being left is never redrawn in
+        // between. Checking whether the conversation on screen holds a message changes nothing on screen.
+        if anchor == nil || selectedRoomID != id { showConversation(id, eventID: eventID, token: token) }
         do {
             let client = try requireClient()
             var pendingRoom = try client.getRoom(roomId: id)
@@ -1609,13 +1599,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
         } catch {
             guard selection == token else { return true }
-            if let shown = shownSelection, shown != token {
-                // A jump within the conversation on screen leaves it as it was.
-                selection = shown
-            } else {
-                showConversation(id, eventID: eventID, token: token)
-                openState = .failed
-            }
+            showConversation(id, eventID: eventID, token: token)
+            openState = .failed
             errorMessage = Self.safeError(error)
         }
         return true

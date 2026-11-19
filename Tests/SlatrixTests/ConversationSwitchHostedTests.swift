@@ -400,7 +400,7 @@ struct ConversationSwitchHostedTests {
         #expect(!reading.isEmpty && reading.contains(where: \.placeholder) == outlasted, Self.report([], frames))
     }
 
-    @Test("A jump to a message the conversation on screen lacks keeps its table and rows until that message's come")
+    @Test("A jump to a message the conversation on screen lacks keeps its table while it checks the live timeline")
     func jumpKeepsPane() async throws {
         let harness = Harness()
         defer { harness.close() }
@@ -409,14 +409,14 @@ struct ConversationSwitchHostedTests {
         let before = harness.sample()
         let room = harness.rooms[0]
         room.focusedItems = [FakeTimelineItem(textEvent("$far", body: "Far back"))]
-        room.eventGate.arm()
+        room.buildGate.arm()
         let jumping = Task { await harness.matrix.jumpToMessage(roomID: room.id(), eventID: "$far") }
-        #expect(await eventually { room.eventGate.isWaiting })
+        #expect(await eventually { room.buildGate.isWaiting })
         // Long enough for the window to draw whatever the jump changed.
         await harness.idle()
         let held = harness.sample()
         #expect(before.table != nil && held.table == before.table && held.rows == before.rows, "\(before)\n\(held)")
-        room.eventGate.release()
+        room.buildGate.release()
         await jumping.value
     }
 }
