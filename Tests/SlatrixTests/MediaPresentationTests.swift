@@ -23,6 +23,7 @@ struct MediaPresentationTests {
     func fileNameCut() {
         let name = "harbor-web-release-4.2.0-rc.3-macos-universal-signed-notarized-with-debug-symbols-2026-11-18.zip"
         #expect(FileName.middleTruncated(name) { _ in true } == name)
+        #expect(FileName.middleTruncated("ab.cdef.zip") { $0.count <= 6 } == "ab…zip")
         for room in 8..<name.count {
             let cut = FileName.middleTruncated(name) { $0.count <= room }
             #expect(cut.count <= room && cut.contains("…"), "\(room): \(cut)")
