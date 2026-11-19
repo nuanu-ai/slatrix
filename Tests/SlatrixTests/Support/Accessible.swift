@@ -6,9 +6,25 @@ import AppKit
     func walk(_ element: AnyObject) -> [AnyObject] {
         [element] + (element.accessibilityChildren?() ?? []).map { $0 as AnyObject }.flatMap(walk)
     }
-    return walk(view).filter { element in
-        [element.accessibilityLabel?(), element.accessibilityTitle?()].contains { ($0 ?? nil)?.contains(text) == true }
+    return walk(view).filter { labelled($0, text) }
+}
+
+@MainActor private func labelled(_ element: AnyObject, _ text: String) -> Bool {
+    [element.accessibilityLabel?(), element.accessibilityTitle?()].contains { ($0 ?? nil)?.contains(text) == true }
+}
+
+/// The roles from `view` down to the first element VoiceOver reaches whose label or title contains `text`, nil if none.
+@MainActor func accessibilityPath(to text: String, in view: NSView) -> [String]? {
+    view.layoutSubtreeIfNeeded()
+    func path(_ element: AnyObject) -> [String]? {
+        let role = (element.accessibilityRole?() ?? nil)?.rawValue ?? "-"
+        if labelled(element, text) { return [role] }
+        for child in element.accessibilityChildren?() ?? [] {
+            if let rest = path(child as AnyObject) { return [role] + rest }
+        }
+        return nil
     }
+    return path(view)
 }
 
 /// SwiftUI builds its accessibility tree only once an assistive app such as VoiceOver asks for it. Tests in parallel

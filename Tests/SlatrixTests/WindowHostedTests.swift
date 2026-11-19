@@ -857,13 +857,22 @@ struct WindowHostedTests {
         #expect(await backAndTypes("i"))
     }
 
-    @Test("A profile in a list's place leaves the list out of VoiceOver's reach until it closes")
+    @Test("What a profile or the drawer lies over can't be activated, and a cover adds nothing to VoiceOver's path")
     func coveredRoute() async throws {
         let harness = Harness()
         defer { harness.close() }
         #expect(await harness.settle())
         VoiceOver.listen()
         defer { VoiceOver.done() }
+        // Nothing between the window and the control, as a cover that covers nothing would add.
+        func direct(_ text: String) -> Bool {
+            accessibilityPath(to: text, in: harness.hosting).map { !$0.dropFirst().dropLast().contains("AXGroup") }
+                == true
+        }
+        func enabled(_ text: String) -> Bool {
+            harness.accessible(text).contains { $0.isAccessibilityEnabled?() == true }
+        }
+        #expect(direct("Message"))
         harness.resize(700)
         harness.menu("people")
         // Everyone with an "a" in their name, Alex and Julia among them.
@@ -871,20 +880,22 @@ struct WindowHostedTests {
             harness.shown().first { ($0 as? NSTextField)?.placeholderString == "Search people" } as? NSTextField
         }
         #expect(await eventually { search() != nil })
+        #expect(direct("Search people"))
         #expect(harness.window.makeFirstResponder(search()))
         harness.window.firstResponder?.insertText("a")
-        #expect(await eventually { !harness.accessible("Julia").isEmpty })
+        #expect(await eventually { enabled("Julia") })
         #expect(harness.accessible("Alex").contains { $0.accessibilityPerformPress?() == true })
         #expect(await eventually { !harness.accessible("Close profile").isEmpty })
-        #expect(harness.accessible("Julia").isEmpty)
+        #expect(!enabled("Julia") && !enabled("Search people"))
+        #expect(!harness.accessible("Julia").contains { $0.accessibilityPerformPress?() == true })
         #expect(harness.accessible("Close profile").contains { $0.accessibilityPerformPress?() == true })
-        #expect(await eventually { !harness.accessible("Julia").isEmpty })
+        #expect(await eventually { enabled("Julia") })
 
         // The sidebar drawer over the whole column, the toolbar too.
         harness.menu("toggle-sidebar")
-        #expect(await eventually { harness.accessible("Search people").isEmpty && harness.accessible("Back").isEmpty })
+        #expect(await eventually { !enabled("Search people") && !enabled("Back") })
         harness.menu("toggle-sidebar")
-        #expect(await eventually { !harness.accessible("Search people").isEmpty })
+        #expect(await eventually { enabled("Search people") })
     }
 
     @Test("In a narrow window an error sits under the thread's header, so Close thread still closes the thread")
