@@ -74,7 +74,7 @@ enum TimelineLayout {
                 Row(id: message.id, kind: .message(message, grouped: grouped, time: message.timestamp.formatted(time))))
             previous = message
             if message.eventID == threadRootEventID,
-                let label = repliesLabel(message.replyCount, replies: messages[(index + 1)...])
+                let label = repliesLabel(message.replyCount ?? 0, replies: messages[(index + 1)...])
             {
                 rows.append(Row(id: "replies", kind: .replies(label)))
             }

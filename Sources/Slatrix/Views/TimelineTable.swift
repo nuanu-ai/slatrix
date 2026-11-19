@@ -475,7 +475,7 @@ struct TimelineTable: NSViewRepresentable {
             if !row.message.reactions.isEmpty { height += m(30) }
             if row.message.attachment != nil { height += m(300) }
             if row.message.replyPreview != nil { height += m(48) }
-            if row.message.replyCount > 0 { height += m(28) }
+            if (row.message.replyCount ?? 0) > 0 { height += m(28) }
             return height
         }
     }

@@ -609,9 +609,9 @@ struct MessageRow: View {
                     // A reused cell shows another message: a download or preview in flight must not carry over.
                     if let attachment { attachment.padding(.top, m(6)).id(message.id) }
                     if !message.reactions.isEmpty { reactions.padding(.top, m(3)) }
-                    if !isThread && message.replyCount > 0 {
+                    if !isThread, let count = message.replyCount, count > 0 {
                         ThreadRepliesBar(
-                            count: message.replyCount, lastReply: message.lastReply, avatar: replierAvatar,
+                            count: count, lastReply: message.lastReply, avatar: replierAvatar,
                             prepare: actions.prepareThread, action: actions.thread
                         ).padding(.top, m.sp4)
                     }
