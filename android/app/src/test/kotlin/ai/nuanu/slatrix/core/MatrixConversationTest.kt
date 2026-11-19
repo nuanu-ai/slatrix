@@ -689,6 +689,35 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: message.delete
+    @Test fun aDeleteTheServerRefusedBringsTheMessageBackAndSaysSo() = runTest {
+        val timeline = ConversationTimeline(listOf(
+            // A failure the room's queue retries by itself is still on its way.
+            conversationItem("a", "\$waiting", "Still deleting", deletion = failed(recoverable = true)),
+            conversationItem("b", "\$refused", "Refused", deletion = failed(recoverable = false)),
+        ))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        assertEquals(EventOrTransactionId.EventId("\$refused") to SendTarget.Redaction,
+            timeline.aborted.receive() to timeline.abortTargets.receive())
+        assertEquals("Couldn’t delete this message.", conversation.state.first { it.notice != null }.notice)
+        assertTrue(timeline.aborted.isEmpty)
+        conversation.close()
+    }
+
+    // capability: message.edit
+    @Test fun anEditTheServerRefusedGoesBackAndSaysSo() = runTest {
+        val timeline = ConversationTimeline(listOf(
+            conversationItem("a", "\$refused", "Edited", editState = failed(recoverable = false))))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        assertEquals(EventOrTransactionId.EventId("\$refused") to SendTarget.Edit,
+            timeline.aborted.receive() to timeline.abortTargets.receive())
+        assertEquals("Couldn’t edit this message.", conversation.state.first { it.notice != null }.notice)
+        conversation.close()
+    }
+
+    private fun failed(recoverable: Boolean) =
+        EventSendState.SendingFailed(QueueWedgeError.GenericApiError("x"), recoverable)
+
     // capability: message.forward
     @Test fun aMessageForwardsAsItsTextOrItsMediaButNotWhileAnEditOrDeleteIsPending() = runTest {
         fun media(type: MessageType) = TimelineItemContent.MsgLike(MsgLikeContent(
@@ -1093,7 +1122,12 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     val retried = Channel<EventOrTransactionId>(Channel.UNLIMITED)
     val aborted = Channel<EventOrTransactionId>(Channel.UNLIMITED)
     override suspend fun retrySend(itemId: EventOrTransactionId, target: SendTarget): Boolean { retried.send(itemId); return true }
-    override suspend fun abortSend(itemId: EventOrTransactionId, target: SendTarget): Boolean { aborted.send(itemId); return true }
+    val abortTargets = Channel<SendTarget>(Channel.UNLIMITED)
+    override suspend fun abortSend(itemId: EventOrTransactionId, target: SendTarget): Boolean {
+        aborted.send(itemId)
+        abortTargets.send(target)
+        return true
+    }
     val reactions = Channel<Pair<EventOrTransactionId, String>>(Channel.UNLIMITED)
     var reactionAdded = true
     override suspend fun toggleReaction(itemId: EventOrTransactionId, key: String): Boolean { reactions.send(itemId to key); return reactionAdded }
@@ -1206,6 +1240,7 @@ internal fun conversationItem(
     editable: Boolean = false,
     editState: EventSendState? = null,
     deleting: Boolean = false,
+    deletion: EventSendState? = if (deleting) EventSendState.NotSentYet(null) else null,
     readBy: List<String> = emptyList(),
     onMap: () -> Unit = {},
 ): TimelineItem {
@@ -1222,7 +1257,7 @@ internal fun conversationItem(
         )),
         reactions = reactions, eventTypeRaw = "m.room.message", timestamp = timestamp,
         localSendState = sendState, editSendState = editState,
-        redactionSendState = if (deleting) EventSendState.NotSentYet(null) else null, localCreatedAt = null,
+        redactionSendState = deletion, localCreatedAt = null,
         readReceipts = readBy.associateWith { Receipt(null) }, origin = null, canBeRepliedTo = true,
         lazyProvider = object : LazyTimelineItemProvider(NoHandle) {},
     )
