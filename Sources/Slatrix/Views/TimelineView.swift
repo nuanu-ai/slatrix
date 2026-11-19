@@ -504,7 +504,30 @@ struct MessageRow: View {
             .contentShape(Rectangle())
     }
     private var layout: some View {
-        HStack(alignment: .top, spacing: m(ConversationGrid.gap(thread: isThread))) {
+        let gutter = m(ConversationGrid.gap(thread: isThread))
+        return VStack(alignment: .leading, spacing: m.sp2) {
+            // Above the avatar and the name, so both start on the name's line as in every other row; the pin stands in
+            // the avatar's column, as in Slack.
+            if isPinned {
+                HStack(spacing: compact ? m.sp4 : gutter) {
+                    Image(systemName: "pin.fill").frame(width: compact ? nil : m.avatar, alignment: .trailing)
+                    Text("Pinned")
+                }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+            }
+            content(gutter: gutter)
+        }.padding(.horizontal, m.conversationInset(thread: isThread))
+            // 12 above a sender and 2 around a message under them, counted from 20 pt lines: a one-line row has none of
+            // that leading of its own, so it comes on top of them. Two grouped rows share both their 2s, so a sender's
+            // first gap is the tightest.
+            .padding(.top, Self.topInset(m, grouped: grouped, compact: compact))
+            .padding(.bottom, compact ? m.sp4 : grouped ? m.sp4 : m.sp2)
+    }
+    /// The space above a row's first line, which the hover toolbar may hang into.
+    static func topInset(_ m: Metrics, grouped: Bool, compact: Bool) -> CGFloat {
+        compact ? (grouped ? 0 : m.sp2) : grouped ? m(3) : m.sp12
+    }
+    private func content(gutter: CGFloat) -> some View {
+        HStack(alignment: .top, spacing: gutter) {
             if !compact {
                 if grouped || !appearance.showAvatars {
                     // One line: a wrap would grow the row on hover.
@@ -524,10 +547,6 @@ struct MessageRow: View {
                 }
             }
             VStack(alignment: .leading, spacing: m.sp2) {
-                if isPinned {
-                    Label("Pinned", systemImage: "pin.fill").font(m.font(.subheadline))
-                        .foregroundStyle(colors.textSecondary)
-                }
                 if !grouped || compact {
                     HStack(alignment: .firstTextBaseline, spacing: m(6)) {
                         if compact {
@@ -606,12 +625,7 @@ struct MessageRow: View {
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(.horizontal, m.conversationInset(thread: isThread))
-            // 12 above a sender and 2 around a message under them, counted from 20 pt lines: a one-line row has none of
-            // that leading of its own, so it comes on top of them. Two grouped rows share both their 2s, so a sender's
-            // first gap is the tightest.
-            .padding(.top, compact ? (grouped ? 0 : m.sp2) : grouped ? m(3) : m.sp12)
-            .padding(.bottom, compact ? m.sp4 : grouped ? m.sp4 : m.sp2)
+        }
     }
     private var clock: some View { SendingClock(since: message.timestamp) }
 
