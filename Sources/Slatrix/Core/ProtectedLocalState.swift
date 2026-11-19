@@ -55,6 +55,16 @@ struct ProtectedLocalState: Codable, Equatable {
     var recentSearches: [String]?
     /// When each message left Later, so a removal made offline still reaches the account; optional, as above.
     var savedRemovals: [SavedMessageReference]?
+    static let maximumDraftBytes = 131_072
+
+    /// Leaves out each entry over its own limit, so one pasted draft or long search never stops the rest from saving.
+    func fitted() -> ProtectedLocalState {
+        var state = self
+        state.drafts = drafts.filter { $0.value.utf8.count <= Self.maximumDraftBytes }
+        state.threadDrafts = threadDrafts.filter { $0.value.utf8.count <= Self.maximumDraftBytes }
+        state.recentSearches = recentSearches?.filter { $0.utf8.count <= RecentSearches.maximumBytes }
+        return state
+    }
 
     func validate() throws {
         guard drafts.count <= 4_096, threadDrafts.count <= 4_096, saved.count <= 10_000,
@@ -63,10 +73,12 @@ struct ProtectedLocalState: Codable, Equatable {
             (recentSearches ?? []).allSatisfy({ $0.utf8.count <= RecentSearches.maximumBytes })
         else { throw ProtectedLocalStateError.invalidData }
         for (id, text) in drafts {
-            guard Self.validID(id), text.utf8.count <= 131_072 else { throw ProtectedLocalStateError.invalidData }
+            guard Self.validID(id), text.utf8.count <= Self.maximumDraftBytes else {
+                throw ProtectedLocalStateError.invalidData
+            }
         }
         for (id, text) in threadDrafts {
-            guard ThreadDraftAddress(id: id) != nil, text.utf8.count <= 131_072 else {
+            guard ThreadDraftAddress(id: id) != nil, text.utf8.count <= Self.maximumDraftBytes else {
                 throw ProtectedLocalStateError.invalidData
             }
         }
@@ -167,6 +179,7 @@ actor ProtectedLocalStateStore {
     }
 
     func save(_ state: ProtectedLocalState, access: ProtectedLocalStateAccess, revision: UInt64) throws {
+        let state = state.fitted()
         guard var record = records[access.accountID], record.generation == access.generation else {
             throw ProtectedLocalStateError.staleAccess
         }
@@ -239,7 +252,7 @@ enum ProtectedLocalStateCodec {
                 // A draft that would outgrow the limit as HTML stays as written rather than lock the whole vault.
                 let migrate = { (text: String) in
                     let html = ComposerFormat.draft(plain: text)
-                    return html.utf8.count <= 131_072 ? html : text
+                    return html.utf8.count <= ProtectedLocalState.maximumDraftBytes ? html : text
                 }
                 payload.state.drafts = payload.state.drafts.mapValues(migrate)
                 payload.state.threadDrafts = payload.state.threadDrafts.mapValues(migrate)

@@ -63,12 +63,11 @@ struct RecentSearchesTests {
         #expect(RecentSearches.adding(spec.query, to: spec.recents) == spec.expected)
     }
 
-    @Test(
-        "A search over 1 KB stays out of recent searches, so it can't stop drafts from saving",
-        arguments: [(1_024, true), (1_025, false)])
-    func overlongQueryNotKept(bytes: Int, kept: Bool) {
-        let query = String(repeating: "q", count: bytes)
-        #expect(RecentSearches.adding(query, to: ["launch"]).contains(query) == kept)
+    @Test("A search over 1 KB stays out of recent searches, so it can't stop drafts from saving")
+    func overlongQueryNotKept() {
+        let fits = String(repeating: "😀", count: 256)
+        #expect(RecentSearches.adding(fits, to: ["launch"]) == [fits, "launch"])
+        #expect(RecentSearches.adding(String(repeating: "😀", count: 257), to: ["launch"]) == ["launch"])
     }
 
     // capability: search.recent
