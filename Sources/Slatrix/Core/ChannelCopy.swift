@@ -4,6 +4,12 @@ import MatrixRustSDK
 /// Slack's "Also send to #channel" for a thread reply: the channel gets a rich reply to it without rel_type m.thread,
 /// which MSC3440 lets clients show in the main timeline to advertise a thread message.
 enum ChannelCopy {
+    /// Whether "Also send to #channel" shows checked under the thread `threadID`, which is what a reply sent from it
+    /// does. Only text is copied, so the box sits out a reply with files.
+    static func isChecked(checkedRootID: String?, threadID: String?, hasFiles: Bool) -> Bool {
+        threadID != nil && checkedRootID == threadID && !hasFiles
+    }
+
     /// The copy's event content as JSON. Its m.mentions is empty, so whoever the reply mentions hears once, from the
     /// thread.
     static func content(_ message: ComposerFormat.Message, replyTo eventID: String) throws -> String {

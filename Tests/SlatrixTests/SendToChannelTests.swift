@@ -50,16 +50,27 @@ struct SendToChannelTests {
         let content = try ChannelCopy.content(ComposerFormat.message(draft: spec.draft), replyTo: spec.replyTo)
         #expect(try JSONDecoder().decode(JSON.self, from: Data(content.utf8)) == spec.content)
     }
+
+    // capability: thread.send-to-channel
+    @Test(
+        "A reply goes to the channel only while its thread's box shows checked, which it never does with files attached",
+        arguments: [
+            ("$root", "$root", false, true), ("$root", "$root", true, false), (nil, "$root", false, false),
+            ("$other", "$root", false, false), ("$root", nil, false, false),
+        ] as [(String?, String?, Bool, Bool)])
+    func copiesOnlyWhenShownChecked(checked: String?, thread: String?, files: Bool, copies: Bool) {
+        #expect(ChannelCopy.isChecked(checkedRootID: checked, threadID: thread, hasFiles: files) == copies)
+    }
 }
 
 /// The reader's own text message in a timeline, still sending under a transaction ID or sent under an event ID.
-private func own(_ id: EventOrTransactionId, body: String) -> FakeTimelineItem {
+private func own(_ id: EventOrTransactionId, body: String, item: String? = nil) -> FakeTimelineItem {
     var event = textEvent("$unused", body: body, sender: "@sender:example.org")
     event.eventOrTransactionId = id
     if case .transactionId = id { event.isRemote = false }
     event.isOwn = true
     // The SDK keeps an item's unique ID when its local echo turns remote.
-    return FakeTimelineItem(event, uniqueID: body)
+    return FakeTimelineItem(event, uniqueID: item ?? body)
 }
 
 @MainActor

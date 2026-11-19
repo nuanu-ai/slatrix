@@ -1339,13 +1339,10 @@ struct RootView: View {
                     .disabled(
                         !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
                             || matrix.selectedRoomID != root.roomID)
-                    // Only text is copied, so the box sits out a reply with files.
-                    let withFiles =
-                        attachmentDrafts.queues[
-                            AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID)]?.isEmpty == false
+                    let withFiles = hasQueuedFiles(roomID: room.id, threadID: root.eventID)
                     Toggle(
                         isOn: Binding(
-                            get: { channelCopyRootID == root.eventID && !withFiles },
+                            get: { copiesToChannel(roomID: room.id, threadID: root.eventID) },
                             set: { channelCopyRootID = $0 ? root.eventID : nil })
                     ) {
                         if room.isDirect {
@@ -2320,13 +2317,20 @@ struct RootView: View {
         _ body: String, files: [URL], room: ChatRoom, threadID: String? = nil, context: ComposerContext,
         reply: MessageReplyTarget?
     ) async throws {
-        try await sendText(body, room: room, threadID: threadID, context: context, reply: reply, copies: files.isEmpty)
+        try await sendText(body, room: room, threadID: threadID, context: context, reply: reply)
         for file in files { try await sendFile(file, room: room, threadID: threadID, context: context) }
     }
-    /// `copies` lets a checked "Also send to #channel" copy the text, which it can't for a reply with files.
+    private func hasQueuedFiles(roomID: String, threadID: String?) -> Bool {
+        attachmentDrafts.queues[AttachmentDraftAddress(roomID: roomID, threadRootID: threadID)]?.isEmpty == false
+    }
+    /// What "Also send to #channel" shows, and so what a reply sent from that thread does.
+    private func copiesToChannel(roomID: String, threadID: String?) -> Bool {
+        ChannelCopy.isChecked(
+            checkedRootID: channelCopyRootID, threadID: threadID,
+            hasFiles: hasQueuedFiles(roomID: roomID, threadID: threadID))
+    }
     private func sendText(
-        _ body: String, room: ChatRoom, threadID: String? = nil, context: ComposerContext, reply: MessageReplyTarget?,
-        copies: Bool = true
+        _ body: String, room: ChatRoom, threadID: String? = nil, context: ComposerContext, reply: MessageReplyTarget?
     ) async throws {
         try assertComposerContext(context)
         guard !matrix.isPreview else { throw MatrixServiceError.preview }
@@ -2344,7 +2348,7 @@ struct RootView: View {
         else {
             throw MatrixServiceError.request("The reply changed. Check it and send again.")
         }
-        let alsoToChannel = copies && threadID != nil && threadID == channelCopyRootID
+        let alsoToChannel = copiesToChannel(roomID: room.id, threadID: threadID)
         try await matrix.sendMessage(
             body, threadRootID: threadID, replyToID: reply?.message.eventID, roomID: room.id,
             alsoToChannel: alsoToChannel)
