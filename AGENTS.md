@@ -76,6 +76,8 @@ Agreed seams, where tests belong:
 
 - **Timeline mapping**: SDK timeline items to `ChatMessage`. Catches wrong kinds, bodies, attachments and send states; misses rendering.
 - **Services against SDK fakes**: subclasses of the generated SDK classes. Catches races, stale completions and error handling; misses real server behavior.
+- **Real SDK against a loopback homeserver**. Two clients send and read synthetic messages over HTTP. This covers transport retries, duplicate delivery and queue stalls. The fixture has no federation or live sync.
+- Run `uv run scripts/tests/delivery/probe.py --seed 7319 --rounds 12` to kill the macOS sender with `SIGKILL` at known points in delivery. A separate recipient reads back the unencrypted text from a private Synapse server.
 - **Local storage**: encrypted drafts, saved messages, attachment staging, credentials. Catches format, permission and corruption handling.
 - **Pure policies**: read state, navigation order, sidebar layout, link parsing, search query grammar, timeline grouping and scroll anchoring. Catches rule regressions directly. Rules with cases in `spec/` run them.
 - **Hosted timeline and window**: the real timeline, the whole window, or a design system component, in an offscreen window, opt-in with `SLATRIX_HOSTED_UI_CHECKS=1` because it needs an awake display. Catches scroll jumps, row geometry and what an update costs the main thread; misses real pointer input and WindowServer timing.

@@ -230,10 +230,10 @@ class MatrixConversationTest {
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
         conversation.state.first { it.rows.isNotEmpty() }
         conversation.loadOlder()
-        runCurrent()
-        assertEquals("It reads on past two pages of edits and reactions", 3, timeline.pages)
-        assertEquals("Earlier", conversation.state.first { it.rows.messages.size == 2 }.rows.messages.first().body)
-        conversation.state.first { !it.loadingHistory }
+        val loaded = withContext(Dispatchers.Default) {
+            withTimeout(2_000) { conversation.state.first { it.rows.messages.size == 2 && !it.loadingHistory } }
+        }
+        assertEquals("Earlier", loaded.rows.messages.first().body)
         assertEquals("It stops at the message", 3, timeline.pages)
         conversation.close()
     }

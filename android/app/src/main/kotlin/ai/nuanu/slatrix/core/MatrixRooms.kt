@@ -137,14 +137,22 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private val spaceRequests = Channel<SpaceRequest>(Channel.UNLIMITED)
     private val followed = mutableMapOf<String, Followed>()
     private val syncGeneration = AtomicLong()
+    private val responseGeneration = AtomicLong()
     private var error: String? = null
     private var isOffline = false
     private var syncRunning = false
     private var syncResponded = false
     private var hasConnected = false
     private var networkAvailable: Boolean? = null
+    private val sendQueues = RoomSendQueues(client, connection, foreground)
+
     // Room calls block on the SDK, so the list never builds on the main thread.
-    private val worker = scope.launch(Dispatchers.Default) {
+    private val worker = scope.launch {
+        launch { sendQueues.run() }
+        withContext(Dispatchers.Default) { followRooms() }
+    }
+
+    private suspend fun followRooms() {
         try {
             coroutineScope {
                 launch { sync() }
@@ -274,7 +282,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                 if (!event.running) syncResponded = false
                 updateConnection()
             }
-            is Event.SyncResponse -> if (event.generation == syncGeneration.get()) {
+            is Event.SyncResponse -> if (event.generation == syncGeneration.get() && event.observer == responseGeneration.get()) {
                 syncResponded = event.state.hasResponse
                 updateConnection()
             }
@@ -290,7 +298,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         }
     }
 
-    private suspend fun updateConnection() {
+    private fun updateConnection() {
         val next = ConnectionState.resolve(networkAvailable, foreground.value, syncRunning, syncResponded,
             isOffline || error != null, hasConnected)
         val wasConnected = mutableConnection.value == ConnectionState.Connected
@@ -300,7 +308,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         if (next == ConnectionState.Connected) {
             hasConnected = true
             // A network error pauses send queues; resume only after the server answers again.
-            if (!wasConnected) runCatching { client.enableAllSendQueues(true) }
+            if (!wasConnected) sendQueues.connected()
         }
     }
 
@@ -533,12 +541,20 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                     }
                 })
                 val roomListService = current.roomListService()
-                responseHandle = roomListService.state(object : RoomListServiceStateListener {
-                    override fun onUpdate(state: RoomListServiceState) {
-                        if (state.hasResponse) failureStreak.set(0)
-                        events.trySend(Event.SyncResponse(state, generation))
-                    }
-                })
+                fun observeResponses(observer: Long, afterStop: Boolean): TaskHandle {
+                    return roomListService.state(object : RoomListServiceStateListener {
+                        // The first callback is a snapshot of the old sync, even when its socket has closed.
+                        private var skipSnapshot = afterStop
+                        override fun onUpdate(state: RoomListServiceState) {
+                            if (skipSnapshot) { skipSnapshot = false; return }
+                            if (observer != responseGeneration.get()) return
+                            if (state.hasResponse) failureStreak.set(0)
+                            events.trySend(Event.SyncResponse(state, generation, observer))
+                        }
+                    })
+                }
+                var stoppedThrough = responseGeneration.get()
+                responseHandle = observeResponses(stoppedThrough, afterStop = false)
                 list = roomListService.allRooms()
                 // The limit truncates actual room vectors; it does not reserve that capacity.
                 entries = list.entriesWithDynamicAdapters(UInt.MAX_VALUE, object : RoomListEntriesListener {
@@ -553,18 +569,32 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                 failures = 0
                 coroutineScope {
                     val networkAvailableNow = AtomicReference<Boolean?>(null)
+                    // Called under syncLock. A route change and a background transition can overlap.
+                    suspend fun stop(epoch: Long) {
+                        if (epoch <= stoppedThrough) return
+                        withContext(NonCancellable) { current.stop() }
+                        responseHandle?.release()
+                        responseHandle = null
+                        stoppedThrough = epoch
+                    }
+                    suspend fun startIfReady() {
+                        if (!foreground.value || networkAvailableNow.get() == false || stoppedThrough != responseGeneration.get()) return
+                        if (responseHandle == null) responseHandle = observeResponses(stoppedThrough, afterStop = true)
+                        current.start()
+                    }
                     // While the app is hidden, a push lookup runs its own short encryption sync through this service.
                     // Offline mode covers a lost network; a sync that ended otherwise starts again while the app is open,
                     // as the Mac's ConnectionRecovery does. A stop is never cut short, or a start could land before it ends.
                     val visibility = launch {
                         foreground.collectLatest { visible ->
+                            val retired = if (!visible) responseGeneration.incrementAndGet() else null
                             events.trySend(Event.Visibility(visible, generation))
-                            if (!visible) return@collectLatest withContext(NonCancellable) { syncLock.withLock { current.stop() } }
-                            syncLock.withLock { if (foreground.value && networkAvailableNow.get() != false) current.start() }
+                            if (retired != null) return@collectLatest withContext(NonCancellable) { syncLock.withLock { stop(retired) } }
+                            syncLock.withLock { startIfReady() }
                             for (end in ended) {
                                 val priorFailures = failureStreak.getAndIncrement()
                                 if (priorFailures > 0) delay(1_000L shl minOf(priorFailures - 1, 5))
-                                syncLock.withLock { if (foreground.value && networkAvailableNow.get() != false) current.start() }
+                                syncLock.withLock { startIfReady() }
                             }
                         }
                     }
@@ -573,14 +603,12 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
                         val available = status.available
                         networkAvailableNow.set(available)
                         if (available) failureStreak.set(0)
+                        val retired = if (!available || status.routeChanged) responseGeneration.incrementAndGet() else null
                         events.trySend(Event.Network(available, generation, status.routeChanged))
                         // start/stop and a push's short sync share the same encryption sync.
                         syncLock.withLock {
-                            if (available && foreground.value) {
-                                // start is a no-op while running, so a new default route must release the old socket first.
-                                if (status.routeChanged) withContext(NonCancellable) { current.stop() }
-                                if (foreground.value) current.start()
-                            } else if (!available) withContext(NonCancellable) { current.stop() }
+                            if (retired != null) stop(retired)
+                            startIfReady()
                         }
                     } }
                     retries.receive()
@@ -644,7 +672,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         data class Info(val info: RoomInfo, val room: Followed) : Event
         data class Entries(val updates: List<RoomListEntriesUpdate>, val generation: Long) : Event
         data class Connection(val error: String?, val generation: Long, val running: Boolean = false, val offline: Boolean = false) : Event
-        data class SyncResponse(val state: RoomListServiceState, val generation: Long) : Event
+        data class SyncResponse(val state: RoomListServiceState, val generation: Long, val observer: Long) : Event
         data class Network(val available: Boolean, val generation: Long, val routeChanged: Boolean) : Event
         data class Visibility(val visible: Boolean, val generation: Long) : Event
         data class Presence(val dots: Map<String, ai.nuanu.slatrix.core.Presence>) : Event

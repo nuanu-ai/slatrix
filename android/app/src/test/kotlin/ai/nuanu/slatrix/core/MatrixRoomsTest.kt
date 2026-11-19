@@ -499,6 +499,37 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    @Test fun aRoomPausedByATemporarySendErrorResumesWhileSyncStaysConnected() = recoverQueueAfterDeleting("later-message")
+
+    @Test fun deletingTheFailedHeadResumesTheRestOfTheRoomQueue() = recoverQueueAfterDeleting("local")
+
+    private fun recoverQueueAfterDeleting(transaction: String) = runTest {
+        val room = TestRoom(roomInfo("!paused:example.org", "Paused"))
+        val rejected = TestRoom(roomInfo("!rejected:example.org", "Rejected"))
+        val client = RoomsClient(listOf(room, rejected))
+        client.services.trySend(RoomsSync())
+        val rooms = MatrixRooms(backgroundScope, client)
+        try {
+            client.sendQueuesEnabled.first { it }
+            rejected.sendQueueEnabled.value = false
+            client.queueUpdates?.onUpdate(rejected.id(), RoomSendQueueUpdate.SendError(
+                "rejected", QueueWedgeError.CrossVerificationRequired, false))
+            client.queueUpdates?.onUpdate(rejected.id(), RoomSendQueueUpdate.CancelledLocalEvent("unrelated"))
+            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.NewLocalEvent("local"))
+            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.NewLocalEvent("later-message"))
+            room.sendQueueEnabled.value = false
+            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.SendError(
+                "local", QueueWedgeError.GenericApiError("502 Bad Gateway"), true))
+
+            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.CancelledLocalEvent(transaction))
+            withContext(Dispatchers.Default) { withTimeout(8_000) { room.sendQueueEnabled.first { it } } }
+            assertFalse("Verification failures wait for the user", rejected.sendQueueEnabled.value)
+            assertEquals(ConnectionState.Connected, rooms.connection.value)
+        } finally {
+            rooms.close()
+        }
+    }
+
     // capability: people.presence
     @Test fun aDirectMessageShowsTheOtherPersonsDotOnceConnected() = runTest {
         val avery = roomInfo("!dm:example.org", "Avery", direct = true)
@@ -626,6 +657,56 @@ class MatrixRoomsTest {
             assertFalse("The app is hidden, so its live sync must stay stopped", sync.running.value)
         } finally {
             release.complete(Unit)
+            rooms.close()
+        }
+    }
+
+    @Test fun aLateRoomResponseFromThePreviousRouteCannotConfirmTheNewConnection() = lateRoomResponse(background = false)
+
+    @Test fun returningToTheAppNeedsAFreshRoomResponse() = lateRoomResponse(background = true)
+
+    private fun lateRoomResponse(background: Boolean) = runTest {
+        val dm = TestRoom(roomInfo("!dm:example.org", "Avery", direct = true))
+        val client = RoomsClient(listOf(dm))
+        val sync = RoomsSync()
+        client.services.trySend(sync)
+        val network = MutableSharedFlow<NetworkStatus>()
+        val foreground = MutableStateFlow(true)
+        val rooms = MatrixRooms(backgroundScope, client, foreground, network)
+        val stopping = CompletableDeferred<Unit>()
+        val releaseStop = CompletableDeferred<Unit>()
+        try {
+            rooms.connection.first { it == ConnectionState.Connected }
+            network.subscriptionCount.first { it > 0 }
+            val typing = dm.typing.filterNotNull().first()
+            val oldResponse = sync.pendingRoomResponse()
+            val startedAgain = CompletableDeferred<Unit>()
+            sync.confirmsSync = false
+            sync.beforeStart = { startedAgain.complete(Unit) }
+            sync.beforeStop = { stopping.complete(Unit); releaseStop.await(); sync.emitState(SyncServiceState.IDLE) }
+            if (background) foreground.value = false else network.emit(NetworkStatus(true, routeChanged = true))
+            stopping.await()
+            val interrupted = if (background) ConnectionState.Paused else ConnectionState.Reconnecting
+            rooms.connection.first { it == interrupted }
+
+            oldResponse()
+            // Typing flows through the same room event queue, so the old response has been handled.
+            typing.call(listOf("@avery:example.org"))
+            rooms.state.first { it.rooms.singleOrNull()?.typing == true }
+            assertEquals(interrupted, rooms.connection.value)
+            releaseStop.complete(Unit)
+            if (background) foreground.value = true
+            startedAgain.await()
+            sync.running.first { it }
+            oldResponse()
+            typing.call(emptyList())
+            rooms.state.first { it.rooms.singleOrNull()?.typing == false }
+            assertEquals(ConnectionState.Reconnecting, rooms.connection.value)
+
+            sync.emitRoomState(RoomListServiceState.RUNNING)
+            rooms.connection.first { it == ConnectionState.Connected }
+        } finally {
+            releaseStop.complete(Unit)
             rooms.close()
         }
     }
@@ -778,6 +859,11 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
             override suspend fun getNotification(roomId: String, eventId: String): NotificationStatus = lookup(roomId, eventId)
         }
     }
+    @Volatile var queueUpdates: SendQueueRoomUpdateListener? = null
+    override suspend fun subscribeToSendQueueUpdates(listener: SendQueueRoomUpdateListener): TaskHandle {
+        queueUpdates = listener
+        return RoomsHandle()
+    }
     val sendQueuesEnabled = MutableStateFlow(false)
     var resumeSending: suspend () -> Unit = {}
     override suspend fun enableAllSendQueues(enable: Boolean) { resumeSending(); sendQueuesEnabled.value = enable }
@@ -795,6 +881,9 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
 }
 
 private class TestRoom(var info: RoomInfo, var latest: LatestEventValue = LatestEventValue.None) : Room(NoHandle) {
+    val sendQueueEnabled = MutableStateFlow(true)
+    override fun isSendQueueEnabled() = sendQueueEnabled.value
+    override fun enableSendQueue(enable: Boolean) { sendQueueEnabled.value = enable }
     private var listener: RoomInfoListener? = null
     val typing = MutableStateFlow<TypingNotificationsListener?>(null)
     override fun ownUserId(): String = "@me:example.org"
@@ -834,8 +923,10 @@ private class TestRoom(var info: RoomInfo, var latest: LatestEventValue = Latest
 
 private class RoomsSync : SyncService(NoHandle) {
     var beforeStart: suspend () -> Unit = {}
+    var beforeStop: suspend () -> Unit = {}
     var confirmsSync = true
     private var roomStateListener: RoomListServiceStateListener? = null
+    private var lastRoomState = RoomListServiceState.INITIAL
     val started = CompletableDeferred<Unit>()
     val stopped = CompletableDeferred<Unit>()
     val teardownStarted = CompletableDeferred<Unit>()
@@ -845,7 +936,7 @@ private class RoomsSync : SyncService(NoHandle) {
     override fun roomListService(): RoomListService = object : RoomListService(NoHandle) {
         override fun state(listener: RoomListServiceStateListener): TaskHandle {
             roomStateListener = listener
-            listener.onUpdate(RoomListServiceState.INITIAL)
+            listener.onUpdate(lastRoomState)
             return RoomsHandle()
         }
         override suspend fun allRooms(): RoomList = object : RoomList(NoHandle) {
@@ -878,6 +969,7 @@ private class RoomsSync : SyncService(NoHandle) {
         started.complete(Unit)
     }
     override suspend fun stop() {
+        beforeStop()
         running.value = false
         stopped.complete(Unit)
     }
@@ -885,7 +977,14 @@ private class RoomsSync : SyncService(NoHandle) {
         stateListener?.onUpdate(state)
         if (confirmsSync && state == SyncServiceState.RUNNING) emitRoomState(RoomListServiceState.RUNNING)
     }
-    fun emitRoomState(state: RoomListServiceState) { roomStateListener?.onUpdate(state) }
+    fun pendingRoomResponse(): () -> Unit {
+        val listener = checkNotNull(roomStateListener)
+        return { listener.onUpdate(RoomListServiceState.RUNNING) }
+    }
+    fun emitRoomState(state: RoomListServiceState) {
+        lastRoomState = state
+        roomStateListener?.onUpdate(state)
+    }
     fun end(state: SyncServiceState) {
         running.value = false
         emitState(state)

@@ -32,10 +32,12 @@ final class StoppedQueueRoom: Room, @unchecked Sendable {
     override func enableSendQueue(enable: Bool) { enabled.append(enable) }
 }
 
+private let wifiRoute = NetworkRoute.online(interface: 4, gateways: [])
+
 @MainActor private func onlineRecovery(wakeNotifications: NotificationCenter = NotificationCenter())
     -> ConnectionRecovery
 {
-    ConnectionRecovery(networkChanges: { AsyncStream { $0.yield(true) } }, wakeNotifications: wakeNotifications)
+    ConnectionRecovery(networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: wakeNotifications)
 }
 
 @MainActor
@@ -52,17 +54,65 @@ struct ConnectionRecoveryTests {
         await recovery.stop()
     }
 
+    @Test("A connection that drops before the SDK can resume sending leaves queues paused")
+    func offlineBeforeQueuedResume() async throws {
+        let recovery = onlineRecovery()
+        let service = FakeSyncService()
+        service.confirmsSync = false
+        let client = SendQueueClient()
+        var connected = false
+        var queueAtDrop: [Bool]?
+        try await recovery.attach(service, client: client) { feedback in
+            if feedback.state == .running { connected = true }
+            if connected && feedback.state == .offline && queueAtDrop == nil { queueAtDrop = client.enabled.all }
+        }
+        service.emit(.running)
+        try #require(await eventually { recovery.feedback.state == .connecting })
+        service.roomSync.emit(.running)
+        service.emit(.offline)
+        try #require(await eventually { queueAtDrop != nil })
+        await drainMainActor()
+        #expect(client.enabled.all == queueAtDrop)
+        await recovery.stop()
+    }
+
     @Test("A room whose sending stopped on a server error resumes by itself while connected, without a restart")
     func failedSendResumes() async throws {
         let recovery = ConnectionRecovery(
-            networkChanges: { AsyncStream { $0.yield(true) } }, wakeNotifications: NotificationCenter(),
-            sendQueueResumeDelay: { _ in .zero })
+            networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
+            waitToResumeSending: { _ in })
         let service = FakeSyncService(state: .running)
         let client = SendQueueClient()
         try await recovery.attach(service, client: client) { _ in }
         #expect(await eventually { recovery.feedback.state == .running })
         client.failSend(roomID: "!room")
         #expect(await eventually { client.stopped.enabled.all == [true] })
+        await recovery.stop()
+    }
+
+    @Test("A delayed room retry leaves its queue paused when the connection has since dropped")
+    func offlineBeforeRoomRetry() async throws {
+        var releaseTimer: CheckedContinuation<Void, Never>?
+        var timerFired = false
+        let recovery = ConnectionRecovery(
+            networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
+            waitToResumeSending: { _ in
+                await withCheckedContinuation { releaseTimer = $0 }
+                timerFired = true
+            })
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { recovery.feedback.state == .running })
+        client.failSend(roomID: "!room")
+        try #require(await eventually { releaseTimer != nil })
+        service.emit(.offline)
+        try #require(await eventually { recovery.feedback.state == .offline })
+
+        releaseTimer?.resume()
+        try #require(await eventually { timerFired })
+        await drainMainActor()
+        #expect(client.stopped.enabled.all.isEmpty)
         await recovery.stop()
     }
 
@@ -104,45 +154,161 @@ struct ConnectionRecoveryTests {
 
     @Test("Network loss says offline, and a returned network reconnects without a click")
     func networkLossAndReturn() async throws {
-        let network = AsyncStream<Bool>.makeStream()
+        let network = AsyncStream<NetworkRoute>.makeStream()
         let recovery = ConnectionRecovery(networkChanges: { network.stream })
         let service = FakeSyncService(state: .running)
         try await recovery.attach(service) { _ in }
         #expect(await eventually { recovery.feedback.state == .running })
-        network.continuation.yield(false)
+        network.continuation.yield(.offline)
         #expect(await eventually { recovery.feedback.state == .offline })
-        network.continuation.yield(true)
+        network.continuation.yield(wifiRoute)
         #expect(await eventually { recovery.feedback.state == .running })
+        await recovery.stop()
+        network.continuation.finish()
+    }
+
+    @Test(
+        "A new interface or gateway releases a stale sync and resumes messages without an offline notification",
+        arguments: [
+            NetworkRoute.online(interface: 7, gateways: []),
+            .online(interface: 4, gateways: [.hostPort(host: "192.0.2.1", port: .any)]),
+        ])
+    func routeHandoffResumesSending(newRoute: NetworkRoute) async throws {
+        let network = AsyncStream<NetworkRoute>.makeStream()
+        network.continuation.yield(wifiRoute)
+        let recovery = ConnectionRecovery(networkChanges: { network.stream })
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { client.enabled.all.last == true })
+        await client.enableAllSendQueues(enable: false)
+
+        network.continuation.yield(newRoute)
+        #expect(await eventually { client.enabled.all.last == true && recovery.feedback.state == .running })
         await recovery.stop()
         network.continuation.finish()
     }
 
     @Test("A path update that keeps the network leaves a running sync alone")
     func steadyNetworkKeepsSync() async throws {
-        let network = AsyncStream<Bool>.makeStream()
+        let network = AsyncStream<NetworkRoute>.makeStream()
         let recovery = ConnectionRecovery(networkChanges: { network.stream })
         let service = FakeSyncService(state: .running)
         try await recovery.attach(service) { _ in }
-        network.continuation.yield(true)
-        network.continuation.yield(true)
-        network.continuation.yield(false)
+        network.continuation.yield(wifiRoute)
+        network.continuation.yield(wifiRoute)
+        network.continuation.yield(.offline)
         #expect(await eventually { recovery.feedback.state == .offline })
         #expect(service.stopCount == 0)
         await recovery.stop()
         network.continuation.finish()
     }
 
+    enum Interruption: CaseIterable {
+        case noNetwork, wifi, ethernet, wake, offlineSync, failedSync, endedSync, oldReply
+    }
+
+    @Test(
+        "A network restored while an earlier SDK start is suspended still resumes the queue",
+        arguments: Interruption.allCases, Interruption.allCases)
+    func handoffDuringStart(first: Interruption, second: Interruption) async throws {
+        let network = AsyncStream<NetworkRoute>.makeStream()
+        let wake = NotificationCenter()
+        let recovery = ConnectionRecovery(networkChanges: { network.stream }, wakeNotifications: wake)
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        let ethernet = NetworkRoute.online(interface: 7, gateways: [])
+        network.continuation.yield(wifiRoute)
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { client.enabled.all.last == true })
+
+        let oldReply = service.roomSync.pendingUpdate(.running)
+        service.startGate.arm()
+        defer { service.startGate.release() }
+        wake.post(name: NSWorkspace.didWakeNotification, object: nil)
+        try #require(await eventually { service.startGate.isWaiting })
+        for event in [first, second] {
+            switch event {
+            case .noNetwork: network.continuation.yield(.offline)
+            case .wifi: network.continuation.yield(wifiRoute)
+            case .ethernet: network.continuation.yield(ethernet)
+            case .wake: wake.post(name: NSWorkspace.didWakeNotification, object: nil)
+            case .offlineSync: service.emit(.offline)
+            case .failedSync: service.emit(.error)
+            case .endedSync: service.emit(.terminated)
+            case .oldReply: oldReply()
+            }
+        }
+
+        network.continuation.yield(.offline)
+        try #require(await eventually { recovery.feedback.errorMessage == "You’re offline" })
+        await client.enableAllSendQueues(enable: false)
+        network.continuation.yield(ethernet)
+        try #require(await eventually { recovery.feedback.errorMessage != "You’re offline" })
+        await drainMainActor()
+        service.startGate.release()
+        #expect(
+            await eventually {
+                recovery.feedback.state == .running && !recovery.feedback.isRetrying && client.enabled.all.last == true
+            })
+        await recovery.stop()
+        network.continuation.finish()
+    }
+
+    enum ReplyTiming: CaseIterable { case offline, stopping, restarted }
+
+    @Test(
+        "A room reply from the old connection cannot resume sends before the new connection answers",
+        arguments: [RoomListServiceState.settingUp, .recovering, .running], ReplyTiming.allCases)
+    func lateRoomSyncDuringNetworkLoss(response: RoomListServiceState, timing: ReplyTiming) async throws {
+        let network = AsyncStream<NetworkRoute>.makeStream()
+        let recovery = ConnectionRecovery(networkChanges: { network.stream })
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { client.enabled.all.last == true })
+
+        let deliverOldReply = service.roomSync.pendingUpdate(response)
+        network.continuation.yield(.offline)
+        try #require(await eventually { recovery.feedback.state == .offline })
+        await client.enableAllSendQueues(enable: false)
+        service.confirmsSync = false
+        if timing == .offline {
+            deliverOldReply()
+            await drainMainActor()
+        }
+        if timing == .stopping { service.stopGate.arm() }
+        network.continuation.yield(wifiRoute)
+        if timing == .stopping {
+            try #require(await eventually { service.stopGate.isWaiting })
+            deliverOldReply()
+            await drainMainActor()
+            service.stopGate.release()
+        }
+        try #require(await eventually { service.startCount > 0 && !recovery.feedback.isRetrying })
+        if timing == .restarted {
+            deliverOldReply()
+            await drainMainActor()
+        }
+
+        #expect(recovery.feedback.state != .running && client.enabled.all.last == false)
+        service.roomSync.emit(.running)
+        #expect(await eventually { client.enabled.all.last == true && recovery.feedback.state == .running })
+        await recovery.stop()
+        network.continuation.finish()
+    }
+
     @Test("A slow SDK start cannot block reporting that the network disappeared")
     func networkLossDuringStart() async throws {
-        let network = AsyncStream<Bool>.makeStream()
-        network.continuation.yield(true)
+        let network = AsyncStream<NetworkRoute>.makeStream()
+        network.continuation.yield(wifiRoute)
         let recovery = ConnectionRecovery(networkChanges: { network.stream })
         let service = FakeSyncService()
         service.startGate.arm()
         try await recovery.attach(service) { _ in }
         let starting = Task { try await recovery.retry() }
         #expect(await eventually { service.startGate.isWaiting })
-        network.continuation.yield(false)
+        network.continuation.yield(.offline)
         #expect(await eventually { recovery.feedback.errorMessage == "You’re offline" })
         service.startGate.release()
         try await starting.value

@@ -21,6 +21,7 @@ jobs:
     outputs:
       mac: ${{ steps.paths.outputs.mac }}
       android: ${{ steps.paths.outputs.android }}
+      delivery: ${{ steps.paths.outputs.delivery }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,8 +30,7 @@ jobs:
         id: paths
         run: |
           if [[ $GITHUB_EVENT_NAME != pull_request ]]; then
-            echo "mac=true" >> "$GITHUB_OUTPUT"
-            echo "android=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n' mac=true android=true delivery=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # A pull request runs on a merge commit whose first parent is the base branch.
@@ -39,8 +39,9 @@ jobs:
           if grep -vE '^(android/|spec/capabilities\.json$)' <<< "$files" | grep -q .; then mac=true; else mac=false; fi
           android_paths='^(android/|design/|spec/|Sources/Slatrix/Core/EmojiData\.swift$|scripts/(build-sdk|settle-android-emulator)\.sh$|Support/MatrixSDK/|\.github/workflows/ci\.yml$)'
           if grep -E "$android_paths" <<< "$files" | grep -qv '^spec/capabilities\.json$'; then android=true; else android=false; fi
-          echo "mac=$mac" >> "$GITHUB_OUTPUT"
-          echo "android=$android" >> "$GITHUB_OUTPUT"
+          delivery_paths='^(scripts/tests/delivery/|scripts/build-sdk\.sh$|Support/MatrixSDK/|Sources/Slatrix/Core/(ConnectionRecovery|NetworkConnectivity|MatrixService)\.swift$|\.github/workflows/ci\.yml$)'
+          if grep -qE "$delivery_paths" <<< "$files"; then delivery=true; else delivery=false; fi
+          printf '%s\n' "mac=$mac" "android=$android" "delivery=$delivery" >> "$GITHUB_OUTPUT"
           echo "Mac: $mac, Android: $android"
 
   capabilities:
@@ -146,6 +147,11 @@ jobs:
           kill "$watchdog" 2> /dev/null || true
           pkill -P "$watchdog" 2> /dev/null || true
           exit "$status"
+
+      - name: Recover a live send queue after a process crash
+        if: matrix.task == 'test' && needs.changes.outputs.delivery == 'true'
+        timeout-minutes: 12
+        run: pipx run --spec uv==0.10.3 uv run scripts/tests/delivery/probe.py --seed "$GITHUB_RUN_ID" --rounds 6
 
       # Alone and one at a time, so other tests do not skew the clock.
       - name: Speed budgets
