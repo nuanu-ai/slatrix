@@ -1,0 +1,134 @@
+diff --git a/bindings/matrix-sdk-ffi/src/client.rs b/bindings/matrix-sdk-ffi/src/client.rs
+--- a/bindings/matrix-sdk-ffi/src/client.rs
++++ b/bindings/matrix-sdk-ffi/src/client.rs
+@@ -252,6 +252,48 @@
+     fn transmission_progress(&self, progress: TransmissionProgress);
+ }
+ 
++/// What [`Client::abort_refused_changes`] cancelled about an existing event.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
++pub enum RefusedChangeKind {
++    /// Its redaction.
++    Redaction,
++    /// An edit of it.
++    Edit,
++    /// A reaction to it.
++    Reaction,
++}
++
++/// A change to an existing event that the server refused, and that
++/// [`Client::abort_refused_changes`] took out of its room's send queue.
++#[derive(Clone, Debug, uniffi::Record)]
++pub struct RefusedChange {
++    /// The room whose send queue held the change.
++    pub room_id: String,
++    /// The event the change applied to.
++    pub event_id: String,
++    /// What the change was.
++    pub kind: RefusedChangeKind,
++}
++
++/// The event an edit or a reaction applies to, or `None` for any other event.
++fn changed_event(
++    content: &matrix_sdk::store::SerializableEventContent,
++) -> Option<(String, RefusedChangeKind)> {
++    #[derive(Deserialize)]
++    struct RelatesTo {
++        rel_type: String,
++        event_id: String,
++    }
++
++    let relation = content.raw().0.get_field::<RelatesTo>("m.relates_to").ok().flatten()?;
++    let kind = match relation.rel_type.as_str() {
++        "m.replace" => RefusedChangeKind::Edit,
++        "m.annotation" => RefusedChangeKind::Reaction,
++        _ => return None,
++    };
++    Some((relation.event_id, kind))
++}
++
+ /// A listener to the global (client-wide) update reporter of the send queue.
+ #[matrix_sdk_ffi_macros::export(callback_interface)]
+ pub trait SendQueueRoomUpdateListener: SyncOutsideWasm + SendOutsideWasm {
+@@ -844,6 +886,53 @@
+     /// [`Room::enable_send_queue`].
+     pub async fn enable_all_send_queues(&self, enable: bool) {
+         self.inner.send_queue().set_enabled(enable).await;
++    }
++
++    /// Aborts every change to an existing event (a redaction, an edit or a
++    /// reaction) that the server refused, in every room with unsent requests,
++    /// and returns what it aborted.
++    ///
++    /// Such a request stays at the head of its room's send queue and holds up
++    /// everything sent after it, across restarts. New events are left alone,
++    /// as is a request wedged by a rejected access token, which the send queue
++    /// retries by itself once the token is refreshed. A request that couldn't
++    /// be aborted is left for the next call.
++    pub async fn abort_refused_changes(&self) -> Result<Vec<RefusedChange>, ClientError> {
++        use matrix_sdk::{QueueWedgeError, send_queue::LocalEchoContent};
++
++        let refused = |error: &Option<QueueWedgeError>| {
++            error
++                .as_ref()
++                .is_some_and(|error| !matches!(error, QueueWedgeError::ExpiredAccessToken))
++        };
++
++        let mut aborted = Vec::new();
++        for (room_id, echoes) in self.inner.send_queue().local_echoes().await? {
++            for echo in echoes {
++                let ((event_id, kind), handle) = match echo.content {
++                    LocalEchoContent::Redaction { redacts, send_handle, send_error, .. }
++                        if refused(&send_error) =>
++                    {
++                        ((redacts.to_string(), RefusedChangeKind::Redaction), send_handle)
++                    }
++                    LocalEchoContent::Event { serialized_event, send_handle, send_error }
++                        if refused(&send_error) =>
++                    {
++                        let Some(change) = changed_event(&serialized_event) else { continue };
++                        (change, send_handle)
++                    }
++                    _ => continue,
++                };
++                match handle.abort().await {
++                    Ok(true) => {
++                        aborted.push(RefusedChange { room_id: room_id.to_string(), event_id, kind })
++                    }
++                    Ok(false) => {}
++                    Err(err) => warn!("couldn't abort a refused change: {err}"),
++                }
++            }
++        }
++        Ok(aborted)
+     }
+ 
+     /// Enables or disables progress reporting for media uploads in the send
+diff --git a/bindings/matrix-sdk-ffi/src/timeline/mod.rs b/bindings/matrix-sdk-ffi/src/timeline/mod.rs
+--- a/bindings/matrix-sdk-ffi/src/timeline/mod.rs
++++ b/bindings/matrix-sdk-ffi/src/timeline/mod.rs
+@@ -936,16 +936,23 @@
+ #[derive(uniffi::Object)]
+ pub struct SendHandle {
+     inner: Mutex<Option<matrix_sdk::send_queue::SendHandle>>,
++    transaction_id: String,
+ }
+ 
+ impl SendHandle {
+     fn new(handle: matrix_sdk::send_queue::SendHandle) -> Self {
+-        Self { inner: Mutex::new(Some(handle)) }
++        let transaction_id = handle.transaction_id().to_string();
++        Self { inner: Mutex::new(Some(handle)), transaction_id }
+     }
+ }
+ 
+ #[matrix_sdk_ffi_macros::export]
+ impl SendHandle {
++    /// The transaction ID the send queue's updates use for this event.
++    pub fn transaction_id(&self) -> String {
++        self.transaction_id.clone()
++    }
++
+     /// Try to abort the sending of the current event, with an optional `reason`
+     /// applied to the redaction when the event went out anyway.
+     ///
