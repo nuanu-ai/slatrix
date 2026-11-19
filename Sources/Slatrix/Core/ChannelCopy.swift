@@ -79,18 +79,20 @@ final class SentEcho: TimelineListener, @unchecked Sendable {
     func onUpdate(diff: [TimelineDiff]) {
         let outcome: Outcome? = lock.withLock {
             guard self.outcome == nil else { return nil }
-            items.apply(diff.map(\.change))
+            let changes = diff.map(\.change)
+            items.apply(changes)
             // The listener's first update is the timeline as it was before the send.
             guard let before else {
                 before = Set(items.map { $0.uniqueId().id })
                 return nil
             }
-            // Its local echo, or the sent event when both arrive in one update.
+            // Its local echo, even when the sent event replaces it in the same update. Only this device's queue makes
+            // one, so the same text sent from another device is never taken for it.
             echo =
                 echo
-                ?? items.first {
-                    guard let event = $0.asEvent(), event.isOwn, case .msgLike(let content) = event.content,
-                        case .message(let message) = content.kind
+                ?? changes.lazy.flatMap(\.values).first {
+                    guard let event = $0.asEvent(), event.isOwn, case .transactionId = event.eventOrTransactionId,
+                        case .msgLike(let content) = event.content, case .message(let message) = content.kind
                     else { return false }
                     return message.body == body && !before.contains($0.uniqueId().id)
                 }?.uniqueId().id

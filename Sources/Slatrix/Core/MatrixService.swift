@@ -1884,6 +1884,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let message = ComposerFormat.message(draft: draft)
         guard !message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let token = selection
+        let session = sessionGeneration
         let target: Timeline
         if let threadRootID {
             _ = try requireClient()
@@ -1910,7 +1911,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             echo?.cancel()
             throw error
         }
-        if let echo { copyToChannel(message, once: echo, room: room) }
+        if let echo { copyToChannel(message, once: echo, room: room, session: session) }
         await returnToLive(after: token, threadRootID: threadRootID)
     }
 
@@ -1935,8 +1936,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// The channel's copy of a thread reply, sent once the reply has an event ID to quote. The send queue only takes
     /// replies that stay in the replied-to event's thread, so the copy goes out directly.
-    private func copyToChannel(_ message: ComposerFormat.Message, once echo: SentEcho, room: Room) {
-        let session = sessionGeneration
+    /// `session` is the one the reply was sent in: a copy never goes out through a session that has since ended.
+    private func copyToChannel(_ message: ComposerFormat.Message, once echo: SentEcho, room: Room, session: UUID) {
+        guard session == sessionGeneration else { return echo.cancel() }
         pendingCopies.append(echo)
         Task {
             let replyID = await echo.sentEventID()

@@ -68,7 +68,10 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     }
     /// Messages sent through this timeline into the room's send queue.
     let sent = Recorder<Void>()
+    /// Holds a send before the queue takes it.
+    let sendGate = Gate()
     override func send(msg: RoomMessageEventContentWithoutRelation) async throws -> SendHandle {
+        await sendGate.wait()
         sent.append(())
         return SendHandle(noHandle: .init())
     }
