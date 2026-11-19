@@ -1116,7 +1116,7 @@ struct RootView: View {
         VStack(spacing: 0) {
             if room.membership == "invite" {
                 channelHeader(room)
-                inviteView(room)
+                inviteView(room).covered(coverage.pane)
             } else {
                 TimelineUnderBars { insets in
                     TimelineView(
@@ -1419,36 +1419,41 @@ struct RootView: View {
                     }.buttonStyle(.secondary)
                 }
             }
-            switch route {
-            case .channels:
-                PublicRoomDirectoryView(
-                    matrix: matrix, service: matrix.publicDirectory, workspace: browsedWorkspace,
-                    onResolve: openBrowsedChannel
-                ).id(workspaceID)
-            case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
-            case .threads:
-                ThreadsFeedView(
-                    matrix: matrix, feed: matrix.threadFeed, workspaceID: $workspaceID, onOpen: openThreadAction)
-            case .files:
-                SharedFilesView(
-                    matrix: matrix, service: matrix.sharedFiles, workspaceID: workspaceID,
-                    onOpen: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
-                    onOpenMedia: { [viewer] in viewer.open($0, files: $1) })
-            case .saved: savedCollection
-            case .drafts: draftsCollection
-            case .activity:
-                ActivityFeedView(
-                    matrix: matrix, activity: matrix.activity, workspaceID: $workspaceID, onOpenMessage: openActivity,
-                    onOpenRoom: selectRoom)
-            case .search:
-                SearchResultsView(
-                    matrix: matrix, bar: searchBar,
-                    onOpenMessage: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
-                    onOpenRoom: selectRoom, onOpenProfile: openProfile)
-            case .home, .directMessages: EmptyView()
-            }
+            routeBody(route)
+                // A pane in its place covers all but the toolbar.
+                .covered(coverage.pane)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .bottom) { ToastHost(toasts: toasts).padding(.bottom, m.sp24) }
+    }
+    @ViewBuilder private func routeBody(_ route: AppRoute) -> some View {
+        switch route {
+        case .channels:
+            PublicRoomDirectoryView(
+                matrix: matrix, service: matrix.publicDirectory, workspace: browsedWorkspace,
+                onResolve: openBrowsedChannel
+            ).id(workspaceID)
+        case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
+        case .threads:
+            ThreadsFeedView(
+                matrix: matrix, feed: matrix.threadFeed, workspaceID: $workspaceID, onOpen: openThreadAction)
+        case .files:
+            SharedFilesView(
+                matrix: matrix, service: matrix.sharedFiles, workspaceID: workspaceID,
+                onOpen: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
+                onOpenMedia: { [viewer] in viewer.open($0, files: $1) })
+        case .saved: savedCollection
+        case .drafts: draftsCollection
+        case .activity:
+            ActivityFeedView(
+                matrix: matrix, activity: matrix.activity, workspaceID: $workspaceID, onOpenMessage: openActivity,
+                onOpenRoom: selectRoom)
+        case .search:
+            SearchResultsView(
+                matrix: matrix, bar: searchBar,
+                onOpenMessage: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
+                onOpenRoom: selectRoom, onOpenProfile: openProfile)
+        case .home, .directMessages: EmptyView()
+        }
     }
     private var savedCollection: some View {
         SavedMessagesView(

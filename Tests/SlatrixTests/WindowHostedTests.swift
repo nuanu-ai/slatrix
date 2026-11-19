@@ -197,6 +197,19 @@ struct WindowHostedTests {
         func menu(_ action: String) {
             NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
         }
+
+        /// What VoiceOver reaches in the window whose label or title contains `text`.
+        func accessible(_ text: String) -> [AnyObject] {
+            hosting.layoutSubtreeIfNeeded()
+            func walk(_ element: AnyObject) -> [AnyObject] {
+                [element] + (element.accessibilityChildren?() ?? []).map { $0 as AnyObject }.flatMap(walk)
+            }
+            return walk(hosting).filter { element in
+                [element.accessibilityLabel?(), element.accessibilityTitle?()].contains {
+                    ($0 ?? nil)?.contains(text) == true
+                }
+            }
+        }
     }
 
     @Test(
@@ -852,6 +865,38 @@ struct WindowHostedTests {
         harness.menu("mark-read")
         #expect(await eventually { harness.shown().compactMap { $0 as? UploadDropView }.count == 1 })
         #expect(await backAndTypes("i"))
+    }
+
+    @Test("A profile in a list's place leaves the list out of VoiceOver's reach until it closes")
+    func coveredRoute() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        // SwiftUI builds its accessibility tree only once an assistive app such as VoiceOver asks for it.
+        let enhanced = NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface")
+        NSApp.accessibilitySetValue(true, forAttribute: enhanced)
+        defer { NSApp.accessibilitySetValue(false, forAttribute: enhanced) }
+        harness.resize(700)
+        harness.menu("people")
+        // Everyone with an "a" in their name, Alex and Julia among them.
+        func search() -> NSTextField? {
+            harness.shown().first { ($0 as? NSTextField)?.placeholderString == "Search people" } as? NSTextField
+        }
+        #expect(await eventually { search() != nil })
+        #expect(harness.window.makeFirstResponder(search()))
+        harness.window.firstResponder?.insertText("a")
+        #expect(await eventually { !harness.accessible("Julia").isEmpty })
+        #expect(harness.accessible("Alex").contains { $0.accessibilityPerformPress?() == true })
+        #expect(await eventually { !harness.accessible("Close profile").isEmpty })
+        #expect(harness.accessible("Julia").isEmpty)
+        #expect(harness.accessible("Close profile").contains { $0.accessibilityPerformPress?() == true })
+        #expect(await eventually { !harness.accessible("Julia").isEmpty })
+
+        // The sidebar drawer over the whole column, the toolbar too.
+        harness.menu("toggle-sidebar")
+        #expect(await eventually { harness.accessible("Search people").isEmpty && harness.accessible("Back").isEmpty })
+        harness.menu("toggle-sidebar")
+        #expect(await eventually { !harness.accessible("Search people").isEmpty })
     }
 
     @Test("In a narrow window an error sits under the thread's header, so Close thread still closes the thread")

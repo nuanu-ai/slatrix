@@ -13,8 +13,11 @@ import SwiftUI
 }
 
 extension View {
-    /// Out of reach under something that covers it: no clicks, keys or drops, and hidden from VoiceOver.
-    func covered(_ covered: Bool) -> some View { disabled(covered).accessibilityHidden(covered) }
+    /// Out of reach under something that covers it: no clicks, keys or drops, and hidden from VoiceOver. On the Mac a
+    /// stack hides its children only as an element of its own, so it is always one, a group while uncovered.
+    func covered(_ covered: Bool) -> some View {
+        disabled(covered).accessibilityElement(children: covered ? .ignore : .contain).accessibilityHidden(covered)
+    }
 
     /// Shows `content` as a modal over the window while `item` is set, like `.sheet(item:)`. A click outside closes it
     /// only when `closesOnClickOutside`, so a form never loses what was typed into it.
