@@ -1198,14 +1198,6 @@ struct TimelineRow: View, Equatable {
                             matrix: matrix, message: message, preview: $0, origin: target, onOpen: context.onShowReply,
                             onOpenThread: context.onThread)
                     },
-                    reactionFaces: message.reactions.reduce(into: [:]) { faces, reaction in
-                        faces[reaction.key] = reaction.faces(me: matrix.user?.id)?.map { id in
-                            let member = matrix.members.first { $0.id == id }
-                            return AvatarView(
-                                name: member?.name ?? MatrixID.localpart(id), size: metrics.avatarReaction,
-                                matrix: matrix, source: member?.avatarURL)
-                        }
-                    },
                     attachment: message.attachment.map {
                         AttachmentView(
                             matrix: matrix, message: message, attachment: $0, collapsed: row.mediaCollapsed,
