@@ -86,9 +86,9 @@ struct TimelineView: View {
             }, insets: insets
         )
         .overlay(alignment: .bottom) {
-            // A conversation still reading its first rows holds their place on the composer.
+            // A conversation still reading its first rows, after the loading delay, holds their place on the composer.
             if !thread && messages.isEmpty && matrix.timelineLoading {
-                SkeletonRows(count: 8, waits: false).fixedSize(horizontal: false, vertical: true)
+                SkeletonRows(count: 8).fixedSize(horizontal: false, vertical: true)
                     .conversationRow(m, isThread: false).padding(.bottom, insets.bottom)
             }
         }

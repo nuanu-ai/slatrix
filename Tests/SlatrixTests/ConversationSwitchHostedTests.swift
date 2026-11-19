@@ -7,8 +7,9 @@ import Testing
 
 /// Switching conversations in the whole window, offscreen, against SDK fakes whose timelines the test holds back;
 /// needs an awake display. A recorder samples the window after every run-loop pass, once Core Animation has committed
-/// it: which conversation the header names, which conversation's rows are on screen and where, whether a loading state
-/// shows, which table shows them, and how many rows the pass measured.
+/// it: which conversation the header shows, which conversation's rows are on screen and where, whether placeholder rows
+/// or a spinner show, which table shows the rows, and how many rows the pass measured. The header and the placeholder
+/// rows are read from the window's pixels, as drawn.
 @MainActor
 @Suite(
     .serialized, .tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
@@ -16,13 +17,15 @@ struct ConversationSwitchHostedTests {
     struct Frame: CustomStringConvertible {
         var at: Duration
         var date = Date()
+        /// The conversation whose header the frame shows, told apart by its pixels once the recording ends.
         var header: String?
+        var headerPixels: [Int] = []
         /// Visible message rows by event ID, with their top in the window.
         var rows: [String: CGFloat]
         var rooms: Set<String>
         var loading: Bool
-        /// Placeholder rows holding the place of rows still being read.
-        var skeleton = false
+        /// Placeholder rows drawn in the message pane, holding the place of rows being read.
+        var placeholder = false
         /// The conversation's introduction, which tops one read back to its start.
         var intro = false
         /// The timeline's table; a new one builds its cells and measures every row it shows afresh.
@@ -33,7 +36,7 @@ struct ConversationSwitchHostedTests {
             let ms = Int((at / .milliseconds(1)).rounded())
             let table = table.map { String(UInt(bitPattern: $0.hashValue) % 10_000) } ?? "-"
             return
-                "\(ms) ms header=\(header ?? "-") rows=\(rows.count) of \(rooms.sorted()) loading=\(loading) skeleton=\(skeleton) intro=\(intro) table=\(table) measured=\(measured)"
+                "\(ms) ms header=\(header ?? "-") rows=\(rows.count) of \(rooms.sorted()) loading=\(loading) placeholder=\(placeholder) intro=\(intro) table=\(table) measured=\(measured)"
         }
     }
 
@@ -124,13 +127,80 @@ struct ConversationSwitchHostedTests {
             }
             // The timeline's own; the composer has a spinner of its own.
             let loading = views.contains { $0 is NSProgressIndicator && $0.enclosingScrollView is TimelineScrollView }
-            // SwiftUI draws the header and the placeholder rows from the service, in the body that hosts the timeline,
-            // and has flushed that body by the time this runs.
-            return Frame(
-                at: ContinuousClock.now - clicked, header: matrix.selectedRoom?.name, rows: rows, rooms: rooms,
-                loading: loading, skeleton: matrix.timelineLoading && matrix.messages.isEmpty, intro: intro,
+            var frame = Frame(
+                at: ContinuousClock.now - clicked, rows: rows, rooms: rooms, loading: loading, intro: intro,
                 table: views.first { $0 is TimelineTableView }.map(ObjectIdentifier.init))
+            // The header runs over the timeline's top and the composer over its bottom; between them is the pane.
+            if let scroll = views.first(where: { $0 is TimelineScrollView }) as? NSScrollView {
+                let column = scroll.convert(scroll.bounds, to: nil)
+                let insets = scroll.contentInsets
+                // Its left part, the conversation's name, without the controls whose state changes as one moves about.
+                frame.headerPixels = pixels(
+                    in: CGRect(
+                        x: column.minX, y: column.maxY - insets.top, width: column.width * 0.4, height: insets.top),
+                    every: 1)
+                if rows.isEmpty {
+                    let pane = pixels(
+                        in: CGRect(
+                            x: column.minX, y: column.minY + insets.bottom, width: column.width,
+                            height: column.height - insets.top - insets.bottom), every: 4)
+                    // Eight placeholder rows tint about 4% of it.
+                    frame.placeholder = Self.tinted(pane) > 0.02
+                }
+            }
+            return frame
         }
+
+        /// The window's pixels in `rect`, a frame in the window, as drawn, one every `points`: red, green and blue, a
+        /// byte each.
+        func pixels(in rect: CGRect, every points: Int) -> [Int] {
+            let local = hosting.convert(rect, from: nil).integral
+            // Drawn at one pixel to the step, as drawing the whole pane at the screen's scale takes several frames.
+            guard local.width >= CGFloat(points), local.height >= CGFloat(points),
+                let image = NSBitmapImageRep(
+                    bitmapDataPlanes: nil, pixelsWide: Int(local.width) / points,
+                    pixelsHigh: Int(local.height) / points, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                    isPlanar: false, colorSpaceName: .deviceRGB,
+                    bytesPerRow: 0, bitsPerPixel: 0),
+                let data = image.bitmapData
+            else { return [] }
+            image.size = local.size
+            hosting.cacheDisplay(in: local, to: image)
+            let bytes = image.bitsPerPixel / 8
+            var pixels: [Int] = []
+            pixels.reserveCapacity(image.pixelsHigh * image.pixelsWide)
+            for y in 0..<image.pixelsHigh {
+                for x in 0..<image.pixelsWide {
+                    let at = y * image.bytesPerRow + x * bytes
+                    pixels.append(Int(data[at]) << 16 | Int(data[at + 1]) << 8 | Int(data[at + 2]))
+                }
+            }
+            return pixels
+        }
+
+        /// How far apart two pixels are in each channel: the furthest and the nearest.
+        static func apart(_ a: Int, _ b: Int) -> (most: Int, least: Int) {
+            let red = abs(a >> 16 - b >> 16)
+            let green = abs((a >> 8 & 0xFF) - (b >> 8 & 0xFF))
+            let blue = abs((a & 0xFF) - (b & 0xFF))
+            return (max(red, green, blue), min(red, green, blue))
+        }
+
+        /// The share of `pixels` tinted a shade off the background, the commonest one, as placeholder rows are filled;
+        /// text, banners and cards stand out further.
+        static func tinted(_ pixels: [Int]) -> Double {
+            var counts: [Int: Int] = [:]
+            for index in stride(from: 0, to: pixels.count, by: 16) { counts[pixels[index], default: 0] += 1 }
+            guard let background = counts.max(by: { $0.value < $1.value })?.key else { return 0 }
+            let tinted = pixels.count { pixel in
+                let apart = apart(pixel, background)
+                return apart.least >= 4 && apart.most <= 24
+            }
+            return Double(tinted) / Double(pixels.count)
+        }
+
+        /// The header's pixels for each conversation, read when the window settles on it.
+        private var headers: [String: [Int]] = [:]
 
         /// Samples the window after every run-loop pass from now on.
         func record() {
@@ -158,6 +228,7 @@ struct ConversationSwitchHostedTests {
             let measures = messages.filter { $0.message.hasPrefix("interval=rows.measure ") }
             var previous = start
             for index in frames.indices {
+                frames[index].header = header(frames[index].headerPixels)
                 frames[index].measured = measures.filter { $0.date > previous && $0.date <= frames[index].date }
                     .compactMap { $0.message.split(separator: " ").first { $0.hasPrefix("rows=") } }
                     .compactMap { Int($0.dropFirst(5)) }.reduce(0, +)
@@ -199,13 +270,27 @@ struct ConversationSwitchHostedTests {
             }
         }
 
-        /// Until the window shows `index`'s newest message and nothing more is loading.
+        /// Until the window shows `index`'s newest message and nothing more is loading, then keeps its header.
         func settled(on index: Int) async -> Bool {
             let newest = "$s\(index)-39"
-            return await eventually(timeout: .seconds(20)) {
-                let frame = sample()
-                return frame.header == name(index) && frame.rows[newest] != nil && !frame.loading
+            var frame = sample()
+            let settled = await eventually(timeout: .seconds(20)) {
+                frame = sample()
+                return frame.rows[newest] != nil && frame.rooms.count == 1 && !frame.loading
             }
+            headers[name(index)] = frame.headerPixels
+            return settled
+        }
+
+        /// The conversation whose header `pixels` are closest to.
+        private func header(_ pixels: [Int]) -> String? {
+            headers.filter { $0.value.count == pixels.count }.min { a, b in
+                distance(a.value, pixels) < distance(b.value, pixels)
+            }?.key
+        }
+
+        private func distance(_ a: [Int], _ b: [Int]) -> Int {
+            zip(a, b).reduce(0) { $0 + Self.apart($1.0, $1.1).most }
         }
     }
 
@@ -219,11 +304,18 @@ struct ConversationSwitchHostedTests {
             if Set([roomID(frame.header)].compactMap { $0 }).union(frame.rooms).count > 1 {
                 faults.append("mixes conversations: \(frame)")
             }
-            if frame.intro && frame.skeleton {
+            if frame.intro && frame.rows.isEmpty {
                 faults.append("introduces a conversation it has not read: \(frame)")
             }
-            if frame.rows.isEmpty && (held || !(frame.skeleton || frame.loading)) {
+            // A conversation not held goes up empty, and placeholder rows hold its rows' place only past the delay
+            // any loading state waits, which most reads never reach.
+            let delay = LoadingPresentation.indicatorDelay
+            if frame.rows.isEmpty && held {
                 faults.append("empty pane: \(frame)")
+            } else if frame.rows.isEmpty && frame.placeholder && frame.at < delay {
+                faults.append("placeholder rows before the loading delay: \(frame)")
+            } else if frame.rows.isEmpty, !frame.placeholder, !frame.loading, frame.at > delay + .milliseconds(100) {
+                faults.append("empty pane past the loading delay: \(frame)")
             }
             for (id, top) in frame.rows where frame.header == to {
                 if let first = firstSeen[id], abs(first - top) > 0.5 {
@@ -245,9 +337,10 @@ struct ConversationSwitchHostedTests {
             faults.append("a new table for the conversation on screen: \(after)")
         }
         // The click's frame shows the next conversation.
-        if let shown = frames.firstIndex(where: { $0.header == to }), shown > 0 {
-            faults.append("the click's frame still shows the previous conversation: \(frames[0])")
+        if let click = frames.first, click.header != to {
+            faults.append("the click's frame still shows the previous conversation: \(click)")
         }
+        if frames.isEmpty { faults.append("no frame recorded") }
         // Rows already held come with their heights; others are measured for the first screen only, once they are read.
         if let click = frames.first, click.rows.isEmpty, click.measured > 0 {
             faults.append("measured \(click.measured) rows before any were read: \(click)")
@@ -301,5 +394,9 @@ struct ConversationSwitchHostedTests {
         let frames = await harness.stop()
         let faults = Self.faults(frames, to: harness.name(1), held: false)
         #expect(faults.isEmpty, Self.report(faults, frames))
+        // Frames drawn while the read was held, with placeholder rows once it outlasted the loading delay.
+        let reading = frames.filter { $0.at < .milliseconds(milliseconds) && $0.rows.isEmpty }
+        let outlasted = Duration.milliseconds(milliseconds) > LoadingPresentation.indicatorDelay
+        #expect(!reading.isEmpty && reading.contains(where: \.placeholder) == outlasted, Self.report([], frames))
     }
 }
