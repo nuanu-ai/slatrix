@@ -149,6 +149,19 @@ struct ComposerSendTests {
         return pixel[0] > pixel[2]
     }
 
+    @Test("A file for a thread closed before it was queued fails instead of going to another conversation")
+    func fileForClosedThread() async throws {
+        let scratch = try TemporaryDirectory()
+        // Another thread of the room opened while this file was being prepared.
+        service.configureMessageActionsForChecks(
+            client: client, main: main, thread: thread, rootID: "$other", sessionID: session, selectionID: UUID(),
+            threadID: UUID())
+        await #expect(throws: MatrixServiceError.self) {
+            try await service.uploadFile(try scratch.file("notes.txt"), threadRootID: "$root", roomID: roomID)
+        }
+        #expect(main.attachments.all.isEmpty && thread.attachments.all.isEmpty)
+    }
+
     @Test("A send the SDK refuses to queue fails without being retried", arguments: [false, true])
     func enqueueFailure(threaded: Bool) async {
         let target = threaded ? thread : main

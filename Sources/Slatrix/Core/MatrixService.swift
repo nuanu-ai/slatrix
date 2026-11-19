@@ -2498,8 +2498,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     mimetype: mime, size: values.fileSize.map(UInt64.init), thumbnailInfo: nil, thumbnailSource: nil))
         }
         let target: Timeline
-        if let threadRootID, threadRootID == loadedThreadRootID, let threadTimeline {
+        if let threadRootID {
             _ = try requireClient()
+            // A thread closed while the file was prepared fails the send; the file never goes anywhere else.
+            guard threadRootID == loadedThreadRootID, let threadTimeline else {
+                throw MatrixServiceError.request("Reopen the thread to reply.")
+            }
             target = threadTimeline
         } else {
             target = try requireTimeline()
