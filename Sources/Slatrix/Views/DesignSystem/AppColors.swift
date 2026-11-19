@@ -115,11 +115,12 @@ struct AppColors {
     var frameEnd: Color { neutrals.frame.map { Color(hex: $0.end).opacity($0.opacity) } ?? canvas }
     /// Glass: the desktop shows through the frame.
     var translucentFrame: Bool { neutrals.frame?.translucent == true }
-    /// The doodles behind the messages in a frame theme, faint enough that text crossing one stays readable.
+    /// The doodles behind the messages in a frame theme: a texture under the text, faint enough that it reads as the
+    /// theme's and never as marks among the words.
     var wallpaperDoodle: Color {
         guard let frame = neutrals.frame else { return .clear }
-        if dark { return .white.opacity(0.06) }
-        return frame.translucent ? .black.opacity(0.05) : Color(hex: frame.start).opacity(0.06)
+        if dark { return .white.opacity(0.035) }
+        return frame.translucent ? .black.opacity(0.03) : Color(hex: frame.start).opacity(0.035)
     }
     /// The colors of what sits on the frame, such as the sidebar: on a colored frame its text, lines and fills are
     /// light, and the accent is white, as in Slack's sidebar.
