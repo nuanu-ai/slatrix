@@ -143,8 +143,15 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private var syncResponded = false
     private var hasConnected = false
     private var networkAvailable: Boolean? = null
+    private val sendQueues = RoomSendQueues(client, connection, foreground)
+
     // Room calls block on the SDK, so the list never builds on the main thread.
-    private val worker = scope.launch(Dispatchers.Default) {
+    private val worker = scope.launch {
+        launch { sendQueues.run() }
+        withContext(Dispatchers.Default) { followRooms() }
+    }
+
+    private suspend fun followRooms() {
         try {
             coroutineScope {
                 launch { sync() }
@@ -290,7 +297,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         }
     }
 
-    private suspend fun updateConnection() {
+    private fun updateConnection() {
         val next = ConnectionState.resolve(networkAvailable, foreground.value, syncRunning, syncResponded,
             isOffline || error != null, hasConnected)
         val wasConnected = mutableConnection.value == ConnectionState.Connected
@@ -300,7 +307,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
         if (next == ConnectionState.Connected) {
             hasConnected = true
             // A network error pauses send queues; resume only after the server answers again.
-            if (!wasConnected) runCatching { client.enableAllSendQueues(true) }
+            if (!wasConnected) sendQueues.connected()
         }
     }
 

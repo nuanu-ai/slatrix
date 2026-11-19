@@ -499,6 +499,30 @@ class MatrixRoomsTest {
         rooms.close()
     }
 
+    @Test fun aRoomPausedByATemporarySendErrorResumesWhileSyncStaysConnected() = runTest {
+        val room = TestRoom(roomInfo("!paused:example.org", "Paused"))
+        val rejected = TestRoom(roomInfo("!rejected:example.org", "Rejected"))
+        val client = RoomsClient(listOf(room, rejected))
+        client.services.trySend(RoomsSync())
+        val rooms = MatrixRooms(backgroundScope, client)
+        try {
+            client.sendQueuesEnabled.first { it }
+            rejected.sendQueueEnabled.value = false
+            client.queueUpdates?.onUpdate(rejected.id(), RoomSendQueueUpdate.SendError(
+                "rejected", QueueWedgeError.CrossVerificationRequired, false))
+            room.sendQueueEnabled.value = false
+            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.SendError(
+                "local", QueueWedgeError.GenericApiError("502 Bad Gateway"), true))
+
+            client.queueUpdates?.onUpdate(room.id(), RoomSendQueueUpdate.CancelledLocalEvent("later-message"))
+            withContext(Dispatchers.Default) { withTimeout(8_000) { room.sendQueueEnabled.first { it } } }
+            assertFalse("Verification failures wait for the user", rejected.sendQueueEnabled.value)
+            assertEquals(ConnectionState.Connected, rooms.connection.value)
+        } finally {
+            rooms.close()
+        }
+    }
+
     // capability: people.presence
     @Test fun aDirectMessageShowsTheOtherPersonsDotOnceConnected() = runTest {
         val avery = roomInfo("!dm:example.org", "Avery", direct = true)
@@ -778,6 +802,11 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
             override suspend fun getNotification(roomId: String, eventId: String): NotificationStatus = lookup(roomId, eventId)
         }
     }
+    @Volatile var queueUpdates: SendQueueRoomUpdateListener? = null
+    override suspend fun subscribeToSendQueueUpdates(listener: SendQueueRoomUpdateListener): TaskHandle {
+        queueUpdates = listener
+        return RoomsHandle()
+    }
     val sendQueuesEnabled = MutableStateFlow(false)
     var resumeSending: suspend () -> Unit = {}
     override suspend fun enableAllSendQueues(enable: Boolean) { resumeSending(); sendQueuesEnabled.value = enable }
@@ -795,6 +824,9 @@ private class RoomsClient(var cached: List<Room>) : Client(NoHandle) {
 }
 
 private class TestRoom(var info: RoomInfo, var latest: LatestEventValue = LatestEventValue.None) : Room(NoHandle) {
+    val sendQueueEnabled = MutableStateFlow(true)
+    override fun isSendQueueEnabled() = sendQueueEnabled.value
+    override fun enableSendQueue(enable: Boolean) { sendQueueEnabled.value = enable }
     private var listener: RoomInfoListener? = null
     val typing = MutableStateFlow<TypingNotificationsListener?>(null)
     override fun ownUserId(): String = "@me:example.org"
