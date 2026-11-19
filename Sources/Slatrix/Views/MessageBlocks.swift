@@ -92,7 +92,7 @@ enum MessageBlocks {
             let last = end >= text.length || text.attribute(.codeBlock, at: end, effectiveRange: nil) == nil
             let before = first ? codePadding(fontSize) : 0
             let after = last ? codePadding(fontSize) : 0
-            // As in `padMentionPills`: an unchanged block must not count as edited, or the caret jumps to its end.
+            // An unchanged block must not count as edited, or the caret jumps to its end.
             guard style.paragraphSpacingBefore != before || style.paragraphSpacing != after else { return }
             style.paragraphSpacingBefore = before
             style.paragraphSpacing = after

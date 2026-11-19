@@ -19,8 +19,7 @@ extension NSAttributedString.Key {
 
 extension NSMutableAttributedString {
     /// Reserves each pill's padding as real space, kerning the characters that end beside it, so the text around a
-    /// pill never touches its fill and layout measures what is drawn. Owns `.kern`: run again after the text or the
-    /// font size changes.
+    /// pill never touches its fill and layout measures what is drawn. For text built to display, never a draft.
     func padMentionPills() {
         var kerns: [Int: CGFloat] = [:]
         let text = string as NSString
@@ -37,18 +36,7 @@ extension NSMutableAttributedString {
                 }
             }
         }
-        var stale: [NSRange] = []
-        enumerateAttribute(.kern, in: NSRange(location: 0, length: length)) { value, range, _ in
-            guard value != nil else { return }
-            stale += (range.location..<NSMaxRange(range)).filter { kerns[$0] == nil }.map {
-                NSRange(location: $0, length: 1)
-            }
-        }
-        for range in stale { removeAttribute(.kern, range: range) }
-        // Setting an equal value still counts as an edit, and a text view puts the caret after its last edit.
-        for (index, kern) in kerns where attribute(.kern, at: index, effectiveRange: nil) as? CGFloat != kern {
-            addAttribute(.kern, value: kern, range: NSRange(location: index, length: 1))
-        }
+        for (index, kern) in kerns { addAttribute(.kern, value: kern, range: NSRange(location: index, length: 1)) }
     }
 }
 
@@ -84,6 +72,9 @@ class PillLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
 
     /// In proportion to the font, so pills scale with zoom: 2 pt at 15 pt.
     static func padding(_ font: NSFont) -> CGFloat { font.pointSize * 0.13 }
+    /// Whether the text reserves that padding with `padMentionPills()`. An editor's text is the draft, which holds no
+    /// layout, so there a fill sits around the letters alone.
+    var padded: Bool { true }
 
     /// Whether a pill's text runs right to left, by its first letter: Hebrew, Arabic and the scripts beside them.
     static func rightToLeft(_ text: String) -> Bool {
@@ -104,7 +95,7 @@ class PillLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
                 // The small radius at the reading size, scaled with the font, and a hair more than the font's height.
                 let radius = font.pointSize * Metrics().radiusSmall / TextRole.reading.points
                 let bleed = font.pointSize * 0.05
-                let padding = Self.padding(font)
+                let padding = padded ? Self.padding(font) : 0
                 let text = storage.string as NSString
                 // The letter `padMentionPills()` kerns, widening the pill's rightmost letter on the line that holds it.
                 let kerned = Self.rightToLeft(text.substring(with: range)) ? range.location : NSMaxRange(range) - 1

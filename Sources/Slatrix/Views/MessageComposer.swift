@@ -867,7 +867,6 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
         themeText = text
         storage.beginEditing()
         restyle(NSRange(location: 0, length: storage.length))
-        storage.padMentionPills()
         storage.endEditing()
         typingAttributes = attributes(typingStyle, block: typingBlock)
     }
@@ -965,7 +964,6 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
         MessageBlocks.padCodeBlocks(
             storage, in: NSRange(location: start, length: min(storage.length, NSMaxRange(paragraphs) + 1) - start),
             fontSize: fontSize)
-        storage.padMentionPills()
     }
 
     // MARK: Typing
@@ -1116,7 +1114,6 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
             }
         }
         MessageBlocks.padCodeBlocks(text, in: NSRange(location: 0, length: text.length), fontSize: fontSize)
-        text.padMentionPills()
         return text
     }
 
@@ -1141,7 +1138,7 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
             var token: ComposerMention?
             storage.enumerateAttributes(in: content) { attributes, range, _ in
                 let mention = attributes[.composerMention] as? ComposerMention
-                // A pill's padding kerns its last character into a run of its own; the token is still one link.
+                // A token whose characters sit in several runs is still one link.
                 if let mention, mention === token {
                     paragraph.runs[paragraph.runs.count - 1].text += text.substring(with: range)
                     return
@@ -1346,6 +1343,7 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
 /// Draws list markers in the indent, where they can't be selected or typed into, and the block of an empty last
 /// line, which has no characters to carry it.
 private final class ComposerLayoutManager: PillLayoutManager {
+    override var padded: Bool { false }
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
         guard let storage = textStorage, let view = firstTextView as? ComposerTextView else { return }
