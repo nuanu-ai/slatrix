@@ -21,6 +21,10 @@ struct WindowHostedTests {
             _ = NSApplication.shared
             // A pane dragged or a sidebar hidden in an earlier test stays so; every window here opens as it first would.
             for key in ["layout.paneWidth", "layout.sidebarHidden"] { UserDefaults.standard.removeObject(forKey: key) }
+            // The tests measure the default theme's edge-to-edge card, not a frame theme's inset one, whatever theme
+            // and density another test or run left behind.
+            appearance.theme = .standard
+            appearance.density = .comfortable
             matrix.enterPreview()
             messages = busyConversation(1_000, roomID: matrix.selectedRoomID!, tag: UUID().uuidString)
             matrix.messages = messages
@@ -56,9 +60,10 @@ struct WindowHostedTests {
         func settle() async -> Bool {
             await eventually(timeout: .seconds(20)) {
                 hosting.layoutSubtreeIfNeeded()
-                return Self.views(in: hosting).contains {
-                    ($0 as? MessageTextView)?.string == messages.last?.body && $0.window != nil
-                }
+                let views = Self.views(in: hosting)
+                // The composer takes text once its draft has loaded.
+                return views.contains { ($0 as? MessageTextView)?.string == messages.last?.body && $0.window != nil }
+                    && views.contains { ($0 as? NSTextView)?.isEditable == true && !($0 is MessageTextView) }
             }
         }
 
@@ -193,6 +198,8 @@ struct WindowHostedTests {
         func menu(_ action: String) {
             NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
         }
+
+        func accessible(_ text: String) -> [AnyObject] { SlatrixTests.accessible(text, in: hosting) }
     }
 
     @Test(
@@ -749,6 +756,220 @@ struct WindowHostedTests {
                     .map { $0.convert($0.bounds, to: nil) }
                 return targets.count == 2 && targets[0].minX == targets[1].minX && targets[0].maxX == targets[1].maxX
             })
+    }
+
+    @Test(
+        "What covers the conversation keeps keys, drops and commands from it, and its composer has the keyboard back after"
+    )
+    func coveredComposer() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        let window = harness.window
+        let composer = try #require(
+            harness.shown().first { ($0 as? NSTextView)?.isEditable == true } as? NSTextView)
+        let drop = try #require(harness.shown().first { $0 is UploadDropView } as? UploadDropView)
+        let files = FakeDrag(files: [URL(fileURLWithPath: #filePath)], over: window)
+        #expect(await eventually { drop.draggingEntered(files) == .copy })
+        #expect(window.makeFirstResponder(composer))
+        // Whatever has the keyboard gets the text; nothing hands it the keyboard first.
+        func types(_ text: String) -> Bool {
+            window.firstResponder?.insertText(text)
+            return composer.string.hasSuffix(text)
+        }
+        func backAndTypes(_ text: String) async -> Bool {
+            await eventually { window.firstResponder === composer } && types(text)
+        }
+
+        // The media viewer over the window.
+        var photo = ChatMessage(
+            id: "$photo", roomID: try #require(harness.matrix.selectedRoomID), senderID: "@ana:example.org",
+            senderName: "ana", body: "photo.png", timestamp: Date(timeIntervalSince1970: 1_762_700_000))
+        photo.kind = "m.image"
+        photo.attachment = MessageAttachment(
+            name: "photo.png", url: "mxc://example.org/photo", mimeType: "image/png", width: 400, height: 300)
+        harness.matrix.messages.append(photo)
+        let m = Metrics()
+        // Hit-testing takes a point in the frame around the content, which is the window's own.
+        let frame = try #require(window.contentView?.superview)
+        // In the photo's row, in the text's column, halfway down, on the photo.
+        func photoPoint() -> NSPoint? {
+            guard let cell = harness.shown().first(where: { ($0 as? TimelineCell)?.entry?.id == photo.id }) else {
+                return nil
+            }
+            let row = cell.convert(cell.bounds, to: nil)
+            let point = NSPoint(
+                x: row.midX - min(row.width, m.conversationRow) / 2 + m.conversationInset(thread: false)
+                    + m.conversationText(thread: false) + 40, y: row.midY)
+            var view = frame.hitTest(point)
+            while let shown = view, !(shown is TimelineCell) { view = shown.superview }
+            return view === cell ? point : nil
+        }
+        #expect(await eventually { photoPoint() != nil })
+        try await harness.click(CGRect(origin: try #require(photoPoint()), size: .zero))
+        func stage() -> NSView? { harness.shown().first { $0 is MediaStageView } }
+        #expect(await eventually { stage() != nil })
+        #expect(await eventually { drop.draggingEntered(files) == [] })
+        #expect(!types("a"))
+        stage()?.keyDown(
+            with: try #require(
+                NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                    characters: "\u{1B}", charactersIgnoringModifiers: "\u{1B}", isARepeat: false, keyCode: 53)))
+        #expect(await eventually { stage() == nil })
+        #expect(await backAndTypes("b"))
+
+        // A dialog, and one closed as soon as it opened.
+        harness.menu("preferences")
+        #expect(await eventually { harness.shown().contains { $0 is NSSwitch } })
+        #expect(await eventually { window.firstResponder !== composer })
+        #expect(!types("c"))
+        harness.menu("mark-read")
+        #expect(await backAndTypes("d"))
+        harness.menu("preferences")
+        harness.menu("mark-read")
+        #expect(await backAndTypes("e"))
+
+        // The sidebar drawer, in a narrow window, which Esc closes.
+        harness.resize(700)
+        #expect(await eventually { !harness.sidebarShown })
+        harness.menu("toggle-sidebar")
+        #expect(await eventually { window.firstResponder !== composer })
+        #expect(!types("f"))
+        #expect(drop.draggingEntered(files) == [])
+        harness.menu("mark-read")
+        #expect(await backAndTypes("g"))
+
+        // A thread in its place, which Esc closes without marking the conversation read.
+        try harness.openThread()
+        #expect(await eventually { harness.shown().compactMap { $0 as? UploadDropView }.count == 2 })
+        #expect(await eventually { window.firstResponder !== composer })
+        #expect(!types("h"))
+        #expect(drop.draggingEntered(files) == [])
+        // ⌘U with neither composer focused attaches to neither.
+        window.makeFirstResponder(nil)
+        harness.menu("attach")
+        await drainMainActor()
+        // Required: the file panel a failure leaves open can't be dismissed from here.
+        try #require(window.attachedSheet == nil)
+        harness.menu("mark-read")
+        #expect(await eventually { harness.shown().compactMap { $0 as? UploadDropView }.count == 1 })
+        #expect(await backAndTypes("i"))
+    }
+
+    @Test("What a profile or the drawer lies over can't be activated, and a cover adds nothing to VoiceOver's path")
+    func coveredRoute() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        // Nothing between the window and the control, as a cover that covers nothing would add.
+        func direct(_ text: String) -> Bool {
+            accessibilityPath(to: text, in: harness.hosting).map { !$0.dropFirst().dropLast().contains("AXGroup") }
+                == true
+        }
+        func enabled(_ text: String) -> Bool {
+            harness.accessible(text).contains { $0.isAccessibilityEnabled?() == true }
+        }
+        #expect(direct("Message"))
+        harness.resize(700)
+        harness.menu("people")
+        // Everyone with an "a" in their name, Alex and Julia among them.
+        func search() -> NSTextField? {
+            harness.shown().first { ($0 as? NSTextField)?.placeholderString == "Search people" } as? NSTextField
+        }
+        #expect(await eventually { search() != nil })
+        #expect(direct("Search people"))
+        #expect(harness.window.makeFirstResponder(search()))
+        harness.window.firstResponder?.insertText("a")
+        #expect(await eventually { enabled("Julia") })
+        #expect(harness.accessible("Alex").contains { $0.accessibilityPerformPress?() == true })
+        #expect(await eventually { !harness.accessible("Close profile").isEmpty })
+        #expect(!enabled("Julia") && !enabled("Search people"))
+        #expect(!harness.accessible("Julia").contains { $0.accessibilityPerformPress?() == true })
+        #expect(harness.accessible("Close profile").contains { $0.accessibilityPerformPress?() == true })
+        #expect(await eventually { enabled("Julia") })
+
+        // The sidebar drawer over the whole column, the toolbar too.
+        harness.menu("toggle-sidebar")
+        #expect(await eventually { !enabled("Search people") && !enabled("Back") })
+        harness.menu("toggle-sidebar")
+        #expect(await eventually { enabled("Search people") })
+    }
+
+    @Test("In a narrow window an error sits under the thread's header, so Close thread still closes the thread")
+    func bannerUnderPaneHeader() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        try harness.openThread()
+        harness.resize(700)
+        func targets() -> [CGRect] {
+            harness.shown().compactMap { $0 as? UploadDropView }.map { $0.convert($0.bounds, to: nil) }
+        }
+        #expect(await eventually { targets().count == 2 })
+        harness.matrix.errorMessage = "The server didn’t answer."
+        // The thread's drop target is the one under the toolbar; Close thread ends its header.
+        let pane = try #require(targets().min { $0.maxY < $1.maxY })
+        let m = Metrics()
+        let close = CGRect(
+            x: pane.maxX - m.conversationInset(thread: true) - m.iconButton / 2, y: pane.maxY - m.paneHeader / 2,
+            width: 0, height: 0)
+        try await harness.click(close)
+        #expect(await eventually { targets().count == 1 })
+        #expect(harness.matrix.errorMessage != nil)
+    }
+
+    @Test(
+        "The composer's text starts where message text starts, in either density",
+        arguments: [MessageDensity.comfortable, .compact])
+    func composerTextOnMessageText(density: MessageDensity) async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        harness.appearance.density = density
+        #expect(await harness.settle())
+        func textStart(_ view: NSTextView) -> CGFloat {
+            let x = view.textContainerOrigin.x + (view.textContainer?.lineFragmentPadding ?? 0)
+            return view.convert(NSPoint(x: x, y: 0), to: nil).x
+        }
+        let message = try #require(try harness.newest() as? NSTextView)
+        let composer = try #require(harness.shown().first { ($0 as? NSTextView)?.isEditable == true } as? NSTextView)
+        #expect(abs(textStart(composer) - textStart(message)) <= 1, "\(textStart(composer)) and \(textStart(message))")
+    }
+
+    @Test("Also send to names a private channel with its lock, as a public one shows its #")
+    func alsoSendToMarksPrivate() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        try harness.openThread()
+        #expect(await eventually { harness.dividers == 2 })
+        let canvas = try #require(NSColor(harness.appearance.colors.canvas).usingColorSpace(.sRGB))
+        // Where the checkbox's words end: the last column of ink on its line, right of the box.
+        func wordsEnd() throws -> CGFloat {
+            let box = try #require(harness.shown().first { $0 is NSButton })
+            let frame = box.convert(box.bounds, to: nil)
+            harness.hosting.layoutSubtreeIfNeeded()
+            let image = try #require(harness.hosting.bitmapImageRepForCachingDisplay(in: harness.hosting.bounds))
+            harness.hosting.cacheDisplay(in: harness.hosting.bounds, to: image)
+            let scale = CGFloat(image.pixelsWide) / harness.hosting.bounds.width
+            let y = Int((harness.hosting.bounds.height - frame.midY) * scale)
+            let ink = (Int(frame.maxX * scale)..<image.pixelsWide).last { x in
+                (y - 8...y + 8).contains { row in
+                    guard let pixel = image.colorAt(x: x, y: row) else { return false }
+                    return abs(pixel.redComponent - canvas.redComponent)
+                        + abs(pixel.greenComponent - canvas.greenComponent)
+                        + abs(pixel.blueComponent - canvas.blueComponent) > 0.3
+                }
+            }
+            return try CGFloat(#require(ink)) / scale
+        }
+        let open = try wordsEnd()
+        let index = try #require(harness.matrix.rooms.firstIndex { $0.id == harness.matrix.selectedRoomID })
+        harness.matrix.rooms[index].isPrivate = true
+        // The same words but for the mark before the name: the lock is wider than a #, in any weight.
+        #expect(await eventually { (try? wordsEnd()).map { $0 - open >= 2 } == true })
     }
 
     // capability: app.narrow-window

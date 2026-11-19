@@ -14,7 +14,12 @@ object AvatarPlaceholder {
                 characters.setText(part)
                 generateSequence(characters.first()) { characters.next().takeIf { it != BreakIterator.DONE } }
                     .zipWithNext()
-                    .firstOrNull { (start, _) -> Character.isLetterOrDigit(part.codePointAt(start)) }
+                    // A keycap such as 1️⃣ is a digit in an enclosing mark, a symbol.
+                    .firstOrNull { (start, end) ->
+                        Character.isLetterOrDigit(part.codePointAt(start)) &&
+                            part.substring(start, end).codePoints()
+                                .noneMatch { Character.getType(it) == Character.ENCLOSING_MARK.toInt() }
+                    }
                     ?.let { (start, end) -> part.substring(start, end).uppercase(Locale.ROOT) }
             }
             .take(2)

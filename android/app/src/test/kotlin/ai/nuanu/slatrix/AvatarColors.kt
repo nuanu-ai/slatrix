@@ -11,10 +11,10 @@ import kotlin.math.abs
 
 /** Which avatar color the tile behind [initials] shows, read from the pixels just below the letters. */
 fun ComposeContentTestRule.avatarColorBehind(initials: String, view: View): Int {
-    // Below the initials, where the tile's shading has reached the color itself.
+    // Above the initials, near where the tile's shading starts from the color itself.
     val letters = onNodeWithText(initials, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     val picture = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(Canvas(it)) }
-    val shown = Color(picture.getPixel(letters.center.x.toInt(), (letters.bottom + (letters.bottom - letters.top) / 4).toInt()))
+    val shown = Color(picture.getPixel(letters.center.x.toInt(), (letters.top - (letters.bottom - letters.top) / 4).toInt()))
     fun distance(color: Color) = abs(color.red - shown.red) + abs(color.green - shown.green) + abs(color.blue - shown.blue)
     return DesignTokens.avatarColors.indices.minBy { distance(DesignTokens.avatarColors[it]) }
 }

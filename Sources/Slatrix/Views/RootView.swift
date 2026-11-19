@@ -150,6 +150,21 @@ struct RootView: View {
     /// Whether an open pane sits beside the conversation; otherwise it takes the conversation's place.
     private var paneBeside: Bool { sidebarCollapsed ? arrangement.paneFitsAlone : arrangement.paneFitsBesideSidebar }
     private var paneCovers: Bool { paneOpen && !paneBeside }
+    /// A thread in the conversation's place.
+    private var threadCovers: Bool { paneCovers && profilePane == nil && threadRoot != nil }
+    /// The open thread couldn't load.
+    @ViewBuilder private var threadNotice: some View {
+        if let threadLoadError, let root = threadRoot {
+            Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
+                Button("Retry") { [open = openThreadAction] in open(root) }
+            }
+        }
+    }
+    private var coverage: Coverage {
+        Coverage(
+            pane: paneCovers, viewer: viewer.message != nil, dialog: modalShown,
+            drawer: sidebarCollapsed && sidebarDrawer)
+    }
     /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
     /// open pane.
     private var sidebarCollapsed: Bool {
@@ -311,6 +326,7 @@ struct RootView: View {
                 item: Binding(get: { modals.current }, set: { if $0 == nil { closeModal() } }),
                 closesOnClickOutside: true, content: modal)
         }
+        .covered(coverage.viewer)
         .overlay {
             MediaViewer(matrix: matrix, viewer: viewer, onForward: startForward)
         }
@@ -757,8 +773,15 @@ struct RootView: View {
                                         .padding(.top, m.paneHeader)
                                 }
                             }
-                            // Banners float over the conversation instead of pushing it down.
-                            .overlay(alignment: .top) { banners.padding(.top, m.paneHeader) }
+                            // Banners float over the conversation instead of pushing it down, under whichever header is
+                            // on top: a pane in the conversation's place brings its own, with its close button. A thread
+                            // there floats its own notice in the same column, first, so neither lies over the other.
+                            .overlay(alignment: .top) {
+                                VStack(spacing: 0) {
+                                    if threadCovers { threadNotice }
+                                    banners
+                                }.padding(.top, (paneCovers ? 2 : 1) * m.paneHeader)
+                            }
                             if paneOpen && paneBeside {
                                 WithWidths(widths) { widths in
                                     ResizeHandle(
@@ -778,6 +801,7 @@ struct RootView: View {
                             }
                         }.frameCard(colors.theme.framed, leading: sidebarCollapsed)
                     }
+                    .covered(coverage.drawer)
                     .overlay(alignment: .leading) { drawer }
                     .animation(Motion.pane, value: sidebarCollapsed)
                 }
@@ -950,7 +974,7 @@ struct RootView: View {
             windowCanRead: windowCanRead, hasPresentedSheet: hasPresentedSheet, threadRootID: threadRoot?.eventID,
             threadReadyID: threadReadyID, openingThreadID: openingThreadID, threadLoadFailed: threadLoadError != nil,
             localReady: localReady, threadReadViewport: threadReadViewport, readHold: readHold,
-            conversationCovered: paneCovers)
+            conversationCovered: coverage.conversation, threadCovered: coverage.thread)
     }
     private var readContext: ReadStateContext { readInputs.readContext(matrix) }
     private var automaticReadTarget: ReadReceiptTarget? { ReadStatePolicy.automaticTarget(readContext, hold: readHold) }
@@ -1092,7 +1116,7 @@ struct RootView: View {
         VStack(spacing: 0) {
             if room.membership == "invite" {
                 channelHeader(room)
-                inviteView(room)
+                inviteView(room).covered(coverage.pane)
             } else {
                 TimelineUnderBars { insets in
                     TimelineView(
@@ -1114,7 +1138,10 @@ struct RootView: View {
                         onEditCaption: startCaption,
                         onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
                         inlineVideo: viewer.inlineVideo, contentAbove: $conversationContentAbove, insets: insets
-                    ).id("\(room.id):\(matrix.shownTimelineID)")
+                    )
+                    .id("\(room.id):\(matrix.shownTimelineID)")
+                    // A pane in its place covers all but the toolbar.
+                    .covered(coverage.pane)
                 } header: {
                     channelHeader(room).scrollEdge(.top, colors.canvas)
                 } footer: {
@@ -1186,6 +1213,7 @@ struct RootView: View {
                         }.alignmentGuide(.top) { $0[.bottom] }
                     }
                     .conversationColumn(m, isThread: false).scrollEdge(.bottom, colors.canvas)
+                    .covered(coverage.pane)
                 }
             }
         }.task(id: room.id + (matrix.user?.id ?? "")) { await loadPinPermission(room) }
@@ -1274,11 +1302,7 @@ struct RootView: View {
             VStack(spacing: 0) {
                 PaneHeader(
                     title: "Thread", subtitle: room.writtenName, closeLabel: "Close thread", onClose: closeThread)
-                if let threadLoadError {
-                    Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
-                        Button("Retry") { [open = openThreadAction] in open(root) }
-                    }
-                }
+                if !threadCovers { threadNotice }
             }.scrollEdge(.top, colors.canvas)
         } footer: {
             VStack(spacing: 0) {
@@ -1348,6 +1372,11 @@ struct RootView: View {
                     ) {
                         if room.isDirect {
                             Text("Also send as direct message")
+                        } else if room.isPrivate {
+                            // Named as its header names it, by its lock.
+                            Text(
+                                "Also send to \(Image(systemName: room.channelSymbol))\(Text(room.name).fontWeight(.semibold))"
+                            )
                         } else {
                             Text("Also send to \(Text(room.writtenName).fontWeight(.semibold))")
                         }
@@ -1390,36 +1419,41 @@ struct RootView: View {
                     }.buttonStyle(.secondary)
                 }
             }
-            switch route {
-            case .channels:
-                PublicRoomDirectoryView(
-                    matrix: matrix, service: matrix.publicDirectory, workspace: browsedWorkspace,
-                    onResolve: openBrowsedChannel
-                ).id(workspaceID)
-            case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
-            case .threads:
-                ThreadsFeedView(
-                    matrix: matrix, feed: matrix.threadFeed, workspaceID: $workspaceID, onOpen: openThreadAction)
-            case .files:
-                SharedFilesView(
-                    matrix: matrix, service: matrix.sharedFiles, workspaceID: workspaceID,
-                    onOpen: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
-                    onOpenMedia: { [viewer] in viewer.open($0, files: $1) })
-            case .saved: savedCollection
-            case .drafts: draftsCollection
-            case .activity:
-                ActivityFeedView(
-                    matrix: matrix, activity: matrix.activity, workspaceID: $workspaceID, onOpenMessage: openActivity,
-                    onOpenRoom: selectRoom)
-            case .search:
-                SearchResultsView(
-                    matrix: matrix, bar: searchBar,
-                    onOpenMessage: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
-                    onOpenRoom: selectRoom, onOpenProfile: openProfile)
-            case .home, .directMessages: EmptyView()
-            }
+            routeBody(route)
+                // A pane in its place covers all but the toolbar.
+                .covered(coverage.pane)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .bottom) { ToastHost(toasts: toasts).padding(.bottom, m.sp24) }
+    }
+    @ViewBuilder private func routeBody(_ route: AppRoute) -> some View {
+        switch route {
+        case .channels:
+            PublicRoomDirectoryView(
+                matrix: matrix, service: matrix.publicDirectory, workspace: browsedWorkspace,
+                onResolve: openBrowsedChannel
+            ).id(workspaceID)
+        case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
+        case .threads:
+            ThreadsFeedView(
+                matrix: matrix, feed: matrix.threadFeed, workspaceID: $workspaceID, onOpen: openThreadAction)
+        case .files:
+            SharedFilesView(
+                matrix: matrix, service: matrix.sharedFiles, workspaceID: workspaceID,
+                onOpen: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
+                onOpenMedia: { [viewer] in viewer.open($0, files: $1) })
+        case .saved: savedCollection
+        case .drafts: draftsCollection
+        case .activity:
+            ActivityFeedView(
+                matrix: matrix, activity: matrix.activity, workspaceID: $workspaceID, onOpenMessage: openActivity,
+                onOpenRoom: selectRoom)
+        case .search:
+            SearchResultsView(
+                matrix: matrix, bar: searchBar,
+                onOpenMessage: { selectRoom($0.roomID, record: true, eventID: $0.eventID) },
+                onOpenRoom: selectRoom, onOpenProfile: openProfile)
+        case .home, .directMessages: EmptyView()
+        }
     }
     private var savedCollection: some View {
         SavedMessagesView(
@@ -2683,11 +2717,20 @@ struct RootView: View {
         threadReadyID = nil
         openingThreadID = nil
     }
+    /// The profile, or else a thread or channel panel.
+    private func closePane() {
+        if profilePane != nil {
+            profilePane = nil
+            return
+        }
+        if route == .home, threadRoot != nil { closeThread() }
+        channelPanel = nil
+    }
     /// Slack's plain-key shortcuts from a composer; false lets the key do its usual thing.
     private func conversationKey(_ action: ConversationKeys.Action, room: ChatRoom, threadRootID: String?) -> Bool {
         switch action {
-        // Esc closes the profile first, then marks read.
-        case .markRead: if profilePane != nil { profilePane = nil } else { markReadState(room, unread: false) }
+        // Esc as the window has it: it closes the profile, or a pane in the conversation's place, before marking read.
+        case .markRead: handleMenu("mark-read")
         case .markAllRead: handleMenu("mark-all-read")
         case .editLastMessage:
             let messages = threadRootID == nil ? matrix.messages : matrix.threadMessages
@@ -2770,27 +2813,20 @@ struct RootView: View {
                 sidebarHidden.toggle()
                 sidebarDrawer = false
             }
-        case "toggle-pane":
-            if profilePane != nil {
-                profilePane = nil
-                return
-            }
-            if route == .home, threadRoot != nil { closeThread() }
-            channelPanel = nil
+        case "toggle-pane": closePane()
         case "mark-read":
-            if sidebarCollapsed && sidebarDrawer {
-                sidebarDrawer = false
-            } else if profilePane != nil {
-                profilePane = nil
-            } else if route == .home, let room {
-                _ = conversationKey(.markRead, room: room, threadRootID: nil)
+            switch coverage.escape(profile: profilePane != nil, inConversation: route == .home && room != nil) {
+            case .closeDrawer: sidebarDrawer = false
+            case .closePane: closePane()
+            case .markRead: if let room { markReadState(room, unread: false) }
+            case .nothing: break
             }
         case "mark-all-read":
             for room in matrix.rooms where room.membership == "join" && room.hasUnread {
                 markReadState(room, unread: false)
             }
         case "react-last":
-            guard route == .home, editTarget == nil,
+            guard route == .home, editTarget == nil, !coverage.conversation,
                 let last = matrix.messages.last(where: { $0.sendState == "sent" && !$0.isRedacted }),
                 let target = matrix.captureMessageAction(message: last, surface: .conversation)
             else { return }
@@ -2837,8 +2873,9 @@ private struct ReadInputs {
     var localReady: Bool
     var threadReadViewport: ThreadReadViewport
     var readHold: ReadStateHold
-    /// A pane has taken the conversation's place, so none of it is on screen.
+    /// Something lies over the conversation, or over the thread, so it isn't on screen.
     var conversationCovered: Bool
+    var threadCovered: Bool
 
     @MainActor static var hasNativeModal: Bool {
         NSApp.modalWindow != nil
@@ -2856,10 +2893,10 @@ private struct ReadInputs {
             isPreview: matrix.isPreview, isJoined: shownRoom(matrix, workspaceID: workspaceID)?.membership == "join",
             isMainTimeline: route == .home,
             isLiveTimeline: matrix.focusedEventID == nil && matrix.status == .ready,
-            isAtBottom: visibleBottomRoomID == matrix.selectedRoomID && visibleBottomRoomID != nil
-                && !conversationCovered,
+            isAtBottom: visibleBottomRoomID == matrix.selectedRoomID && visibleBottomRoomID != nil,
             isWindowActive: visible, isWindowVisible: visible, isWindowUnoccluded: visible,
-            hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented
+            hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented,
+            isCovered: conversationCovered
         )
     }
 
@@ -2876,7 +2913,7 @@ private struct ReadInputs {
             isAtBottom: threadReadViewport.isAtBottom(identity), isWindowActive: visible, isWindowVisible: visible,
             isWindowUnoccluded: visible,
             hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented,
-            manualUnreadHeld: readHold.blocks(readContext(matrix)))
+            isCovered: threadCovered, manualUnreadHeld: readHold.blocks(readContext(matrix)))
     }
 }
 

@@ -4,9 +4,11 @@ import Testing
 
 @testable import Slatrix
 
-/// The composer in a real offscreen window; opt-in like the timeline's hosted tests.
+/// The composer in a real offscreen window; opt-in like the timeline's hosted tests. One at a time: a window that says
+/// it is key takes text editing from the others.
 @MainActor
-@Suite(.tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
+@Suite(
+    .serialized, .tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
 struct ComposerHostedTests {
     private struct Fixture: View {
         @State var text = ""
@@ -18,9 +20,9 @@ struct ComposerHostedTests {
         }
     }
 
-    private func host(_ view: some View) -> (NSHostingView<AnyView>, NSWindow) {
+    private func host(_ view: some View, key: Bool = false) -> (NSHostingView<AnyView>, NSWindow) {
         let hosting = NSHostingView(rootView: AnyView(view.environmentObject(AppearanceStore())))
-        let window = offscreenWindow(NSSize(width: 400, height: 400))
+        let window = offscreenWindow(NSSize(width: 400, height: 400), key: key)
         window.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
         return (hosting, window)
@@ -373,6 +375,100 @@ struct ComposerHostedTests {
         let before = hosting.fittingSize.height
         #expect(await eventually { showsRed(hosting) })
         #expect(hosting.fittingSize.height == before)
+    }
+
+    @MainActor private final class Cover: ObservableObject { @Published var covered = false }
+
+    /// A composer that a pane can cover, beside a field the keyboard can go to instead, like a thread's reply.
+    private struct Covered: View {
+        @ObservedObject var cover: Cover
+        let sent: Gate
+        var editing = false
+        @State private var text = ""
+        @State private var other = ""
+        var body: some View {
+            VStack {
+                MessageComposer(
+                    text: $text, placeholder: "Message #team", members: [], isEditing: editing,
+                    onSend: { _, _ in await sent.wait() }, onTyping: { _ in }
+                ).covered(cover.covered)
+                TextField("Reply…", text: $other)
+            }.frame(width: 360)
+        }
+    }
+
+    @Test("A send that finishes once the composer is covered leaves the keyboard where it went meanwhile")
+    func coveredSendKeepsFocus() async throws {
+        let cover = Cover()
+        let sent = Gate()
+        sent.arm()
+        let (hosting, window) = host(Covered(cover: cover, sent: sent))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let editor = try editor(in: hosting)
+        window.makeFirstResponder(editor)
+        editor.insertText("Hello", replacementRange: editor.selectedRange())
+        editor.keyDown(
+            with: try #require(
+                NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                    characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)))
+        #expect(await eventually { sent.isWaiting })
+
+        cover.covered = true
+        hosting.layoutSubtreeIfNeeded()
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        let reply = try #require(views(hosting).first { ($0 as? NSTextField)?.placeholderString == "Reply…" })
+        #expect(window.makeFirstResponder(reply))
+        let focused = window.firstResponder
+        sent.release()
+        #expect(await eventually { editor.string.isEmpty })
+        await drainMainActor()
+        #expect(window.firstResponder === focused && focused !== editor)
+    }
+
+    @Test("An edit uncovered doesn't take back the keyboard that went elsewhere meanwhile")
+    func uncoveredEditKeepsFocus() async throws {
+        let cover = Cover()
+        let (hosting, window) = host(Covered(cover: cover, sent: Gate(), editing: true), key: true)
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let editor = try editor(in: hosting)
+        // An edit takes the keyboard as it opens.
+        #expect(await eventually { window.firstResponder === editor })
+
+        cover.covered = true
+        hosting.layoutSubtreeIfNeeded()
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        let reply = try #require(views(hosting).first { ($0 as? NSTextField)?.placeholderString == "Reply…" })
+        #expect(await eventually { window.firstResponder !== editor })
+        #expect(window.makeFirstResponder(reply))
+        cover.covered = false
+        hosting.layoutSubtreeIfNeeded()
+        // Only the editor: a test window in parallel can take key and end the reply's editing.
+        #expect(await !eventually(timeout: .milliseconds(500)) { window.firstResponder === editor })
+    }
+
+    // AppKit reads `isEditable` before it lets a drop, a paste or a service put text in.
+    @Test("A covered composer takes no dropped text, and takes it again once uncovered")
+    func coveredTakesNoDrop() throws {
+        let cover = Cover()
+        let (hosting, window) = host(Covered(cover: cover, sent: Gate()))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let editor = try editor(in: hosting)
+        cover.covered = true
+        hosting.layoutSubtreeIfNeeded()
+        #expect(!editor.isEditable)
+        cover.covered = false
+        hosting.layoutSubtreeIfNeeded()
+        #expect(editor.isEditable)
     }
 
     /// Whether any pixel has the fixture images' red; nothing else in the composer is red.

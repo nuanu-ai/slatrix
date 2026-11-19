@@ -99,12 +99,13 @@ struct MessageComposer: View {
             if !attachments.isEmpty && !isEditing { attachmentStrip.padding(.top, m.sp8) }
             // One line at rest, 40 pt, growing upward; the buttons keep to its bottom edge, so Send never moves. The
             // composer keeps to the messages' column, so "+" sits under their avatars and the text starts where theirs
-            // does, past the editor's own inset.
+            // does, past the editor's own inset. Compact messages have no avatars, so "+" joins the buttons at the end
+            // and the composer reaches past the column for its text to start where theirs does.
             HStack(alignment: .bottom, spacing: 0) {
-                iconButton("plus", label: "Attach files", circular: true) { chooseFiles() }.disabled(
-                    sending || isEditing || preparingAttachments
-                ).padding(.bottom, m(6))
-                    .padding(.trailing, m.conversationText(thread: isThread) - m(6) - m.iconButton - m.sp4)
+                if !compact {
+                    attachButton.padding(.bottom, m(6))
+                        .padding(.trailing, m.conversationText(thread: isThread) - m(6) - m.iconButton - m.sp4)
+                }
                 ZStack(alignment: .topLeading) {
                     if text.isEmpty && editor.formats.block == nil {
                         Text(placeholder)
@@ -115,7 +116,7 @@ struct MessageComposer: View {
                     ComposerNativeEditor(
                         text: $text, state: editor, members: members, mentionText: NSColor(colors.mentionText),
                         mentionFill: NSColor(colors.mentionFill), textColor: NSColor(colors.textBody),
-                        linkColor: NSColor(colors.accent), enabled: !sending,
+                        linkColor: NSColor(colors.accent), enabled: !sending, reachable: isEnabled,
                         acceptsAttachments: !sending && !isEditing && !preparingAttachments, onTextChange: changed,
                         onSelectionChange: { text, range in
                             if hasSelection != (range.length > 0) { hasSelection = range.length > 0 }
@@ -127,6 +128,7 @@ struct MessageComposer: View {
                     .accessibilityHint("Drop or paste files to attach.")
                 }
                 HStack(spacing: 0) {
+                    if compact { attachButton }
                     iconButton("at", label: "Mention someone") {
                         editor.insert("@")
                         editor.focus()
@@ -149,7 +151,7 @@ struct MessageComposer: View {
                             .accessibilityLabel(isEditing ? "Save changes" : "Send message")
                     }
                 }.padding(.bottom, m(6)).padding(.leading, m.sp4).disabled(sending)
-            }.padding(.horizontal, m(6))
+            }.padding(.leading, compact ? m.sp8 : m(6)).padding(.trailing, m(6))
         }
         .glass(
             colors.control, in: RoundedRectangle(cornerRadius: m.controlLarge / 2), cornerRadius: m.controlLarge / 2,
@@ -161,13 +163,16 @@ struct MessageComposer: View {
                 editor.isFocused ? colors.accentLine : .clear, lineWidth: 1)
         )
         .elevation(.e1, cornerRadius: m.controlLarge / 2)
+        // Compact, the text sits 12 in from the rounded edge: 8 here and the editor's own 4.
+        .padding(.leading, compact ? -m.sp12 : 0)
         // Suggestions, errors and hints float above the composer instead of growing it.
         .overlay(alignment: .topLeading) {
             floating.alignmentGuide(.top) { $0[.bottom] + m.sp8 }
         }
         .onAppear { isActive = true }
-        .task(id: (isEditing || requiresTextForSend) && isEnabled) {
-            guard isEditing || requiresTextForSend, isEnabled else { return }
+        // Once as an edit opens; opened under a cover, the editor takes the keyboard as it would after any cover.
+        .task(id: isEditing || requiresTextForSend) {
+            guard isEditing || requiresTextForSend else { return }
             for _ in 0..<20 {
                 guard !Task.isCancelled, isActive, !sending else { return }
                 if let view = editor.textView, let window = view.window,
@@ -326,6 +331,13 @@ struct MessageComposer: View {
             linkDraft = nil
             editor.focus()
         }
+    }
+
+    private var compact: Bool { appearance.density == .compact }
+
+    private var attachButton: some View {
+        iconButton("plus", label: "Attach files", circular: true) { chooseFiles() }.disabled(
+            sending || isEditing || preparingAttachments)
     }
 
     private func iconButton(_ icon: String, label: String, circular: Bool = false, action: @escaping () -> Void)
@@ -613,7 +625,7 @@ private struct ComposerLinkDraft: Equatable {
     @Published var formats = ComposerFormats()
     weak var textView: ComposerTextView?
 
-    func focus() { if let textView { textView.window?.makeFirstResponder(textView) } }
+    func focus() { textView?.takeKeyboard() }
 
     func insert(_ string: String, replacing range: NSRange? = nil, selection: NSRange? = nil) {
         guard let textView, textView.isEditable else { return }
@@ -694,6 +706,7 @@ private struct ComposerNativeEditor: NSViewRepresentable {
     var textColor: NSColor
     var linkColor: NSColor
     var enabled: Bool
+    var reachable: Bool
     var acceptsAttachments: Bool
     var onTextChange: (String, NSRange) -> Void
     var onSelectionChange: (String, NSRange) -> Void
@@ -772,7 +785,8 @@ private struct ComposerNativeEditor: NSViewRepresentable {
             // After this update, which mustn't publish.
             Task { @MainActor in view.publishFormats() }
         }
-        view.isEditable = enabled
+        view.isEditable = enabled && reachable
+        view.isEnabled = reachable
     }
 
     private func configure(_ view: ComposerTextView, context: Context) {
@@ -847,6 +861,43 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
     var acceptsAttachments = true
     var onAttachments: ((ComposerAttachmentInput) -> Bool)?
     var onAttachmentError: ((String) -> Void)?
+    /// Off under whatever covers it. The keyboard it had or was asked to take meanwhile, such as after a send or as the
+    /// media viewer closes, comes back when it's on again, unless something else took it.
+    var isEnabled = true {
+        didSet {
+            guard isEnabled != oldValue else { return }
+            if !isEnabled, window?.firstResponder === self { wantsKeyboard = true }
+            // After this pass, once whatever covers it has taken the keyboard or not.
+            DispatchQueue.main.async { [weak self] in self?.enabledChanged() }
+        }
+    }
+    private var wantsKeyboard = false
+    override var acceptsFirstResponder: Bool { isEnabled && super.acceptsFirstResponder }
+    // `makeFirstResponder` asks only this.
+    override func becomeFirstResponder() -> Bool {
+        guard isEnabled else {
+            wantsKeyboard = true
+            return false
+        }
+        return super.becomeFirstResponder()
+    }
+    /// Off, it waits: asking the window would take the keyboard from where it is, even though this refuses it.
+    func takeKeyboard() {
+        guard isEnabled else {
+            wantsKeyboard = true
+            return
+        }
+        window?.makeFirstResponder(self)
+    }
+    private func enabledChanged() {
+        guard let window else { return }
+        if !isEnabled {
+            if window.firstResponder === self { window.makeFirstResponder(nil) }
+        } else if wantsKeyboard {
+            wantsKeyboard = false
+            if window.firstResponder === window { window.makeFirstResponder(self) }
+        }
+    }
     private var fontSize: CGFloat = 0
     private var mentionText = NSColor.linkColor
     private var mentionFill = NSColor.clear

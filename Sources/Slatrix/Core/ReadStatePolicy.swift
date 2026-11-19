@@ -16,6 +16,8 @@ struct ReadStateContext: Equatable {
     var isWindowVisible = false
     var isWindowUnoccluded = false
     var hasModal = false
+    /// Something lies over the conversation: a pane in its place, the media viewer or a dialog.
+    var isCovered = false
 }
 
 struct ReadReceiptTarget: Equatable, Hashable {
@@ -80,7 +82,7 @@ enum ReadStatePolicy {
     {
         guard !context.isPreview, context.isJoined, context.isMainTimeline, context.isLiveTimeline,
             context.isAtBottom, context.isWindowActive, context.isWindowVisible, context.isWindowUnoccluded,
-            !context.hasModal, context.roomID == context.selectedRoomID, !hold.blocks(context),
+            !context.hasModal, !context.isCovered, context.roomID == context.selectedRoomID, !hold.blocks(context),
             let account = context.accountID, valid(account, prefix: "@"), account.contains(":"),
             valid(context.roomID, prefix: "!"), let eventID = context.latestVisibleEventID, valid(eventID, prefix: "$"),
             let session = context.sessionGeneration, let timeline = context.timelineGeneration
