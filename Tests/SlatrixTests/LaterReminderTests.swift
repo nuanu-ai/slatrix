@@ -8,8 +8,11 @@ import Testing
 struct LaterReminderTests {
     @MainActor private final class Queue: LaterReminderTransport {
         var queued: [String: (Date, DesktopMessageNotification)] = [:]
+        /// Holds a request on its way into the queue while armed.
+        let arriving = Gate()
         func scheduled() async -> [String] { Array(queued.keys) }
         func schedule(_ identifier: String, at date: Date, notification: DesktopMessageNotification) async throws {
+            await arriving.wait()
             queued[identifier] = (date, notification)
         }
         func cancel(_ identifiers: [String]) { for identifier in identifiers { queued[identifier] = nil } }
@@ -81,5 +84,21 @@ struct LaterReminderTests {
         }
         await schedule.sync(list, accountID: owner, preview: false) { notification($0) }
         #expect(queue.queued.values.map(\.1.body) == ["Reminder"])
+    }
+
+    @Test("A reminder still on its way into the queue at sign-out is withdrawn when it lands")
+    func lateArrival() async {
+        let queue = Queue()
+        let schedule = LaterReminderSchedule(transport: queue)
+        let list = SavedMessages().reminding(
+            roomID: room, eventID: "$one", at: Date().addingTimeInterval(600), now: Date())
+        queue.arriving.arm()
+        let signedIn = Task { await schedule.sync(list, accountID: owner, preview: true, notification: notification) }
+        #expect(await eventually { queue.arriving.isWaiting })
+        signedIn.cancel()
+        await schedule.sync(list, accountID: nil, preview: true, notification: notification)
+        queue.arriving.release()
+        await signedIn.value
+        #expect(queue.queued.isEmpty)
     }
 }

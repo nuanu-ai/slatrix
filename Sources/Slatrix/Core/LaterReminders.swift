@@ -13,6 +13,8 @@ import Foundation
 @MainActor final class LaterReminderSchedule {
     static let prefix = "later."
     private let transport: LaterReminderTransport
+    /// What the newest sync wants queued.
+    private var latest: Set<String> = []
 
     init(transport: LaterReminderTransport) { self.transport = transport }
 
@@ -33,11 +35,14 @@ import Foundation
                     }
                 }
             } ?? []
+        latest = Set(wanted.map(\.0))
         let queued = Set(await transport.scheduled().filter { $0.hasPrefix(Self.prefix) })
         transport.cancel(Array(queued.subtracting(wanted.map(\.0))))
         for (identifier, item, date) in wanted where !queued.contains(identifier) {
             guard !Task.isCancelled, let message = await notification(item), !Task.isCancelled else { return }
             try? await transport.schedule(identifier, at: date, notification: message)
+            // A newer sync that read the queue before this landed couldn't withdraw it.
+            if !latest.contains(identifier) { transport.cancel([identifier]) }
         }
     }
 }
