@@ -1108,6 +1108,40 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    private fun countedRoot(replies: Int?) = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen",
+        "Plan?", null, 1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0,
+        thread = replies?.let { MessageThread(it, null, null) })
+
+    @Test fun theThreadsRootCountsTheRepliesTheChannelCountsUnderItAsTheChannelsCountChanges() = runTest {
+        val channel = MutableStateFlow(ConversationState(rows = listOf(countedRoot(5))))
+        val timeline = ConversationTimeline(emptyList())
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root",
+            root = countedRoot(5))
+        backgroundScope.launch { conversation.followRoot(channel) }
+        runCurrent()
+        // The thread's own timeline holds its root as first sent, without a summary, and one reply.
+        timeline.emit(listOf(TimelineDiff.Reset(listOf(conversationItem("thread-root", "\$root", "Plan?"),
+            conversationItem("reply", "\$reply", "Yes")))))
+        assertEquals(5, conversation.state.first { it.rows.size == 2 }.rows.messages.first().thread?.replies)
+        channel.value = ConversationState(rows = listOf(countedRoot(6)))
+        conversation.state.first { it.rows.messages.first().thread?.replies == 6 }
+        conversation.close()
+    }
+
+    @Test fun aRootFromTheThreadsTimelineWithoutACountKeepsTheCountTheThreadOpenedWith() = runTest {
+        // The channel's loaded rows don't reach the root, as for a thread opened from the Threads list.
+        val channel = MutableStateFlow(ConversationState(rows = emptyList()))
+        val timeline = ConversationTimeline(emptyList())
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root",
+            root = countedRoot(5))
+        backgroundScope.launch { conversation.followRoot(channel) }
+        runCurrent()
+        timeline.emit(listOf(TimelineDiff.Reset(listOf(conversationItem("thread-root", "\$root", "Plan?"),
+            conversationItem("reply", "\$reply", "Yes")))))
+        assertEquals(5, conversation.state.first { it.rows.size == 2 }.rows.messages.first().thread?.replies)
+        conversation.close()
+    }
+
     // capability: message.delete
     @Test fun aRootTheChannelNoLongerHoldsShowsAsTheThreadHasItDeletedIncluded() = runTest {
         val file = MessageAttachment(MessageAttachment.Kind.File, "plan.pdf", "application/pdf", 17, null, null,
