@@ -232,7 +232,8 @@ struct LostSendResponseTests {
             eventOrTransactionId: .eventId(eventId: "$reply"),
             newContent: .roomMessage(content: messageEventContentFromMarkdown(md: "Changed")))
         #expect(await eventually(timeout: .seconds(15)) { app.errorMessage == "Couldn’t edit this message." })
-        #expect(shown.messages.first { $0.eventID == "$reply" }?.body == "Reply")
+        // The banner comes from the cancel's result, the text from the timeline, which can hear of it moments later.
+        #expect(await eventually { shown.messages.first { $0.eventID == "$reply" }?.body == "Reply" })
         _ = try await pane.send(msg: messageEventContentFromMarkdown(md: "second"))
         #expect(
             await eventually(timeout: .seconds(15)) { server.bodies.contains("second") }, "Server has \(server.bodies)")
