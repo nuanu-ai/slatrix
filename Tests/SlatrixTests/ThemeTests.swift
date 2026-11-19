@@ -24,6 +24,7 @@ struct ThemeTests {
             #expect(contrast(colors.textSecondary, surface) >= 4.5)
         }
         #expect(contrast(colors.accent, colors.canvas) >= 4.5)
+        #expect(contrast(colors.mentionText, over(colors.mentionFill, colors.canvas)) >= 4.5)
         #expect(contrast(colors.mentionYouText, over(colors.mentionYouFill, colors.canvas)) >= 4.5)
         // Where a message crosses a doodle, and under the pointer too.
         let doodled = over(colors.wallpaperDoodle, colors.canvas)
