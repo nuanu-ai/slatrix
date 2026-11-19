@@ -10,8 +10,8 @@ enum TimelineLayout {
         enum Kind: Equatable {
             case day(String)
             case unread
-            /// Under a thread's root, as Slack sets the root apart from its replies.
-            case replies(Int)
+            /// Under a thread's root, as Slack sets the root apart from its replies: the words that count them.
+            case replies(String)
             case message(ChatMessage, grouped: Bool, time: String)
         }
         let id: String
@@ -31,10 +31,11 @@ enum TimelineLayout {
     }
 
     /// `unreadBoundaryEventID` is the event the "New messages" line goes above; `groups` is false in compact density;
-    /// `threadRootEventID` is a thread's root, which gets the line counting its replies once it has loaded.
+    /// `threadRootEventID` is a thread's root, which gets the line counting its replies; `repliesLoaded` says the
+    /// thread has loaded back to its root, so they can be counted.
     static func rows(
         _ messages: [ChatMessage], unreadBoundaryEventID: String?, groups: Bool, threadRootEventID: String? = nil,
-        now: Date, calendar: Calendar, locale: Locale
+        repliesLoaded: Bool = false, now: Date, calendar: Calendar, locale: Locale
     ) -> [Row] {
         let time = Date.FormatStyle(
             date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
@@ -73,10 +74,19 @@ enum TimelineLayout {
             rows.append(
                 Row(id: message.id, kind: .message(message, grouped: grouped, time: message.timestamp.formatted(time))))
             previous = message
-            if message.eventID == threadRootEventID {
-                rows.append(Row(id: "replies", kind: .replies(messages.count - index - 1)))
+            if message.eventID == threadRootEventID, let label = repliesLabel(messages[(index + 1)...], loaded: repliesLoaded)
+            {
+                rows.append(Row(id: "replies", kind: .replies(label)))
             }
         }
         return rows
+    }
+
+    /// The words under a thread's root: empty while the count isn't known, so the line holds its place, and nil for no
+    /// line. Only replies the server confirmed count. The cases are in spec/thread-replies.json.
+    private static func repliesLabel(_ replies: ArraySlice<ChatMessage>, loaded: Bool) -> String? {
+        guard loaded else { return "" }
+        let count = replies.count { $0.sendState == "sent" }
+        return count == 0 ? nil : count == 1 ? "1 reply" : "\(count) replies"
     }
 }

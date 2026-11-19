@@ -33,13 +33,13 @@ struct TimelineLayoutTests {
         _ messages: [ChatMessage], unread: String? = nil, groups: Bool = true, threadRoot: String? = nil
     ) -> [String] {
         TimelineLayout.rows(
-            messages, unreadBoundaryEventID: unread, groups: groups, threadRootEventID: threadRoot, now: Self.now,
-            calendar: Self.calendar, locale: Self.locale
+            messages, unreadBoundaryEventID: unread, groups: groups, threadRootEventID: threadRoot,
+            repliesLoaded: true, now: Self.now, calendar: Self.calendar, locale: Self.locale
         ).map { row in
             switch row.kind {
             case .day(let label): "day \(label)"
             case .unread: "unread"
-            case .replies(let count): "\(count) replies"
+            case .replies(let label): label
             case .message(let message, let grouped, let time): "\(message.id)\(grouped ? " grouped" : "") \(time)"
             }
         }.map { $0.replacingOccurrences(of: "\u{202F}", with: " ") }
@@ -128,6 +128,31 @@ struct TimelineLayoutTests {
         #expect(
             layout([message("a", "@alice", at: 2), message("b", "@alice", at: 1)], threadRoot: "root")
                 == ["day Today", "a 11:58 AM", "b grouped 11:59 AM"])
+    }
+
+    struct RepliesCase: Decodable, CustomTestStringConvertible {
+        var name: String
+        var loaded: Bool
+        var replies: [Bool]
+        var divider: String?
+        var testDescription: String { name }
+    }
+    struct RepliesSpec: Decodable { var cases: [RepliesCase] }
+
+    @Test(
+        "Shared case: the line counting a thread's replies",
+        arguments: try SharedSpec.decode("spec/thread-replies.json", as: RepliesSpec.self).cases)
+    func repliesLine(spec: RepliesCase) {
+        let replies = spec.replies.enumerated().map { index, confirmed in
+            var reply = message("r\(index)", "@alice", at: 1)
+            if !confirmed { reply.sendState = "failed" }
+            return reply
+        }
+        let rows = TimelineLayout.rows(
+            [message("root", "@alice", at: 2)] + replies, unreadBoundaryEventID: nil, groups: true,
+            threadRootEventID: "root", repliesLoaded: spec.loaded, now: Self.now, calendar: Self.calendar,
+            locale: Self.locale)
+        #expect(rows.compactMap { if case .replies(let label) = $0.kind { label } else { nil } }.first == spec.divider)
     }
 
     @MainActor @Test("A message that arrives while the conversation is open adds no unread line")

@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.ThreadReplies
 import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationRow
@@ -348,9 +349,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         Box(Modifier.fillMaxSize()) {
             val rows = state.rows
             // A reset re-pages the thread; the last count stays until the new one is known, so the bar doesn't blank.
-            var replies by remember { mutableStateOf<Int?>(null) }
+            var replies by remember { mutableStateOf(ThreadReplies.divider(loaded = false, replies = emptyList())) }
             if (threadRoot != null && !state.hasMore) {
-                replies = rows.count { it is ConversationMessage && it.eventId != null && it.eventId != threadRoot }
+                replies = ThreadReplies.divider(loaded = true,
+                    replies = rows.filterIsInstance<ConversationMessage>().filter { it.eventId != threadRoot }.map { it.eventId })
             }
             val firstReply = remember(rows, threadRoot) {
                 rows.getOrNull(rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot } + 1)?.id.takeIf { threadRoot != null }
@@ -522,13 +524,13 @@ internal fun membersLabel(count: Long) = if (count == 1L) "1 member" else "$coun
 
 /** Slack's bar between a thread's root and its replies. */
 @Composable
-private fun RepliesBar(count: Int?) {
+private fun RepliesBar(words: String?) {
     val colors = SlatrixTheme.colors
-    if (count == 0) return
+    if (words == null) return
     Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         HorizontalDivider(Modifier.weight(1f), color = colors.borderStrong)
-        Text(when (count) { null -> ""; 1 -> "1 reply"; else -> "$count replies" }, style = MaterialTheme.typography.labelMedium,
+        Text(words, style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary)
         HorizontalDivider(Modifier.weight(1f), color = colors.borderStrong)
     }

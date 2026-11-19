@@ -1,0 +1,12 @@
+{
+  "about": "The line under a thread's root that counts its replies, as Slack shows it. loaded is whether the thread has loaded back to its root; until then the count isn't known, so the line keeps its place with no words, and nothing moves when it arrives. replies lists the messages after the root, true for one the server has confirmed and false for one still sending or failed, which doesn't count. divider is the line's words, empty for a line holding its place, and null for no line at all, which is how a thread with no confirmed reply shows.",
+  "cases": [
+    { "name": "A thread still loading holds the line's place with no count", "loaded": false, "replies": [], "divider": "" },
+    { "name": "Replies seen before the thread loads aren't counted yet", "loaded": false, "replies": [true, true], "divider": "" },
+    { "name": "A loaded thread with no replies has no line", "loaded": true, "replies": [], "divider": null },
+    { "name": "One reply", "loaded": true, "replies": [true], "divider": "1 reply" },
+    { "name": "Several replies", "loaded": true, "replies": [true, true, true], "divider": "3 replies" },
+    { "name": "A reply still sending or failed isn't counted", "loaded": true, "replies": [true, false], "divider": "1 reply" },
+    { "name": "Only an unconfirmed reply means no line yet", "loaded": true, "replies": [false], "divider": null }
+  ]
+}
