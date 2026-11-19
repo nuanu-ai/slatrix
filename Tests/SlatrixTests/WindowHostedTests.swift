@@ -851,6 +851,46 @@ struct WindowHostedTests {
         #expect(harness.matrix.errorMessage != nil)
     }
 
+    @Test("Also send to names a private channel with its lock, as a public one shows its #")
+    func alsoSendToMarksPrivate() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        try harness.openThread()
+        #expect(await eventually { harness.dividers == 2 })
+        let canvas = try #require(NSColor(harness.appearance.colors.canvas).usingColorSpace(.sRGB))
+        // Where the checkbox's words end: the last column of ink on its line, right of the box.
+        func wordsEnd() throws -> CGFloat {
+            let box = try #require(harness.shown().first { $0 is NSButton })
+            let frame = box.convert(box.bounds, to: nil)
+            harness.hosting.layoutSubtreeIfNeeded()
+            let image = try #require(harness.hosting.bitmapImageRepForCachingDisplay(in: harness.hosting.bounds))
+            harness.hosting.cacheDisplay(in: harness.hosting.bounds, to: image)
+            let scale = CGFloat(image.pixelsWide) / harness.hosting.bounds.width
+            let y = Int((harness.hosting.bounds.height - frame.midY) * scale)
+            var end = frame.maxX
+            for x in Int(frame.maxX * scale)..<image.pixelsWide {
+                for row in y - 4...y + 4 {
+                    guard let pixel = image.colorAt(x: x, y: row) else { continue }
+                    if abs(pixel.redComponent - canvas.redComponent) + abs(pixel.greenComponent - canvas.greenComponent)
+                        + abs(pixel.blueComponent - canvas.blueComponent) > 0.3
+                    {
+                        end = CGFloat(x) / scale
+                    }
+                }
+            }
+            return end
+        }
+        let open = try wordsEnd()
+        let index = try #require(harness.matrix.rooms.firstIndex { $0.id == harness.matrix.selectedRoomID })
+        harness.matrix.rooms[index].isPrivate = true
+        await drainMainActor()
+        // The lock stands where the # stood, a little wider, so the words end about where they did.
+        #expect(
+            await eventually { (try? (-4..<8).contains(wordsEnd() - open)) == true },
+            "\((try? wordsEnd()) ?? 0) from \(open)")
+    }
+
     // capability: app.narrow-window
     @Test("In a narrow window the sidebar opens as a drawer, and picking a conversation or Esc closes it")
     func drawer() async {

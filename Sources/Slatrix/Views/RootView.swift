@@ -1354,6 +1354,11 @@ struct RootView: View {
                     ) {
                         if room.isDirect {
                             Text("Also send as direct message")
+                        } else if room.isPrivate {
+                            // Named as its header names it, by its lock.
+                            Text(
+                                "Also send to \(Image(systemName: room.channelSymbol))\(Text(room.name).fontWeight(.semibold))"
+                            )
                         } else {
                             Text("Also send to \(Text(room.writtenName).fontWeight(.semibold))")
                         }
