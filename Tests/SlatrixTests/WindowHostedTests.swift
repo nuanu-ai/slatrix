@@ -828,6 +828,29 @@ struct WindowHostedTests {
         #expect(await eventually { !takesKeyboard() })
     }
 
+    @Test("In a narrow window an error sits under the thread's header, so Close thread still closes the thread")
+    func bannerUnderPaneHeader() async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        try harness.openThread()
+        harness.resize(700)
+        func targets() -> [CGRect] {
+            harness.shown().compactMap { $0 as? UploadDropView }.map { $0.convert($0.bounds, to: nil) }
+        }
+        #expect(await eventually { targets().count == 2 })
+        harness.matrix.errorMessage = "The server didn’t answer."
+        // The thread's drop target is the one under the toolbar; Close thread ends its header.
+        let pane = try #require(targets().min { $0.maxY < $1.maxY })
+        let m = Metrics()
+        let close = CGRect(
+            x: pane.maxX - m.conversationInset(thread: true) - m.iconButton / 2, y: pane.maxY - m.paneHeader / 2,
+            width: 0, height: 0)
+        try await harness.click(close)
+        #expect(await eventually { targets().count == 1 })
+        #expect(harness.matrix.errorMessage != nil)
+    }
+
     // capability: app.narrow-window
     @Test("In a narrow window the sidebar opens as a drawer, and picking a conversation or Esc closes it")
     func drawer() async {

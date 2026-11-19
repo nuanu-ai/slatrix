@@ -762,8 +762,9 @@ struct RootView: View {
                                         .padding(.top, m.paneHeader)
                                 }
                             }
-                            // Banners float over the conversation instead of pushing it down.
-                            .overlay(alignment: .top) { banners.padding(.top, m.paneHeader) }
+                            // Banners float over the conversation instead of pushing it down, under whichever header is
+                            // on top: a pane in the conversation's place brings its own, with its close button.
+                            .overlay(alignment: .top) { banners.padding(.top, (paneCovers ? 2 : 1) * m.paneHeader) }
                             if paneOpen && paneBeside {
                                 WithWidths(widths) { widths in
                                     ResizeHandle(
