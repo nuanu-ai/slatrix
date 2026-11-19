@@ -1,20 +1,26 @@
 import Foundation
 import Network
 
-/// A homeserver on the loopback interface with one room, `room`, whose whole history is `messages`, newest first. It
-/// answers just what a client needs to join that room and page back through it, so the real SDK can index synthetic
-/// messages; anything else is "not found".
+/// A loopback homeserver with one room. History is newest first, as returned by backward pagination.
 final class FakeHomeserver: @unchecked Sendable {
     let room: String
-    private let messages: [[String: Any]]
+    private var messages: [[String: Any]]
+    private let dropFirstSendResponse: Bool
+    private var sent: [String: String] = [:]
+    private var dropped: String?
+    private var replayed = false
+    var retriedDroppedSend: Bool { queue.sync { replayed } }
     private let listener: NWListener
     private let queue = DispatchQueue(label: "FakeHomeserver")
     private(set) var url = ""
 
-    init(room: String, messages: [[String: Any]]) async throws {
+    init(room: String, messages: [[String: Any]], dropFirstSendResponse: Bool = false) async throws {
+        self.dropFirstSendResponse = dropFirstSendResponse
         self.room = room
         self.messages = messages
-        listener = try NWListener(using: .tcp, on: .any)
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
+        listener = try NWListener(using: parameters)
         listener.newConnectionHandler = { [unowned self] connection in
             connection.start(queue: queue)
             read(connection, Data())
@@ -45,9 +51,11 @@ final class FakeHomeserver: @unchecked Sendable {
                     lines.first { $0.lowercased().hasPrefix("content-length:") }
                     .flatMap { Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) } ?? 0
                 guard buffer.count >= end.upperBound + length else { break }
+                let payload = Data(buffer[end.upperBound..<(end.upperBound + length)])
                 buffer = Data(buffer[(end.upperBound + length)...])
                 let request = lines.first?.split(separator: " ").map(String.init) ?? []
-                let (status, body) = respond(request.first ?? "", request.count > 1 ? request[1] : "")
+                guard let (status, body) = respond(request.first ?? "", request.count > 1 ? request[1] : "", payload)
+                else { return connection.cancel() }
                 let json = try! JSONSerialization.data(withJSONObject: body)
                 let head =
                     "HTTP/1.1 \(status) \(status == 200 ? "OK" : "Not Found")\r\n"
@@ -58,13 +66,35 @@ final class FakeHomeserver: @unchecked Sendable {
         }
     }
 
-    private func respond(_ method: String, _ target: String) -> (Int, Any) {
+    private func respond(_ method: String, _ target: String, _ payload: Data) -> (Int, Any)? {
         let path = target.split(separator: "?", maxSplits: 1).first.map(String.init) ?? ""
         let segments = path.split(separator: "/").map { $0.removingPercentEncoding ?? String($0) }
         if path == "/_matrix/client/versions" { return (200, ["versions": ["v1.11"]]) }
         // POST /_matrix/client/v3/rooms/{room}/join
         if method == "POST", segments.count == 6, segments[4] == room, segments[5] == "join" {
             return (200, ["room_id": room])
+        }
+        if method == "PUT", segments.count == 8, segments[4] == room, segments[5] == "send",
+            segments[6] == "m.room.message",
+            let content = try? JSONSerialization.jsonObject(with: payload) as? [String: Any]
+        {
+            let transaction = segments[7]
+            if let eventID = sent[transaction] {
+                if transaction == dropped { replayed = true }
+                return (200, ["event_id": eventID])
+            }
+            let eventID = "$message-\(sent.count + 1)"
+            sent[transaction] = eventID
+            messages.insert(
+                [
+                    "type": "m.room.message", "event_id": eventID, "sender": "@me:localhost",
+                    "origin_server_ts": sent.count, "content": content,
+                ], at: 0)
+            if dropFirstSendResponse, dropped == nil {
+                dropped = transaction
+                return nil
+            }
+            return (200, ["event_id": eventID])
         }
         // GET /_matrix/client/v3/rooms/{room}/messages: everything in one page, then the start of the room.
         if segments.count == 6, segments[4] == room, segments[5] == "messages" {
