@@ -31,11 +31,10 @@ enum TimelineLayout {
     }
 
     /// `unreadBoundaryEventID` is the event the "New messages" line goes above; `groups` is false in compact density;
-    /// `threadRootEventID` is a thread's root, which gets the line counting its replies; `repliesLoaded` says the
-    /// thread has loaded back to its root, so they can be counted.
+    /// `threadRootEventID` is a thread's root, which gets the line counting its replies.
     static func rows(
         _ messages: [ChatMessage], unreadBoundaryEventID: String?, groups: Bool, threadRootEventID: String? = nil,
-        repliesLoaded: Bool = false, now: Date, calendar: Calendar, locale: Locale
+        now: Date, calendar: Calendar, locale: Locale
     ) -> [Row] {
         let time = Date.FormatStyle(
             date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
@@ -75,7 +74,7 @@ enum TimelineLayout {
                 Row(id: message.id, kind: .message(message, grouped: grouped, time: message.timestamp.formatted(time))))
             previous = message
             if message.eventID == threadRootEventID,
-                let label = repliesLabel(messages[(index + 1)...], loaded: repliesLoaded)
+                let label = repliesLabel(message.replyCount, replies: messages[(index + 1)...])
             {
                 rows.append(Row(id: "replies", kind: .replies(label)))
             }
@@ -83,11 +82,11 @@ enum TimelineLayout {
         return rows
     }
 
-    /// The words under a thread's root: empty while the count isn't known, so the line holds its place, and nil for no
-    /// line. Only replies the server confirmed count. The cases are in spec/thread-replies.json.
-    private static func repliesLabel(_ replies: ArraySlice<ChatMessage>, loaded: Bool) -> String? {
-        guard loaded else { return "" }
-        let count = replies.count { $0.sendState == "sent" }
+    /// The words under a thread's root, as the channel counts its replies, and nil for no line. The root's count can
+    /// lag behind, or already include, a reply of this device's, so the replies held that haven't failed count when
+    /// they're more. The cases are in spec/thread-replies.json.
+    private static func repliesLabel(_ rootCount: Int, replies: ArraySlice<ChatMessage>) -> String? {
+        let count = max(rootCount, replies.count { $0.sendState != "failed" })
         return count == 0 ? nil : count == 1 ? "1 reply" : "\(count) replies"
     }
 }

@@ -190,8 +190,7 @@ struct TimelineView: View {
     private var entries: [TimelineEntry] {
         let rows = layout.rows(
             messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
-            groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil,
-            repliesLoaded: thread && (matrix.isPreview || !matrix.hasMoreThreadHistory))
+            groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil)
         let context = matrix.messageActionContext
         let offline = matrix.connectionState == .offline
         let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
@@ -391,7 +390,7 @@ struct TimelineView: View {
 /// Lays the messages out once per change, and pins the "New messages" line to the first unread event as the
 /// conversation opens, so reading does not move the line and nothing arriving while it's open adds one.
 @MainActor final class TimelineLayoutCache {
-    private var input: (messages: [ChatMessage], unread: String?, groups: Bool, repliesLoaded: Bool)?
+    private var input: (messages: [ChatMessage], unread: String?, groups: Bool)?
     private var rows: [TimelineLayout.Row] = []
     private var unreadBoundary: String?
     private var opened = false
@@ -427,25 +426,20 @@ struct TimelineView: View {
     }
 
     /// A cache serves one timeline, so `threadRootEventID` never changes under it.
-    func rows(
-        _ messages: [ChatMessage], firstUnreadEventID: String?, groups: Bool, threadRootEventID: String? = nil,
-        repliesLoaded: Bool = false
-    ) -> [TimelineLayout.Row] {
+    func rows(_ messages: [ChatMessage], firstUnreadEventID: String?, groups: Bool, threadRootEventID: String? = nil)
+        -> [TimelineLayout.Row]
+    {
         if !opened, !messages.isEmpty {
             opened = true
             if let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID }) {
                 unreadBoundary = firstUnreadEventID
             }
         }
-        if let input, input.groups == groups, input.unread == unreadBoundary, input.repliesLoaded == repliesLoaded,
-            input.messages == messages
-        {
-            return rows
-        }
+        if let input, input.groups == groups, input.unread == unreadBoundary, input.messages == messages { return rows }
         rows = TimelineLayout.rows(
             messages, unreadBoundaryEventID: unreadBoundary, groups: groups, threadRootEventID: threadRootEventID,
-            repliesLoaded: repliesLoaded, now: Date(), calendar: .current, locale: .current)
-        input = (messages, unreadBoundary, groups, repliesLoaded)
+            now: Date(), calendar: .current, locale: .current)
+        input = (messages, unreadBoundary, groups)
         return rows
     }
 }

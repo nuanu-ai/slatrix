@@ -33,8 +33,8 @@ struct TimelineLayoutTests {
         _ messages: [ChatMessage], unread: String? = nil, groups: Bool = true, threadRoot: String? = nil
     ) -> [String] {
         TimelineLayout.rows(
-            messages, unreadBoundaryEventID: unread, groups: groups, threadRootEventID: threadRoot,
-            repliesLoaded: true, now: Self.now, calendar: Self.calendar, locale: Self.locale
+            messages, unreadBoundaryEventID: unread, groups: groups, threadRootEventID: threadRoot, now: Self.now,
+            calendar: Self.calendar, locale: Self.locale
         ).map { row in
             switch row.kind {
             case .day(let label): "day \(label)"
@@ -132,8 +132,8 @@ struct TimelineLayoutTests {
 
     struct RepliesCase: Decodable, CustomTestStringConvertible {
         var name: String
-        var loaded: Bool
-        var replies: [Bool]
+        var count: Int
+        var replies: [String]
         var divider: String?
         var testDescription: String { name }
     }
@@ -143,15 +143,16 @@ struct TimelineLayoutTests {
         "Shared case: the line counting a thread's replies",
         arguments: try SharedSpec.decode("spec/thread-replies.json", as: RepliesSpec.self).cases)
     func repliesLine(spec: RepliesCase) {
-        let replies = spec.replies.enumerated().map { index, confirmed in
+        let replies = spec.replies.enumerated().map { index, state in
             var reply = message("r\(index)", "@alice", at: 1)
-            if !confirmed { reply.sendState = "failed" }
+            reply.sendState = state
             return reply
         }
+        var root = message("root", "@alice", at: 2)
+        root.replyCount = spec.count
         let rows = TimelineLayout.rows(
-            [message("root", "@alice", at: 2)] + replies, unreadBoundaryEventID: nil, groups: true,
-            threadRootEventID: "root", repliesLoaded: spec.loaded, now: Self.now, calendar: Self.calendar,
-            locale: Self.locale)
+            [root] + replies, unreadBoundaryEventID: nil, groups: true, threadRootEventID: "root", now: Self.now,
+            calendar: Self.calendar, locale: Self.locale)
         #expect(rows.compactMap { if case .replies(let label) = $0.kind { label } else { nil } }.first == spec.divider)
     }
 

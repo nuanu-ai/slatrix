@@ -1,12 +1,15 @@
 {
-  "about": "The line under a thread's root that counts its replies, as Slack shows it. loaded is whether the thread has loaded back to its root; until then the count isn't known, so the line keeps its place with no words, and nothing moves when it arrives. replies lists the messages after the root, true for one the server has confirmed and false for one still sending or failed, which doesn't count. divider is the line's words, empty for a line holding its place, and null for no line at all, which is how a thread with no confirmed reply shows.",
+  "about": "The line under a thread's root that counts its replies, saying what the channel says under that message, from the first frame the thread opens. count is the root's own reply count, as the channel shows it. replies lists the replies the thread holds so far, each sent, sending (this device's, not yet taken by the server) or failed. The line counts whichever is larger, the root's count or the replies held that haven't failed, so a reply still sending adds one, and a reply the root's count already includes isn't counted twice. divider is the line's words, and null for no line.",
   "cases": [
-    { "name": "A thread still loading holds the line's place with no count", "loaded": false, "replies": [], "divider": "" },
-    { "name": "Replies seen before the thread loads aren't counted yet", "loaded": false, "replies": [true, true], "divider": "" },
-    { "name": "A loaded thread with no replies has no line", "loaded": true, "replies": [], "divider": null },
-    { "name": "One reply", "loaded": true, "replies": [true], "divider": "1 reply" },
-    { "name": "Several replies", "loaded": true, "replies": [true, true, true], "divider": "3 replies" },
-    { "name": "A reply still sending or failed isn't counted", "loaded": true, "replies": [true, false], "divider": "1 reply" },
-    { "name": "Only an unconfirmed reply means no line yet", "loaded": true, "replies": [false], "divider": null }
+    { "name": "A thread opens with the count the channel shows, before its replies load", "count": 3, "replies": [], "divider": "3 replies" },
+    { "name": "No replies, no line", "count": 0, "replies": [], "divider": null },
+    { "name": "One reply", "count": 1, "replies": ["sent"], "divider": "1 reply" },
+    { "name": "A first reply still sending brings its line with it", "count": 0, "replies": ["sending"], "divider": "1 reply" },
+    { "name": "A first reply stays counted once the server has it, before the root's count catches up", "count": 0, "replies": ["sent"], "divider": "1 reply" },
+    { "name": "A reply the root's count already includes counts once", "count": 1, "replies": ["sending"], "divider": "1 reply" },
+    { "name": "A reply still sending adds one", "count": 2, "replies": ["sent", "sent", "sending"], "divider": "3 replies" },
+    { "name": "A failed reply doesn't count", "count": 1, "replies": ["sent", "failed"], "divider": "1 reply" },
+    { "name": "Only a failed reply means no line", "count": 0, "replies": ["failed"], "divider": null },
+    { "name": "The root's count includes replies the thread hasn't loaded", "count": 5, "replies": ["sent", "sent"], "divider": "5 replies" }
   ]
 }

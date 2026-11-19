@@ -348,11 +348,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     Box(Modifier.fillMaxSize().glassSource(glass).wallpaper()) {
         Box(Modifier.fillMaxSize()) {
             val rows = state.rows
-            // A reset re-pages the thread; the last count stays until the new one is known, so the bar doesn't blank.
-            var replies by remember { mutableStateOf(ThreadReplies.divider(loaded = false, replies = emptyList())) }
-            if (threadRoot != null && !state.hasMore) {
-                replies = ThreadReplies.divider(loaded = true,
-                    replies = rows.filterIsInstance<ConversationMessage>().filter { it.eventId != threadRoot }.map { it.eventId })
+            val replies = remember(rows, threadRoot) {
+                val root = rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot }
+                (rows.getOrNull(root) as? ConversationMessage)?.let { message ->
+                    ThreadReplies.divider(message.thread?.replies ?: 0,
+                        rows.drop(root + 1).filterIsInstance<ConversationMessage>().map { it.sendState })
+                }
             }
             val firstReply = remember(rows, threadRoot) {
                 rows.getOrNull(rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot } + 1)?.id.takeIf { threadRoot != null }
@@ -384,7 +385,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val last = next == null || !next.grouped || restarts(next)
                             val root = threadRoot != null && row.eventId == threadRoot
                             messageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last)
-                            // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
+                            // Under the root, the count the channel shows there, with this device's replies still sending.
                             if (root) RepliesBar(replies)
                         }
                     }
