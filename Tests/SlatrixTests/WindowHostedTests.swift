@@ -21,6 +21,10 @@ struct WindowHostedTests {
             _ = NSApplication.shared
             // A pane dragged or a sidebar hidden in an earlier test stays so; every window here opens as it first would.
             for key in ["layout.paneWidth", "layout.sidebarHidden"] { UserDefaults.standard.removeObject(forKey: key) }
+            // The tests measure the default theme's edge-to-edge card, not a frame theme's inset one, whatever theme
+            // and density another test or run left behind.
+            appearance.theme = .standard
+            appearance.density = .comfortable
             matrix.enterPreview()
             messages = busyConversation(1_000, roomID: matrix.selectedRoomID!, tag: UUID().uuidString)
             matrix.messages = messages
