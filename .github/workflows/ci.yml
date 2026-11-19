@@ -151,7 +151,7 @@ jobs:
       - name: Recover a live send queue after a process crash
         if: matrix.task == 'test' && needs.changes.outputs.delivery == 'true'
         timeout-minutes: 12
-        run: pipx run --spec uv==0.10.3 uv run scripts/tests/delivery/probe.py --seed 7319 --rounds 6
+        run: pipx run --spec uv==0.10.3 uv run scripts/tests/delivery/probe.py --seed "$GITHUB_RUN_ID" --rounds 6
 
       # Alone and one at a time, so other tests do not skew the clock.
       - name: Speed budgets
