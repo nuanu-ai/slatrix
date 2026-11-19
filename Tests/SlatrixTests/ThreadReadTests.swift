@@ -84,6 +84,18 @@ struct ThreadReadTests {
         ThreadReadReceiptTarget(identity: try #require(f.service.threadReadIdentity), eventID: "$reply")
     }
 
+    // capability: activity.badge
+    @Test("A reply to an open thread counts in Activity until the thread is on screen")
+    func openThreadIsNotOpenedReply() {
+        let f = fixture()
+        f.service.activity.record(
+            ActivityItem(
+                id: "reply", roomID: f.roomID, eventID: "$late", roomName: "Actions", senderID: "@alice:example.org",
+                senderName: "Alice", body: "Reply", timestamp: Date(), hasMention: false, threadRootID: f.rootID,
+                kind: .message))
+        #expect(ActivityBadge.count(rooms: [], items: f.service.activity.items) == 1)
+    }
+
     // capability: thread.open
     @Test("Opening a thread shows what is cached at once, and makes it readable only once its first page has loaded")
     func readyAfterInitialPage() async throws {

@@ -17,7 +17,7 @@ struct ActivityItem: Identifiable, Hashable {
     var kind: Kind
     var avatarURL: String? = nil
     var allowsNativeNotification = true
-    /// You opened its thread, so it leaves Activity's count.
+    /// Its thread was on screen, so it leaves Activity's count.
     var opened = false
 }
 
@@ -147,11 +147,7 @@ enum ActivityBadge {
         return Set(runs.compactMap(\.mention).filter { $0 != "@room" })
     }
 
-    func markOpened(_ id: String) {
-        if let index = items.firstIndex(where: { $0.id == id }) { items[index].opened = true }
-    }
-
-    func markThreadOpened(roomID: String, rootID: String) {
+    private func markThreadOpened(roomID: String, rootID: String) {
         for index in items.indices where items[index].roomID == roomID && items[index].threadRootID == rootID {
             items[index].opened = true
         }

@@ -49,11 +49,12 @@ struct ActivityBadgeTests {
         #expect(ActivityBadge.count(rooms: rooms, items: items) == spec.count)
     }
 
-    @Test("Opening a thread takes its replies off the count, and a reply decrypted again stays opened")
+    @Test("A thread on screen takes its replies off the count, and a reply decrypted again stays opened")
     func openingThread() {
         let activity = ActivityService()
         activity.record(Self.reply(0))
-        activity.markThreadOpened(roomID: "!room-0", rootID: "$root")
+        activity.shownThread = (roomID: "!room-0", rootID: "$root")
+        activity.shownThread = nil
         activity.record(Self.reply(0))
         #expect(ActivityBadge.count(rooms: [], items: activity.items) == 0)
     }

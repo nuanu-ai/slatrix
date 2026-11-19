@@ -1901,7 +1901,6 @@ struct RootView: View {
     /// A thread in the conversation on screen opens beside it, which stays as it is; one elsewhere opens with its
     /// conversation.
     private func openThread(_ root: ChatMessage, room id: String) {
-        matrix.activity.markThreadOpened(roomID: id, rootID: root.eventID)
         guard id == matrix.selectedRoomID, pendingRoomID == nil, route == .home,
             matrix.isPreview || matrix.isLiveTimelineReady(roomID: id)
         else { return selectRoom(id, record: true, thread: root) }
@@ -2191,8 +2190,6 @@ struct RootView: View {
             }
             return
         }
-        matrix.activity.markOpened(item.id)
-        if let rootID = item.threadRootID { matrix.activity.markThreadOpened(roomID: item.roomID, rootID: rootID) }
         if let eventID = item.eventID {
             selectRoom(item.roomID, record: true, eventID: eventID)
         } else {
@@ -2927,11 +2924,16 @@ private struct ReadTracking: View {
     let acknowledgeThread: () async -> Void
     var body: some View {
         let context = inputs.readContext(matrix)
+        let thread = inputs.threadReadContext(matrix)
         Color.clear
             .onChange(of: context) { _, context in onReadContext(context) }
             .task(id: ReadStatePolicy.automaticTarget(context, hold: inputs.readHold)) { await acknowledgeTimeline() }
             .onChange(of: matrix.threadReadIdentity) { _, identity in onThreadIdentity(identity) }
-            .task(id: ThreadReadPolicy.target(inputs.threadReadContext(matrix))) { await acknowledgeThread() }
+            .task(id: ThreadReadPolicy.target(thread)) { await acknowledgeThread() }
+            // Activity counts a thread's replies opened while the thread is on screen, and only then.
+            .onChange(of: ThreadReadPolicy.isOnScreen(thread) ? thread.identity : nil, initial: true) { _, shown in
+                matrix.activity.shownThread = shown.map { (roomID: $0.roomID, rootID: $0.rootID) }
+            }
     }
 }
 

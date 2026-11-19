@@ -713,7 +713,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard visibleActionThreadID != rootID else { return }
         visibleActionThreadID = rootID
         messageActionThreadPresentationID = UUID()
-        activity.shownThread = rootID.flatMap { root in selectedRoomID.map { (roomID: $0, rootID: root) } }
     }
     var messageActionContext: MessageActionTarget.Context {
         MessageActionTarget.Context(
