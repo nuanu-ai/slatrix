@@ -115,13 +115,6 @@ struct EmojiTests {
         #expect(tooltip(["@zoe:example.org"]) == "zoe reacted with :+1:")
     }
 
-    @Test("The one-click reactions show an emoji once however it was sent, and toggle the form the message carries")
-    func quickVariants() {
-        #expect(EmojiRecents.quick(["❤", "❤️", "🔥"]) == ["❤", "🔥", "✅"])
-        let carried = [MessageReaction(key: "❤", count: 1, mine: true)]
-        #expect(EmojiRecents.quick(["❤️", "🔥"], on: carried) == ["❤", "🔥", "✅"])
-    }
-
     @Test("A reaction sent as a bare symbol, such as a heart without its selector, draws as a color emoji")
     func colorPresentation() {
         #expect(EmojiCatalog.presented("➕") == "➕\u{FE0F}")

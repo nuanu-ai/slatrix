@@ -851,8 +851,7 @@ struct HoveredMessageToolbar: View {
         if let matrix = context.matrix, let appearance = context.appearance {
             let message = entry.message
             MessageToolbar(
-                quick: EmojiRecents.quick(matrix.recentEmoji, on: message.reactions), isThread: context.isThread,
-                isSaved: entry.saved,
+                quick: EmojiRecents.quick(matrix.recentEmoji), isThread: context.isThread, isSaved: entry.saved,
                 pending: message.senderID == matrix.user?.id && message.sendState != "sent",
                 actions: context.actions(for: entry, target: context.actionTarget(for: message))
             ).environment(\.metrics, context.metrics).environmentObject(appearance)
