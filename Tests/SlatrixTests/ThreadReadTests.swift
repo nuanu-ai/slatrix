@@ -214,7 +214,9 @@ struct ThreadReadTests {
     }
 
     // capability: conversation.read
-    @Test("A receipt the server turned down goes again by itself while it's still the one to send", arguments: [false, true])
+    @Test(
+        "A receipt the server turned down goes again by itself while it's still the one to send",
+        arguments: [false, true])
     func failedReceiptIsRetried(inThread: Bool) async throws {
         let f = fixture()
         let timeline = inThread ? f.thread : f.main
