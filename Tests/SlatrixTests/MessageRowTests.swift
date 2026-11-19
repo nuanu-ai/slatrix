@@ -49,12 +49,13 @@ struct MessageRowTests {
     @Test("A pill is its emoji and count however few reacted: knowing the two people changes nothing")
     func pillShowsCount() {
         let emoji = ["🔥", "🚀", "👏", "😍", "💯", "🙌", "👀", "✨", "🎯", "📈", "🤯", "🥳"]
-        func width(_ senders: [String]) -> CGFloat {
+        func width(_ senders: [String], count: Int = 2) -> CGFloat {
             var message = message([])
-            message.reactions = emoji.map { MessageReaction(key: $0, count: 2, mine: false, senders: senders) }
+            message.reactions = emoji.map { MessageReaction(key: $0, count: count, mine: false, senders: senders) }
             return NSHostingView(rootView: row(message, context: TimelineRowContext())).fittingSize.width
         }
         #expect(width(["@a:example.org", "@b:example.org"]) == width([]))
+        #expect(width([], count: 22) > width([]), "The count shows")
     }
 
     @Test("A reaction with a very long key stays inside a narrow thread's column")
