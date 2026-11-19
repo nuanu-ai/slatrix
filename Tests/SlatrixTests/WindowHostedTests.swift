@@ -851,6 +851,23 @@ struct WindowHostedTests {
         #expect(harness.matrix.errorMessage != nil)
     }
 
+    @Test(
+        "The composer's text starts where message text starts, in either density",
+        arguments: [MessageDensity.comfortable, .compact])
+    func composerTextOnMessageText(density: MessageDensity) async throws {
+        let harness = Harness()
+        defer { harness.close() }
+        harness.appearance.density = density
+        #expect(await harness.settle())
+        func textStart(_ view: NSTextView) -> CGFloat {
+            let x = view.textContainerOrigin.x + (view.textContainer?.lineFragmentPadding ?? 0)
+            return view.convert(NSPoint(x: x, y: 0), to: nil).x
+        }
+        let message = try #require(try harness.newest() as? NSTextView)
+        let composer = try #require(harness.shown().first { ($0 as? NSTextView)?.isEditable == true } as? NSTextView)
+        #expect(abs(textStart(composer) - textStart(message)) <= 1, "\(textStart(composer)) and \(textStart(message))")
+    }
+
     @Test("Also send to names a private channel with its lock, as a public one shows its #")
     func alsoSendToMarksPrivate() async throws {
         let harness = Harness()

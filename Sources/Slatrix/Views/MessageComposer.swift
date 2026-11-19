@@ -101,12 +101,13 @@ struct MessageComposer: View {
             if !attachments.isEmpty && !isEditing { attachmentStrip.padding(.top, m.sp8) }
             // One line at rest, 40 pt, growing upward; the buttons keep to its bottom edge, so Send never moves. The
             // composer keeps to the messages' column, so "+" sits under their avatars and the text starts where theirs
-            // does, past the editor's own inset.
+            // does, past the editor's own inset. Compact messages have no avatars, so "+" joins the buttons at the end
+            // and the composer reaches past the column for its text to start where theirs does.
             HStack(alignment: .bottom, spacing: 0) {
-                iconButton("plus", label: "Attach files", circular: true) { chooseFiles() }.disabled(
-                    sending || isEditing || preparingAttachments
-                ).padding(.bottom, m(6))
-                    .padding(.trailing, m.conversationText(thread: isThread) - m(6) - m.iconButton - m.sp4)
+                if !compact {
+                    attachButton.padding(.bottom, m(6))
+                        .padding(.trailing, m.conversationText(thread: isThread) - m(6) - m.iconButton - m.sp4)
+                }
                 ZStack(alignment: .topLeading) {
                     if text.isEmpty && editor.formats.block == nil {
                         Text(placeholder)
@@ -129,6 +130,7 @@ struct MessageComposer: View {
                     .accessibilityHint("Drop or paste files to attach.")
                 }
                 HStack(spacing: 0) {
+                    if compact { attachButton }
                     iconButton("at", label: "Mention someone") {
                         editor.insert("@")
                         editor.focus()
@@ -151,7 +153,7 @@ struct MessageComposer: View {
                             .accessibilityLabel(isEditing ? "Save changes" : "Send message")
                     }
                 }.padding(.bottom, m(6)).padding(.leading, m.sp4).disabled(sending)
-            }.padding(.horizontal, m(6))
+            }.padding(.leading, compact ? m.sp8 : m(6)).padding(.trailing, m(6))
         }
         .glass(
             colors.control, in: RoundedRectangle(cornerRadius: m.controlLarge / 2), cornerRadius: m.controlLarge / 2,
@@ -163,6 +165,8 @@ struct MessageComposer: View {
                 editor.isFocused ? colors.accentLine : .clear, lineWidth: 1)
         )
         .elevation(.e1, cornerRadius: m.controlLarge / 2)
+        // Compact, the text sits 12 in from the rounded edge: 8 here and the editor's own 4.
+        .padding(.leading, compact ? -m.sp12 : 0)
         // Suggestions, errors and hints float above the composer instead of growing it.
         .overlay(alignment: .topLeading) {
             floating.alignmentGuide(.top) { $0[.bottom] + m.sp8 }
@@ -330,6 +334,13 @@ struct MessageComposer: View {
             linkDraft = nil
             editor.focus()
         }
+    }
+
+    private var compact: Bool { appearance.density == .compact }
+
+    private var attachButton: some View {
+        iconButton("plus", label: "Attach files", circular: true) { chooseFiles() }.disabled(
+            sending || isEditing || preparingAttachments)
     }
 
     private func iconButton(_ icon: String, label: String, circular: Bool = false, action: @escaping () -> Void)
