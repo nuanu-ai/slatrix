@@ -52,15 +52,17 @@ final class ConnectionRecovery {
     private static let logger = Logger(subsystem: "ai.nuanu.slatrix", category: "connection")
     private let networkChanges: @Sendable () -> AsyncStream<NetworkRoute>
     private let wakeNotifications: NotificationCenter
-    private let sendQueueResumeDelay: (Int) -> Duration
+    private let waitToResumeSending: @MainActor (Int) async throws -> Void
     init(
         networkChanges: @escaping @Sendable () -> AsyncStream<NetworkRoute> = { NetworkConnectivity.changes() },
         wakeNotifications: NotificationCenter? = nil,
-        sendQueueResumeDelay: @escaping (Int) -> Duration = { .seconds(min(300, 5 << min($0, 6))) }
+        waitToResumeSending: @escaping @MainActor (Int) async throws -> Void = { failures in
+            try await Task.sleep(for: .seconds(min(300, 5 << min(failures, 6))))
+        }
     ) {
         self.networkChanges = networkChanges
         self.wakeNotifications = wakeNotifications ?? NSWorkspace.shared.notificationCenter
-        self.sendQueueResumeDelay = sendQueueResumeDelay
+        self.waitToResumeSending = waitToResumeSending
     }
     private struct Attempt {
         let id: UUID
@@ -188,12 +190,13 @@ final class ConnectionRecovery {
         let failures = sendQueueFailures[roomID, default: 0]
         sendQueueFailures[roomID] = failures + 1
         let account = generation
-        let delay = sendQueueResumeDelay(failures)
-        sendQueueResumes[roomID] = Task { [weak self] in
-            try? await Task.sleep(for: delay)
+        sendQueueResumes[roomID] = Task { [weak self, waitToResumeSending] in
+            try? await waitToResumeSending(failures)
             guard let self, !Task.isCancelled, self.generation == account else { return }
             self.sendQueueResumes[roomID] = nil
-            guard let room = try? client.getRoom(roomId: roomID), !room.isSendQueueEnabled() else { return }
+            guard self.feedback.state == .running, let room = try? client.getRoom(roomId: roomID),
+                !room.isSendQueueEnabled()
+            else { return }
             room.enableSendQueue(enable: true)
         }
     }
@@ -334,7 +337,7 @@ final class ConnectionRecovery {
             sendQueueFailures = [:]
             let account = generation
             Task { @MainActor [weak self] in
-                guard self?.generation == account else { return }
+                guard let self, self.generation == account, self.feedback.state == .running else { return }
                 await client.enableAllSendQueues(enable: true)
             }
         }

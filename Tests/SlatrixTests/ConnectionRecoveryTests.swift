@@ -54,17 +54,65 @@ struct ConnectionRecoveryTests {
         await recovery.stop()
     }
 
+    @Test("A connection that drops before the SDK can resume sending leaves queues paused")
+    func offlineBeforeQueuedResume() async throws {
+        let recovery = onlineRecovery()
+        let service = FakeSyncService()
+        service.confirmsSync = false
+        let client = SendQueueClient()
+        var connected = false
+        var queueAtDrop: [Bool]?
+        try await recovery.attach(service, client: client) { feedback in
+            if feedback.state == .running { connected = true }
+            if connected && feedback.state == .offline && queueAtDrop == nil { queueAtDrop = client.enabled.all }
+        }
+        service.emit(.running)
+        try #require(await eventually { recovery.feedback.state == .connecting })
+        service.roomSync.emit(.running)
+        service.emit(.offline)
+        try #require(await eventually { queueAtDrop != nil })
+        await drainMainActor()
+        #expect(client.enabled.all == queueAtDrop)
+        await recovery.stop()
+    }
+
     @Test("A room whose sending stopped on a server error resumes by itself while connected, without a restart")
     func failedSendResumes() async throws {
         let recovery = ConnectionRecovery(
             networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
-            sendQueueResumeDelay: { _ in .zero })
+            waitToResumeSending: { _ in })
         let service = FakeSyncService(state: .running)
         let client = SendQueueClient()
         try await recovery.attach(service, client: client) { _ in }
         #expect(await eventually { recovery.feedback.state == .running })
         client.failSend(roomID: "!room")
         #expect(await eventually { client.stopped.enabled.all == [true] })
+        await recovery.stop()
+    }
+
+    @Test("A delayed room retry leaves its queue paused when the connection has since dropped")
+    func offlineBeforeRoomRetry() async throws {
+        var releaseTimer: CheckedContinuation<Void, Never>?
+        var timerFired = false
+        let recovery = ConnectionRecovery(
+            networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
+            waitToResumeSending: { _ in
+                await withCheckedContinuation { releaseTimer = $0 }
+                timerFired = true
+            })
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { recovery.feedback.state == .running })
+        client.failSend(roomID: "!room")
+        try #require(await eventually { releaseTimer != nil })
+        service.emit(.offline)
+        try #require(await eventually { recovery.feedback.state == .offline })
+
+        releaseTimer?.resume()
+        try #require(await eventually { timerFired })
+        await drainMainActor()
+        #expect(client.stopped.enabled.all.isEmpty)
         await recovery.stop()
     }
 
