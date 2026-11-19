@@ -661,13 +661,18 @@ class MatrixRoomsTest {
         }
     }
 
-    @Test fun aLateRoomResponseFromThePreviousRouteCannotConfirmTheNewConnection() = runTest {
+    @Test fun aLateRoomResponseFromThePreviousRouteCannotConfirmTheNewConnection() = lateRoomResponse(background = false)
+
+    @Test fun returningToTheAppNeedsAFreshRoomResponse() = lateRoomResponse(background = true)
+
+    private fun lateRoomResponse(background: Boolean) = runTest {
         val dm = TestRoom(roomInfo("!dm:example.org", "Avery", direct = true))
         val client = RoomsClient(listOf(dm))
         val sync = RoomsSync()
         client.services.trySend(sync)
         val network = MutableSharedFlow<NetworkStatus>()
-        val rooms = MatrixRooms(backgroundScope, client, network = network)
+        val foreground = MutableStateFlow(true)
+        val rooms = MatrixRooms(backgroundScope, client, foreground, network)
         val stopping = CompletableDeferred<Unit>()
         val releaseStop = CompletableDeferred<Unit>()
         try {
@@ -678,17 +683,19 @@ class MatrixRoomsTest {
             val startedAgain = CompletableDeferred<Unit>()
             sync.confirmsSync = false
             sync.beforeStart = { startedAgain.complete(Unit) }
-            sync.beforeStop = { stopping.complete(Unit); releaseStop.await() }
-            network.emit(NetworkStatus(true, routeChanged = true))
+            sync.beforeStop = { stopping.complete(Unit); releaseStop.await(); sync.emitState(SyncServiceState.IDLE) }
+            if (background) foreground.value = false else network.emit(NetworkStatus(true, routeChanged = true))
             stopping.await()
-            rooms.connection.first { it == ConnectionState.Reconnecting }
+            val interrupted = if (background) ConnectionState.Paused else ConnectionState.Reconnecting
+            rooms.connection.first { it == interrupted }
 
             oldResponse()
             // Typing flows through the same room event queue, so the old response has been handled.
             typing.call(listOf("@avery:example.org"))
             rooms.state.first { it.rooms.singleOrNull()?.typing == true }
-            assertEquals(ConnectionState.Reconnecting, rooms.connection.value)
+            assertEquals(interrupted, rooms.connection.value)
             releaseStop.complete(Unit)
+            if (background) foreground.value = true
             startedAgain.await()
             sync.running.first { it }
             oldResponse()
