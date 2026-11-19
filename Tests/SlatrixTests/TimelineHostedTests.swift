@@ -55,7 +55,8 @@ struct TimelineHostedTests {
                 onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onBottomVisibilityChange: atBottom,
                 insets: TimelineHostedTests.insets
             )
-            .id("\(room.id):\(timeline)")
+            // As the app's room pane, a table per timeline the service opens.
+            .id("\(room.id):\(timeline):\(service.shownTimelineID)")
             .environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom)).environment(popovers)
         }
     }

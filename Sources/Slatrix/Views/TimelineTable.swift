@@ -104,6 +104,8 @@ struct TimelineTable: NSViewRepresentable {
     var startsAtUnread: Bool
     /// Where to remember the reading position across visits.
     var memoryKey: TimelineMemory.Key?
+    /// The timeline the rows come from, when the table shows one only.
+    var timelineID: UUID? = nil
     var canLoadOlder: Bool
     var canLoadNewer: Bool
     var scroller: TimelineScroller
@@ -132,6 +134,7 @@ struct TimelineTable: NSViewRepresentable {
 
     static func dismantleNSView(_ view: TimelineScrollView, coordinator: TimelineTableCoordinator) {
         coordinator.remember()
+        coordinator.holdHeights()
         coordinator.stopLoading()
         coordinator.recycleCells()
     }
@@ -230,6 +233,8 @@ struct TimelineTable: NSViewRepresentable {
 
     func update(_ configuration: TimelineTable) {
         let previous = self.configuration
+        // The view this table leaves with may already describe the next timeline, which a table of its own shows.
+        guard previous == nil || previous?.timelineID == configuration.timelineID else { return }
         self.configuration = configuration
         if previous == nil, !opened {
             loading = Performance.begin(configuration.context.isThread ? .threadLoading : .timelineLoading)
@@ -272,9 +277,11 @@ struct TimelineTable: NSViewRepresentable {
         guard next != rows || settingsChanged else { return }
         let interval = Performance.begin(.timelineApply)
         defer { Performance.end(interval, ["rows": next.count]) }
-        guard opened || !rows.isEmpty else {
+        // Until rows with content open the table, there is nothing on screen to keep in place.
+        guard opened else {
             rows = next
             reindex()
+            restoreHeights()
             table.reloadData()
             open()
             return
@@ -489,14 +496,22 @@ struct TimelineTable: NSViewRepresentable {
     private func prefetchSoon() {
         guard !prefetching else { return }
         prefetching = true
-        DispatchQueue.main.async { [weak self] in self?.prefetch() }
+        // Once the frame in progress is on screen: Core Animation commits it as the run loop is about to wait, and the
+        // timer wakes it again at once.
+        let drawn = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, .max) {
+            [weak self] _, _ in
+            RunLoop.main.add(
+                Timer(timeInterval: 0, repeats: false) { _ in MainActor.assumeIsolated { self?.prefetch() } },
+                forMode: .common)
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), drawn, .commonModes)
     }
 
     /// Prepares the cells of rows within `Self.ahead` screens of the viewport, nearest first, for a few milliseconds
     /// a pass, so scrolling finds them built and measured and no frame waits on many at once.
     private func prefetch() {
         prefetching = false
-        guard opened, viewportHeight > 0 else { return }
+        guard opened, viewportHeight > 0, !leaving else { return }
         let bounds = scrollView.contentView.bounds
         // Ahead of the reader, and a little behind in case they turn back.
         let ahead = viewportHeight * Self.ahead
@@ -520,12 +535,12 @@ struct TimelineTable: NSViewRepresentable {
         let deadline = ContinuousClock.now + Self.prefetchSlice
         var done = 0
         var measured = IndexSet()
-        Performance.measure(.rowsMeasure, ["rows": pending.count]) {
-            for row in pending where done == 0 || ContinuousClock.now < deadline {
-                if prepare(row) { measured.insert(row) }
-                done += 1
-            }
+        let interval = Performance.begin(.rowsMeasure)
+        for row in pending where done == 0 || ContinuousClock.now < deadline {
+            if prepare(row) { measured.insert(row) }
+            done += 1
         }
+        Performance.end(interval, ["rows": done])
         if measured.isEmpty { prefetchSoon() } else { preservingPosition { noteHeights(measured) } }
     }
 
@@ -674,6 +689,7 @@ struct TimelineTable: NSViewRepresentable {
         let opening = Policy.opening(
             focusedRowID: restoresReadingPosition ? nil : focused, unreadRowID: index["unread"] == nil ? nil : "unread",
             startsAtUnread: configuration.startsAtUnread, remembered: remembered, contains: { index[$0] != nil })
+        let held = known.count
         scroll(to: opening)
         settle(keeping: opening)
         stopLoading()
@@ -687,7 +703,8 @@ struct TimelineTable: NSViewRepresentable {
             }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.logFit(opening: start) }
         if !configuration.context.isThread {
-            Performance.finishOnScreen(.roomOpen, ["rows": rows.count])
+            // Rows that come with heights from an earlier visit are not measured again.
+            Performance.finishOnScreen(.roomOpen, ["rows": rows.count, "measured": known.count - held])
             Performance.finishOnScreen(.launchConversation, ["rows": rows.count])
         }
     }
@@ -890,6 +907,47 @@ struct TimelineTable: NSViewRepresentable {
         } else {
             TimelineMemory.positions[key] = nil
         }
+    }
+
+    /// The pane is moving on to another timeline, or has, so this table has nothing left to scroll to.
+    private var leaving: Bool {
+        guard let configuration else { return true }
+        return scrollView.window == nil
+            || configuration.timelineID != nil
+                && configuration.timelineID != configuration.context.matrix?.shownTimelineID
+    }
+
+    /// Keeps what this table measured for the next table on the same timeline.
+    func holdHeights() {
+        // A session signed out has nothing to come back to.
+        guard let configuration, let key = configuration.memoryKey, width > 0,
+            key.sessionID == configuration.context.matrix?.notificationSessionID
+        else { return }
+        var heights: [String: (fingerprint: Int, height: CGFloat)] = [:]
+        for (id, height) in known { if let row = index[id] { heights[id] = (fingerprint(rows[row]), height) } }
+        TimelineMemory.heights.removeAll { $0.key == key }
+        TimelineMemory.heights.append((key, heights))
+        // The open conversations, their threads and a few left behind.
+        if TimelineMemory.heights.count > 8 { TimelineMemory.heights.removeFirst() }
+    }
+
+    /// Rows this timeline showed last, unchanged and at the same width, keep the heights they were measured at.
+    private func restoreHeights() {
+        guard let key = configuration?.memoryKey, let held = TimelineMemory.heights.first(where: { $0.key == key })
+        else { return }
+        for row in rows {
+            if let kept = held.rows[row.id], kept.fingerprint == fingerprint(row) { known[row.id] = kept.height }
+        }
+    }
+
+    /// What a row's height depends on: the row, and the table's width, settings and pane.
+    private func fingerprint(_ row: TimelineEntry) -> Int {
+        var hasher = Hasher()
+        hasher.combine(row)
+        hasher.combine(width)
+        hasher.combine(settings)
+        hasher.combine(configuration?.context.isThread)
+        return hasher.finalize()
     }
 
     private var restoresReadingPosition: Bool {

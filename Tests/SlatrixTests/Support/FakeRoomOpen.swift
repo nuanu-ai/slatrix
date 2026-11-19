@@ -16,6 +16,12 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         set { lock.withLock { reachedStart = newValue } }
     }
     private var reachedStart = false
+    /// What the next older pages answer, in order, before `startReached` does.
+    var pageAnswers: [Bool] {
+        get { lock.withLock { answers } }
+        set { lock.withLock { answers = newValue } }
+    }
+    private var answers: [Bool] = []
     /// Read receipts sent through this timeline, as "read:" or "fully:" and the event.
     let receipts = Recorder<String>()
     /// False until a listener is added: a timeline still being set up is not closed.
@@ -35,9 +41,16 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         listener.onUpdate(diff: [.reset(values: cached)])
         return handle
     }
+    private var paging = false
+    /// One older page at a time: asking for another while one is on its way fails, as a busy paginator would.
     override func paginateBackwards(numEvents: UInt16) async throws -> Bool {
+        try lock.withLock {
+            if paging { throw URLError(.cancelled) }
+            paging = true
+        }
+        defer { lock.withLock { paging = false } }
         await pageGate.wait()
-        return startReached
+        return lock.withLock { answers.isEmpty ? reachedStart : answers.removeFirst() }
     }
     /// Loaded around an older message, it already reaches the newest one.
     override func paginateForwards(numEvents: UInt16) async throws -> Bool { true }
@@ -89,6 +102,8 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     let eventGate = Gate()
     /// What a timeline opened at an older message loads; the cache when nil.
     var focusedItems: [TimelineItem]?
+    /// Why a timeline opened at an older message fails to load, as a lost connection would make it.
+    var focusedError: Error?
     /// What a thread's timeline loads; the cache when nil.
     var threadItems: [TimelineItem]?
     /// Thread replies the room can load, by event ID, with their thread's root.
@@ -104,11 +119,16 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
     override func id() -> String { identifier }
-    override func membership() -> Membership { .joined }
+    /// Joined unless the test invites you.
+    var joined = true
+    override func membership() -> Membership { joined ? .joined : .invited }
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
         focuses.append(configuration.focus)
         await buildGate.wait()
-        if case .event = configuration.focus { await eventGate.wait() }
+        if case .event = configuration.focus {
+            await eventGate.wait()
+            if let focusedError { throw focusedError }
+        }
         var items = cached
         if case .event = configuration.focus, let focusedItems { items = focusedItems }
         if case .thread = configuration.focus, let threadItems { items = threadItems }

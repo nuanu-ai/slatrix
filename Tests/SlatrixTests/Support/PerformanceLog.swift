@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import os
 
 /// The first performance log message since `date` that matches, polled for up to 20 s. A read blocks on logd for
 /// seconds, so the reads run on a thread of their own: on the cooperative pool they would hold one of its few threads
@@ -24,4 +25,27 @@ private func readPerformanceLog(since date: Date, where match: (String) -> Bool)
         }
     }
     return nil
+}
+
+/// Every performance log message from `date` on, with its time, once the log has caught up with the call.
+func performanceMessages(since date: Date) async -> [(date: Date, message: String)] {
+    let sentinel = "event=test.sentinel id=\(UUID().uuidString)"
+    Logger(subsystem: "ai.nuanu.slatrix", category: "performance").log("\(sentinel, privacy: .public)")
+    return await withCheckedContinuation { continuation in
+        Thread.detachNewThread {
+            let predicate = NSPredicate(format: "subsystem == 'ai.nuanu.slatrix' AND category == 'performance'")
+            let deadline = ContinuousClock.now + .seconds(20)
+            while ContinuousClock.now < deadline {
+                guard let store = try? OSLogStore(scope: .currentProcessIdentifier),
+                    let entries = try? store.getEntries(at: store.position(date: date), matching: predicate)
+                else { break }
+                let found = entries.compactMap { $0 as? OSLogEntryLog }.filter { $0.date >= date }
+                    .map { (date: $0.date, message: $0.composedMessage) }
+                if found.contains(where: { $0.message == sentinel }) {
+                    return continuation.resume(returning: found.filter { $0.message != sentinel })
+                }
+            }
+            continuation.resume(returning: [])
+        }
+    }
 }
