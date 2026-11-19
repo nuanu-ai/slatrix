@@ -724,22 +724,22 @@ struct TimelineHostedTests {
         defer { harness.close() }
         await settle(harness)
         harness.scroll(toTop: harness.clip.bounds.minY - 120)
-        let since = Date()
+        let mark = performanceMark()
         let rows = harness.rowCount
         // The last rows go, taller together than the reader is scrolled up: the view has to move to stay on content.
         harness.service.messages = Self.messages(0..<36)
         await settle(harness) { harness.rowCount < rows }
-        let jump = await firstPerformanceMessage(since: since) { $0.hasPrefix("event=timeline.jump ") }
+        let jump = await firstPerformanceMessage(after: mark) { $0.hasPrefix("event=timeline.jump ") }
         #expect(jump != nil)
     }
 
     @Test("An opened conversation logs whether its rows fit their content and it sits at its newest message")
     func logsFitAfterOpening() async throws {
-        let since = Date()
+        let mark = performanceMark()
         let harness = Harness(messages: Self.messages(0..<40))
         defer { harness.close() }
         await settle(harness)
-        let fit = await firstPerformanceMessage(since: since) { $0.hasPrefix("event=timeline.fit ") }
+        let fit = await firstPerformanceMessage(after: mark) { $0.hasPrefix("event=timeline.fit ") }
         #expect(
             fit
                 == "event=timeline.fit misfit=0 px=0 bottom=0 opening=0 live=1 below=22 past=0 inset=100")
