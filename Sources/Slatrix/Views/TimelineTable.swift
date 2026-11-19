@@ -520,12 +520,12 @@ struct TimelineTable: NSViewRepresentable {
         let deadline = ContinuousClock.now + Self.prefetchSlice
         var done = 0
         var measured = IndexSet()
-        Performance.measure(.rowsMeasure, ["rows": pending.count]) {
-            for row in pending where done == 0 || ContinuousClock.now < deadline {
-                if prepare(row) { measured.insert(row) }
-                done += 1
-            }
+        let interval = Performance.begin(.rowsMeasure)
+        for row in pending where done == 0 || ContinuousClock.now < deadline {
+            if prepare(row) { measured.insert(row) }
+            done += 1
         }
+        Performance.end(interval, ["rows": done])
         if measured.isEmpty { prefetchSoon() } else { preservingPosition { noteHeights(measured) } }
     }
 
