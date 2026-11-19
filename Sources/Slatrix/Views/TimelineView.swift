@@ -84,6 +84,13 @@ struct TimelineView: View {
                 onBottomVisibilityChange?(newestSeen)
             }, insets: insets
         )
+        .overlay(alignment: .bottom) {
+            // A conversation still reading its first rows holds their place on the composer.
+            if !thread && messages.isEmpty && matrix.timelineLoading {
+                SkeletonRows(count: 8, waits: false).fixedSize(horizontal: false, vertical: true)
+                    .conversationRow(m, isThread: false).padding(.bottom, insets.bottom)
+            }
+        }
         .overlay(alignment: .top) {
             if contentAbove.wrappedValue {
                 Divider().overlay(colors.border).padding(.top, insets.top)

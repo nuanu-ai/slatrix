@@ -21,6 +21,8 @@ struct ConversationSwitchHostedTests {
         var rows: [String: CGFloat]
         var rooms: Set<String>
         var loading: Bool
+        /// Placeholder rows holding the place of rows still being read.
+        var skeleton = false
         /// The timeline's table; a new one builds its cells and measures every row it shows afresh.
         var table: ObjectIdentifier?
         /// Rows measured in the pass that drew this frame.
@@ -29,7 +31,7 @@ struct ConversationSwitchHostedTests {
             let ms = Int((at / .milliseconds(1)).rounded())
             let table = table.map { String(UInt(bitPattern: $0.hashValue) % 10_000) } ?? "-"
             return
-                "\(ms) ms header=\(header ?? "-") rows=\(rows.count) of \(rooms.sorted()) loading=\(loading) table=\(table) measured=\(measured)"
+                "\(ms) ms header=\(header ?? "-") rows=\(rows.count) of \(rooms.sorted()) loading=\(loading) skeleton=\(skeleton) table=\(table) measured=\(measured)"
         }
     }
 
@@ -110,11 +112,11 @@ struct ConversationSwitchHostedTests {
             }
             // The timeline's own; the composer has a spinner of its own.
             let loading = views.contains { $0 is NSProgressIndicator && $0.enclosingScrollView is TimelineScrollView }
+            // SwiftUI draws the header and the placeholder rows from the service, in the body that hosts the timeline,
+            // and has flushed that body by the time this runs.
             return Frame(
-                at: ContinuousClock.now - clicked,
-                // SwiftUI draws the header from the shown room, in the body that hosts the timeline, and has flushed
-                // that body by the time this runs.
-                header: matrix.selectedRoom?.name, rows: rows, rooms: rooms, loading: loading,
+                at: ContinuousClock.now - clicked, header: matrix.selectedRoom?.name, rows: rows, rooms: rooms,
+                loading: loading, skeleton: matrix.timelineLoading && matrix.messages.isEmpty,
                 table: views.first { $0 is TimelineTableView }.map(ObjectIdentifier.init))
         }
 
@@ -138,6 +140,7 @@ struct ConversationSwitchHostedTests {
             if let observer { CFRunLoopObserverInvalidate(observer) }
             observer = nil
             let start = clickDate
+            frames.removeAll { $0.date < start }
             let measures = await performanceMessages(since: start).filter {
                 $0.message.hasPrefix("interval=rows.measure ")
             }
@@ -151,11 +154,18 @@ struct ConversationSwitchHostedTests {
             return frames
         }
 
-        /// As the app's menu sends it.
+        /// As the app's menu sends it, woken from the run loop's wait as an event is: main-actor work the action queues
+        /// runs before the frame is drawn, as after a real click. Sent from a main-actor job instead, that work would
+        /// wait for the frame after.
         func menu(_ action: String) {
-            clicked = .now
-            clickDate = Date()
-            NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
+            let click = Timer(timeInterval: 0, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    self.clicked = .now
+                    self.clickDate = Date()
+                    NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": action])
+                }
+            }
+            RunLoop.main.add(click, forMode: .common)
         }
 
         /// Until the window shows `index`'s newest message and nothing more is loading.
@@ -178,7 +188,9 @@ struct ConversationSwitchHostedTests {
             if Set([roomID(frame.header)].compactMap { $0 }).union(frame.rooms).count > 1 {
                 faults.append("mixes conversations: \(frame)")
             }
-            if frame.rows.isEmpty && (held || !frame.loading) { faults.append("empty pane: \(frame)") }
+            if frame.rows.isEmpty && (held || !(frame.skeleton || frame.loading)) {
+                faults.append("empty pane: \(frame)")
+            }
             for (id, top) in frame.rows where frame.header == to {
                 if let first = firstSeen[id], abs(first - top) > 0.5 {
                     faults.append("\(id) moved \(Int(top - first)) pt: \(frame)")

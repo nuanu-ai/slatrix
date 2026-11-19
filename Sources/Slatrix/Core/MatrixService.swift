@@ -649,6 +649,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     )
     /// The open whose conversation is on screen, which can trail `selection` while the next one reads its cache.
     private var shownSelection: UUID?
+    /// The conversation on screen is still reading its first rows, which the timeline it reads them from shows only
+    /// once it is in place.
+    private(set) var timelineLoading = false
     private var typingHandle: TaskHandle?
     private var threadTimeline: Timeline?
     private var threadHandle: TaskHandle?
@@ -1209,6 +1212,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         mainProjections = [:]
         threadProjections = [:]
         timelineHandle = nil
+        timelineLoading = false
         typingHandle = nil
         threadHandle = nil
         for handle in handles { handle.cancel() }
@@ -1412,6 +1416,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         liveTimeline = kept
         timeline = kept.timeline
         timelineHandle = kept.listener
+        timelineLoading = false
         messages = kept.messages
         members = kept.members
         canMentionRoom = false
@@ -1499,20 +1504,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let token = ahead?.token ?? UUID()
         selection = token
         updateSubscriptions(id)
-        // The previous conversation stays up while this one reads its cache, so its rows replace the old ones in
-        // one frame; only a slow open shows the room before its rows. A check for `anchor` never shows it: rows that
-        // miss the anchor would flash before the anchor's own.
-        let handoff = Task { [weak self] in
-            guard anchor == nil else { return }
-            try? await Task.sleep(for: LoadingPresentation.handoff)
-            guard !Task.isCancelled else { return }
-            self?.showConversation(id, eventID: eventID, token: token)
-        }
+        // Another conversation goes up as it is chosen and its rows follow, so the one being left is never redrawn in
+        // between; a jump within the one on screen keeps its rows until the ones it needs arrive.
+        if selectedRoomID != id || timelineLoading { showConversation(id, eventID: eventID, token: token) }
         var missedAnchor = false
-        defer {
-            handoff.cancel()
-            if !missedAnchor { showConversation(id, eventID: eventID, token: token) }
-        }
+        defer { if !missedAnchor { showConversation(id, eventID: eventID, token: token) } }
         do {
             let client = try requireClient()
             var pendingRoom = try client.getRoom(roomId: id)
@@ -1549,6 +1545,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             showConversation(id, eventID: eventID, token: token)
             timeline = next
             timelineHandle = listenerHandle
+            timelineLoading = false
             hasMoreForwardHistory = eventID != nil
             if eventID == nil {
                 liveTimeline = KeptTimeline(
@@ -1577,6 +1574,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         } catch {
             guard selection == token else { return true }
             showConversation(id, eventID: eventID, token: token)
+            timelineLoading = false
             errorMessage = Self.safeError(error)
         }
         return true
@@ -1587,7 +1585,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func mainObserver(roomID id: String, token: UUID, focus eventID: String?) -> TimelineObserver {
         TimelineObserver { [weak self] items, revision in
             Task { @MainActor [weak self] in
-                guard let self, self.selection == token, self.shownSelection == token, self.focusedEventID == eventID
+                guard let self, self.selection == token, self.shownSelection == token, !self.timelineLoading,
+                    self.focusedEventID == eventID
                 else { return }
                 self.showTimeline((items, revision), roomID: id)
             }
@@ -1706,6 +1705,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         sendFailures = [:]
         selectedRoomID = id
         focusedEventID = eventID
+        timelineLoading = true
         messages = []
         threadMessages = []
         members = []

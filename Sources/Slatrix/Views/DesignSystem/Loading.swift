@@ -10,20 +10,22 @@ struct DelayedProgress: View {
     /// Logs the whole wait, shown or not.
     var interval: Performance.Name? = nil
     var body: some View {
-        AfterLoadingDelay(active: active, hasContent: hasContent, offline: offline, interval: interval) {
+        AfterLoadingDelay(active: active, hasContent: hasContent, offline: offline, waits: true, interval: interval) {
             ProgressView().controlSize(.small)
         }
     }
 }
 
-/// Placeholder rows for a list whose shape is known: an avatar block and two bars. They wait like the spinner.
+/// Placeholder rows for a list whose shape is known: an avatar block and two bars. They wait like the spinner, unless
+/// they hold the place of rows the pane always shows, as a conversation's do while it reads them.
 struct SkeletonRows: View {
     var count = 6
     var interval: Performance.Name? = nil
+    var waits = true
     @Environment(\.metrics) private var m
     @ThemeColors private var colors
     var body: some View {
-        AfterLoadingDelay(active: true, hasContent: false, offline: false, interval: interval) {
+        AfterLoadingDelay(active: true, hasContent: false, offline: false, waits: waits, interval: interval) {
             let fill = colors.sunken
             VStack(alignment: .leading, spacing: m.sp20) {
                 ForEach(0..<count, id: \.self) { index in
@@ -68,11 +70,12 @@ private struct AfterLoadingDelay<Content: View>: View {
     let active: Bool
     let hasContent: Bool
     let offline: Bool
+    let waits: Bool
     let interval: Performance.Name?
     @ViewBuilder let content: Content
     @State private var shown = false
     var body: some View {
-        ZStack { if shown { content } }
+        ZStack { if shown || !waits { content } }
             .loadingInterval(interval, while: active && !hasContent)
             .task(id: [active && !hasContent, offline]) {
                 shown = false
