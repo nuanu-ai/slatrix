@@ -104,7 +104,9 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
     override func id() -> String { identifier }
-    override func membership() -> Membership { .joined }
+    /// Joined unless the test invites you.
+    var joined = true
+    override func membership() -> Membership { joined ? .joined : .invited }
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
         focuses.append(configuration.focus)
         await buildGate.wait()
