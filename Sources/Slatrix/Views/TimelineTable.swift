@@ -698,6 +698,7 @@ struct TimelineTable: NSViewRepresentable {
         let opening = Policy.opening(
             focusedRowID: restoresReadingPosition ? nil : focused, unreadRowID: index["unread"] == nil ? nil : "unread",
             startsAtUnread: configuration.startsAtUnread, remembered: remembered, contains: { index[$0] != nil })
+        let held = known.count
         scroll(to: opening)
         settle(keeping: opening)
         stopLoading()
@@ -711,7 +712,8 @@ struct TimelineTable: NSViewRepresentable {
             }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.logFit(opening: start) }
         if !configuration.context.isThread {
-            Performance.finishOnScreen(.roomOpen, ["rows": rows.count])
+            // Rows that come with heights from an earlier visit are not measured again.
+            Performance.finishOnScreen(.roomOpen, ["rows": rows.count, "measured": known.count - held])
             Performance.finishOnScreen(.launchConversation, ["rows": rows.count])
         }
     }

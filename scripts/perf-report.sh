@@ -15,6 +15,7 @@ lines=$(/usr/bin/log show --last "$duration" --style compact \
             name = field("interval")
             print (name ~ /\.loading$/ ? "loading" : "interval"), name, field("ms")
         }
+        / interval=room\.open / { print "opened", field("measured") }
         / event=/ { print "event", field("event"), field("px"), field("misfit"), field("bottom"), field("opening"), field("past") }
         / hang ms=/ { print "hang", field("during"), field("ms"), field("seen") }
     ')
@@ -45,6 +46,9 @@ only interval | table Flows 0
 echo
 only loading | table "Loading on screen" 1
 echo
+only opened | sort -k2,2n | awk '
+    $2 != "" { v[++n] = $2 }
+    END { if (n) printf "Conversations shown: %d, rows measured to show one: median %d, most %d\n", n, v[int((n + 1) / 2)], v[n] }'
 only "event timeline.jump" | awk '
     { n++; px = $3 < 0 ? -$3 : $3; if (px > max) max = px }
     END { printf "Rows that moved under the reader: %d%s\n", n, n ? sprintf(" (largest %d px)", max) : "" }'

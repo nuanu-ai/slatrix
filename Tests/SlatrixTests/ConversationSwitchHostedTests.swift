@@ -43,6 +43,8 @@ struct ConversationSwitchHostedTests {
         let window: NSWindow
         let hosting: NSHostingView<AnyView>
         var frames: [Frame] = []
+        /// What the app logged about its speed from the click on.
+        var log: [String] = []
         private var observer: CFRunLoopObserver?
         private var clicked = ContinuousClock.now
         private var clickDate = Date()
@@ -151,9 +153,9 @@ struct ConversationSwitchHostedTests {
             observer = nil
             let start = clickDate
             frames.removeAll { $0.date < start }
-            let measures = await performanceMessages(since: start).filter {
-                $0.message.hasPrefix("interval=rows.measure ")
-            }
+            let messages = await performanceMessages(since: start)
+            log = messages.map(\.message)
+            let measures = messages.filter { $0.message.hasPrefix("interval=rows.measure ") }
             var previous = start
             for index in frames.indices {
                 frames[index].measured = measures.filter { $0.date > previous && $0.date <= frames[index].date }
@@ -276,6 +278,8 @@ struct ConversationSwitchHostedTests {
         let frames = await harness.stop()
         let faults = Self.faults(frames, to: harness.name(0), held: true)
         #expect(faults.isEmpty, Self.report(faults, frames))
+        // The performance report counts it too.
+        #expect(harness.log.contains { $0.hasPrefix("interval=room.open ") && $0.hasSuffix(" measured=0") })
     }
 
     /// A cache read of a few frames, as on disk, and a slow one.
