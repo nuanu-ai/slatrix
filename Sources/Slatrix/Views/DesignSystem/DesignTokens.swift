@@ -9,9 +9,11 @@ enum TextRole: CaseIterable {
     case body
     /// 14/20: messages and the composer. The one size off the macOS scale.
     case reading
-    /// 15/20: window, thread and sheet titles; the space name.
+    /// 15/20: window, thread and sheet titles; the space name. A message's h3 to h6.
     case title3
-    /// 22/26: page headers and large icons.
+    /// 17/22: a message's h2.
+    case title2
+    /// 22/26: page headers and large icons. A message's h1.
     case title1
     /// 26/32: empty states and sign-in.
     case largeTitle
@@ -24,6 +26,7 @@ enum TextRole: CaseIterable {
         case .body: 13
         case .reading: 14
         case .title3: 15
+        case .title2: 17
         case .title1: 22
         case .largeTitle: 26
         case .hero: 40
@@ -36,6 +39,7 @@ enum TextRole: CaseIterable {
         case .subheadline: 14
         case .body: 16
         case .reading, .title3: 20
+        case .title2: 22
         case .title1: 26
         case .largeTitle: 32
         case .hero: 48

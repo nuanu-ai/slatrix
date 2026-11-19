@@ -218,15 +218,14 @@ struct AppColors {
     var destructive: Color { Color(hex: dark ? 0xff453a : 0xd70015) }
     /// Connection trouble and recoverable failures.
     var warning: Color { Color(hex: dark ? 0xff9f0a : 0xc46800) }
-    /// An @Name pill in a message or the composer.
-    var mentionText: Color { accent }
-    var mentionFill: Color { .clear }
-    /// The pill of a mention that notifies you, or everyone. Deeper than the accent in light mode, so it reads on its
-    /// tint.
-    var mentionYouText: Color {
-        dark ? accent : Color(nsColor: accentBase.blended(withFraction: 0.35, of: .black) ?? accentBase)
-    }
-    var mentionYouFill: Color { accentTint }
+    /// An @Name pill in a message or the composer. Deeper than the accent in light mode, so it reads on its tint.
+    var mentionText: Color { dark ? accent : deepAccent }
+    var mentionFill: Color { accentTint }
+    /// The pill of a mention that notifies you, or everyone: a stronger fill than anyone else's, under white text in
+    /// dark mode.
+    var mentionYouText: Color { dark ? onAccent : deepAccent }
+    var mentionYouFill: Color { accentFill.opacity(dark ? 0.42 : 0.24) }
+    private var deepAccent: Color { Color(nsColor: accentBase.blended(withFraction: 0.5, of: .black) ?? accentBase) }
     /// Inline code in a message.
     var code: Color { sunken }
     var presenceActive: Color { Color(hex: dark ? 0x30d158 : 0x34c759) }

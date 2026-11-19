@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Testing
 
 @testable import Slatrix
@@ -32,11 +33,10 @@ struct NativeMessageTextTests {
         #expect(traits(at: 4)?.contains(.italic) == true)
     }
 
-    @Test("Code is monospaced on a background and keeps nested bold")
+    @Test("Code is monospaced and keeps nested bold")
     func code() {
         #expect(traits(at: 10)?.contains(.monoSpace) == true)
         #expect(traits(at: 10)?.contains(.bold) == true)
-        #expect(text.attribute(.backgroundColor, at: 10, effectiveRange: nil) is NSColor)
     }
 
     @Test("Strikethrough and underline are both applied")
@@ -128,6 +128,23 @@ struct NativeMessageTextTests {
         }
     }
 
+    @Test("Headings step down in size from h1 to h3, all above the body, and h4 to h6 share h3's size")
+    func headings() throws {
+        let runs = MessageBodyRenderer().render(
+            body: "", formattedBody: "<h1>A</h1><h2>B</h2><h3>C</h3><h4>D</h4><h6>E</h6><p>f</p>"
+        ).runs
+        let text = NativeSelectableMessageText.attributed(
+            runs, fontSize: 14, textColor: .labelColor, linkColor: .systemBlue)
+        let sizes = try ["A", "B", "C", "D", "E", "f"].map { letter in
+            let font =
+                text.attribute(
+                    .font, at: (text.string as NSString).range(of: letter).location, effectiveRange: nil) as? NSFont
+            return try #require(font).pointSize
+        }
+        #expect(sizes[0] > sizes[1] && sizes[1] > sizes[2] && sizes[2] > sizes[5])
+        #expect(sizes[3] == sizes[2] && sizes[4] == sizes[2])
+    }
+
     @Test("A blank line between paragraphs is a small gap, not a whole line; in a code block it stays a line")
     func paragraphGap() {
         func gap(_ block: MessageBlock = MessageBlock()) -> CGFloat {
@@ -164,8 +181,42 @@ struct NativeMessageTextTests {
             ], fontSize: 15, textColor: .labelColor, linkColor: .systemBlue)
         let at = positions(text, width: 200)
         let wrapped = try #require((2..<text.length).first { at($0).y > at(2).y })
-        #expect(at(0).x == 0 && at(2).x > 0)
+        #expect(at(0).x < at(2).x)
         #expect(abs(at(wrapped).x - at(2).x) < 0.5)
+    }
+
+    @Test("A bullet and a number end the same distance before their item's text, which starts at one indent")
+    func listMarkers() {
+        let list = MessageBlock(list: 1)
+        let storage = laidOut([
+            MessageBodyRun(text: "• ", block: list, marker: true), MessageBodyRun(text: "one\n", block: list),
+            MessageBodyRun(text: "12. ", block: list, marker: true), MessageBodyRun(text: "two", block: list),
+        ])
+        func at(_ index: Int) -> NSRect { glyphs(storage, NSRange(location: index, length: 1)) }
+        let bulletGap = at(2).minX - at(0).maxX
+        let numberGap = at(10).minX - at(8).maxX
+        #expect(abs(bulletGap - numberGap) < 0.5)
+        #expect(at(2).minX == at(10).minX)
+    }
+
+    @Test(
+        "A number wider than its list's indent pushes the item's text over, wrapped lines too, clear of the quote's bar"
+    )
+    func wideMarkerInQuote() {
+        let item = "one two three four five six seven eight nine ten eleven twelve"
+        let runs = MessageBodyRenderer().render(
+            body: "", formattedBody: "<blockquote><ol start=\"1000000\"><li>\(item)</li></ol></blockquote>"
+        ).runs
+        let storage = laidOut(runs, width: 200)
+        let text = storage.string as NSString
+        let marker = glyphs(storage, text.range(of: "1000000."))
+        let first = glyphs(storage, text.range(of: "one"))
+        #expect(marker.minX >= MessageBlocks.quoteIndent(15) && first.minX > marker.maxX)
+        let layout = storage.layoutManagers[0]
+        var line = NSRange()
+        layout.lineFragmentRect(forGlyphAt: layout.numberOfGlyphs - 1, effectiveRange: &line)
+        let wrapped = glyphs(storage, NSRange(location: layout.characterIndexForGlyph(at: line.location), length: 1))
+        #expect(wrapped.minY > first.minY && abs(wrapped.minX - first.minX) < 0.5)
     }
 
     @Test("A code block sits on a padded fill instead of inline code's background")
@@ -207,12 +258,15 @@ struct NativeMessageTextTests {
         let layout = storage.layoutManagers[0] as! PillLayoutManager
         return layout.pills(forCharacterRange: NSRange(location: 0, length: storage.length)).map(\.rect)
     }
-    /// Where the characters in `range` sit on their line, in text container coordinates.
+    /// Where the characters in `range` sit on their line, in text container coordinates, as a selection encloses them.
     private func glyphs(_ storage: NSTextStorage, _ range: NSRange) -> NSRect {
         let layout = storage.layoutManagers[0]
-        return layout.boundingRect(
+        var box = NSRect.null
+        layout.enumerateEnclosingRects(
             forGlyphRange: layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil),
-            in: layout.textContainers[0])
+            withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: layout.textContainers[0]
+        ) { rect, _ in box = box.union(rect) }
+        return box
     }
 
     @Test("A mention's pill is as tall beside an emoji or a taller script, or above another line, as on a plain line")
@@ -224,42 +278,96 @@ struct NativeMessageTextTests {
         #expect(abs(above.height - plain.height) < 0.5)
     }
 
-    @Test("A mention at a line start lines up with the text, and the text beside a mention stays clear of its pill")
-    func pillEdges() throws {
-        let storage = laidOut([
-            mention("Alice"), MessageBodyRun(text: " and ("), mention("Bob"), MessageBodyRun(text: ")"),
-        ])
-        let found = pills(storage)
-        try #require(found.count == 2)
-        #expect(found[0].minX >= 0)
-        let before = glyphs(storage, NSRange(location: 11, length: 1))
-        let after = glyphs(storage, NSRange(location: 16, length: 1))
-        #expect(before.maxX <= found[1].minX + 0.01)
-        #expect(after.minX >= found[1].maxX - 0.01)
+    @Test("A mention that fits on a line moves to the next one whole instead of breaking inside the name")
+    func mentionKeepsTogether() throws {
+        let name = mention("Евгения Красносельская-Тихомирова")
+        let alone = laidOut([name], width: 2_000)
+        let width = glyphs(alone, NSRange(location: 0, length: alone.length)).width + 20
+        let storage = laidOut([MessageBodyRun(text: "Reviewers this week: "), name], width: width)
+        let mentionRange = NSRange(location: 21, length: storage.length - 21)
+        #expect(pills(storage).count == 1)
+        #expect(glyphs(storage, mentionRange).minX < 1)
     }
 
-    @Test("A mention's text is drawn in the middle of its pill")
-    func pillInset() throws {
-        let storage = laidOut([mention("Alice"), MessageBodyRun(text: " and "), mention("Bob")])
+    /// `storage`'s glyphs as drawn into a bitmap `size` points large, one pixel a point.
+    private func drawn(_ storage: NSTextStorage, _ size: NSSize) throws -> NSBitmapImageRep {
         let layout = try #require(storage.layoutManagers.first)
         let rep = try #require(
             NSBitmapImageRep(
-                bitmapDataPlanes: nil, pixelsWide: 400, pixelsHigh: 40, bitsPerSample: 8, samplesPerPixel: 4,
-                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+                bitmapDataPlanes: nil, pixelsWide: Int(size.width), pixelsHigh: Int(size.height), bitsPerSample: 8,
+                samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0,
+                bitsPerPixel: 0))
         let context = try #require(NSGraphicsContext(bitmapImageRep: rep))
-        context.cgContext.translateBy(x: 0, y: 40)
+        context.cgContext.translateBy(x: 0, y: size.height)
         context.cgContext.scaleBy(x: 1, y: -1)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context.cgContext, flipped: true)
         layout.drawGlyphs(forGlyphRange: NSRange(location: 0, length: layout.numberOfGlyphs), at: .zero)
         NSGraphicsContext.restoreGraphicsState()
-        for pill in pills(storage) {
-            let inked = (Int(pill.minX)..<Int(pill.maxX.rounded(.up))).filter { x in
-                (Int(pill.minY)..<Int(pill.maxY)).contains { y in (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.3 }
-            }
-            let ink = try #require(inked.first.flatMap { first in inked.last.map { (first, $0 + 1) } })
-            #expect(abs((CGFloat(ink.0) - pill.minX) - (pill.maxX - CGFloat(ink.1))) <= 1.5)
+        return rep
+    }
+    private func inked(_ rep: NSBitmapImageRep, x: Range<Int>, y: Range<Int>) -> [Int] {
+        x.filter { x in y.contains { y in (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.3 } }
+    }
+
+    @Test("A fill only paints: no character moves for it, even where many code spans border one accented letter")
+    func pillsAddNoKern() {
+        let runs = MessageBodyRenderer().render(
+            body: "", formattedBody: "a<code>\u{0301}</code>\u{0301}<code>\u{0301}</code> b"
+        ).runs
+        let text = NativeSelectableMessageText.attributed(
+            runs, fontSize: 15, textColor: .labelColor, linkColor: .systemBlue,
+            mentions: MentionPalette(
+                me: nil, text: .systemBlue, fill: .systemTeal, ownText: .systemBrown, ownFill: .systemYellow))
+        var kerned = false
+        text.enumerateAttribute(.kern, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+            kerned = kerned || value != nil
         }
+        #expect(!kerned)
+    }
+
+    @Test("Inline code too long for a line wraps with its fill and letters inside the column")
+    func inlineCodeWraps() throws {
+        let code = MessageBodyRun(text: String(repeating: "M", count: 60), style: .code)
+        let font = try #require(laidOut([code]).attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+        let width = 24 * NSAttributedString(string: "M", attributes: [.font: font]).size().width + 1
+        let storage = laidOut([code], width: width)
+        let found = pills(storage)
+        #expect(found.count > 1 && found.allSatisfy { $0.minX >= 0 && $0.maxX <= width + 0.01 })
+        let rep = try drawn(storage, NSSize(width: width + 40, height: 160))
+        #expect(inked(rep, x: Int(width.rounded(.up))..<Int(width) + 40, y: 0..<160).isEmpty)
+    }
+
+    @Test("Inline code in right-to-left text sits on a fill around its letters, clear of the words beside it")
+    func inlineCodeRightToLeft() throws {
+        let runs = MessageBodyRenderer().render(body: "", formattedBody: "<p>לפני <code>אבג</code> אחרי</p>").runs
+        let storage = laidOut(runs)
+        let fill = try #require(pills(storage).first)
+        let text = storage.string as NSString
+        let code = glyphs(storage, text.range(of: "אבג"))
+        #expect(fill.minX <= code.minX + 0.01 && fill.maxX >= code.maxX - 0.01)
+        for neighbor in [text.range(of: "לפני"), text.range(of: "אחרי")] {
+            #expect(!glyphs(storage, neighbor).intersects(fill))
+        }
+    }
+
+    @Test("A message of only emoji shows them larger than text, but a preview keeps them at text size")
+    func emojiSize() throws {
+        func size(_ body: String, large: Bool = true) throws -> CGFloat {
+            let hosting = NSHostingView(
+                rootView: NativeMessageBody(body: body, formattedBody: nil, largeEmoji: large)
+                    .environmentObject(AppearanceStore()))
+            hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 200)
+            hosting.layoutSubtreeIfNeeded()
+            func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+            let text = try #require(views(hosting).compactMap { $0 as? MessageTextView }.first)
+            let font = text.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+            return try #require(font).pointSize
+        }
+        let reading = Metrics().size(.reading)
+        #expect(try size("🎉") > reading)
+        #expect(try size("Nice 🎉") == reading)
+        #expect(try size("🎉", large: false) == reading)
     }
 
     @Test("A menu item runs only its own enabled command")

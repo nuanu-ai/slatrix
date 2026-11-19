@@ -867,7 +867,6 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
         themeText = text
         storage.beginEditing()
         restyle(NSRange(location: 0, length: storage.length))
-        storage.padMentionPills()
         storage.endEditing()
         typingAttributes = attributes(typingStyle, block: typingBlock)
     }
@@ -965,7 +964,6 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
         MessageBlocks.padCodeBlocks(
             storage, in: NSRange(location: start, length: min(storage.length, NSMaxRange(paragraphs) + 1) - start),
             fontSize: fontSize)
-        storage.padMentionPills()
     }
 
     // MARK: Typing
@@ -1116,7 +1114,6 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
             }
         }
         MessageBlocks.padCodeBlocks(text, in: NSRange(location: 0, length: text.length), fontSize: fontSize)
-        text.padMentionPills()
         return text
     }
 
@@ -1141,7 +1138,7 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
             var token: ComposerMention?
             storage.enumerateAttributes(in: content) { attributes, range, _ in
                 let mention = attributes[.composerMention] as? ComposerMention
-                // A pill's padding kerns its last character into a run of its own; the token is still one link.
+                // A token whose characters sit in several runs is still one link.
                 if let mention, mention === token {
                     paragraph.runs[paragraph.runs.count - 1].text += text.substring(with: range)
                     return
@@ -1396,11 +1393,14 @@ private final class ComposerLayoutManager: PillLayoutManager {
             }
         }
         let font = view.typingAttributes[.font] as? NSFont ?? .systemFont(ofSize: NSFont.systemFontSize)
-        let marker = NSAttributedString(
-            string: block == .bullet ? "•" : "\(number).",
+        let marker = MessageBlocks.marker(
+            block == .bullet ? "• " : "\(number). ",
             attributes: [.font: NSFont.systemFont(ofSize: font.pointSize), .foregroundColor: NSColor.labelColor])
         // Where a message's marker text sits, so a list looks the same before and after sending.
-        marker.draw(at: NSPoint(x: baseline.x, y: baseline.y - font.ascender))
+        marker.draw(
+            at: NSPoint(
+                x: baseline.x + MessageBlocks.listIndent(font.pointSize) - marker.size().width,
+                y: baseline.y - font.ascender))
     }
 }
 

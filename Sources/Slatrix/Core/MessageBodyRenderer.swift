@@ -15,6 +15,8 @@ struct MessageBlock: Hashable, Sendable {
     var list = 0
     /// Inside `<pre>`.
     var code = false
+    /// 1 to 6 inside `<h1>` to `<h6>`. Only the Mac draws it, so the shared cases leave it out.
+    var heading = 0
 }
 
 struct MessageBodyRun: Hashable, Sendable {
@@ -33,6 +35,29 @@ struct RenderedMessageBody: Sendable {
     var containsSpoilers: Bool
     var usedPlainTextFallback: Bool
     var plainText: String { runs.map(\.text).joined() }
+
+    /// Slack shows a message of nothing but emoji, up to 23 of them in plain paragraphs, large.
+    var isJumbomoji: Bool {
+        var count = 0
+        for run in runs {
+            guard run.link == nil, run.mention == nil, !run.style.contains(.code), run.block == MessageBlock() else {
+                return false
+            }
+            for character in run.text where !character.isWhitespace {
+                guard count < 23, character.isEmoji else { return false }
+                count += 1
+            }
+        }
+        return count > 0
+    }
+}
+
+extension Character {
+    /// Drawn as an emoji, as by default or by a variation selector or keycap, unlike a digit or ©.
+    fileprivate var isEmoji: Bool {
+        unicodeScalars.contains { $0.properties.isEmojiPresentation || $0 == "\u{FE0F}" || $0 == "\u{20E3}" }
+            && unicodeScalars.first?.properties.isEmoji == true
+    }
 }
 
 /// Renders Matrix HTML bodies into styled runs. The cache is shared by every thread, so a timeline renders its
@@ -251,7 +276,10 @@ final class MessageBodyRenderer: @unchecked Sendable {
             guard runs.last?.marker != true else { return }
             trimEnd(spacesOnly: true)
             if !runs.isEmpty && (force || lastCharacter != "\n") {
-                try append("\n", context: Context(block: runs.last?.block ?? MessageBlock()), literal: true)
+                var block = runs.last?.block ?? MessageBlock()
+                // A heading ends at its text, so its line break merges into the plain text after it.
+                block.heading = 0
+                try append("\n", context: Context(block: block), literal: true)
             }
         }
 
@@ -423,6 +451,7 @@ final class MessageBodyRenderer: @unchecked Sendable {
             name)
         if block { try builder.newline() }
         if ["h1", "h2", "h3", "h4", "h5", "h6", "th"].contains(name) { next.style.insert(.bold) }
+        if name.count == 2, name.first == "h", let level = name.last?.wholeNumberValue { next.block.heading = level }
         for child in element.children ?? [] {
             try walk(child, context: next, depth: depth + 1, revealSpoilers: revealSpoilers, builder: &builder)
         }

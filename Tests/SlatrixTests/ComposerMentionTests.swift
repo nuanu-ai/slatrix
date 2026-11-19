@@ -35,6 +35,25 @@ struct ComposerMentionTests {
         #expect(message.html == "<a href=\"https://matrix.to/#/@deadlock:example.org\">deadlock agent</a>")
     }
 
+    @Test("Bold text right before a mention stays one bold element in the draft after an edit")
+    func boldBeforeMentionStaysWhole() throws {
+        var draft = "<strong>go</strong><a href=\"https://matrix.to/#/@alice:example.org\">Alice</a>"
+        let hosting = NSHostingView(
+            rootView: MessageComposer(
+                text: Binding(get: { draft }, set: { draft = $0 }), placeholder: "Message #team",
+                members: [ChatUser(id: "@alice:example.org", name: "Alice")], onSend: { _, _ in }, onTyping: { _ in }
+            ).environmentObject(AppearanceStore()))
+        hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        hosting.layoutSubtreeIfNeeded()
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        let editor = try #require(views(hosting).compactMap { $0 as? NSTextView }.first { $0.isEditable })
+        editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+
+        editor.insertText("!", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        #expect(draft.hasPrefix("<strong>go</strong>"))
+    }
+
     @Test("A word replaced behind the caret, as a spelling correction does, leaves the caret after the space")
     func replacementBehindCaretKeepsCaret() throws {
         var draft = ""

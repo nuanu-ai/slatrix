@@ -221,7 +221,8 @@ private struct ThreadFeedRow: View {
             Text(ChatMessage.deletedBody).italic().foregroundStyle(colors.textSecondary)
         case .ready:
             NativeMessageBody(
-                body: Self.preview(message), formattedBody: message.formattedBody, showsSpoilerControl: false
+                body: Self.preview(message), formattedBody: message.formattedBody, showsSpoilerControl: false,
+                largeEmoji: false
             ).allowsHitTesting(false)
         case .failed: Text(Self.preview(message))
         case .snapshot, .loading: Text(Self.preview(shape)).redacted(reason: .placeholder).accessibilityHidden(true)

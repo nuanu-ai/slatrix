@@ -426,7 +426,7 @@ struct Snapshots {
         try write(await settledImage(hosting), "gallery-\(theme.rawValue)")
     }
 
-    @Test("Mentions in messages and the composer", arguments: [1, 1.25], Theme.allCases)
+    @Test("Mentions and inline code in messages and the composer", arguments: [1, 1.1, 1.25], Theme.allCases)
     func mentions(zoom: Double, theme: Theme) async throws {
         _ = NSApplication.shared
         let appearance = AppearanceStore()
@@ -444,6 +444,12 @@ struct Snapshots {
         let me = "<a href=\"https://matrix.to/#/@me:example.org\">Dmitry</a>"
         let view = VStack(alignment: .leading, spacing: 0) {
             MessageRow(message: message("Bob", "-", html: "Hey \(alice), can you review the deck before standup?"))
+            MessageRow(message: message("Heidi", "-", html: "\(alice): the numbers are in, \(me), take a look"))
+            MessageRow(
+                message: message(
+                    "Ivan", "-",
+                    html: "Set <code>MAX_RETRIES</code> to 5, then run <code>scripts/deploy --region eu-central-1 "
+                        + "--dry-run</code>, and check <code>billing.yaml</code>."))
             MessageRow(message: message("Carol", "-", html: "\(me) the build is green, @room please pull"))
             MessageRow(message: message("Dave", "Pinging @carol:example.org and @erin:example.org about it"))
             MessageRow(
