@@ -429,7 +429,7 @@ struct ComposerHostedTests {
         #expect(window.firstResponder === focused && focused !== editor)
     }
 
-    @Test("An edit uncovered leaves the keyboard where it went meanwhile")
+    @Test("An edit uncovered doesn't take back the keyboard that went elsewhere meanwhile")
     func uncoveredEditKeepsFocus() async throws {
         let cover = Cover()
         let (hosting, window) = host(Covered(cover: cover, sent: Gate(), editing: true), key: true)
@@ -447,10 +447,10 @@ struct ComposerHostedTests {
         let reply = try #require(views(hosting).first { ($0 as? NSTextField)?.placeholderString == "Reply…" })
         #expect(await eventually { window.firstResponder !== editor })
         #expect(window.makeFirstResponder(reply))
-        let focused = window.firstResponder
         cover.covered = false
         hosting.layoutSubtreeIfNeeded()
-        #expect(await !eventually(timeout: .milliseconds(500)) { window.firstResponder !== focused })
+        // Only the editor: a test window in parallel can take key and end the reply's editing.
+        #expect(await !eventually(timeout: .milliseconds(500)) { window.firstResponder === editor })
     }
 
     // AppKit reads `isEditable` before it lets a drop, a paste or a service put text in.

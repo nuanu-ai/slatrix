@@ -60,9 +60,10 @@ struct WindowHostedTests {
         func settle() async -> Bool {
             await eventually(timeout: .seconds(20)) {
                 hosting.layoutSubtreeIfNeeded()
-                return Self.views(in: hosting).contains {
-                    ($0 as? MessageTextView)?.string == messages.last?.body && $0.window != nil
-                }
+                let views = Self.views(in: hosting)
+                // The composer takes text once its draft has loaded.
+                return views.contains { ($0 as? MessageTextView)?.string == messages.last?.body && $0.window != nil }
+                    && views.contains { ($0 as? NSTextView)?.isEditable == true && !($0 is MessageTextView) }
             }
         }
 
