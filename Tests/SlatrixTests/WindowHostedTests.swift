@@ -911,27 +911,21 @@ struct WindowHostedTests {
             harness.hosting.cacheDisplay(in: harness.hosting.bounds, to: image)
             let scale = CGFloat(image.pixelsWide) / harness.hosting.bounds.width
             let y = Int((harness.hosting.bounds.height - frame.midY) * scale)
-            var end = frame.maxX
-            for x in Int(frame.maxX * scale)..<image.pixelsWide {
-                for row in y - 4...y + 4 {
-                    guard let pixel = image.colorAt(x: x, y: row) else { continue }
-                    if abs(pixel.redComponent - canvas.redComponent) + abs(pixel.greenComponent - canvas.greenComponent)
+            let ink = (Int(frame.maxX * scale)..<image.pixelsWide).last { x in
+                (y - 8...y + 8).contains { row in
+                    guard let pixel = image.colorAt(x: x, y: row) else { return false }
+                    return abs(pixel.redComponent - canvas.redComponent)
+                        + abs(pixel.greenComponent - canvas.greenComponent)
                         + abs(pixel.blueComponent - canvas.blueComponent) > 0.3
-                    {
-                        end = CGFloat(x) / scale
-                    }
                 }
             }
-            return end
+            return try CGFloat(#require(ink)) / scale
         }
         let open = try wordsEnd()
         let index = try #require(harness.matrix.rooms.firstIndex { $0.id == harness.matrix.selectedRoomID })
         harness.matrix.rooms[index].isPrivate = true
-        await drainMainActor()
-        // The lock stands where the # stood, a little wider, so the words end about where they did.
-        #expect(
-            await eventually { (try? (-4..<8).contains(wordsEnd() - open)) == true },
-            "\((try? wordsEnd()) ?? 0) from \(open)")
+        // The same words but for the mark before the name: the lock is wider than a #, in any weight.
+        #expect(await eventually { (try? wordsEnd()).map { $0 - open >= 2 } == true })
     }
 
     // capability: app.narrow-window
