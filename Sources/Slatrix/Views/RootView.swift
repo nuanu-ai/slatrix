@@ -475,6 +475,7 @@ struct RootView: View {
             // Saved here or merged from another device, it reaches the vault either way.
             .onChange(of: matrix.savedMessages.list) { _, _ in saveLocalData() }
             .onChange(of: route) { _, next in
+                matrix.showsConversation = next == .home
                 // DMs picked in the drawer keeps it open on the list.
                 if !(next == .home && directMessagesColumn) { sidebarDrawer = false }
                 if let request = pendingMatrixLink, request.route != next { cancelMatrixLink() }

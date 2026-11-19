@@ -8,6 +8,8 @@ final class FakeHomeserver: @unchecked Sendable {
     private let dropFirstSendResponse: Bool
     private let refusesDeletions: Bool
     private let refusesEdits: Bool
+    /// Answers deletions as if the access token had expired.
+    private let rejectsTokenOnDeletions: Bool
     /// Deletions whose response waits for `releaseDeletions()`.
     private var heldDeletions: [() -> Void] = []
     private var holdsDeletions: Bool
@@ -26,8 +28,9 @@ final class FakeHomeserver: @unchecked Sendable {
 
     init(
         room: String, messages: [[String: Any]], dropFirstSendResponse: Bool = false, refusesDeletions: Bool = false,
-        holdsDeletions: Bool = false, refusesEdits: Bool = false
+        holdsDeletions: Bool = false, refusesEdits: Bool = false, rejectsTokenOnDeletions: Bool = false
     ) async throws {
+        self.rejectsTokenOnDeletions = rejectsTokenOnDeletions
         self.dropFirstSendResponse = dropFirstSendResponse
         self.refusesDeletions = refusesDeletions
         self.holdsDeletions = holdsDeletions
@@ -102,6 +105,8 @@ final class FakeHomeserver: @unchecked Sendable {
         let path = target.split(separator: "?", maxSplits: 1).first.map(String.init) ?? ""
         let segments = path.split(separator: "/").map { $0.removingPercentEncoding ?? String($0) }
         if path == "/_matrix/client/versions" { return (200, ["versions": ["v1.11"]]) }
+        // GET /_matrix/client/v3/profile/{user}[/{field}], which the app reads once signed in.
+        if method == "GET", segments.count >= 5, segments[3] == "profile" { return (200, ["displayname": "Me"]) }
         // POST /_matrix/client/v3/rooms/{room}/join
         if method == "POST", segments.count == 6, segments[4] == room, segments[5] == "join" {
             return (200, ["room_id": room])
@@ -133,6 +138,7 @@ final class FakeHomeserver: @unchecked Sendable {
         }
         // PUT /_matrix/client/v3/rooms/{room}/redact/{event}/{transaction}
         if method == "PUT", segments.count == 8, segments[4] == room, segments[5] == "redact" {
+            if rejectsTokenOnDeletions { return (401, ["errcode": "M_UNKNOWN_TOKEN", "error": "Expired"]) }
             return refusesDeletions
                 ? (403, ["errcode": "M_FORBIDDEN", "error": "Not allowed"])
                 : (200, ["event_id": "$redaction-\(segments[7])"])

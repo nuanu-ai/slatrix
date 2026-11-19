@@ -152,6 +152,19 @@ struct ConnectionRecoveryTests {
         await recovery.stop()
     }
 
+    // capability: message.delete
+    @Test("Once sending resumes after a reconnect, a change refused while it was held is looked for again")
+    func resumedSendingLooksForRefusedChanges() async throws {
+        let recovery = onlineRecovery()
+        let client = SendQueueClient()
+        let looked = Recorder<Bool>()
+        try await recovery.attach(
+            FakeSyncService(state: .running), client: client,
+            onSendingResumed: { looked.append(client.enabled.all.last == true) }, onUpdate: { _ in })
+        #expect(await eventually { looked.all.contains(true) })
+        await recovery.stop()
+    }
+
     @Test("Network loss says offline, and a returned network reconnects without a click")
     func networkLossAndReturn() async throws {
         let network = AsyncStream<NetworkRoute>.makeStream()

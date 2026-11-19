@@ -86,6 +86,7 @@ final class ConnectionRecovery {
     private var networkTask: Task<Void, Never>?
     private var sdkState: SyncServiceState?
     private var onUpdate: ((MatrixConnectionFeedback) -> Void)?
+    private var onSendingResumed: (() -> Void)?
     private var automaticRetry: Task<Void, Never>?
     private var failures = 0
     private var wakeObserver: NSObjectProtocol?
@@ -96,7 +97,8 @@ final class ConnectionRecovery {
         state: .idle, isRetrying: false, canRetry: false, errorMessage: nil)
 
     func attach(
-        _ service: SyncService, client: Client? = nil, onUpdate: @escaping (MatrixConnectionFeedback) -> Void
+        _ service: SyncService, client: Client? = nil, onSendingResumed: @escaping () -> Void = {},
+        onUpdate: @escaping (MatrixConnectionFeedback) -> Void
     ) async throws {
         let request = UUID()
         attachmentRequest = request
@@ -105,6 +107,7 @@ final class ConnectionRecovery {
         self.service = service
         self.client = client
         self.onUpdate = onUpdate
+        self.onSendingResumed = onSendingResumed
         let account = generation
         publish()
         handle = service.state(
@@ -306,6 +309,7 @@ final class ConnectionRecovery {
         feedback = MatrixConnectionFeedback(
             state: .idle, isRetrying: false, canRetry: false, errorMessage: nil)
         onUpdate = nil
+        onSendingResumed = nil
         // Cancelling a Swift Task cannot stop its UniFFI future. Stopping only
         // after start returns prevents an old start from resurrecting sync.
         if let pending { _ = await pending.result }
@@ -339,6 +343,7 @@ final class ConnectionRecovery {
             Task { @MainActor [weak self] in
                 guard let self, self.generation == account, self.feedback.state == .running else { return }
                 await client.enableAllSendQueues(enable: true)
+                self.onSendingResumed?()
             }
         }
         let next = MatrixConnectionFeedback(

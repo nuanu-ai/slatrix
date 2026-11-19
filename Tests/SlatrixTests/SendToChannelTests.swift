@@ -63,16 +63,6 @@ struct SendToChannelTests {
     }
 }
 
-/// The reader's own text message in a timeline, still sending under a transaction ID or sent under an event ID.
-private func own(_ id: EventOrTransactionId, body: String, item: String? = nil) -> FakeTimelineItem {
-    var event = textEvent("$unused", body: body, sender: "@sender:example.org")
-    event.eventOrTransactionId = id
-    if case .transactionId = id { event.isRemote = false }
-    event.isOwn = true
-    // The SDK keeps an item's unique ID when its local echo turns remote.
-    return FakeTimelineItem(event, uniqueID: item ?? body)
-}
-
 @MainActor
 struct SendToChannelServiceTests {
     private let service = MatrixService()
@@ -89,64 +79,59 @@ struct SendToChannelServiceTests {
             sessionID: UUID(), selectionID: UUID(), threadID: UUID())
     }
 
+    /// The copy's event content.
+    private func copy() throws -> [String: JSON] {
+        let content = try JSONDecoder().decode(JSON.self, from: Data(try #require(room.raw.all.first).content.utf8))
+        guard case .object(let fields) = content else { return [:] }
+        return fields
+    }
+
     // capability: thread.send-to-channel
     @Test(
         "A reply also sent to the channel goes to its thread, then to the channel as a reply to it once it's sent",
         arguments: [false, true])
-    func copiesOnceSent(sentAtOnce: Bool) async throws {
+    func copiesOnceSent(sentBeforeTheSendReturns: Bool) async throws {
         let thread = FakeLiveTimeline([])
         configure(thread: thread)
 
-        try await service.sendMessage("On it", threadRootID: "$root", roomID: room.id(), alsoToChannel: true)
-        // An earlier reply's echo that lands only now must not be taken for this one.
-        thread.emit([.pushBack(value: own(.transactionId(transactionId: "earlier"), body: "First"))])
-        if sentAtOnce {
-            thread.emit([
-                .set(index: 0, value: own(.eventId(eventId: "$earlier"), body: "First")),
-                .pushBack(value: own(.transactionId(transactionId: "this"), body: "On it")),
-                .set(index: 1, value: own(.eventId(eventId: "$reply"), body: "On it")),
-            ])
+        if sentBeforeTheSendReturns {
+            thread.sendGate.arm()
+            let sending = Task {
+                try await service.sendMessage("On it", threadRootID: "$root", roomID: room.id(), alsoToChannel: true)
+            }
+            #expect(await eventually { thread.sendGate.isWaiting })
+            room.queue(.sentEvent(transactionId: "txn-1", eventId: "$reply"))
+            thread.sendGate.release()
+            try await sending.value
         } else {
-            thread.emit([.pushBack(value: own(.transactionId(transactionId: "this"), body: "On it"))])
-            thread.emit([.set(index: 0, value: own(.eventId(eventId: "$earlier"), body: "First"))])
-            thread.emit([.set(index: 1, value: own(.eventId(eventId: "$reply"), body: "On it"))])
+            try await service.sendMessage("On it", threadRootID: "$root", roomID: room.id(), alsoToChannel: true)
+            room.queue(.sentEvent(transactionId: "txn-1", eventId: "$reply"))
         }
 
         #expect(await eventually { room.raw.all.count == 1 })
-        let copy = try #require(room.raw.all.first)
-        #expect(copy.type == "m.room.message")
-        let content = try JSONDecoder().decode(JSON.self, from: Data(copy.content.utf8))
-        guard case .object(let fields) = content, case .object(let relation) = fields["m.relates_to"] else {
-            Issue.record("the copy isn't a reply: \(copy.content)")
-            return
-        }
+        #expect(room.raw.all.first?.type == "m.room.message")
+        let fields = try copy()
         #expect(fields["body"] == .string("On it"))
-        #expect(relation["m.in_reply_to"] == .object(["event_id": .string("$reply")]))
+        #expect(fields["m.relates_to"] == .object(["m.in_reply_to": .object(["event_id": .string("$reply")])]))
     }
 
     // capability: thread.send-to-channel
-    @Test("A channel's copy quotes the reply its own send queued, not the same text sent from another device")
+    @Test("A channel's copy quotes the reply its own send queued, not the same words sent just before it")
     func quotesItsOwnReply() async throws {
         let thread = FakeLiveTimeline([])
         configure(thread: thread)
 
+        try await service.sendMessage("On it", threadRootID: "$root", roomID: room.id())
         try await service.sendMessage("On it", threadRootID: "$root", roomID: room.id(), alsoToChannel: true)
-        // Sent elsewhere, it arrives from the server already sent, never as this device's local echo.
-        thread.emit([.pushBack(value: own(.eventId(eventId: "$elsewhere"), body: "On it", item: "elsewhere"))])
-        thread.emit([.pushBack(value: own(.transactionId(transactionId: "this"), body: "On it"))])
-        thread.emit([.set(index: 1, value: own(.eventId(eventId: "$reply"), body: "On it"))])
+        room.queue(.sentEvent(transactionId: "txn-1", eventId: "$first"))
+        room.queue(.sentEvent(transactionId: "txn-2", eventId: "$second"))
 
         #expect(await eventually { room.raw.all.count == 1 })
-        let content = try JSONDecoder().decode(JSON.self, from: Data(try #require(room.raw.all.first).content.utf8))
-        guard case .object(let fields) = content, case .object(let relation) = fields["m.relates_to"] else {
-            Issue.record("the copy isn't a reply")
-            return
-        }
-        #expect(relation["m.in_reply_to"] == .object(["event_id": .string("$reply")]))
+        #expect(try copy()["m.relates_to"] == .object(["m.in_reply_to": .object(["event_id": .string("$second")])]))
     }
 
-    @Test("A reply whose send returns after the session changed copies nothing to the channel")
-    func noCopyAcrossSessions() async throws {
+    @Test("A reply whose send was cancelled, or returned after the session changed, copies nothing to the channel")
+    func noCopy() async throws {
         let thread = FakeLiveTimeline([])
         configure(thread: thread)
         thread.sendGate.arm()
@@ -157,14 +142,13 @@ struct SendToChannelServiceTests {
         configure(thread: thread)
         thread.sendGate.release()
         try await stale.value
-        thread.emit([.pushBack(value: own(.transactionId(transactionId: "stale"), body: "On it"))])
-        thread.emit([.set(index: 0, value: own(.eventId(eventId: "$stale"), body: "On it"))])
+        room.queue(.sentEvent(transactionId: "txn-1", eventId: "$stale"))
+        try await service.sendMessage("Never mind", threadRootID: "$root", roomID: room.id(), alsoToChannel: true)
+        room.queue(.cancelledLocalEvent(transactionId: "txn-2"))
 
-        // The new session's own copy goes out after the old one would have.
+        // The new session's own copy goes out after the others would have.
         try await service.sendMessage("Later", threadRootID: "$root", roomID: room.id(), alsoToChannel: true)
-        thread.emit([.pushBack(value: own(.transactionId(transactionId: "fresh"), body: "Later"))])
-        // As one change each listener can apply, whatever it saw of the stale reply.
-        thread.emit([.popBack, .pushBack(value: own(.eventId(eventId: "$fresh"), body: "Later"))])
+        room.queue(.sentEvent(transactionId: "txn-3", eventId: "$fresh"))
         #expect(await eventually { room.raw.all.contains { $0.content.contains("$fresh") } })
         await drainMainActor()
         #expect(room.raw.all.count == 1)

@@ -703,6 +703,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             presentationID: messageActionThreadPresentationID)
     }
     private var visibleActionThreadID: String?
+    /// Whether the selected room's conversation is on screen, rather than Activity or another list.
+    var showsConversation = true
     private(set) var messageActionThreadPresentationID = UUID()
 
     // Closing a pane invalidates its actions and read acknowledgements without cancelling the SDK's
@@ -821,7 +823,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadSelection = threadID
         setMessageActionThread(rootID: rootID)
     }
-    func watchRefusedChangesForChecks() async throws { try await watchRefusedChanges(try requireClient()) }
+    /// Starts the session as signing in does, for a client already signed in.
+    func startForChecks(_ client: Client) async throws {
+        try await start(
+            client, delegate: SessionPersistence(storeID: "", storeKey: Data(), initialSession: nil, failure: {}))
+    }
+    func stopForChecks() async { await stop() }
     func configureRoomOpenForChecks(client: Client, roomList: RoomListService, user: ChatUser) {
         self.client = client
         self.user = user
@@ -1100,10 +1107,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let service = try await newClient.syncService().withOfflineMode().finish()
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         roomSubscriptions.attach(service.roomListService())
-        try await connectionRecovery.attach(service, client: newClient) { [weak self] feedback in
-            guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
-            self.applyConnection(feedback)
-        }
+        try await connectionRecovery.attach(
+            service, client: newClient,
+            onSendingResumed: { [weak self] in self?.refusedChanges?.cancel() },
+            onUpdate: { [weak self] feedback in
+                guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
+                self.applyConnection(feedback)
+            })
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         try await watchRefusedChanges(newClient)
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
@@ -1894,11 +1904,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func watchRefusedChanges(_ client: Client) async throws {
         let session = sessionGeneration
         let watcher = RefusedChanges(client: client) { [weak self] undone in
-            guard let self, session == sessionGeneration, selectedRoomID == undone.roomID,
-                undone.threadRootID == nil || undone.threadRootID == visibleActionThreadID
+            guard let self, session == sessionGeneration, showsConversation else { return }
+            let thread = visibleActionThreadID != nil && visibleActionThreadID == loadedThreadRootID
+            let shown = Set((messages + (thread ? threadMessages : [])).compactMap(\.eventID))
+            let room = selectedRoomID
+            // A reaction goes back quietly.
+            guard
+                let change = undone.last(where: {
+                    $0.kind != .reaction && $0.roomId == room && shown.contains($0.eventId)
+                })
             else { return }
             errorMessage =
-                undone.target == .redaction ? "Couldn’t delete this message." : "Couldn’t edit this message."
+                change.kind == .redaction ? "Couldn’t delete this message." : "Couldn’t edit this message."
         }
         refusedChanges?.stop()
         refusedChanges = watcher
@@ -1929,15 +1946,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let room = try requireRoom(roomID)
         let content = try MatrixMapping.content(message).withMentions(
             mentions: mentions(message))
-        let echo = alsoToChannel && threadRootID != nil ? await SentEcho(target, body: message.body) : nil
+        let echo = alsoToChannel && threadRootID != nil ? try await SentEcho(room) : nil
         // Thread timelines infer their own relation. Extra JSON cannot override
         // that fallback relation, so an explicit quote must use sendReply.
         do {
-            if let reply = replyToID {
-                _ = try await target.sendReply(msg: content, eventId: reply)
-            } else {
-                _ = try await target.send(msg: content)
-            }
+            let handle =
+                if let reply = replyToID {
+                    try await target.sendReply(msg: content, eventId: reply)
+                } else {
+                    try await target.send(msg: content)
+                }
+            echo?.follow(handle.transactionId())
         } catch {
             echo?.cancel()
             throw error
@@ -2122,18 +2141,21 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
         }
     }
-    /// The SDK's thread timeline keeps its root as first sent: an edit to the root arrives in the main timeline.
+    /// The SDK's thread timeline keeps its root as first sent: an edit or deletion of the root, or one the server
+    /// refused and the channel took back, arrives in the main timeline.
     private func showEditedThreadRoot() {
         guard let rootID = loadedThreadRootID,
-            let current = messages.first(where: { $0.eventID == rootID }), !current.isRedacted,
+            let current = messages.first(where: { $0.eventID == rootID }),
             let index = threadMessages.firstIndex(where: { $0.eventID == rootID })
         else { return }
-        // An edit the server refused goes back in the channel, and so here.
         var root = threadMessages[index]
         root.body = current.body
         root.formattedBody = current.formattedBody
+        root.kind = current.kind
+        root.attachment = current.attachment
         root.mediaCaption = current.mediaCaption
         root.isEdited = current.isEdited
+        root.isRedacted = current.isRedacted
         if root != threadMessages[index] { threadMessages[index] = root }
     }
 
