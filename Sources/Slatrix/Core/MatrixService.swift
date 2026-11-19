@@ -656,6 +656,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     )
     /// The open whose conversation is on screen, which can trail `selection` while the next one reads its cache.
     private var shownSelection: UUID?
+    /// The timeline whose rows the conversation pane shows. It changes when another conversation goes up, or when rows
+    /// of another timeline replace those on screen, and each gets a table of its own.
+    private(set) var shownTimelineID = UUID()
     /// The conversation on screen is still reading its first rows: it has none to show, and older ones to read.
     var timelineLoading: Bool {
         selectedRoomID != nil && messages.isEmpty && hasMoreHistory && blankPages < 5 && errorMessage == nil
@@ -1677,6 +1680,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func showConversation(_ id: String, eventID: String?, token: UUID) {
         guard selection == token, shownSelection != token else { return }
         shownSelection = token
+        if selectedRoomID != id || !messages.isEmpty { shownTimelineID = token }
         if let live = liveTimeline {
             live.revision = timelineRevision
             live.messages = messages

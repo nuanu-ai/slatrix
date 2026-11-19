@@ -1113,7 +1113,7 @@ struct RootView: View {
                         onEditCaption: startCaption,
                         onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
                         inlineVideo: viewer.inlineVideo, contentAbove: $conversationContentAbove, insets: insets
-                    ).id("\(room.id):\(matrix.timelineSelectionID)")
+                    ).id("\(room.id):\(matrix.shownTimelineID)")
                 } header: {
                     channelHeader(room).scrollEdge(.top, colors.canvas)
                 } footer: {

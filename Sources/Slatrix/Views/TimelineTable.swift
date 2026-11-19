@@ -914,7 +914,7 @@ struct TimelineTable: NSViewRepresentable {
         guard let configuration else { return true }
         return scrollView.window == nil
             || configuration.timelineID != nil
-                && configuration.timelineID != configuration.context.matrix?.timelineSelectionID
+                && configuration.timelineID != configuration.context.matrix?.shownTimelineID
     }
 
     /// Keeps what this table measured for the next table on the same timeline.

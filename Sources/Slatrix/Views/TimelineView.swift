@@ -74,7 +74,7 @@ struct TimelineView: View {
             jumpID: jumpTarget == nil ? nil : matrix.jump?.id, startsAtUnread: startsAtUnread,
             memoryKey: TimelineMemory.Key(
                 sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
-            timelineID: thread ? nil : matrix.timelineSelectionID,
+            timelineID: thread ? nil : matrix.shownTimelineID,
             canLoadOlder: hasOlder && !loadingHistory,
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
