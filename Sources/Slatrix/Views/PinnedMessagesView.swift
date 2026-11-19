@@ -83,7 +83,7 @@ struct PinnedMessagesView: View {
                         Image(systemName: "pin.fill").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                     }
                     if message.isRedacted {
-                        Text("This message was deleted.").italic().foregroundStyle(colors.textSecondary)
+                        Text(ChatMessage.deletedBody).italic().foregroundStyle(colors.textSecondary)
                     } else {
                         NativeMessageBody(
                             body: message.body, formattedBody: message.formattedBody, showsSpoilerControl: false

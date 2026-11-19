@@ -57,6 +57,14 @@ enum EmojiCatalog {
         return ":\(code):" + tone
     }
 
+    /// A lone symbol such as ❤ in color: sent without its presentation selector, it otherwise draws as black text.
+    static func presented(_ value: String) -> String {
+        guard value.unicodeScalars.count == 1, let scalar = value.unicodeScalars.first, !scalar.isASCII,
+            scalar.properties.isEmoji
+        else { return value }
+        return value + "\u{FE0F}"
+    }
+
     /// Exact shortcodes first, then shortcodes the query starts, then words that start with it, then anything
     /// that contains it; picker order within each.
     static func search(_ query: String) -> [Emoji] {
@@ -103,12 +111,6 @@ extension MessageReaction {
         let names = ordered.map { $0 == me ? "You" : name($0) ?? MatrixID.localpart($0) }
         let who = names.isEmpty ? "\(count) \(count == 1 ? "person" : "people")" : MatrixID.listed(names)
         return "\(who) reacted with \(EmojiCatalog.shortcode(for: key))"
-    }
-
-    /// The people a pill shows in place of its count, yours first; nil past three or while someone is unknown.
-    func faces(me: String?) -> [String]? {
-        guard count <= 3, senders.count == count else { return nil }
-        return senders.filter { $0 == me } + senders.filter { $0 != me }
     }
 }
 

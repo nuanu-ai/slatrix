@@ -287,11 +287,15 @@ struct ComponentGallery: View {
             .flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
     }
 
-    /// Skeleton rows only: the spinner never stops moving, so a snapshot of it never settles.
+    /// Skeletons only: the spinner never stops moving, so a snapshot of it never settles.
     private var loading: some View {
-        SkeletonRows(count: 2).frame(width: m(420), height: m(132))
-            .background(appearance.colors.canvas, in: RoundedRectangle(cornerRadius: m.radiusLarge))
-            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(appearance.colors.border))
+        VStack(alignment: .leading, spacing: m.sp12) {
+            SkeletonRows(count: 2).frame(width: m(420), height: m(132))
+                .background(appearance.colors.canvas, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+                .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(appearance.colors.border))
+            caption("Lines, for a quote still loading")
+            SkeletonLines()
+        }
     }
 
     private var tooltips: some View {

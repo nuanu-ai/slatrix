@@ -938,8 +938,8 @@ struct TimelineTable: NSViewRepresentable {
         placeToolbar()
     }
 
-    /// The one hover toolbar, at the hovered row's top right and inside the row, centered on a row shorter than it, and
-    /// kept inside the viewport.
+    /// The one hover toolbar, hung on the hovered row's top right edge as Slack hangs it, never down over the row's
+    /// first line, and kept inside the viewport.
     private func placeToolbar() {
         guard let id = hoveredID, let row = index[id], case .message(let entry) = rows[row].kind,
             !entry.message.isRedacted, let context = configuration?.context
@@ -962,9 +962,9 @@ struct TimelineTable: NSViewRepresentable {
         let visible = NSRect(
             x: clip.minX, y: clip.minY + insets.top, width: clip.width,
             height: clip.height - insets.top - insets.bottom)
-        // A row too short for the gap above it centers the toolbar instead.
-        let inset = min(m.sp4, (rect.height - size.height) / 2)
-        let y = min(max(top.y + inset, visible.minY + m.sp4), visible.maxY - size.height)
+        let compact = context.appearance?.density == .compact
+        let inset = min(size.height / 2, MessageRow.topInset(m, grouped: entry.grouped, compact: compact))
+        let y = min(max(top.y + inset - size.height, visible.minY + m.sp4), visible.maxY - size.height)
         toolbar.frame.origin = NSPoint(x: top.x - m.conversationInset(thread: context.isThread) - size.width, y: y)
         toolbar.isHidden = false
     }
@@ -1197,14 +1197,6 @@ struct TimelineRow: View, Equatable {
                         ReplyPreviewView(
                             matrix: matrix, message: message, preview: $0, origin: target, onOpen: context.onShowReply,
                             onOpenThread: context.onThread)
-                    },
-                    reactionFaces: message.reactions.reduce(into: [:]) { faces, reaction in
-                        faces[reaction.key] = reaction.faces(me: matrix.user?.id)?.map { id in
-                            let member = matrix.members.first { $0.id == id }
-                            return AvatarView(
-                                name: member?.name ?? MatrixID.localpart(id), size: metrics.avatarReaction,
-                                matrix: matrix, source: member?.avatarURL)
-                        }
                     },
                     attachment: message.attachment.map {
                         AttachmentView(

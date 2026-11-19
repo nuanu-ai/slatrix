@@ -474,8 +474,6 @@ struct MessageRow: View {
     /// The thread's last replier, in the replies bar.
     var replierAvatar: AvatarView? = nil
     var replyPreview: ReplyPreviewView? = nil
-    /// The faces each reaction shows in place of its count, by its key.
-    var reactionFaces: [String: [AvatarView]] = [:]
     var attachment: AttachmentView? = nil
     var actions = MessageRowActions()
     /// Where each reaction sits while the row is hovered, for the timeline's tooltip naming who reacted.
@@ -506,7 +504,30 @@ struct MessageRow: View {
             .contentShape(Rectangle())
     }
     private var layout: some View {
-        HStack(alignment: .top, spacing: m(ConversationGrid.gap(thread: isThread))) {
+        let gutter = m(ConversationGrid.gap(thread: isThread))
+        return VStack(alignment: .leading, spacing: m.sp2) {
+            // Above the avatar and the name, so both start on the name's line as in every other row; the pin stands in
+            // the avatar's column, as in Slack.
+            if isPinned {
+                HStack(spacing: compact ? m.sp4 : gutter) {
+                    Image(systemName: "pin.fill").frame(width: compact ? nil : m.avatar, alignment: .trailing)
+                    Text("Pinned")
+                }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+            }
+            content(gutter: gutter)
+        }.padding(.horizontal, m.conversationInset(thread: isThread))
+            // 12 above a sender and 2 around a message under them, counted from 20 pt lines: a one-line row has none of
+            // that leading of its own, so it comes on top of them. Two grouped rows share both their 2s, so a sender's
+            // first gap is the tightest.
+            .padding(.top, Self.topInset(m, grouped: grouped, compact: compact))
+            .padding(.bottom, compact ? m.sp4 : grouped ? m.sp4 : m.sp2)
+    }
+    /// The space above a row's first line, which the hover toolbar may hang into.
+    static func topInset(_ m: Metrics, grouped: Bool, compact: Bool) -> CGFloat {
+        compact ? (grouped ? 0 : m.sp2) : grouped ? m(3) : m.sp12
+    }
+    private func content(gutter: CGFloat) -> some View {
+        HStack(alignment: .top, spacing: gutter) {
             if !compact {
                 if grouped || !appearance.showAvatars {
                     // One line: a wrap would grow the row on hover.
@@ -526,10 +547,6 @@ struct MessageRow: View {
                 }
             }
             VStack(alignment: .leading, spacing: m.sp2) {
-                if isPinned {
-                    Label("Pinned", systemImage: "pin.fill").font(m.font(.subheadline))
-                        .foregroundStyle(colors.textSecondary)
-                }
                 if !grouped || compact {
                     HStack(alignment: .firstTextBaseline, spacing: m(6)) {
                         if compact {
@@ -557,7 +574,7 @@ struct MessageRow: View {
                     }
                 }
                 if message.isRedacted {
-                    Text("This message was deleted.").italic().font(m.font(.reading)).foregroundStyle(
+                    Text(ChatMessage.deletedBody).italic().font(m.font(.reading)).foregroundStyle(
                         colors.textSecondary
                     )
                 } else {
@@ -608,36 +625,20 @@ struct MessageRow: View {
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(.horizontal, m.conversationInset(thread: isThread))
-            // 12 above a sender and 2 around a message under them, counted from 20 pt lines: a one-line row has none of
-            // that leading of its own, so it comes on top of them. Two grouped rows share both their 2s, so a sender's
-            // first gap is the tightest.
-            .padding(.top, compact ? (grouped ? 0 : m.sp2) : grouped ? m(3) : m.sp12)
-            .padding(.bottom, compact ? m.sp4 : grouped ? m.sp4 : m.sp2)
+        }
     }
     private var clock: some View { SendingClock(since: message.timestamp) }
 
     private var reactions: some View {
-        HStack(spacing: m.sp4) {
+        WrappingRow(spacing: m.sp4) {
             ForEach(message.reactions, id: \.key) { reaction in
                 Button {
                     actions.react?(reaction.key)
                 } label: {
-                    ReactionChip(mine: reaction.mine, hasFaces: reactionFaces[reaction.key] != nil) {
-                        Text(reaction.key).font(m.font(.subheadline))
-                        if let faces = reactionFaces[reaction.key] {
-                            // Overlapping, each ringed in the canvas so the one beneath shows where it ends.
-                            HStack(spacing: -m.sp4) {
-                                ForEach(faces.indices, id: \.self) { index in
-                                    faces[index].overlay {
-                                        if faces.count > 1 { Circle().strokeBorder(colors.canvas, lineWidth: m(1.5)) }
-                                    }
-                                }
-                            }.alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + m.sp4 }
-                        } else {
-                            Text("\(reaction.count)").font(m.font(.subheadline, .semibold))
-                                .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
-                        }
+                    ReactionChip(mine: reaction.mine) {
+                        Text(EmojiCatalog.presented(reaction.key)).font(m.font(.subheadline)).lineLimit(1)
+                        Text("\(reaction.count)").font(m.font(.subheadline, .semibold)).fixedSize()
+                            .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
                     }
                 }.buttonStyle(.row).disabled(actions.react == nil)
                     .accessibilityLabel(
@@ -700,18 +701,47 @@ private struct SendingClock: View {
 /// A reaction's pill: 24 pt, gray at rest; yours are tinted.
 private struct ReactionChip<Content: View>: View {
     let mine: Bool
-    /// Faces end the pill, close to its round end.
-    var hasFaces = false
     @ViewBuilder let content: Content
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
         let colors = appearance.colors
         // The emoji and its count on one baseline: centered frames put the count low, as an emoji's line is taller.
-        HStack(alignment: .firstTextBaseline, spacing: m.sp4) { content }.padding(.leading, m.sp8)
-            .padding(.trailing, hasFaces ? m(3) : m.sp8)
+        HStack(alignment: .firstTextBaseline, spacing: m.sp4) { content }.padding(.horizontal, m.sp8)
             .frame(height: m.sp24)
             .background(mine ? colors.accentTint : colors.sunken, in: Capsule())
+    }
+}
+
+/// Its views in lines as wide as the column, as Slack wraps reactions, so none is ever squeezed.
+private struct WrappingRow: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        frames(width: proposal.width ?? .infinity, subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (view, frame) in zip(subviews, frames(width: proposal.width ?? bounds.width, subviews).frames) {
+            let origin = CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY)
+            view.place(at: origin, proposal: ProposedViewSize(frame.size))
+        }
+    }
+
+    private func frames(width: CGFloat, _ subviews: Subviews) -> (frames: [CGRect], size: CGSize) {
+        var frames: [CGRect] = []
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        for view in subviews {
+            // Never wider than the column: a pill with a long custom key truncates it instead.
+            let ideal = view.sizeThatFits(.unspecified).width
+            let fit = view.sizeThatFits(ProposedViewSize(width: min(ideal, width), height: nil))
+            if origin.x > 0, origin.x + fit.width > width { origin = CGPoint(x: 0, y: size.height + spacing) }
+            frames.append(CGRect(origin: origin, size: fit))
+            origin.x += fit.width + spacing
+            size = CGSize(width: max(size.width, origin.x - spacing), height: max(size.height, origin.y + fit.height))
+        }
+        return (frames, size)
     }
 }
 
@@ -783,7 +813,8 @@ struct MessageToolbar: View {
                         Button {
                             react(emoji)
                         } label: {
-                            Text(emoji).font(m.font(.body)).frame(width: m(Self.button), height: m(Self.button))
+                            Text(EmojiCatalog.presented(emoji)).font(m.font(.body))
+                                .frame(width: m(Self.button), height: m(Self.button))
                         }.buttonStyle(.icon).help("React with \(EmojiCatalog.shortcode(for: emoji))")
                     }
                 }

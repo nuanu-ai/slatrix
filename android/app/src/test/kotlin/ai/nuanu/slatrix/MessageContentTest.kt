@@ -170,20 +170,26 @@ class MessageContentTest {
             MessageReaction("🎉", 1, false, listOf("@sam:example.org")),
         ))
         show(shipped)
-        compose.onNode(hasText("👍") and hasContentDescription("You and Mira")).assertIsSelected()
-        compose.onNode(hasText("🎉") and hasContentDescription("sam")).assertIsNotSelected().performClick()
+        compose.onNode(hasText("👍") and hasContentDescription("👍 2, You and Mira")).assertIsSelected()
+        compose.onNode(hasText("🎉") and hasContentDescription("🎉 1, sam")).assertIsNotSelected().performClick()
         compose.runOnIdle { assertEquals(shipped to "🎉", toggled) }
     }
 
     // capability: message.reactions.show
-    @Test fun aPillShowsTheFacesOfWhoReactedYoursFirstAndTheCountPastThree() {
+    @Test fun everyPillShowsItsEmojiAndCountHoweverFewReacted() {
         show(message("Ship it").copy(reactions = listOf(
             MessageReaction("👍", 2, true, listOf("@mira:example.org", "@me:example.org")),
             MessageReaction("🎉", 4, false, listOf("@a:example.org", "@b:example.org", "@c:example.org", "@d:example.org")),
         )))
-        compose.onNode(hasText("👍") and hasContentDescription("You and Mira")).assertIsDisplayed()
-        compose.onNode(hasText("👍") and hasText("2")).assertDoesNotExist()
+        compose.onNode(hasText("👍") and hasText("2")).assertIsDisplayed()
         compose.onNode(hasText("🎉") and hasText("4")).assertIsDisplayed()
+    }
+
+    // capability: message.reactions.show
+    @Test fun aChipDescribesItsEmojiCountAndAtMostThreeWhoReacted() {
+        val senders = listOf("@me:example.org") + (1..99).map { "@p$it:example.org" }
+        show(message("Ship it").copy(reactions = listOf(MessageReaction("🎉", 100, true, senders))))
+        compose.onNode(hasText("🎉") and hasContentDescription("🎉 100, You, p1, p2 and 97 others")).assertIsSelected()
     }
 
     // capability: message.reactions.show

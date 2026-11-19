@@ -123,6 +123,8 @@ struct ChatMessage: Identifiable, Hashable {
     var threadRootID: String? = nil
     var isEdited = false
     var isRedacted = false
+    /// What stands in for a deleted message wherever it shows, quotes included, as Slack words it.
+    static let deletedBody = "This message was deleted."
     var sendState = "sent"
     /// Who has read up to this message, from their read receipts.
     var readBy: [String] = []

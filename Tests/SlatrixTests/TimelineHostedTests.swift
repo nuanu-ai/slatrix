@@ -945,7 +945,7 @@ extension TimelineHostedTests {
         harness.scrollView?.subviews.first { $0 is TimelineToolbarView && !$0.isHidden }
     }
 
-    @Test("Hovering a message floats the toolbar inside its top right, and no row moves or changes height")
+    @Test("Hovering a message hangs the toolbar on its top edge, clear of its text, and no row moves or changes height")
     func hoverKeepsRowsStill() async throws {
         var messages = Self.actionable(0..<30)
         messages[27].reactions = [MessageReaction(key: "👍", count: 2, mine: true, senders: [Self.user, "@b:x"])]
@@ -964,14 +964,16 @@ extension TimelineHostedTests {
         let before = heights()
         let tops = bodies.map(harness.top)
         for body in bodies {
-            var cell: NSView? = try hover(harness, body)
+            let text = try hover(harness, body)
+            var cell: NSView? = text
             while let view = cell, !(view is TimelineCell) { cell = view.superview }
             let row = try #require(cell as? TimelineCell)
             let frame = row.convert(row.bounds, to: nil)
             let shown = try #require(toolbar(harness))
             let bar = shown.convert(shown.bounds, to: nil)
-            // At the row's top right, inside it, so it covers no other message.
-            #expect(bar.maxY <= frame.maxY && bar.minY >= frame.minY, "\(body): \(bar) in \(frame)")
+            // Across the row's top edge, as Slack hangs it, and above the message's text.
+            #expect(bar.maxY > frame.maxY && bar.minY < frame.maxY, "\(body): \(bar) on \(frame)")
+            #expect(bar.minY >= text.convert(text.bounds, to: nil).maxY - 0.5, "\(body): \(bar)")
             #expect(bar.maxX < frame.maxX && bar.height >= MessageToolbar.button)
             // The hovered row lays out at the height it was measured at without hover.
             #expect(abs(row.height(width: row.bounds.width) - row.bounds.height) < 0.5, "\(body)")
@@ -1004,21 +1006,19 @@ extension TimelineHostedTests {
         #expect(abs(try barEdge() - (750 + 352)) < 1)
     }
 
-    @Test("A one-sender row shorter than the toolbar has the toolbar centered on it")
-    func toolbarCentersOnShortRow() async throws {
+    @Test("A one-line row under the same sender has the toolbar above its line, never over it")
+    func toolbarClearsGroupedRow() async throws {
         var messages = Self.actionable(0..<30)
         messages[29].timestamp = messages[28].timestamp.addingTimeInterval(5)
         #expect(messages[29].senderID == messages[28].senderID)
         let harness = Harness(messages: messages, height: 560)
         defer { harness.close() }
         await settle(harness) { harness.top(of: "Message 29") != nil }
-        var cell: NSView? = try hover(harness, "Message 29")
-        while let view = cell, !(view is TimelineCell) { cell = view.superview }
-        let row = try #require(cell).convert(try #require(cell).bounds, to: nil)
+        let text = try hover(harness, "Message 29")
+        let line = text.convert(text.bounds, to: nil)
         let shown = try #require(toolbar(harness))
         let bar = shown.convert(shown.bounds, to: nil)
-        #expect(bar.height > row.height, "\(bar) over \(row)")
-        #expect(abs(bar.midY - row.midY) <= 1, "\(bar) over \(row)")
+        #expect(bar.minY >= line.maxY - 0.5, "\(bar) over \(line)")
     }
 
     @Test("A message passing under the header shows its toolbar below the header, and the header itself hovers none")
@@ -1041,18 +1041,22 @@ extension TimelineHostedTests {
     @Test("The pointer is an I-beam over message text and an arrow over the hover toolbar on top of it")
     func toolbarCursor() async throws {
         var messages = Self.actionable(0..<6)
-        // Grouped under the message before it, so the toolbar over its top edge covers its first line of text.
+        // Grouped under a long message, so the toolbar hung on its top edge covers that message's last lines.
+        messages[4].body = String(repeating: "word ", count: 60)
         messages[5].timestamp = messages[4].timestamp.addingTimeInterval(30)
-        messages[5].body = String(repeating: "word ", count: 60)
         let harness = Harness(messages: messages)
         defer { harness.close() }
         await settle(harness) { harness.top(of: messages[5].body) != nil }
-        let text = try hover(harness, "word word")
+        _ = try hover(harness, messages[5].body)
+        let text = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? MessageTextView }.first {
+                $0.string.hasPrefix("word word")
+            })
         let frame = text.convert(text.bounds, to: nil)
         let shown = try #require(toolbar(harness))
         let bar = shown.convert(shown.bounds, to: nil)
-        let overToolbar = NSPoint(x: bar.midX, y: bar.minY + 3)
-        let body = NSPoint(x: frame.minX + 10, y: frame.minY + 6)
+        let overToolbar = NSPoint(x: bar.midX, y: bar.maxY - 3)
+        let body = NSPoint(x: frame.minX + 10, y: frame.maxY - 6)
         #expect(frame.contains(overToolbar))
         // The toolbar never takes the click that would drag the window.
         #expect(!shown.mouseDownCanMoveWindow)
@@ -1080,6 +1084,8 @@ extension TimelineHostedTests {
         #expect(try entered(at: body) == .iBeam)
         #expect(try entered(at: overToolbar) == .arrow)
         #expect(try moved(to: body) == .iBeam)
+        // That hovered the long message; back down on the short one, its toolbar hangs over the long one's text again.
+        _ = try hover(harness, messages[5].body)
         #expect(try moved(to: overToolbar) == .arrow)
         #expect(try moved(to: body) == .iBeam)
     }

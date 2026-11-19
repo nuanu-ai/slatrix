@@ -304,7 +304,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val named = !room.direct || room.memberCount > 2
     @Composable
     fun messageRow(row: ConversationMessage, last: Boolean, lifted: Boolean = false) = LiveMessageRow(row, last, named,
-        state.ownUserId, state.names, state.avatars, actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null },
+        state.ownUserId, state.names, actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null },
         onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
         loadThreadOrigin, actions.onQuote, lifted) { y -> menu = Pressed(row, last, y) }
     var origin by remember { mutableFloatStateOf(0f) }
@@ -590,7 +590,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
  * in their color, atop the first; yours on the right in the accent. The time sits inside, after the last line when it fits.
  */
 @Composable
-private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, named: Boolean, me: String?, names: Map<String, String>, avatars: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
+private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, named: Boolean, me: String?, names: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?, onReply: ((ConversationMessage) -> Unit)?,
@@ -717,7 +717,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, nam
                 if (body != null) TimedBody(body, if (media) inset.padding(vertical = UiMetrics.GapTiny) else Modifier) { time(timeColor) }
                 else if (!media) TimedBody(null, Modifier.align(Alignment.End)) { time(timeColor) }
                 if (message.reactions.isNotEmpty()) Box(inset) {
-                    Reactions(message.reactions, me, names, avatars, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
+                    Reactions(message.reactions, me, names, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
                 }
                 val root = message.eventId
                 // Inside a thread the root's replies bar says it instead.

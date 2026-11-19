@@ -1,7 +1,6 @@
 package ai.nuanu.slatrix.ui.account
 
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
@@ -41,40 +40,30 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.compositeOver
 
 /**
- * Slack's reaction chips under a message: a tap adds or takes back yours, a long press shows who reacted. A chip shows
- * the faces of who reacted in place of its count, by the shared rule, from [avatars] by user ID over their initials.
+ * Slack's reaction chips under a message, each its emoji and count: a tap adds or takes back yours, a long press shows
+ * who reacted.
  */
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
-internal fun Reactions(reactions: List<MessageReaction>, me: String?, names: Map<String, String>, avatars: Map<String, String>,
+internal fun Reactions(reactions: List<MessageReaction>, me: String?, names: Map<String, String>,
     onToggle: ((String) -> Unit)?, onShowWho: () -> Unit) {
     val colors = SlatrixTheme.colors
     FlowRow(Modifier.padding(top = UiMetrics.GapSmall), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall),
         verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
         for (reaction in reactions) {
-            // Yours is tinted with the accent, as on the Mac; opaque, so the faces' rings match the chip.
+            // Yours is tinted with the accent, as on the Mac.
             val fill = (if (reaction.mine) colors.accentTint else colors.reaction).compositeOver(colors.bubbleIn)
             Row(Modifier.height(UiMetrics.ChipHeight)
                 .background(fill, CircleShape)
                 // Your own bubble tints every chip alike, so there yours also wears an edge in the accent, white there.
                 .then(if (reaction.mine && colors.accentTint == colors.reaction) Modifier.border(UiMetrics.Divider, colors.accent, CircleShape)
                     else Modifier)
-                .semantics { selected = reaction.mine }
+                .semantics { selected = reaction.mine; contentDescription = chip(reaction, names, me) }
                 .combinedClickable(onLongClickLabel = "See who reacted", onLongClick = onShowWho) { onToggle?.invoke(reaction.key) }
                 .padding(horizontal = UiMetrics.GapSmall),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
                 Text(reaction.key, style = MaterialTheme.typography.bodyLarge)
-                val faces = reaction.faces(me)
-                // Overlapping, each ringed in the chip's fill so the one beneath shows where it ends.
-                if (faces != null) Row(Modifier.semantics { contentDescription = who(faces, names, me) },
-                    horizontalArrangement = Arrangement.spacedBy(-UiMetrics.GapTiny)) {
-                    for (id in faces) {
-                        val name = names[id] ?: DisplayNames.localpart(id)
-                        Box(Modifier.border(UiMetrics.FaceRing, fill, CircleShape)) {
-                            LiveAvatar(name, UiMetrics.Facepile, avatars[id])
-                        }
-                    }
-                } else Text("${reaction.count}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium,
+                Text("${reaction.count}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium,
                     color = if (reaction.mine) colors.accent else colors.textPrimary)
             }
         }
@@ -127,8 +116,18 @@ internal fun ReactionsSheet(reactions: List<MessageReaction>, names: Map<String,
     }
 }
 
-/** "Mira, You and sam": [ids] by the names the room knows them by, with you as "You". */
-private fun who(ids: List<String>, names: Map<String, String>, me: String?): String {
-    val who = ids.map { if (it == me) "You" else names[it] ?: DisplayNames.localpart(it) }
-    return if (who.size > 1) who.dropLast(1).joinToString(", ") + " and " + who.last() else who.joinToString()
+/** "🎉 100, You, Mira and 98 others": read for every chip, so it names at most three; the long press lists them all. */
+private fun chip(reaction: MessageReaction, names: Map<String, String>, me: String?): String {
+    val named = reaction.senders.sortedBy { it != me }.take(3).map { name(it, names, me) }
+    val rest = reaction.count - named.size
+    val who = if (named.isEmpty()) named else named + listOfNotNull(if (rest > 1) "$rest others" else if (rest == 1) "1 other" else null)
+    return "${reaction.key} ${reaction.count}" + if (who.isEmpty()) "" else ", " + listed(who)
 }
+
+/** "Mira, You and sam": [ids] by the names the room knows them by, with you as "You". */
+private fun who(ids: List<String>, names: Map<String, String>, me: String?): String = listed(ids.map { name(it, names, me) })
+
+private fun name(id: String, names: Map<String, String>, me: String?) = if (id == me) "You" else names[id] ?: DisplayNames.localpart(id)
+
+private fun listed(items: List<String>) =
+    if (items.size > 1) items.dropLast(1).joinToString(", ") + " and " + items.last() else items.joinToString()

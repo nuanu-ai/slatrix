@@ -89,8 +89,6 @@ struct Metrics: Equatable {
     var avatarSmall: CGFloat { 20 * zoom }
     var avatarMedium: CGFloat { 24 * zoom }
     var avatar: CGFloat { 32 * zoom }
-    /// The faces that end a reaction's pill.
-    var avatarReaction: CGFloat { 18 * zoom }
     /// You, at the foot of the sidebar.
     var avatarFooter: CGFloat { 22 * zoom }
     /// Where a sidebar list fades into the row above its foot. A list's end stops above this too, so its last row

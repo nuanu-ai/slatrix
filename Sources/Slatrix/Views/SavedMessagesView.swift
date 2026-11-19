@@ -261,7 +261,7 @@ private struct SavedMessageRow: View {
     @ViewBuilder private var content: some View {
         if let message {
             if message.isRedacted {
-                Text("This message was deleted.").italic().foregroundStyle(colors.textSecondary)
+                Text(ChatMessage.deletedBody).italic().foregroundStyle(colors.textSecondary)
             } else {
                 // A text view keeps clicks for selecting; here a click anywhere opens the message, as in Slack.
                 NativeMessageBody(body: message.body, formattedBody: message.formattedBody, showsSpoilerControl: false)

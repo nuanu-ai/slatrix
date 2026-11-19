@@ -41,7 +41,7 @@ struct ThreadPreviewTests {
         let root = shownRoot.shown(row.root)
         let latest = shownLatest.shown(try #require(row.latest))
         #expect(root.body == "Edited successfully" && root.isEdited && root.replyCount == 9)
-        #expect(latest.isRedacted && latest.body == "This message was deleted")
+        #expect(latest.isRedacted && latest.body == "This message was deleted.")
     }
 
     @Test("Hydration reads each event alone, without receipts, decryption reports, pagination or read markers")

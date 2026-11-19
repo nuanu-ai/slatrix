@@ -115,25 +115,14 @@ struct EmojiTests {
         #expect(tooltip(["@zoe:example.org"]) == "zoe reacted with :+1:")
     }
 
-    private struct ReactionSpec: Decodable {
-        struct Pill: Decodable {
-            let name: String
-            let me: String
-            let count: Int
-            let senders: [String]
-            let faces: [String]?
-        }
-        let pill: [Pill]
-    }
-
-    // capability: message.reactions.show
-    @Test("A reaction's pill shows up to three faces, yours first, and otherwise the count")
-    func reactionPill() throws {
-        for pill in try SharedSpec.decode("spec/reactions.json", as: ReactionSpec.self).pill {
-            let reaction = MessageReaction(
-                key: "👍", count: pill.count, mine: pill.senders.contains(pill.me), senders: pill.senders)
-            #expect(reaction.faces(me: pill.me) == pill.faces, "\(pill.name)")
-        }
+    @Test("A reaction sent as a bare symbol, such as a heart without its selector, draws as a color emoji")
+    func colorPresentation() {
+        #expect(EmojiCatalog.presented("➕") == "➕\u{FE0F}")
+        #expect(EmojiCatalog.presented("❤") == "❤\u{FE0F}")
+        #expect(EmojiCatalog.presented("❤️") == "❤️")
+        #expect(EmojiCatalog.presented("👍🏽") == "👍🏽")
+        #expect(EmojiCatalog.presented("1") == "1")
+        #expect(EmojiCatalog.presented("lgtm") == "lgtm")
     }
 
     // capability: message.thread-summary

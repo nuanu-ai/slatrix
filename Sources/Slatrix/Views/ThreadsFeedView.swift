@@ -217,6 +217,8 @@ private struct ThreadFeedRow: View {
         -> some View
     {
         switch state {
+        case .ready where message.isRedacted:
+            Text(ChatMessage.deletedBody).italic().foregroundStyle(colors.textSecondary)
         case .ready:
             NativeMessageBody(
                 body: Self.preview(message), formattedBody: message.formattedBody, showsSpoilerControl: false
@@ -226,7 +228,7 @@ private struct ThreadFeedRow: View {
         }
     }
     private static func preview(_ message: ChatMessage) -> String {
-        if message.isRedacted { return "This message was deleted." }
+        if message.isRedacted { return ChatMessage.deletedBody }
         if message.formattedBody?.localizedCaseInsensitiveContains("data-mx-spoiler") == true {
             return "[Spoiler hidden]"
         }
