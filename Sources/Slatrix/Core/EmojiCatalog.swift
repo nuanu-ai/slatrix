@@ -57,7 +57,7 @@ enum EmojiCatalog {
         return ":\(code):" + tone
     }
 
-    /// A lone symbol such as ➕ or ❤ in color: the system font has its own gray glyph for many of them.
+    /// A lone symbol such as ❤ in color: sent without its presentation selector, it otherwise draws as black text.
     static func presented(_ value: String) -> String {
         guard value.unicodeScalars.count == 1, let scalar = value.unicodeScalars.first, !scalar.isASCII,
             scalar.properties.isEmoji

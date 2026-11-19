@@ -115,7 +115,7 @@ struct EmojiTests {
         #expect(tooltip(["@zoe:example.org"]) == "zoe reacted with :+1:")
     }
 
-    @Test("A reaction sent as a bare symbol, such as a plus sign, draws as a color emoji; text stays text")
+    @Test("A reaction sent as a bare symbol, such as a heart without its selector, draws as a color emoji")
     func colorPresentation() {
         #expect(EmojiCatalog.presented("➕") == "➕\u{FE0F}")
         #expect(EmojiCatalog.presented("❤") == "❤\u{FE0F}")
