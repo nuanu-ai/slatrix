@@ -119,7 +119,9 @@ final class SecureSessionStore: @unchecked Sendable {
     private static func repairing(_ data: Data) throws -> CredentialEnvelope {
         if let envelope = try? decodeEnvelope(data) { return envelope }
         let record = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        if let version = record?["version"] as? Int, version != 1 { throw StoreError.invalidSession }
+        if let version = record?["version"] as? Int, version > CredentialEnvelope().version {
+            throw StoreError.invalidSession
+        }
         var envelope = CredentialEnvelope()
         for case (let account, let text as String) in record?["vaultKeys"] as? [String: Any] ?? [:] {
             if validAccountID(account), let key = Data(base64Encoded: text), key.count == 32 {
@@ -169,9 +171,12 @@ final class SecureSessionStore: @unchecked Sendable {
         // What a lost key sealed for this account can't be read with a new one, so it goes aside first and the
         // drafts vault and attachment drafts open empty.
         let root = fileURL?.deletingLastPathComponent() ?? AppPaths.applicationSupport
-        try ProtectedLocalStateCodec.setAside(
-            ProtectedLocalStateStore.fileURL(accountID, in: ProtectedLocalStateStore.directory(in: root)))
+        let vault = ProtectedLocalStateStore.fileURL(accountID, in: ProtectedLocalStateStore.directory(in: root))
+        // Once the folders check out only the attachment drafts' lease can refuse, so it goes first and nothing
+        // moves unless everything can.
+        _ = try ProtectedLocalStateCodec.existingFolder(vault.deletingLastPathComponent())
         try AttachmentDraftStore.setAside(accountID, in: AttachmentDraftStore.directory(in: root))
+        try ProtectedLocalStateCodec.setAside(vault)
         envelope.vaultKeys[accountID] = key
         try writeEnvelope(envelope)
         return key

@@ -446,7 +446,9 @@ actor AttachmentDraftStore {
     /// Moves the account's folder aside under its lease, so a folder still in use is never moved.
     static func setAside(_ account: String, in directory: URL) throws {
         let folder = accountDirectory(account, in: directory)
-        guard FileManager.default.fileExists(atPath: folder.path) else { return }
+        guard try ProtectedLocalStateCodec.existingFolder(directory),
+            try ProtectedLocalStateCodec.existingFolder(folder)
+        else { return }
         let lease = try Lease(directory: folder)
         try withExtendedLifetime(lease) { try ProtectedLocalStateCodec.setAside(folder) }
     }

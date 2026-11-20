@@ -81,6 +81,18 @@ struct SavedSessionTests {
         #expect(try Data(contentsOf: file) == record)
     }
 
+    @Test(
+        "A record whose version isn't a whole number above this build's is damage, so signing in and out repair it",
+        arguments: ["false", "0", #""2""#])
+    func otherVersionRepaired(version: String) throws {
+        let record = Data(#"{"version":\#(version),"vaultKeys":{}}"#.utf8)
+        _ = try folder.file("credentials.json", record)
+        #expect(throws: (any Error).self) { try credentials.load() }
+        try credentials.save(session)
+        _ = try folder.file("credentials.json", record)
+        try credentials.delete()
+    }
+
     private let room = "!design:example.org"
     private var vault: URL {
         ProtectedLocalStateStore.fileURL(session.userId, in: ProtectedLocalStateStore.directory(in: folder.url))
@@ -153,6 +165,36 @@ struct SavedSessionTests {
         _ = try await stores().0.open(accountID: session.userId)
         #expect(try Data(contentsOf: vault.appendingPathExtension("set-aside")) == sealed)
         #expect(try Data(contentsOf: asideManifest) == sealedManifest)
+    }
+
+    @Test("Recovery refuses a drafts folder reached through a link, and every file stays where it was")
+    func linkedFolderRefused() async throws {
+        try credentials.save(session)
+        let (sealed, sealedManifest) = try await saveDrafts("Before")
+        let elsewhere = folder.path("elsewhere")
+        try FileManager.default.moveItem(at: vault.deletingLastPathComponent(), to: elsewhere)
+        try FileManager.default.createSymbolicLink(at: vault.deletingLastPathComponent(), withDestinationURL: elsewhere)
+        let earlier = try folder.file("elsewhere/" + vault.lastPathComponent + ".set-aside", Data("earlier".utf8))
+        try loseKey()
+
+        await #expect(throws: (any Error).self) { try await stores().0.open(accountID: session.userId) }
+        #expect(try Data(contentsOf: elsewhere.appendingPathComponent(vault.lastPathComponent)) == sealed)
+        #expect(try Data(contentsOf: earlier) == Data("earlier".utf8))
+        #expect(try Data(contentsOf: manifest) == sealedManifest)
+    }
+
+    @Test("While attachment drafts are open elsewhere, recovery moves nothing")
+    func busyAttachmentsMoveNothing() async throws {
+        try credentials.save(session)
+        let (sealed, sealedManifest) = try await saveDrafts("Before")
+        let holder = stores().1
+        let held = try await holder.open(accountID: session.userId)
+        try loseKey()
+
+        await #expect(throws: (any Error).self) { try await stores().0.open(accountID: session.userId) }
+        #expect(try Data(contentsOf: vault) == sealed)
+        #expect(try Data(contentsOf: manifest) == sealedManifest)
+        await holder.close(access: held)
     }
 
     @Test("A first sign-in on a clean Mac has nothing to set aside")

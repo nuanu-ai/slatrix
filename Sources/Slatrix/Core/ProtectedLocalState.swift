@@ -270,20 +270,42 @@ enum ProtectedLocalStateCodec {
         } catch { throw ProtectedLocalStateError.invalidData }
     }
 
-    /// Moves `url` aside as `<name>.set-aside`, replacing an earlier copy, and leaves nothing aside when `url` is
-    /// absent. Nothing reads or sweeps set-aside copies.
+    /// Whether `folder` exists, refusing anything there but this user's own folder reached without a link.
+    static func existingFolder(_ folder: URL) throws -> Bool {
+        var info = stat()
+        guard lstat(folder.path, &info) == 0 else {
+            if errno == ENOENT { return false }
+            throw ProtectedLocalStateError.unavailable
+        }
+        guard info.st_mode & S_IFMT == S_IFDIR, info.st_uid == geteuid() else {
+            throw ProtectedLocalStateError.invalidData
+        }
+        return true
+    }
+
+    /// Moves `url` aside as `<name>.set-aside`, and leaves nothing aside when `url` is absent. Callers check its folder
+    /// with `existingFolder` first, and an earlier copy goes only once the new one is in its place. Nothing reads or
+    /// sweeps set-aside copies.
     static func setAside(_ url: URL) throws {
+        let parent = url.deletingLastPathComponent()
         var info = stat()
         guard lstat(url.path, &info) == 0 else {
             if errno == ENOENT { return }
             throw ProtectedLocalStateError.unavailable
         }
-        let aside = url.appendingPathExtension("set-aside")
-        if lstat(aside.path, &info) == 0 { try FileManager.default.removeItem(at: aside) }
-        let folder = Darwin.open(url.deletingLastPathComponent().path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        let folder = Darwin.open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard folder >= 0 else { throw ProtectedLocalStateError.unavailable }
         defer { Darwin.close(folder) }
+        let aside = url.appendingPathExtension("set-aside")
+        let earlier = url.appendingPathExtension("set-aside-earlier")
+        // A rename replaces a file but not a full folder, so an earlier folder steps out of the way and goes last.
+        let isFolder = info.st_mode & S_IFMT == S_IFDIR
+        if isFolder, lstat(aside.path, &info) == 0 {
+            if lstat(earlier.path, &info) == 0 { try FileManager.default.removeItem(at: earlier) }
+            guard rename(aside.path, earlier.path) == 0 else { throw ProtectedLocalStateError.unavailable }
+        }
         guard rename(url.path, aside.path) == 0, fsync(folder) == 0 else { throw ProtectedLocalStateError.unavailable }
+        if isFolder, lstat(earlier.path, &info) == 0 { try FileManager.default.removeItem(at: earlier) }
     }
 
     static func prepareDirectory(_ directory: URL) throws {
