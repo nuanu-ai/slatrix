@@ -426,6 +426,29 @@ struct AttachmentDraftStoreTests {
         #expect(!FileManager.default.fileExists(atPath: leftover.path))
     }
 
+    @Test(
+        "Without a manifest, anything a first write couldn't have left is refused and nothing is deleted",
+        arguments: ["look-alike name", "blob beside staging", "linked staging"])
+    func unknownLeftoversKept(kind: String) async throws {
+        let store = store()
+        await store.close(access: try await store.open(accountID: account))
+        try FileManager.default.removeItem(at: manifest())
+        let staging = folder().appendingPathComponent(".write-manifest.vault-" + UUID().uuidString)
+        var seeded: [URL] = []
+        switch kind {
+        case "look-alike name": seeded = [folder().appendingPathComponent(".write-manifest.vault-backup")]
+        case "blob beside staging": seeded = [staging, folder().appendingPathComponent(UUID().uuidString + ".blob")]
+        default:
+            try FileManager.default.createSymbolicLink(at: staging, withDestinationURL: original)
+        }
+        for url in seeded { try Data("ELADM01\npartial".utf8).write(to: url) }
+        await expectError(.invalidData) { _ = try await store.open(accountID: account) }
+        for url in seeded { #expect(try Data(contentsOf: url) == Data("ELADM01\npartial".utf8)) }
+        if kind == "linked staging" {
+            #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: staging.path)) == original.path)
+        }
+    }
+
     @Test("Deleting the manifest of an open, empty account does not reset it")
     func missingActiveManifestRefused() async throws {
         let store = store()
