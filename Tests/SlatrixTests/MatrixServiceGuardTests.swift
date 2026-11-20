@@ -69,7 +69,7 @@ struct HomeserverAndSessionTests {
 
 @MainActor
 struct MatrixServiceGuardTests {
-    let service = MatrixService()
+    let service = MatrixService.scratch()
 
     private func failure(_ operation: () async throws -> Void) async -> String {
         do { try await operation() } catch { return error.localizedDescription }

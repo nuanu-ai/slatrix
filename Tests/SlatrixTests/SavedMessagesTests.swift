@@ -359,7 +359,7 @@ struct SavedMessagesServiceTests {
     @Test("A save made offline stays in Later and reaches the account once the connection is back")
     func offline() async {
         let client = LaterClient(server: #"{"saved":[\#(one)],"removed":[]}"#)
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.savedMessages.attach(client, accountID: owner)
         #expect(await eventually { matrix.savedMessages.list.saved.map(\.eventID) == ["$one"] })
         client.failsWrites = true
@@ -459,7 +459,7 @@ struct SavedMessagesServiceTests {
 
     @Test("The preview starts with an empty Later, never the last account's")
     func preview() async {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.savedMessages.attach(LaterClient(server: #"{"saved":[\#(one)],"removed":[]}"#), accountID: owner)
         #expect(await eventually { matrix.savedMessages.list.saved.map(\.eventID) == ["$one"] })
         matrix.savedMessages.attach(nil, accountID: nil)

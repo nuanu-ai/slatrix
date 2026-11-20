@@ -19,7 +19,7 @@ struct DropToUploadHostedTests {
     /// conversation takes no drops either.
     private func conversation() async throws -> (MatrixService, NSWindow, NSView, composer: NSTextView) {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let hosting = NSHostingView(rootView: AnyView(RootView(matrix: matrix).environmentObject(AppearanceStore())))
         let window = offscreenWindow(NSSize(width: 1_200, height: 800))

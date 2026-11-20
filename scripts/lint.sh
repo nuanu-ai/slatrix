@@ -36,4 +36,9 @@ if grep -rn 'NSWindow(' Tests --exclude-dir=Support; then
     echo "error: open test windows with offscreenWindow(_:)" >&2
     failed=1
 fi
+# The bare service signs in and out on the development build's own session and stores.
+if grep -rn 'MatrixService()' Tests; then
+    echo "error: build test services with MatrixService.scratch()" >&2
+    failed=1
+fi
 exit $failed

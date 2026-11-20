@@ -8,7 +8,7 @@ import Testing
 struct AttachmentPreviewTests {
     private let roomID = "!files:example.org"
     private let client: FakeClient
-    private let service = MatrixService()
+    private let service = MatrixService.scratch()
 
     init() {
         client = FakeClient(rooms: [FakeRoom(roomInfo(id: roomID))])

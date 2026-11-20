@@ -10,7 +10,7 @@ struct MatrixObservationTests {
     @Test(
         "A change to another room leaves the open conversation's readers alone, a change to the open one reaches them")
     func openConversationReaders() {
-        let service = MatrixService()
+        let service = MatrixService.scratch()
         service.rooms = [
             ChatRoom(id: "!open:example.org", name: "Open"), ChatRoom(id: "!other:example.org", name: "Other"),
         ]
@@ -30,7 +30,7 @@ struct MatrixObservationTests {
 
     @Test("The open room's unread count, which changes with every message in it, leaves the window alone")
     func openRoomUnread() {
-        let service = MatrixService()
+        let service = MatrixService.scratch()
         service.rooms = [ChatRoom(id: "!open:example.org", name: "Open")]
         service.selectedRoomID = "!open:example.org"
         let changes = Recorder<Void>()
@@ -49,7 +49,7 @@ struct MatrixObservationTests {
 
     @Test("A message arriving leaves the conversation header alone until one can't be read")
     func lockedMessages() {
-        let service = MatrixService()
+        let service = MatrixService.scratch()
         let changes = Recorder<Void>()
         withObservationTracking {
             _ = service.hasLockedMessages

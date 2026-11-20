@@ -510,7 +510,7 @@ extension NotificationDeliveryTests {
         transport.dismiss(try await show("$dismissed"))
         _ = try await show("$new")
         let room = AnsweringRoom("!room:example.org", answers: ["$old": .message, "$new": .deleted])
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.configureRoomOpenForChecks(
             client: FakeClient(rooms: [room]), roomList: FakeRoomListService(),
             user: ChatUser(id: accountA, name: "Alice"))

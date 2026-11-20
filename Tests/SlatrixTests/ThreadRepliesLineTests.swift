@@ -48,7 +48,7 @@ struct ThreadRepliesLineTests {
 struct ThreadRepliesLineServiceTests {
     let room = FakeOpenRoom(
         "!team:example.org", cached: [FakeTimelineItem(textEvent("$other", body: "Later"), uniqueID: "other")])
-    let service = MatrixService()
+    let service = MatrixService.scratch()
 
     init() {
         service.configureRoomOpenForChecks(

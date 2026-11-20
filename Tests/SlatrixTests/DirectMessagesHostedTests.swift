@@ -14,7 +14,7 @@ struct DirectMessagesHostedTests {
     func listInColumn() async throws {
         _ = NSApplication.shared
         UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let now = Date()
         // Newest first is Sam, Julia, Alex: not their order by name.
@@ -104,7 +104,7 @@ struct DirectMessagesHostedTests {
     @Test("In a narrow window, DMs picked in the drawer from another page keeps the drawer open on the list")
     func drawer() async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(AppearanceStore()))
         let window = offscreenWindow(NSSize(width: 1_440, height: 900))

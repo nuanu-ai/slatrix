@@ -59,7 +59,7 @@ private let otherID = "!other:example.org"
 
 @MainActor
 struct ComposerSendTests {
-    private let service = MatrixService()
+    private let service = MatrixService.scratch()
     private let client = RoomsClient(noHandle: .init())
     private let room = TypingRoom(noHandle: .init())
     private let otherRoom = TypingRoom(noHandle: .init())

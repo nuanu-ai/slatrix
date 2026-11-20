@@ -106,7 +106,7 @@ struct PerformanceBudgetTests {
 
     @Test("A 50-message diff on a 1,000-message timeline is applied and projected within budget")
     func timelineDiffBudget() async {
-        let service = MatrixService()
+        let service = MatrixService.scratch()
         service.user = ChatUser(id: "@ana:example.org", name: "Ana")
         let roomID = "!busy:example.org"
         let time = await fastest(of: 5) {

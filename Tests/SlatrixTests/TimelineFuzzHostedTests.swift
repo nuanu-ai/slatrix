@@ -141,7 +141,7 @@ struct TimelineFuzzHostedTests {
         "Rows stay as tall as their content and on their rows through a busy channel's changes", arguments: 0..<10)
     func fuzz(seed: Int) async throws {
         var rng = RNG(state: UInt64(seed) &* 7919 &+ 17)
-        let service = MatrixService()
+        let service = MatrixService.scratch()
         let appearance = AppearanceStore()
         let popovers = Popovers()
         let client = FakeClient(rooms: [FakeRoom(roomInfo(id: Self.room.id))])

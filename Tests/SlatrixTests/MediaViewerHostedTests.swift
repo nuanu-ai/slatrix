@@ -30,7 +30,7 @@ struct MediaViewerHostedTests {
     @Test("The arrow keys step through the conversation's images and videos, and Esc closes the viewer")
     func keys() async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.messages = [
             media("$photo", kind: "m.image", mime: "image/png"),
             media("$report", kind: "m.file", mime: "application/pdf"),

@@ -183,7 +183,7 @@ struct SendQueueStaleMessageTests {
 
     @Test("Retry and cancel reject a message from a room that is no longer selected", arguments: [true, false])
     func roomSwitched(retry: Bool) async {
-        let service = MatrixService()
+        let service = MatrixService.scratch()
         service.configureMessageActionsForChecks(
             client: FakeClient(), main: nil, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(),
             threadID: UUID())
@@ -195,7 +195,7 @@ struct SendQueueStaleMessageTests {
 
     @Test("Retry and cancel reject a stale local echo after sign-out", arguments: [true, false])
     func signedOut(retry: Bool) async {
-        let service = MatrixService()
+        let service = MatrixService.scratch()
         service.selectedRoomID = stale.roomID
         await #expect(throws: (any Error).self) {
             if retry { try await service.retryMessage(stale) } else { _ = try await service.cancelMessage(stale) }

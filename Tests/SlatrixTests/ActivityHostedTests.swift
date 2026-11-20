@@ -21,7 +21,7 @@ struct ActivityHostedTests {
     ) {
         _ = NSApplication.shared
         UserDefaults.standard.removeObject(forKey: "room.@me:example.org")
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.configureRoomOpenForChecks(
             client: FakeClient(rooms: [room]), roomList: FakeRoomListService(),
             user: ChatUser(id: "@me:example.org", name: "Me"))

@@ -12,7 +12,7 @@ struct SidebarResizeHostedTests {
     @Test("Clicking keeps the divider neutral, with no focus ring, and dragging widens the real sidebar")
     func clickAndDrag() async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let savedWidth = UserDefaults.standard.object(forKey: "layout.sidebarWidth")
         UserDefaults.standard.set(280, forKey: "layout.sidebarWidth")
@@ -115,7 +115,7 @@ struct SidebarResizeHostedTests {
     @Test("Dragging the thread pane divider widens the pane, keeps the conversation usable, and remembers the width")
     func paneDivider() async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let saved = ["layout.sidebarWidth", "layout.paneWidth"].map { ($0, UserDefaults.standard.object(forKey: $0)) }
         UserDefaults.standard.set(280, forKey: "layout.sidebarWidth")

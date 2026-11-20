@@ -25,7 +25,7 @@ struct ConnectionHealthTests {
 
     @MainActor @Test("Only a lost network shows a crossed-out Wi-Fi; reconnecting to the server does not")
     func noticeSymbol() {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.applyConnection(
             MatrixConnectionFeedback(
                 state: .offline, isRetrying: true, canRetry: false, errorMessage: ConnectionHealth.reconnecting.label))
@@ -39,7 +39,7 @@ struct ConnectionHealthTests {
     // capability: app.own-presence
     @MainActor @Test("Your own dot goes hollow only once the connection is lost, not while it first connects")
     func ownDot() {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.applyConnection(
             MatrixConnectionFeedback(state: .connecting, isRetrying: false, canRetry: false, errorMessage: nil))
         #expect(!matrix.connectionLost)

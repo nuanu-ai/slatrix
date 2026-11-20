@@ -164,7 +164,7 @@ struct ProfileEditingTests {
     }
 
     private func signedIn(_ client: Client) -> MatrixService {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.configureMessageActionsForChecks(
             client: client, main: nil, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(),
             threadID: UUID())
