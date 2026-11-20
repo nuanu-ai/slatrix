@@ -28,7 +28,7 @@ struct TimelineCellTests {
     @Test("A row whose content shrinks after it was measured reports its content's new height")
     func reportsShrinkingContent() async throws {
         let id = Self.id
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         let context = TimelineRowContext()
         context.matrix = matrix
         context.appearance = AppearanceStore()
@@ -60,7 +60,7 @@ struct TimelineCellTests {
 
     @Test("A row measured ahead of display reports its height when names landed before it was shown")
     func reportsContentChangedBeforeDisplay() async throws {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         let context = TimelineRowContext()
         context.matrix = matrix
         context.appearance = AppearanceStore()

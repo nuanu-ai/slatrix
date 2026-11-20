@@ -26,7 +26,7 @@ struct ThreadsFeedHostedTests {
     }
 
     @MainActor private final class Harness {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         let window = offscreenWindow(NSSize(width: 1_000, height: 900))
         var hosting: NSHostingView<AnyView>?
         /// By the message's key in the feed.

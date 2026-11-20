@@ -187,7 +187,7 @@ final class SharedFilesTests {
     private let source = Source("mxc://example.org/encrypted-file")
     private let room: SharedRoom
     private let client: SharedClient
-    private let matrix = MatrixService()
+    private let matrix = MatrixService.scratch()
     private var service: SharedFilesService { matrix.sharedFiles }
 
     init() throws {
@@ -473,7 +473,7 @@ final class SharedFilesTests {
 final class SharedFilesReopenHostedTests {
     private let temp: TemporaryDirectory
     private let room = SharedRoom([file("$guide", source: Source("mxc://example.org/guide"), name: "guidelines.pdf")])
-    private let matrix = MatrixService()
+    private let matrix = MatrixService.scratch()
 
     init() throws {
         temp = try TemporaryDirectory()

@@ -65,7 +65,7 @@ struct SendToChannelTests {
 
 @MainActor
 struct SendToChannelServiceTests {
-    private let service = MatrixService()
+    private let service = MatrixService.scratch()
     private let room = FakeOpenRoom("!room:example.org", cached: [])
 
     init() {

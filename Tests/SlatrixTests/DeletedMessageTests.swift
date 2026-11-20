@@ -68,7 +68,7 @@ final class AnsweringRoom: Room, @unchecked Sendable {
 
 @MainActor
 struct DeletedMessageTests {
-    let service = MatrixService()
+    let service = MatrixService.scratch()
 
     private func use(_ rooms: [Room]) {
         service.configureRoomOpenForChecks(

@@ -1675,8 +1675,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         items.contains { $0.asEvent().map { MatrixMapping.identifier($0.eventOrTransactionId) } == eventID }
     }
 
-    /// False, without showing the room, when its live timeline does not hold `anchor`.
-    @discardableResult
     /// Opens a conversation's live timeline before it is chosen, as the pointer rests on it, so choosing it shows
     /// its first page in the frame of the click. Building one reads the event cache, which takes a few frames.
     func prepareRoom(_ id: String) {
@@ -1713,6 +1711,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         Task { await prepared.task.value?.listener.cancel() }
     }
 
+    /// False, without showing the room, when its live timeline does not hold `anchor`.
+    @discardableResult
     private func setupRoom(_ id: String, focus: TimelineFocus, eventID: String?, containing anchor: String? = nil)
         async -> Bool
     {

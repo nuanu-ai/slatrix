@@ -61,7 +61,7 @@ struct Snapshots {
     @Test("Channel and thread windows", arguments: [1, 1.5, 2], Theme.allCases)
     func window(zoom: Double, theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
@@ -136,7 +136,7 @@ struct Snapshots {
     @Test("The title bar with the window buttons, and Preferences open under it", arguments: [1, 1.5], Theme.allCases)
     func titleBar(zoom: Double, theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
@@ -168,7 +168,7 @@ struct Snapshots {
     @Test("Every theme, with the window gradient where it has one", arguments: ColorTheme.allCases, Theme.allCases)
     func colorTheme(_ colorTheme: ColorTheme, theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let appearance = AppearanceStore()
         let saved = ["appearance.mode", "appearance.theme", "appearance.windowGradient", "layout.sidebarHidden"].map {
@@ -208,7 +208,7 @@ struct Snapshots {
     @Test("Window widths, with and without a thread, and the collapsed sidebar's drawer", arguments: Theme.allCases)
     func widths(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
@@ -255,7 +255,7 @@ struct Snapshots {
     @Test("A message jumped to, in the live conversation and at an older message", arguments: Theme.allCases)
     func jump(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
@@ -286,7 +286,7 @@ struct Snapshots {
     @Test("A channel's header with its facepile, and a direct message's with the person", arguments: Theme.allCases)
     func headers(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
@@ -313,7 +313,7 @@ struct Snapshots {
     @Test("The line in place of the composer in a channel you may not post in", arguments: Theme.allCases)
     func cannotPost(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let index = try #require(matrix.rooms.firstIndex { $0.id == matrix.selectedRoomID })
         matrix.rooms[index].canPostMessages = false
@@ -323,7 +323,7 @@ struct Snapshots {
     @Test("The offline banner, and a toast over the conversation", arguments: Theme.allCases)
     func bannerAndToast(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
@@ -366,7 +366,7 @@ struct Snapshots {
         [false, true])
     func sidebar(theme: Theme, long: Bool) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         if long {
             matrix.rooms += (0..<30).map {
@@ -569,7 +569,7 @@ struct Snapshots {
     @Test("Attachments and the media viewer", arguments: Theme.allCases)
     func attachments(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         matrix.selectPreviewRoom(PreviewMedia.roomID)
         let appearance = AppearanceStore()
@@ -617,7 +617,7 @@ struct Snapshots {
     @Test("Modals and tab bars", arguments: Theme.allCases)
     func modals(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let room = try #require(matrix.selectedRoom)
         func details(_ tab: RoomInfoView.Tab) -> some View {
@@ -658,7 +658,7 @@ struct Snapshots {
     @Test("Later's In progress tab, with a reminder to come and one overdue", arguments: Theme.allCases)
     func later(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let messages = matrix.messages.filter { !$0.body.isEmpty }.suffix(4)
         let now = Date()
@@ -683,7 +683,7 @@ struct Snapshots {
     @Test("The DMs page", arguments: Theme.allCases)
     func directMessages(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let now = Date()
         let samples: [(String, String?, TimeInterval, Bool, Int)] = [
@@ -710,7 +710,7 @@ struct Snapshots {
     func search(theme: Theme) async throws {
         _ = NSApplication.shared
         UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let appearance = AppearanceStore()
         let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
@@ -790,7 +790,7 @@ struct Snapshots {
     @Test("A busy workspace: long posts, links, a bot, an edited message with a thread", arguments: Theme.allCases)
     func realLife(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let channels = [
             "Announcements", "Backend", "Mobile", "QA and Releases", "Customer Feedback", "Hiring", "Office Lisbon",
@@ -857,7 +857,7 @@ struct Snapshots {
         arguments: Theme.allCases)
     func shortMessages(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         matrix.user = ChatUser(id: "preview.you", name: "Dmitry Ukhanov")
         let channels = [
@@ -964,7 +964,7 @@ struct Snapshots {
         theme: Theme, zoom: Double, _ body: (MatrixService, NSWindow, NSView) async throws -> Void
     ) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         matrix.user = ChatUser(id: Self.hardMe, name: Self.hardPeople[Self.hardMe]!)
         matrix.members = Self.hardPeople.map { ChatUser(id: $0.key, name: $0.value) }
@@ -1335,7 +1335,7 @@ struct Snapshots {
     @Test("Files and the composer's attachment tray", arguments: Theme.allCases)
     func files(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         matrix.selectPreviewRoom(PreviewMedia.roomID)
         let appearance = AppearanceStore()
@@ -1385,7 +1385,7 @@ struct Snapshots {
     @Test("A channel's files beside its messages", arguments: Theme.allCases)
     func filesPane(theme: Theme) async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         matrix.selectPreviewRoom(PreviewMedia.roomID)
         let appearance = AppearanceStore()
@@ -1434,7 +1434,7 @@ struct Snapshots {
 
     @Test("A hovered message's toolbar, reactions, replies and (edited)", arguments: Theme.allCases)
     func hoveredRow(theme: Theme) async throws {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let room = try #require(matrix.selectedRoom)
         // Signed in rather than sampled, so the toolbar offers reactions.
@@ -1466,7 +1466,7 @@ struct Snapshots {
 
     @Test("A thread reply also sent to the channel, under its thread's first message", arguments: Theme.allCases)
     func channelCopy(theme: Theme) async throws {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let room = try #require(matrix.selectedRoom)
         let threads = FakeOpenRoom(room.id, cached: [])
@@ -1502,7 +1502,7 @@ struct Snapshots {
 
     @Test("A channel with no messages, at its intro", arguments: Theme.allCases)
     func emptyChannel(theme: Theme) async throws {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let room = try #require(matrix.selectedRoom)
         // Signed in, with older history still to load, as a channel of only joins opens.
@@ -1528,7 +1528,7 @@ struct Snapshots {
     }
 
     private func reactionTooltip(zoom: Double, theme: Theme, long: Bool) async throws {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         if long {
             let names = ["preview.alex": "Alexandra Konstantinopoulou", "preview.julia": "Julia von Fürstenberg"]
@@ -1621,7 +1621,7 @@ struct Snapshots {
         "Profiles: someone with a photo and status, someone in a call without one, you, and editing yours",
         arguments: Theme.allCases)
     func profiles(theme: Theme) async throws {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         // Signed in rather than sampled, so the photo draws from the cache.
         matrix.isPreview = false

@@ -68,7 +68,7 @@ struct TimelineHostedTests {
     }
 
     @MainActor private final class Harness {
-        let service = MatrixService()
+        let service = MatrixService.scratch()
         let timeline = HistoryTimeline(noHandle: .init())
         let appearance = AppearanceStore()
         let client: FakeClient
@@ -1399,7 +1399,7 @@ extension TimelineHostedTests {
     func dividersLetThePointerThrough() async throws {
         // The table on its own, as `Harness` has no way to put the New line in.
         let context = TimelineRowContext()
-        context.matrix = MatrixService()
+        context.matrix = MatrixService.scratch()
         context.appearance = AppearanceStore()
         func message(_ index: Int) -> TimelineEntry {
             let message = Self.actionable(index..<index + 1)[0]
@@ -1449,7 +1449,7 @@ extension TimelineHostedTests {
     )
     func reportsContentAbove() async throws {
         let context = TimelineRowContext()
-        context.matrix = MatrixService()
+        context.matrix = MatrixService.scratch()
         context.appearance = AppearanceStore()
         let entries = Self.actionable(0..<40).map { message in
             TimelineEntry(
@@ -1833,7 +1833,7 @@ struct ReplyPreviewLayoutTests {
         "A reply keeps its height while its original loads, arrives or fails",
         arguments: [CGFloat(320), 800])
     func heightHolds(width: CGFloat) {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         let appearance = AppearanceStore()
         let message = ChatMessage(
             id: "$reply", roomID: "!room:example.org", senderID: "@reader:example.org", senderName: "Reader",
