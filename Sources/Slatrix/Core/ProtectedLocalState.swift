@@ -296,9 +296,7 @@ enum ProtectedLocalStateCodec {
         guard folder >= 0 else { throw ProtectedLocalStateError.unavailable }
         defer { Darwin.close(folder) }
         let aside = parent.appendingPathComponent(url.lastPathComponent + ".set-aside-" + UUID().uuidString)
-        guard renamex_np(url.path, aside.path, UInt32(RENAME_EXCL)) == 0, fsync(folder) == 0 else {
-            throw ProtectedLocalStateError.unavailable
-        }
+        guard rename(url.path, aside.path) == 0, fsync(folder) == 0 else { throw ProtectedLocalStateError.unavailable }
     }
 
     static func prepareDirectory(_ directory: URL) throws {

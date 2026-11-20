@@ -94,7 +94,9 @@ struct SavedSessionTests {
 
     @Test("A saved record from a newer build is never rewritten", arguments: ["2", "2.0", "9223372036854775808"])
     func newerRecordKept(version: String) throws {
-        let record = Data(#"{"version":\#(version),"vaultKeys":{"@keep:example.org":"QkJC"}}"#.utf8)
+        // Valid for this build but for its version, with a key for the account asked about.
+        let key = Damaged.key.base64EncodedString()
+        let record = Data(#"{"version":\#(version),"vaultKeys":{"\#(session.userId)":"\#(key)"}}"#.utf8)
         let file = try folder.file("credentials.json", record)
         #expect(throws: (any Error).self) { try credentials.load() }
         #expect(try Data(contentsOf: file) == record)
