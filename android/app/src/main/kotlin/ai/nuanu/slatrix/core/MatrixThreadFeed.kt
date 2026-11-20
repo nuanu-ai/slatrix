@@ -21,6 +21,7 @@ import org.matrix.rustcomponents.sdk.ThreadListEntriesListener
 import org.matrix.rustcomponents.sdk.ThreadListItemEvent
 import org.matrix.rustcomponents.sdk.ThreadListService
 import org.matrix.rustcomponents.sdk.ThreadListUpdate
+import org.matrix.rustcomponents.sdk.TimelineItemContent
 
 data class ThreadFeedMessage(val senderName: String, val initials: String, val colorIndex: Int, val body: String, val timestamp: Long,
     val avatarUrl: String? = null)
@@ -35,6 +36,8 @@ data class ThreadFeedItem(
     val replies: Int,
     /** Someone else replied after your last read in the thread. */
     val unread: Boolean,
+    /** The root's row, for its thread to show at once; null for an event that shows none. */
+    val rootRow: ConversationMessage? = null,
 ) {
     val lastActivity: Long get() = latest?.timestamp ?: root.timestamp
 }
@@ -121,7 +124,11 @@ class MatrixThreadFeed(scope: CoroutineScope, private val client: Client, privat
                 ThreadFeedItem(summary.id, summary.name, summary.direct, thread.rootEvent.eventId, message(thread.rootEvent),
                     latest?.let(::message), thread.numReplies.toInt(),
                     unread = latest != null && !latest.isOwn && read?.eventId != latest.eventId &&
-                        (read?.receipt?.timestamp ?: 0u) < latest.timestamp)
+                        (read?.receipt?.timestamp ?: 0u) < latest.timestamp,
+                    rootRow = thread.rootEvent.run {
+                        (content as? TimelineItemContent.MsgLike)?.content
+                            ?.let { messageRow(eventId, eventId, sender, senderProfile, isOwn, timestamp, it) }
+                    })
             }
         } finally {
             threads.forEach { it.destroy() }
