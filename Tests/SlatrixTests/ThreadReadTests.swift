@@ -47,37 +47,6 @@ struct ThreadReadPolicyTests {
         reason.apply(to: &context)
         #expect(ThreadReadPolicy.target(context) == nil)
     }
-
-    @Test("Reopening a thread needs a new bottom sample; late samples from the old pane are ignored")
-    func viewportBelongsToItsPane() {
-        let old = Self.identity
-        let reopened = ThreadReadIdentity(
-            accountID: old.accountID, sessionID: old.sessionID, roomID: old.roomID, timelineID: old.timelineID,
-            rootID: old.rootID, threadSelectionID: old.threadSelectionID, presentationID: UUID())
-        var viewport = ThreadReadViewport()
-        viewport.record(true, from: old, current: old)
-        #expect(viewport.isAtBottom(old))
-        viewport.observe(reopened)
-        #expect(!viewport.isAtBottom(reopened))
-        viewport.record(true, from: old, current: reopened)
-        #expect(!viewport.isAtBottom(reopened))
-        viewport.record(true, from: reopened, current: reopened)
-        viewport.record(false, from: old, current: reopened)
-        #expect(viewport.isAtBottom(reopened))
-    }
-
-    @Test("A thread whose newest reply showed before it was ready to read is at its bottom once it is, unless it left")
-    func shownBeforeReady() {
-        var viewport = ThreadReadViewport()
-        viewport.record(true, from: nil, current: nil)
-        viewport.observe(Self.identity)
-        #expect(viewport.isAtBottom(Self.identity))
-        var scrolledAway = ThreadReadViewport()
-        scrolledAway.record(true, from: nil, current: nil)
-        scrolledAway.record(false, from: nil, current: nil)
-        scrolledAway.observe(Self.identity)
-        #expect(!scrolledAway.isAtBottom(Self.identity))
-    }
 }
 
 @MainActor
@@ -98,7 +67,7 @@ struct ThreadReadTests {
     }
 
     // capability: activity.badge
-    @Test("A reply to an open thread counts in Activity until the thread is on screen")
+    @Test("A reply to an open thread counts in Activity until the reader sees it")
     func openThreadIsNotOpenedReply() {
         let f = fixture()
         f.service.activity.record(
@@ -107,6 +76,24 @@ struct ThreadReadTests {
                 senderName: "Alice", body: "Reply", timestamp: Date(), hasMention: false, threadRootID: f.rootID,
                 kind: .message))
         #expect(ActivityBadge.count(rooms: [], items: f.service.activity.items) == 1)
+    }
+
+    @Test("A thread pane's report counts only for the thread ready to read, not one made before it was or for another")
+    func reportBelongsToItsThread() throws {
+        let f = fixture()
+        let identity = try #require(f.service.threadReadIdentity)
+        let newest = PaneReport(newestInView: "$reply", laidOut: "$reply")
+        f.service.record(newest, thread: nil)
+        #expect(f.service.shownThreadReport == nil)
+        let reopened = ThreadReadIdentity(
+            accountID: identity.accountID, sessionID: identity.sessionID, roomID: identity.roomID,
+            timelineID: identity.timelineID, rootID: identity.rootID, threadSelectionID: identity.threadSelectionID,
+            presentationID: UUID())
+        f.service.record(newest, thread: identity)
+        #expect(f.service.shownThreadReport == newest)
+        // Late, from a pane on the same thread opened again.
+        f.service.record(PaneReport(), thread: reopened)
+        #expect(f.service.shownThreadReport == newest)
     }
 
     // capability: thread.open

@@ -17,7 +17,7 @@ struct ActivityItem: Identifiable, Hashable {
     var kind: Kind
     var avatarURL: String? = nil
     var allowsNativeNotification = true
-    /// Its thread was on screen, so it leaves Activity's count.
+    /// The reader has seen its message, so it leaves Activity’s count.
     var opened = false
 }
 
@@ -54,10 +54,6 @@ enum ActivityBadge {
     private var seen: [String] = []
     private var seenIDs = Set<String>()
     static let maximumItems = 300
-    /// The thread on screen: its replies count as opened, the ones that land while it shows too.
-    var shownThread: (roomID: String, rootID: String)? {
-        didSet { if let shownThread { markThreadOpened(roomID: shownThread.roomID, rootID: shownThread.rootID) } }
-    }
 
     func clear() {
         items = []
@@ -147,10 +143,9 @@ enum ActivityBadge {
         return Set(runs.compactMap(\.mention).filter { $0 != "@room" })
     }
 
-    private func markThreadOpened(roomID: String, rootID: String) {
-        for index in items.indices where items[index].roomID == roomID && items[index].threadRootID == rootID {
-            items[index].opened = true
-        }
+    /// Opens the items whose message the reader has seen.
+    func markSeen(_ isSeen: (ActivityItem) -> Bool) {
+        for index in items.indices where !items[index].opened && isSeen(items[index]) { items[index].opened = true }
     }
 
     @discardableResult
@@ -164,10 +159,6 @@ enum ActivityBadge {
                 items[index] = updated
             }
             return false
-        }
-        var item = item
-        if let shownThread, shownThread.roomID == item.roomID, shownThread.rootID == item.threadRootID {
-            item.opened = true
         }
         seenIDs.insert(item.id)
         seen.append(item.id)

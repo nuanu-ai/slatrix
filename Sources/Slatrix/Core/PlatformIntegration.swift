@@ -51,12 +51,12 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
 
     var openAtLogin: Bool { SMAppService.mainApp.status == .enabled }
 
-    var conversationWindowIsVisible: Bool {
-        NSApp.isActive
-            && NSApp.windows.contains {
-                $0.frameAutosaveName == "SlatrixMainWindow" && $0.isVisible && !$0.isMiniaturized
-                    && $0.occlusionState.contains(.visible) && $0.attachedSheet == nil
-            }
+    /// Whether the reader can read what `window` shows: it is the key window, so Slatrix is the active app, and it is
+    /// on screen, not minimized, behind others or under a sheet.
+    static func canRead(_ window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        return window.isKeyWindow && window.isVisible && !window.isMiniaturized
+            && window.occlusionState.contains(.visible) && window.attachedSheet == nil
     }
 
     func setOpenAtLogin(_ enabled: Bool) throws {
@@ -89,7 +89,16 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
         if pendingNotification?.accountID != accountID { pendingNotification = nil }
     }
 
-    func notify(_ message: DesktopMessageNotification) async throws { try await delivery.deliver(message) }
+    func notify(_ message: DesktopMessageNotification, stillAnnounce: () -> Bool = { true }) async throws {
+        try await delivery.deliver(message, stillAnnounce: stillAnnounce)
+    }
+    #if DEBUG
+    /// Hands desktop notifications to `transport`, or back to the OS when nil.
+    func useNotificationTransportForChecks(_ transport: DesktopNotificationTransport?) {
+        delivery = DesktopNotificationDelivery(
+            transport: transport ?? SystemDesktopNotificationTransport(center: notificationCenter))
+    }
+    #endif
 
     func consumeNotification(_ target: MatrixNotificationTarget) {
         if pendingNotification == target { pendingNotification = nil }

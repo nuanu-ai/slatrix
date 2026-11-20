@@ -20,8 +20,10 @@ struct TimelineView: View {
     var onOpenProfile: ((String, ChatUser?) -> Void)? = nil
     var canPinMessages = false
     var onTogglePin: ((ChatMessage) -> Void)? = nil
-    /// Whether any part of the newest message is on screen, which reads the conversation.
-    var onBottomVisibilityChange: ((Bool) -> Void)? = nil
+    /// What the pane shows, for the read checks; nothing once it leaves.
+    var onReport: ((PaneReport) -> Void)? = nil
+    /// What the read checks take the report for; when it changes, the pane reports again.
+    var readKey: AnyHashable? = nil
     var onJumpToLatest: (() -> Void)? = nil
     var startsAtUnread = false
     /// Whether an edit to a message in this conversation is open.
@@ -80,12 +82,12 @@ struct TimelineView: View {
             canLoadOlder: hasOlder && !loadingHistory,
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
-            onScroll: { atBottom, showsJump, scrolled, newestSeen in
+            onScroll: { atBottom, showsJump, scrolled, report in
                 self.atBottom = atBottom
                 jumpVisible = showsJump
                 if let scrolled, scrolled != contentAbove.wrappedValue { contentAbove.wrappedValue = scrolled }
-                onBottomVisibilityChange?(newestSeen)
-            }, insets: insets
+                onReport?(report)
+            }, readKey: readKey, insets: insets
         )
         .overlay(alignment: .bottom) {
             // A conversation still reading its first rows, after the loading delay, holds their place on the composer.
@@ -139,7 +141,7 @@ struct TimelineView: View {
             deleting = nil
             cancelling = nil
             linkCopy = nil
-            onBottomVisibilityChange?(false)
+            onReport?(PaneReport())
             inlineVideo?.stop(from: rowContext)
         }
         .onChange(of: matrix.messageActionContext) { _, _ in

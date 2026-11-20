@@ -171,6 +171,7 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     override func subscribeToTypingNotifications(listener: TypingNotificationsListener) -> TaskHandle {
         FakeCancellableHandle(noHandle: .init())
     }
+    override func typingNotice(isTyping: Bool) async throws {}
 }
 
 private final class FakeThreadReply: TimelineEvent, @unchecked Sendable {

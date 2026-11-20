@@ -68,6 +68,35 @@ struct WindowConfiguration: NSViewRepresentable {
     }
 }
 
+/// The window a view is in, for what asks that window rather than the app.
+@MainActor final class WindowReference { weak var window: NSWindow? }
+
+/// Keeps `reference` on the window this view is in, and says when it changes.
+struct WindowReader: NSViewRepresentable {
+    let reference: WindowReference
+    var onChange: () -> Void
+
+    func makeNSView(context: Context) -> ReaderView { ReaderView(reference: reference, onChange: onChange) }
+    func updateNSView(_ view: ReaderView, context: Context) { view.onChange = onChange }
+
+    final class ReaderView: NSView {
+        let reference: WindowReference
+        var onChange: () -> Void
+        init(reference: WindowReference, onChange: @escaping () -> Void) {
+            self.reference = reference
+            self.onChange = onChange
+            super.init(frame: .zero)
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            reference.window = window
+            // SwiftUI state; never changed from inside its own update.
+            DispatchQueue.main.async { [onChange] in onChange() }
+        }
+    }
+}
+
 struct WindowDragArea: NSViewRepresentable {
     final class DragView: NSView { override var mouseDownCanMoveWindow: Bool { true } }
     func makeNSView(context: Context) -> NSView { DragView() }

@@ -703,6 +703,28 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             timelineID: selection, rootID: root, threadSelectionID: threadSelection,
             presentationID: messageActionThreadPresentationID)
     }
+    /// What the conversation's pane last showed, and of which timeline; only the read checks read it.
+    private var conversationReport: (timeline: UUID, report: PaneReport)?
+    /// What the thread's pane last showed, and of which thread; only the read checks read it.
+    private var threadReport: (identity: ThreadReadIdentity, report: PaneReport)?
+    /// What the pane shows of the conversation on screen.
+    var shownConversationReport: PaneReport? {
+        conversationReport.flatMap { $0.timeline == shownTimelineID ? $0.report : nil }
+    }
+    /// What the pane shows of the thread ready to read.
+    var shownThreadReport: PaneReport? {
+        threadReport.flatMap { $0.identity == threadReadIdentity ? $0.report : nil }
+    }
+    /// A report from a pane on another timeline than the one on screen is dropped.
+    func record(_ report: PaneReport, timeline: UUID) {
+        guard timeline == shownTimelineID else { return }
+        conversationReport = (timeline, report)
+    }
+    /// A report from a pane on another thread than the one ready to read, or before one is, is dropped.
+    func record(_ report: PaneReport, thread identity: ThreadReadIdentity?) {
+        guard let identity, identity == threadReadIdentity else { return }
+        threadReport = (identity, report)
+    }
     private var visibleActionThreadID: String?
     /// Whether the selected room's conversation is on screen, rather than Activity or another list.
     var showsConversation = true
@@ -2741,7 +2763,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     /// A receipt the server turns down goes again after each of these, while the read policy still sends it.
-    static let receiptRetries: [Duration] = [.seconds(1), .seconds(5), .seconds(25)]
+    nonisolated static let receiptRetries: [Duration] = [.seconds(1), .seconds(5), .seconds(25)]
     /// Each attempt asks the caller's policy first and throws CancellationError once it no longer sends the receipt,
     /// which ends the retries, as leaving the view does.
     private func retryingReceipt(_ delays: [Duration], _ send: () async throws -> Void) async throws {

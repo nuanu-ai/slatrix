@@ -157,6 +157,18 @@ struct NotificationDeliveryTests {
         #expect(transport.delivered[request.identifier] != nil)
     }
 
+    // capability: notifications.alert
+    @Test("A message the reader sees while the OS answers whether alerts may show goes unannounced, quietly")
+    func seenWhileAuthorizing() async throws {
+        let seen = Recorder<Void>()
+        let task = Task { try await delivery.deliver(try message(), stillAnnounce: { seen.all.isEmpty }) }
+        await awaitAuthorization()
+        seen.append(())
+        try transport.authorize(0, .success(false))
+        #expect(try await task.value == false)
+        #expect(transport.attempts.isEmpty)
+    }
+
     @Test("An invitation is shown silently without an event, next to message notifications")
     func deliversInvitation() async throws {
         let first = deliver(try message())
