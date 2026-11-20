@@ -41,7 +41,8 @@ struct RootView: View {
     let matrix: MatrixService
     /// Drafts, saved messages and recent searches, each account's sealed with its vault key.
     private let localStore: ProtectedLocalStateStore
-    /// Where desktop notifications for messages go.
+    /// Where desktop notifications for messages go; whoever passes one in tells it the account, since the window's
+    /// account changes and clears go to `PlatformIntegration`'s.
     private let notifications: DesktopNotificationDelivery
     @ObservedObject private var platform = PlatformIntegration.shared
     @ObservedObject private var updater = AppUpdater.shared
