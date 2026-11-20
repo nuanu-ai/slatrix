@@ -411,10 +411,12 @@ struct NotificationTextTests {
 
     private static let spec = Result { try SharedSpec.decode("spec/notification-text.json", as: Spec.self) }
 
+    /// The body passes through Activity's preview first, as a synced notification's does.
     @Test("A notification reads as in every shared case", arguments: try spec.get().cases)
     func text(spec: Case) {
         let shown = DesktopMessageNotification.message(
-            room: spec.room, sender: spec.sender, direct: spec.direct, body: spec.body)
+            room: spec.room, sender: spec.sender, direct: spec.direct,
+            body: ActivityService.previewBody(spec.body, formatted: nil))
         #expect(shown.title == spec.title && shown.text == spec.text)
     }
 }

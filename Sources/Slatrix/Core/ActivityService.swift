@@ -122,7 +122,10 @@ enum ActivityBadge {
     nonisolated static func previewBody(_ body: String, formatted: FormattedBody?, names: [String: String] = [:])
         -> String
     {
-        String(MatrixMapping.previewText(body, formatted: formatted, names: names).prefix(4096))
+        String(
+            MatrixMapping.previewText(
+                DesktopMessageNotification.withoutReplyFallback(body), formatted: formatted, names: names
+            ).prefix(4096))
     }
 
     /// The people a message notification mentions, so their names can be looked up before it shows.
