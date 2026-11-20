@@ -178,6 +178,34 @@ struct ProtectedLocalStateStoreTests {
         #expect(try await store.open(accountID: account).state.recentSearches == ["budget", "launch plan"])
     }
 
+    @Test("A draft or recent search over its own limit is left out, and everything else still saves")
+    func oversizedEntriesLeftOut() async throws {
+        let access = try await store.open(accountID: account)
+        let thread = ThreadDraftAddress(roomID: reference.roomID, rootID: "$root").id
+        var state = original
+        state.drafts["!pasted:example.org"] = String(repeating: "a", count: 131_073)
+        state.threadDrafts[thread] = String(repeating: "a", count: 131_073)
+        state.recentSearches = [String(repeating: "q", count: 1_025), "budget"]
+        try await store.save(state, access: access, revision: 1)
+        var expected = original
+        expected.recentSearches = ["budget"]
+        #expect(try await store.open(accountID: account).state == expected)
+    }
+
+    @Test("A saved draft that grows past its limit keeps the copy last saved, and the rest still saves")
+    func outgrownDraftKeepsSavedCopy() async throws {
+        let access = try await store.open(accountID: account)
+        try await store.save(original, access: access, revision: 1)
+        var grown = original
+        grown.drafts[reference.roomID] = String(repeating: "a", count: 131_073)
+        grown.threadDrafts[reference.id] = String(repeating: "a", count: 131_073)
+        grown.drafts["!other:example.org"] = "typed meanwhile"
+        try await store.save(grown, access: access, revision: 2)
+        var expected = original
+        expected.drafts["!other:example.org"] = "typed meanwhile"
+        #expect(try await store.open(accountID: account).state == expected)
+    }
+
     // capability: message.save.sync
     @Test("Messages taken out of Later are kept with the account's other private state, so the removal can still sync")
     func savedRemovalsPersist() async throws {

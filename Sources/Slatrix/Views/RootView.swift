@@ -568,13 +568,10 @@ struct RootView: View {
     private func syncLaterReminders() async {
         let preview = appearance.notificationPreview
         let account = reminderAccount
-        await platform.laterReminders.sync(matrix.savedMessages.list, accountID: account) { item in
+        await platform.laterReminders.sync(matrix.savedMessages.list, accountID: account, preview: preview) { item in
             guard let account,
                 let target = MatrixNotificationTarget(accountID: account, roomID: item.roomID, eventID: item.eventID)
             else { return nil }
-            guard preview else {
-                return DesktopMessageNotification(target: target, title: "Slatrix", body: "Reminder", playSound: true)
-            }
             let room = matrix.rooms.first { $0.id == item.roomID }
             var (title, body) = (room?.name ?? "Slatrix", "Reminder")
             if let message = try? await matrix.messagePreview(roomID: item.roomID, eventID: item.eventID) {
