@@ -16,3 +16,18 @@ extension MatrixService {
         return service
     }
 }
+
+extension RootView {
+    /// The window with its drafts vault and attachment drafts in the service's scratch folder, beside its credentials.
+    @MainActor init(scratch matrix: MatrixService) {
+        let folder = objc_getAssociatedObject(matrix, &scratchFolderKey) as! TemporaryDirectory
+        let credentials = matrix.credentials
+        let key: @Sendable (String) async throws -> Data = { try credentials.localStateKey(accountID: $0) }
+        self.init(
+            matrix: matrix,
+            localStore: ProtectedLocalStateStore(
+                directory: ProtectedLocalStateStore.directory(in: folder.url), keyProvider: key),
+            attachmentDrafts: AttachmentDraftStore(
+                directory: AttachmentDraftStore.directory(in: folder.url), keyProvider: key))
+    }
+}

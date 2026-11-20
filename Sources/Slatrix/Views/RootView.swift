@@ -317,8 +317,8 @@ struct RootView: View {
     private var hasModal: Bool { hasPresentedSheet || modals.current != nil || modalShown }
 
     @MainActor init(
-        matrix: MatrixService, localStore: ProtectedLocalStateStore = .shared,
-        attachmentDrafts: AttachmentDraftStore = .shared, notifications: DesktopNotificationDelivery? = nil
+        matrix: MatrixService, localStore: ProtectedLocalStateStore,
+        attachmentDrafts: AttachmentDraftStore, notifications: DesktopNotificationDelivery? = nil
     ) {
         self.matrix = matrix
         self.localStore = localStore

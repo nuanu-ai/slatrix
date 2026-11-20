@@ -70,7 +70,8 @@ struct Snapshots {
         appearance.systemIsDark = theme == .dark
 
         let hosting = NSHostingView(
-            rootView: RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom))
+            rootView: RootView(scratch: matrix).environmentObject(appearance).environment(
+                \.metrics, Metrics(zoom: zoom))
         )
         let window = offscreenWindow(NSSize(width: 1440, height: 900))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
@@ -144,7 +145,8 @@ struct Snapshots {
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
         let hosting = NSHostingView(
-            rootView: RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom))
+            rootView: RootView(scratch: matrix).environmentObject(appearance).environment(
+                \.metrics, Metrics(zoom: zoom))
         )
         // Titled, as `.hiddenTitleBar` sets up the app's window, so the composite has the window buttons.
         let window = offscreenWindow(
@@ -178,7 +180,7 @@ struct Snapshots {
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
         appearance.theme = colorTheme
-        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let hosting = NSHostingView(rootView: RootView(scratch: matrix).environmentObject(appearance))
         let window = offscreenWindow(
             NSSize(width: 1280, height: 800),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
@@ -215,7 +217,7 @@ struct Snapshots {
         defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
-        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let hosting = NSHostingView(rootView: RootView(scratch: matrix).environmentObject(appearance))
         let window = offscreenWindow(NSSize(width: 1440, height: 900))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
@@ -262,7 +264,7 @@ struct Snapshots {
         defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
-        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let hosting = NSHostingView(rootView: RootView(scratch: matrix).environmentObject(appearance))
         let window = offscreenWindow(NSSize(width: 1440, height: 900))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
@@ -293,7 +295,7 @@ struct Snapshots {
         defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
-        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let hosting = NSHostingView(rootView: RootView(scratch: matrix).environmentObject(appearance))
         let window = offscreenWindow(NSSize(width: 1440, height: 900))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
@@ -317,7 +319,7 @@ struct Snapshots {
         matrix.enterPreview()
         let index = try #require(matrix.rooms.firstIndex { $0.id == matrix.selectedRoomID })
         matrix.rooms[index].canPostMessages = false
-        try await render(RootView(matrix: matrix), theme: theme, name: "cannot-post")
+        try await render(RootView(scratch: matrix), theme: theme, name: "cannot-post")
     }
 
     @Test("The offline banner, and a toast over the conversation", arguments: Theme.allCases)
@@ -330,7 +332,7 @@ struct Snapshots {
         defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
-        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let hosting = NSHostingView(rootView: RootView(scratch: matrix).environmentObject(appearance))
         let window = offscreenWindow(NSSize(width: 1440, height: 900))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
@@ -609,7 +611,7 @@ struct Snapshots {
         viewer.open(matrix.messages[0], surface: .conversation)
         try await capture(
             ZStack {
-                RootView(matrix: matrix)
+                RootView(scratch: matrix)
                 MediaViewer(matrix: matrix, viewer: viewer, onForward: { _ in })
             }, size: CGSize(width: 1440, height: 900), "viewer")
     }
@@ -642,14 +644,14 @@ struct Snapshots {
         ]
         for (name, modal) in modals {
             try await render(
-                ModalHost { RootView(matrix: matrix).modal(isPresented: .constant(true)) { modal } }, theme: theme,
+                ModalHost { RootView(scratch: matrix).modal(isPresented: .constant(true)) { modal } }, theme: theme,
                 name: name
             ) {
                 // The sample workspace can't load members and says so in a toast, which would cover the tabs.
                 matrix.errorMessage = nil
             }
         }
-        try await render(RootView(matrix: matrix), theme: theme, name: "activity") {
+        try await render(RootView(scratch: matrix), theme: theme, name: "activity") {
             matrix.errorMessage = nil
             NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "activity"])
         }
@@ -674,7 +676,7 @@ struct Snapshots {
             list = list.changing(roomID: done.roomID, eventID: done.eventID, to: .completed, at: now)
         }
         matrix.savedMessages.merge(list, accountID: "preview.you")
-        try await render(RootView(matrix: matrix), theme: theme, name: "later") {
+        try await render(RootView(scratch: matrix), theme: theme, name: "later") {
             matrix.errorMessage = nil
             NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "later"])
         }
@@ -700,7 +702,7 @@ struct Snapshots {
                 id: "preview.dm.\(index)", name: name, isDirect: true, unreadMessages: unread,
                 latest: body.map { LatestMessage(body: $0, timestamp: now - age, isOwn: own) })
         }
-        try await render(RootView(matrix: matrix), theme: theme, name: "dms") {
+        try await render(RootView(scratch: matrix), theme: theme, name: "dms") {
             matrix.errorMessage = nil
             NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "dms"])
         }
@@ -717,7 +719,7 @@ struct Snapshots {
         defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
-        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let hosting = NSHostingView(rootView: RootView(scratch: matrix).environmentObject(appearance))
         let window = offscreenWindow(NSSize(width: 1440, height: 900))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting
@@ -849,7 +851,7 @@ struct Snapshots {
             message("real.5", "preview.you", "You", "Thanks! I'll bring the numbers from the last two sprints.", 12),
         ]
         try await render(
-            RootView(matrix: matrix).environment(\.metrics, Metrics()), theme: theme, name: "real-life")
+            RootView(scratch: matrix).environment(\.metrics, Metrics()), theme: theme, name: "real-life")
     }
 
     @Test(
@@ -910,7 +912,7 @@ struct Snapshots {
             message(you, days: 0, 9.2, "спасибо!"),
         ]
         try await render(
-            RootView(matrix: matrix).environment(\.metrics, Metrics()), theme: theme, name: "short-messages",
+            RootView(scratch: matrix).environment(\.metrics, Metrics()), theme: theme, name: "short-messages",
             size: NSSize(width: 1_280, height: 800), hovering: "Привет!")
     }
 
@@ -982,7 +984,8 @@ struct Snapshots {
         appearance.windowGradient = true
         appearance.density = .comfortable
         let hosting = NSHostingView(
-            rootView: RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom))
+            rootView: RootView(scratch: matrix).environmentObject(appearance).environment(
+                \.metrics, Metrics(zoom: zoom))
         )
         let window = offscreenWindow(
             NSSize(width: 1438, height: 936),
@@ -1393,7 +1396,7 @@ struct Snapshots {
         defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
-        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(appearance))
+        let hosting = NSHostingView(rootView: RootView(scratch: matrix).environmentObject(appearance))
         let window = offscreenWindow(NSSize(width: 1440, height: 900))
         window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         window.contentView = hosting

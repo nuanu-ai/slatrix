@@ -45,7 +45,7 @@ struct WindowHostedTests {
         }
 
         static func root(_ matrix: MatrixService, _ appearance: AppearanceStore, zoom: Double) -> AnyView {
-            AnyView(RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom)))
+            AnyView(RootView(scratch: matrix).environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom)))
         }
 
         /// As ⌘= and ⌘- change it, with the window open.
