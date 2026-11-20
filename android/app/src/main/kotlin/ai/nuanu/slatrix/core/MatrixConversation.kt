@@ -120,8 +120,8 @@ data class ConversationMessage(
     /** Your message, read by someone. */
     val seen: Boolean = false,
 ) : ConversationRow {
-    /** The thread the channel shows under it: its own summary while that counts replies, else the server's list. */
-    val shownThread: MessageThread? get() = thread?.takeIf { it.replies > 0 } ?: listedThread
+    /** The thread the channel shows under it: the server's list while it counts replies, else its own summary. */
+    val shownThread: MessageThread? get() = listedThread?.takeIf { it.replies > 0 } ?: thread?.takeIf { it.replies > 0 }
     /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
     val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
 }

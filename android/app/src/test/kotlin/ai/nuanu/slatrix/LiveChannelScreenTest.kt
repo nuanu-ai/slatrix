@@ -616,7 +616,8 @@ class LiveChannelScreenTest {
     @Test fun aMessageWhoseThreadCountsNoRepliesShowsNoRepliesBar() {
         compose.setContent {
             SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(listOf(message("Review: two nits", 0).copy(thread = MessageThread(0, null, null))),
+                LiveChannelScreen(room, ConversationState(listOf(message("Review: two nits", 0).copy(thread = MessageThread(0, null, null),
+                    listedThread = MessageThread(0, null, null))),
                     loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread = {})
             }
         }

@@ -1218,6 +1218,17 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    @Test fun theChannelShowsTheServersCountOverARootsOwnSmallerOne() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 2u)),
+            conversationItem("other", "\$other", "Hello")))
+        val room = ConversationRoom(timeline)
+        room.threads = listOf(listed("\$root", 5u), listed("\$other", 2u))
+        val conversation = MatrixConversation(backgroundScope, room)
+        val rows = conversation.state.first { state -> state.rows.messages.any { it.body == "Hello" && it.shownThread != null } }.rows.messages
+        assertEquals(5, rows.single { it.body == "PR 417" }.shownThread?.replies)
+        conversation.close()
+    }
+
     @Test fun aThreadsLineFollowsItsRootsOwnCountNeverTheServersListCount() = runTest {
         val channelTimeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 0u)),
             conversationItem("other", "\$other", "Hello")))
