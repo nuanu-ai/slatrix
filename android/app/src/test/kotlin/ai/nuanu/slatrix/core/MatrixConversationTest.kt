@@ -1229,6 +1229,19 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    @Test fun theChannelShowsARootsOwnCountOnceItOutgrowsTheServersList() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 7u)),
+            conversationItem("other", "\$other", "Hello")))
+        val room = ConversationRoom(timeline)
+        room.threads = listOf(listed("\$root", 5u), listed("\$other", 2u))
+        val conversation = MatrixConversation(backgroundScope, room)
+        val rows = conversation.state.first { state -> state.rows.messages.any { it.body == "Hello" && it.shownThread != null } }.rows.messages
+        val root = rows.single { it.body == "PR 417" }
+        assertEquals(7, root.shownThread?.replies)
+        assertEquals(root.thread, root.shownThread)
+        conversation.close()
+    }
+
     @Test fun aThreadOpenedOnARootThatCountsRepliesSaysSoFromItsFirstFrame() = runTest {
         val root = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", "Plan?", null, 1_700_000_000_000L,
             MessageKind.Text, MessageSendState.Sent, false, "MC", 0, thread = MessageThread(4, null, null))

@@ -104,7 +104,7 @@ data class ConversationMessage(
     val reactions: List<MessageReaction> = emptyList(),
     /** Set on a thread's root: the summary it carries, zero included. */
     val thread: MessageThread? = null,
-    /** The thread the server's list has for this root, for a root whose own summary counts no replies. */
+    /** The thread the server's list has for this root, for the channel to show while it counts more than [thread]. */
     val listedThread: MessageThread? = null,
     /** The message this one replies to, quoted above it. */
     val replyTo: ReplyPreview? = null,
@@ -120,8 +120,9 @@ data class ConversationMessage(
     /** Your message, read by someone. */
     val seen: Boolean = false,
 ) : ConversationRow {
-    /** The thread the channel shows under it: the server's list while it counts replies, else its own summary. */
-    val shownThread: MessageThread? get() = listedThread?.takeIf { it.replies > 0 } ?: thread?.takeIf { it.replies > 0 }
+    /** The thread the channel shows under it: the server's list while it counts more, else its own while it counts any. */
+    val shownThread: MessageThread?
+        get() = listedThread?.takeIf { it.replies > (thread?.replies ?: 0) } ?: thread?.takeIf { it.replies > 0 }
     /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
     val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
 }
@@ -261,8 +262,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     @Volatile private var blankPages = 0
     /**
      * The server's count for each recent thread, by its root, for the channel to show on a root whose own summary counts
-     * none. The SDK counts only replies it has seen, and a phone that slept through them has none, so their roots would
-     * show no replies at all. A thread's own line never reads it.
+     * fewer. The SDK counts only replies it has seen, so on a phone that slept through some a root would show too few, or
+     * none at all. A thread's own line never reads it.
      */
     @Volatile private var serverThreads = emptyMap<String, MessageThread>()
 
