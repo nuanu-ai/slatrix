@@ -119,7 +119,8 @@ final class SecureSessionStore: @unchecked Sendable {
     private static func repairing(_ data: Data) throws -> CredentialEnvelope {
         if let envelope = try? decodeEnvelope(data) { return envelope }
         let record = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        if let version = record?["version"] as? Int, version > CredentialEnvelope().version {
+        // Compared as a number, so a version too large for an Int, or written as 2.0, still counts as newer.
+        if let version = record?["version"] as? NSNumber, version.doubleValue > Double(CredentialEnvelope().version) {
             throw StoreError.invalidSession
         }
         var envelope = CredentialEnvelope()

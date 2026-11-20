@@ -381,9 +381,9 @@ struct ConversationSwitchHostedTests {
     func heldSwitch() async throws {
         let harness = try Harness()
         defer { harness.close() }
-        #expect(await harness.settled(on: 0))
+        try #require(await harness.settled(on: 0))
         harness.menu("next-conversation")
-        #expect(await harness.settled(on: 1))
+        try #require(await harness.settled(on: 1))
         await harness.idle()
         harness.record()
         harness.menu("back")
@@ -402,7 +402,7 @@ struct ConversationSwitchHostedTests {
     func coldSwitch(read milliseconds: Int) async throws {
         let harness = try Harness()
         defer { harness.close() }
-        #expect(await harness.settled(on: 0))
+        try #require(await harness.settled(on: 0))
         await harness.idle()
         harness.rooms[1].buildGate.arm()
         harness.record()
@@ -424,7 +424,7 @@ struct ConversationSwitchHostedTests {
     func jumpKeepsPane() async throws {
         let harness = try Harness()
         defer { harness.close() }
-        #expect(await harness.settled(on: 0))
+        try #require(await harness.settled(on: 0))
         await harness.idle()
         let before = harness.sample()
         let room = harness.rooms[0]

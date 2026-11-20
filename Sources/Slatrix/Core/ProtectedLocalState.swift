@@ -283,9 +283,8 @@ enum ProtectedLocalStateCodec {
         return true
     }
 
-    /// Moves `url` aside as `<name>.set-aside`, and leaves nothing aside when `url` is absent. Callers check its folder
-    /// with `existingFolder` first, and an earlier copy goes only once the new one is in its place. Nothing reads or
-    /// sweeps set-aside copies.
+    /// Moves whatever is at `url`, a link included, to a name of its own beside it, and does nothing when nothing is
+    /// there. Callers check its folder with `existingFolder` first. Copies are kept, and nothing sweeps them.
     static func setAside(_ url: URL) throws {
         let parent = url.deletingLastPathComponent()
         var info = stat()
@@ -296,16 +295,10 @@ enum ProtectedLocalStateCodec {
         let folder = Darwin.open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard folder >= 0 else { throw ProtectedLocalStateError.unavailable }
         defer { Darwin.close(folder) }
-        let aside = url.appendingPathExtension("set-aside")
-        let earlier = url.appendingPathExtension("set-aside-earlier")
-        // A rename replaces a file but not a full folder, so an earlier folder steps out of the way and goes last.
-        let isFolder = info.st_mode & S_IFMT == S_IFDIR
-        if isFolder, lstat(aside.path, &info) == 0 {
-            if lstat(earlier.path, &info) == 0 { try FileManager.default.removeItem(at: earlier) }
-            guard rename(aside.path, earlier.path) == 0 else { throw ProtectedLocalStateError.unavailable }
+        let aside = parent.appendingPathComponent(url.lastPathComponent + ".set-aside-" + UUID().uuidString)
+        guard renamex_np(url.path, aside.path, UInt32(RENAME_EXCL)) == 0, fsync(folder) == 0 else {
+            throw ProtectedLocalStateError.unavailable
         }
-        guard rename(url.path, aside.path) == 0, fsync(folder) == 0 else { throw ProtectedLocalStateError.unavailable }
-        if isFolder, lstat(earlier.path, &info) == 0 { try FileManager.default.removeItem(at: earlier) }
     }
 
     static func prepareDirectory(_ directory: URL) throws {

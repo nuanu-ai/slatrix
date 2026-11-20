@@ -38,13 +38,16 @@ struct SavedSessionTests {
         #expect(matrix.status == .signedOut && matrix.user == nil && !matrix.isPreview)
     }
 
-    @Test("Restoring over an empty saved record leaves SDK stores outside the service's own roots alone")
+    @Test("Restoring over an empty saved record sweeps the service's own SDK store folders and no others")
     func restoreKeepsOtherRoots() async throws {
+        let orphan = try SessionStores.create(UUID().uuidString, roots: storeRoots)
         let planted = try SessionStores.create(
             UUID().uuidString, roots: [folder.path("other-support"), folder.path("other-caches")])
         let matrix = MatrixService(credentials: credentials, storeRoots: storeRoots)
         await matrix.restore()
         #expect(matrix.status == .signedOut)
+        #expect(!FileManager.default.fileExists(atPath: orphan.data.path))
+        #expect(!FileManager.default.fileExists(atPath: orphan.cache.path))
         #expect(FileManager.default.fileExists(atPath: planted.data.path))
     }
 
@@ -89,12 +92,17 @@ struct SavedSessionTests {
         #expect(try savedKeys() == damaged.kept)
     }
 
-    @Test("A saved record from a newer build is never rewritten")
-    func newerRecordKept() throws {
-        let record = Data(#"{"version":2,"vaultKeys":{"@keep:example.org":"QkJC"}}"#.utf8)
+    @Test("A saved record from a newer build is never rewritten", arguments: ["2", "2.0", "9223372036854775808"])
+    func newerRecordKept(version: String) throws {
+        let record = Data(#"{"version":\#(version),"vaultKeys":{"@keep:example.org":"QkJC"}}"#.utf8)
         let file = try folder.file("credentials.json", record)
+        #expect(throws: (any Error).self) { try credentials.load() }
+        #expect(try Data(contentsOf: file) == record)
         #expect(throws: (any Error).self) { try credentials.save(session) }
+        #expect(try Data(contentsOf: file) == record)
         #expect(throws: (any Error).self) { try credentials.delete() }
+        #expect(try Data(contentsOf: file) == record)
+        #expect(throws: (any Error).self) { try credentials.localStateKey(accountID: session.userId) }
         #expect(try Data(contentsOf: file) == record)
     }
 
@@ -102,12 +110,16 @@ struct SavedSessionTests {
         "A record whose version isn't a whole number above this build's is damage, so signing in and out repair it",
         arguments: ["false", "0", #""2""#])
     func otherVersionRepaired(version: String) throws {
-        let record = Data(#"{"version":\#(version),"vaultKeys":{}}"#.utf8)
+        let key = Damaged.key.base64EncodedString()
+        let record = Data(#"{"version":\#(version),"vaultKeys":{"@keep:example.org":"\#(key)"}}"#.utf8)
         _ = try folder.file("credentials.json", record)
         #expect(throws: (any Error).self) { try credentials.load() }
         try credentials.save(session)
+        #expect(try credentials.load() == session)
+        #expect(try savedKeys() == ["@keep:example.org": Damaged.key])
         _ = try folder.file("credentials.json", record)
         try credentials.delete()
+        #expect(try savedKeys() == ["@keep:example.org": Damaged.key])
     }
 
     private let room = "!design:example.org"
@@ -119,8 +131,17 @@ struct SavedSessionTests {
     }
 
     private var manifest: URL { attachmentFolder.appendingPathComponent("manifest.vault") }
-    private var asideManifest: URL {
-        attachmentFolder.appendingPathExtension("set-aside").appendingPathComponent("manifest.vault")
+
+    /// Every copy of `url` set aside beside it.
+    private func asideCopies(of url: URL) throws -> [URL] {
+        let names = try FileManager.default.contentsOfDirectory(atPath: url.deletingLastPathComponent().path)
+        return names.filter { $0.hasPrefix(url.lastPathComponent + ".set-aside-") }
+            .map { url.deletingLastPathComponent().appendingPathComponent($0) }
+    }
+    private func asideVaults() throws -> Set<Data> { try Set(asideCopies(of: vault).map { try Data(contentsOf: $0) }) }
+    private func asideManifests() throws -> Set<Data> {
+        try Set(
+            asideCopies(of: attachmentFolder).map { try Data(contentsOf: $0.appendingPathComponent("manifest.vault")) })
     }
 
     /// The drafts vault and attachment drafts as a fresh launch opens them, keyed by this test's record.
@@ -164,24 +185,42 @@ struct SavedSessionTests {
         #expect(access.state == ProtectedLocalState())
         let files = try await attachments.open(accountID: session.userId)
         #expect(try await attachments.restore(access: files).isEmpty)
-        #expect(try Data(contentsOf: vault.appendingPathExtension("set-aside")) == sealed)
-        #expect(try Data(contentsOf: asideManifest) == sealedManifest)
+        #expect(try asideVaults() == [sealed])
+        #expect(try asideManifests() == [sealedManifest])
 
         try await drafts.save(ProtectedLocalState(drafts: [room: "After"]), access: access, revision: 1)
         #expect(try await stores().0.open(accountID: session.userId).state.drafts == [room: "After"])
     }
 
-    @Test("Losing a key again replaces the earlier set-aside copy")
-    func setAsideReplaced() async throws {
+    @Test("Losing a key twice keeps both set-aside copies, each as it was")
+    func setAsideTwiceKeepsBoth() async throws {
         try credentials.save(session)
-        _ = try await saveDrafts("First")
+        let first = try await saveDrafts("First")
         try loseKey()
-        let (sealed, sealedManifest) = try await saveDrafts("Second")
+        let second = try await saveDrafts("Second")
         try loseKey()
 
         _ = try await stores().0.open(accountID: session.userId)
-        #expect(try Data(contentsOf: vault.appendingPathExtension("set-aside")) == sealed)
-        #expect(try Data(contentsOf: asideManifest) == sealedManifest)
+        #expect(try asideVaults() == [first.0, second.0])
+        #expect(try asideManifests() == [first.1, second.1])
+    }
+
+    @Test("Something already at a set-aside name neither stops recovery nor changes")
+    func takenNameLeftAlone() async throws {
+        try credentials.save(session)
+        _ = try await saveDrafts("Before")
+        let folderThere = vault.appendingPathExtension("set-aside")
+        try FileManager.default.createDirectory(at: folderThere, withIntermediateDirectories: false)
+        try Data("folder".utf8).write(to: folderThere.appendingPathComponent("inside"))
+        let fileThere = URL(fileURLWithPath: attachmentFolder.path + ".set-aside")
+        try Data("file".utf8).write(to: fileThere)
+        try loseKey()
+
+        let (drafts, attachments) = stores()
+        #expect(try await drafts.open(accountID: session.userId).state == ProtectedLocalState())
+        _ = try await attachments.open(accountID: session.userId)
+        #expect(try Data(contentsOf: folderThere.appendingPathComponent("inside")) == Data("folder".utf8))
+        #expect(try Data(contentsOf: fileThere) == Data("file".utf8))
     }
 
     @Test("Recovery refuses a drafts folder reached through a link, and every file stays where it was")
@@ -221,7 +260,7 @@ struct SavedSessionTests {
         _ = try await drafts.open(accountID: session.userId)
         _ = try await attachments.open(accountID: session.userId)
         let paths = try FileManager.default.subpathsOfDirectory(atPath: folder.url.path)
-        #expect(!paths.contains { $0.hasSuffix(".set-aside") })
+        #expect(!paths.contains { $0.contains(".set-aside") })
     }
 
     @Test("A vault that won't open under the key it still has fails as before, and nothing is set aside")
@@ -232,6 +271,6 @@ struct SavedSessionTests {
         try sealed.write(to: vault)
         await #expect(throws: (any Error).self) { try await stores().0.open(accountID: session.userId) }
         #expect(try Data(contentsOf: vault) == sealed)
-        #expect(!FileManager.default.fileExists(atPath: vault.appendingPathExtension("set-aside").path))
+        #expect(try asideCopies(of: vault).isEmpty)
     }
 }
