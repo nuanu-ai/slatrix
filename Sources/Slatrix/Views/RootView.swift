@@ -551,27 +551,25 @@ struct RootView: View {
             .onChange(of: appearance.notificationPreview) { _, _ in platform.clearNotificationPreviews() }
             .task(
                 id: LaterReminderInputs(
-                    list: matrix.savedMessages.list, audience: reminderAudience,
+                    list: matrix.savedMessages.list, accountID: reminderAccount,
                     preview: appearance.notificationPreview)
             ) { await syncLaterReminders() }
     }
 
     private struct LaterReminderInputs: Equatable {
         var list: SavedMessages
-        var audience: LaterReminderSchedule.Audience
+        var accountID: String?
         var preview: Bool
     }
-    private var reminderAudience: LaterReminderSchedule.Audience {
-        LaterReminderSchedule.audience(
-            restoring: bootstrapping, status: matrix.status, userID: matrix.user?.id, localReady: localReady,
-            localFailed: localError != nil,
-            notifications: appearance.notifications, preview: matrix.isPreview)
+    /// Who Later's reminders notify: nobody in the preview or with notifications off.
+    private var reminderAccount: String? {
+        appearance.notifications && !matrix.isPreview ? matrix.user?.id : nil
     }
     private func syncLaterReminders() async {
         let preview = appearance.notificationPreview
-        let audience = reminderAudience
-        await platform.laterReminders.sync(matrix.savedMessages.list, audience: audience, preview: preview) { item in
-            guard case .account(let account) = audience,
+        let account = reminderAccount
+        await platform.laterReminders.sync(matrix.savedMessages.list, accountID: account, preview: preview) { item in
+            guard let account,
                 let target = MatrixNotificationTarget(accountID: account, roomID: item.roomID, eventID: item.eventID)
             else { return nil }
             let room = matrix.rooms.first { $0.id == item.roomID }
