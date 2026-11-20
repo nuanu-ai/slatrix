@@ -12,7 +12,7 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
     static let shared = PlatformIntegration()
     @Published private(set) var pendingNotification: MatrixNotificationTarget?
     private var notificationAccountConfigured = false
-    private lazy var delivery = DesktopNotificationDelivery(
+    private(set) lazy var delivery = DesktopNotificationDelivery(
         transport: SystemDesktopNotificationTransport(center: notificationCenter))
     private(set) lazy var laterReminders = LaterReminderSchedule(
         transport: SystemLaterReminderTransport(center: notificationCenter))
@@ -88,17 +88,6 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
         delivery.useAccount(accountID)
         if pendingNotification?.accountID != accountID { pendingNotification = nil }
     }
-
-    func notify(_ message: DesktopMessageNotification, stillAnnounce: () -> Bool = { true }) async throws {
-        try await delivery.deliver(message, stillAnnounce: stillAnnounce)
-    }
-    #if DEBUG
-    /// Hands desktop notifications to `transport`, or back to the OS when nil.
-    func useNotificationTransportForChecks(_ transport: DesktopNotificationTransport?) {
-        delivery = DesktopNotificationDelivery(
-            transport: transport ?? SystemDesktopNotificationTransport(center: notificationCenter))
-    }
-    #endif
 
     func consumeNotification(_ target: MatrixNotificationTarget) {
         if pendingNotification == target { pendingNotification = nil }

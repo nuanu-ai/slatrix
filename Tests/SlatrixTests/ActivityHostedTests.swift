@@ -13,11 +13,7 @@ struct ActivityHostedTests {
     /// Drafts and saved messages, away from the keychain, so threads open ready to read.
     private let local: TemporaryDirectory
 
-    init() throws {
-        local = try TemporaryDirectory()
-        ProtectedLocalStateStore.useForChecks(
-            ProtectedLocalStateStore(directory: local.url, keyProvider: { _ in Data(repeating: 0x5a, count: 32) }))
-    }
+    init() throws { local = try TemporaryDirectory() }
 
     /// The whole window on `room`, with Activity holding `item`; `key` when the reader can read it.
     private func host(_ room: FakeOpenRoom, item: ActivityItem, mentions: Int = 0, key: Bool) -> (
@@ -30,9 +26,12 @@ struct ActivityHostedTests {
             client: FakeClient(rooms: [room]), roomList: FakeRoomListService(),
             user: ChatUser(id: "@me:example.org", name: "Me"))
         matrix.status = .ready
+        let store = ProtectedLocalStateStore(
+            directory: local.url, keyProvider: { _ in Data(repeating: 0x5a, count: 32) })
         let hosting = NSHostingView(
             rootView: AnyView(
-                RootView(matrix: matrix).environmentObject(AppearanceStore()).environment(\.metrics, Metrics(zoom: 1))))
+                RootView(matrix: matrix, localStore: store).environmentObject(AppearanceStore())
+                    .environment(\.metrics, Metrics(zoom: 1))))
         let window = offscreenWindow(NSSize(width: 1_200, height: 800), key: key)
         window.contentView = hosting
         window.orderFrontRegardless()
@@ -128,5 +127,33 @@ struct ActivityHostedTests {
             await eventually {
                 matrix.activity.items.allSatisfy { !ActivityBadge.isUnread($0, room: matrix.rooms.first) }
             })
+    }
+
+    // capability: activity.open-item
+    @Test("An older reply loses its dot when a page of older replies brings it into the open thread")
+    func seenOncePaged() async throws {
+        let root = FakeTimelineItem(textEvent("$root", body: "Root"))
+        let room = FakeOpenRoom("!activity:example.org", cached: [root])
+        room.threadRoots = ["$older": "$root", "$newer": "$root"]
+        room.threadItems = [root, FakeTimelineItem(textEvent("$newer", body: "Newer"))]
+        let body = "Newer \(UUID().uuidString)"
+        let (matrix, hosting, window) = host(room, item: item("$newer", body: body, root: "$root"), key: true)
+        matrix.activity.record(item("$older", body: "Older", root: "$root"))
+        VoiceOver.listen()
+        defer {
+            VoiceOver.done()
+            window.contentView = nil
+            window.close()
+        }
+        let unread = { (id: String) in
+            matrix.activity.items.contains { $0.id == id && ActivityBadge.isUnread($0, room: matrix.rooms.first) }
+        }
+        await click(body, in: hosting)
+        #expect(await eventually { !unread("$newer") })
+        #expect(unread("$older"))
+        let thread = try #require(
+            room.focuses.all.firstIndex { if case .thread = $0 { true } else { false } }.map { room.timelines.all[$0] })
+        thread.emit([.pushFront(value: FakeTimelineItem(textEvent("$older", body: "Older")))])
+        #expect(await eventually { !unread("$older") })
     }
 }

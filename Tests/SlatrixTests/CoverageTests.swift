@@ -22,9 +22,19 @@ struct CoverageTests {
         #expect(coverage.escape(profile: profile, inConversation: inConversation) == expected)
     }
 
-    @Test("The identity prompt lies over the conversation and its thread")
-    func identityPromptCovers() {
-        let coverage = Coverage(identity: true)
-        #expect(coverage.conversation && coverage.thread)
+    @Test(
+        "What lies over the conversation and what lies over its thread",
+        arguments: [
+            (Coverage(), false, false),
+            (Coverage(pane: true), true, false),
+            (Coverage(viewer: true), true, true),
+            (Coverage(dialog: true), true, true),
+            (Coverage(drawer: true), true, true),
+            (Coverage(identity: true), true, true),
+            // A profile takes the thread's place beside the conversation.
+            (Coverage(profile: true), false, true),
+        ])
+    func covers(coverage: Coverage, conversation: Bool, thread: Bool) {
+        #expect(coverage.conversation == conversation && coverage.thread == thread)
     }
 }

@@ -49,6 +49,11 @@ struct ThreadReadPolicyTests {
     }
 }
 
+/// The window's Mark unread hold, which the read policy asks before each write.
+@MainActor private final class Reader {
+    var hold = ReadStateHold()
+}
+
 @MainActor
 struct ThreadReadTests {
     /// A loaded thread on `$root` whose latest reply is `$reply`, in a room the user has joined.
@@ -255,6 +260,47 @@ struct ThreadReadTests {
             }
         }
         #expect(asked > 1 && timeline.writes.all == ["mark-read"])
+    }
+
+    @Test("Mark unread while a refused receipt goes again stops the writes after the one in flight")
+    func markUnreadDuringRetry() async throws {
+        let f = fixture()
+        let target = ReadReceiptTarget(
+            accountID: "@reader:example.org", sessionGeneration: f.session, timelineGeneration: f.selection,
+            roomID: f.roomID, eventID: f.rootID)
+        let context = ReadStateContext(
+            accountID: target.accountID, sessionGeneration: f.session, timelineGeneration: f.selection,
+            roomID: f.roomID, selectedRoomID: f.roomID, latestVisibleEventID: f.rootID, isJoined: true,
+            isMainTimeline: true, isLiveTimeline: true, isAtBottom: true, isWindowActive: true, isWindowVisible: true,
+            isWindowUnoccluded: true)
+        let reader = Reader()
+        f.main.failsNextWrites = 1
+        f.main.gate.arm()
+        let reading = Task {
+            try await f.service.markVisibleRead(target, retries: [.zero]) {
+                ReadStatePolicy.isCurrent(target, in: context, hold: reader.hold)
+            }
+        }
+        #expect(await eventually { f.main.gate.isWaiting })
+        // The first attempt fails; the retry's first write waits.
+        f.main.gate.release()
+        f.main.gate.arm()
+        #expect(await eventually { f.main.gate.isWaiting && f.main.writes.all.count == 2 })
+        reader.hold.markUnread(context)
+        f.main.gate.release()
+        await #expect(throws: CancellationError.self) { try await reading.value }
+        #expect(f.main.writes.all == ["mark-read", "mark-read"])
+    }
+
+    @Test("A thread closed and opened again has no report until its pane reports again")
+    func reopenedThreadHasNoReport() throws {
+        let f = fixture()
+        let report = PaneReport(newestInView: "$reply", laidOut: "$reply")
+        f.service.record(report, thread: try #require(f.service.threadReadIdentity))
+        #expect(f.service.shownThreadReport == report)
+        f.apply(.threadReopened)
+        #expect(f.service.threadReadIdentity != nil)
+        #expect(f.service.shownThreadReport == nil)
     }
 
     @Test("A receipt in flight when the thread is reopened finishes once and is not credited to the new pane")

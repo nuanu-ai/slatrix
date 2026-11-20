@@ -41,10 +41,12 @@ struct NotificationGateHostedTests {
                 user: ChatUser(id: "@me:example.org", name: "Me"))
             matrix.status = .ready
             appearance.notifications = true
-            PlatformIntegration.shared.useNotificationTransportForChecks(transport)
+            let delivery = DesktopNotificationDelivery(transport: transport)
+            delivery.useAccount("@me:example.org")
             hosting = NSHostingView(
                 rootView: AnyView(
-                    RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, Metrics(zoom: 1))))
+                    RootView(matrix: matrix, notifications: delivery).environmentObject(appearance)
+                        .environment(\.metrics, Metrics(zoom: 1))))
             window = offscreenWindow(NSSize(width: 1_200, height: 800), key: true)
             window.contentView = hosting
             window.orderFrontRegardless()
@@ -53,7 +55,6 @@ struct NotificationGateHostedTests {
         }
 
         func close() {
-            PlatformIntegration.shared.useNotificationTransportForChecks(nil)
             UserDefaults.standard.removeObject(forKey: "notifications.enabled")
             window.contentView = nil
             window.close()

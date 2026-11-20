@@ -105,17 +105,22 @@ enum ReadStatePolicy {
             && ThreadReadPolicy.isShown(thread)
     }
 
-    /// Whether `eventID` is in `timeline` at or before `newestInView`.
-    static func isSeen(_ eventID: String, in timeline: [String], newestInView: String?) -> Bool {
-        guard let newestInView, let newest = timeline.lastIndex(of: newestInView),
-            let index = timeline.lastIndex(of: eventID)
-        else { return false }
+    /// Each event's place in a timeline's events, in order, for `isSeen`.
+    static func positions(_ timeline: [String]) -> [String: Int] {
+        Dictionary(timeline.enumerated().map { ($1, $0) }, uniquingKeysWith: max)
+    }
+
+    /// Whether `eventID` is in the timeline at or before `newestInView`, by their `positions`.
+    static func isSeen(_ eventID: String, in positions: [String: Int], newestInView: String?) -> Bool {
+        guard let newestInView, let newest = positions[newestInView], let index = positions[eventID] else {
+            return false
+        }
         return index <= newest
     }
 
     /// Whether the reader has seen `eventID`, whose pane is `shown` or not, with `timeline` and `report` that pane's:
     /// nil while a shown pane has yet to lay the message out.
-    static func seen(_ eventID: String, shown: Bool, in timeline: [String], report: PaneReport?) -> Bool? {
+    static func seen(_ eventID: String, shown: Bool, in timeline: [String: Int], report: PaneReport?) -> Bool? {
         guard shown else { return false }
         guard isSeen(eventID, in: timeline, newestInView: report?.laidOut) else { return nil }
         return isSeen(eventID, in: timeline, newestInView: report?.newestInView)

@@ -1,8 +1,8 @@
 import Observation
 
-/// Waits until `condition` holds or `deadline` passes, checking again whenever an observable value it reads changes.
-@MainActor func waitObserving(until condition: @escaping @MainActor () -> Bool, deadline: ContinuousClock.Instant)
-    async
+/// The first value `value` has, checked again whenever an observable value it reads changes; nil at `deadline`.
+@MainActor func waitObserving<Value>(for value: @escaping @MainActor () -> Value?, deadline: ContinuousClock.Instant)
+    async -> Value?
 {
     let waiter = Waiter()
     let timer = Task { @MainActor in
@@ -10,16 +10,18 @@ import Observation
         waiter.resume()
     }
     defer { timer.cancel() }
-    while !condition(), ContinuousClock.now < deadline {
+    while ContinuousClock.now < deadline {
+        if let found = value() { return found }
         await withCheckedContinuation { continuation in
             waiter.continuation = continuation
             withObservationTracking {
-                _ = condition()
+                _ = value()
             } onChange: {
                 Task { @MainActor in waiter.resume() }
             }
         }
     }
+    return nil
 }
 
 @MainActor private final class Waiter {

@@ -113,9 +113,10 @@ enum DesktopNotificationError: LocalizedError {
         transport.clear()
     }
 
-    /// `stillAnnounce` is asked last, once the OS has answered, so a message the reader has seen by then goes quietly.
+    /// `stillAnnounce` decides once the OS has answered, and nothing after it but the checks above can stop the alert,
+    /// so a message the reader has seen by then goes quietly.
     @discardableResult func deliver(
-        _ message: DesktopMessageNotification, stillAnnounce: () -> Bool = { true }
+        _ message: DesktopMessageNotification, stillAnnounce: () async -> Bool = { true }
     ) async throws -> Bool {
         guard message.target.accountID == accountID else { return false }
         let token = generation
@@ -124,7 +125,8 @@ enum DesktopNotificationError: LocalizedError {
             guard token == generation, message.target.accountID == accountID, !Task.isCancelled else { return false }
             throw error
         }
-        guard token == generation, message.target.accountID == accountID, !Task.isCancelled, stillAnnounce() else {
+        let announce = await stillAnnounce()
+        guard token == generation, message.target.accountID == accountID, !Task.isCancelled, announce else {
             return false
         }
         guard allowed else { throw DesktopNotificationError.notificationsDisabled }

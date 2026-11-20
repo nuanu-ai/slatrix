@@ -135,11 +135,7 @@ enum ProtectedLocalStateError: LocalizedError {
 
 /// All writes finish and verify before returning. Await a final captured save to flush on switch or quit.
 actor ProtectedLocalStateStore {
-    @MainActor static private(set) var shared = ProtectedLocalStateStore()
-    #if DEBUG
-    /// Gives the window `store`, which keeps its key and files where the test says.
-    @MainActor static func useForChecks(_ store: ProtectedLocalStateStore) { shared = store }
-    #endif
+    static let shared = ProtectedLocalStateStore()
     private let directory: URL
     private let keyProvider: @Sendable (String) async throws -> Data
     private struct Record {

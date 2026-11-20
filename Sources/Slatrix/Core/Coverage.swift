@@ -10,10 +10,13 @@ struct Coverage: Equatable {
     var drawer = false
     /// "Confirm it's you", over the whole window.
     var identity = false
+    /// A profile, in the thread's place.
+    var profile = false
 
-    /// The media viewer, a dialog, the sidebar drawer and the identity prompt lie over the thread too.
-    var thread: Bool { viewer || dialog || drawer || identity }
-    var conversation: Bool { pane || thread }
+    /// The media viewer, a dialog, the sidebar drawer and the identity prompt lie over both.
+    private var window: Bool { viewer || dialog || drawer || identity }
+    var thread: Bool { window || profile }
+    var conversation: Bool { pane || window }
 
     enum Escape: Equatable { case closeDrawer, closePane, markRead, nothing }
 

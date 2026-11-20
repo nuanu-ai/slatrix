@@ -39,6 +39,10 @@ enum AppRoute: String, CaseIterable {
 
 struct RootView: View {
     let matrix: MatrixService
+    /// Drafts, saved messages and recent searches, each account's sealed with its vault key.
+    private let localStore: ProtectedLocalStateStore
+    /// Where desktop notifications for messages go.
+    private let notifications: DesktopNotificationDelivery
     @ObservedObject private var platform = PlatformIntegration.shared
     @ObservedObject private var updater = AppUpdater.shared
     @EnvironmentObject var appearance: AppearanceStore
@@ -163,7 +167,7 @@ struct RootView: View {
     private var coverage: Coverage {
         Coverage(
             pane: paneCovers, viewer: viewer.message != nil, dialog: modalShown,
-            drawer: sidebarCollapsed && sidebarDrawer, identity: identityPrompt)
+            drawer: sidebarCollapsed && sidebarDrawer, identity: identityPrompt, profile: profilePane != nil)
     }
     /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
     /// open pane.
@@ -308,6 +312,15 @@ struct RootView: View {
 
     /// Every modal, for actions that must wait for all of them; read outside the body only.
     private var hasModal: Bool { hasPresentedSheet || modals.current != nil || modalShown }
+
+    @MainActor init(
+        matrix: MatrixService, localStore: ProtectedLocalStateStore = .shared,
+        notifications: DesktopNotificationDelivery? = nil
+    ) {
+        self.matrix = matrix
+        self.localStore = localStore
+        self.notifications = notifications ?? PlatformIntegration.shared.delivery
+    }
 
     var body: some View {
         ModalHost(
@@ -698,19 +711,20 @@ struct RootView: View {
                     platform.setNotificationAccount(identity.userID)
                     Task {
                         let target = notification.target
-                        let seen = {
-                            target.eventID.map {
-                                readInputs.seen(matrix)($0, target.roomID, notification.threadRootID)
-                            } ?? false
-                        }
-                        // A shown pane gets the chance to lay the message out first.
-                        await waitObserving(
-                            until: { seen() != nil }, deadline: .now + ReadStatePolicy.layoutDeadline)
-                        guard appearance.notifications, composerIdentity == identity,
-                            matrix.notificationSessionID == session
-                        else { return }
                         let value = notification.applyingPreviewPreference(appearance.notificationPreview)
-                        do { try await platform.notify(value, stillAnnounce: { seen() != true }) } catch {
+                        do {
+                            try await notifications.deliver(value) {
+                                // A shown pane gets the chance to lay the message out; its first answer decides.
+                                let seen = await waitObserving(
+                                    for: {
+                                        target.eventID.map {
+                                            readInputs.seen(matrix)($0, target.roomID, notification.threadRootID)
+                                        } ?? false
+                                    }, deadline: .now + ReadStatePolicy.layoutDeadline)
+                                return seen != true && appearance.notifications && composerIdentity == identity
+                                    && matrix.notificationSessionID == session
+                            }
+                        } catch {
                             if composerIdentity == identity, matrix.notificationSessionID == session {
                                 matrix.errorMessage = MatrixService.safeError(error)
                             }
@@ -2557,7 +2571,7 @@ struct RootView: View {
             await previous?.value
             guard localGeneration == generation, composerIdentity == identity else { return }
             do {
-                let access = try await ProtectedLocalStateStore.shared.open(accountID: accountID)
+                let access = try await localStore.open(accountID: accountID)
                 guard localGeneration == generation, composerIdentity == identity else { return }
                 localAccess = access
                 localRevision = 0
@@ -2582,7 +2596,7 @@ struct RootView: View {
         localRevision += 1
         let state = localState
         let revision = localRevision
-        return { try await ProtectedLocalStateStore.shared.save(state, access: access, revision: revision) }
+        return { try await localStore.save(state, access: access, revision: revision) }
     }
     private func saveLocalData() {
         guard let save = capturedLocalSave(), let generation = localAccess?.generation else { return }
@@ -2894,7 +2908,7 @@ private struct ReadInputs {
             isLiveTimeline: matrix.focusedEventID == nil && matrix.status == .ready,
             isAtBottom: latest.map {
                 ReadStatePolicy.isSeen(
-                    $0.eventID, in: matrix.messages.map(\.eventID),
+                    $0.eventID, in: ReadStatePolicy.positions(matrix.messages.map(\.eventID)),
                     newestInView: matrix.shownConversationReport?.newestInView)
             } ?? false,
             isWindowActive: visible, isWindowVisible: visible, isWindowUnoccluded: visible,
@@ -2915,7 +2929,7 @@ private struct ReadInputs {
                 && openingThreadID == nil && !threadLoadFailed,
             isAtBottom: latest.map {
                 ReadStatePolicy.isSeen(
-                    $0.eventID, in: matrix.threadMessages.map(\.eventID),
+                    $0.eventID, in: ReadStatePolicy.positions(matrix.threadMessages.map(\.eventID)),
                     newestInView: matrix.shownThreadReport?.newestInView)
             } ?? false, isWindowActive: visible, isWindowVisible: visible,
             isWindowUnoccluded: visible,
@@ -2928,8 +2942,11 @@ private struct ReadInputs {
     @MainActor func seen(_ matrix: MatrixService) -> (String, String, String?) -> Bool? {
         let conversation = readContext(matrix)
         let thread = threadReadContext(matrix)
-        let messages = matrix.messages.map(\.eventID)
-        let replies = matrix.threadMessages.map(\.eventID)
+        // One pass over each shown timeline, however many messages are asked about.
+        let messages =
+            ReadStatePolicy.isShown(conversation) ? ReadStatePolicy.positions(matrix.messages.map(\.eventID)) : [:]
+        let replies =
+            ThreadReadPolicy.isShown(thread) ? ReadStatePolicy.positions(matrix.threadMessages.map(\.eventID)) : [:]
         let reports = (conversation: matrix.shownConversationReport, thread: matrix.shownThreadReport)
         return { eventID, roomID, threadRootID in
             let shown = ReadStatePolicy.isShown(
@@ -2947,6 +2964,19 @@ private struct SeenInputs: Equatable {
     let thread: ThreadReadContext
     let reports: [PaneReport?]
     let items: [String]
+    /// The shown timelines' lengths and ends: a page of older messages changes what is seen without moving a report.
+    let timelines: [Ends]
+
+    struct Ends: Equatable {
+        let count: Int
+        let first: String?
+        let last: String?
+        init(_ messages: [ChatMessage]) {
+            count = messages.count
+            first = messages.first?.eventID
+            last = messages.last?.eventID
+        }
+    }
 }
 
 /// Marks what the reader can see as read. Apart from the window, so a new message reruns only these checks.
@@ -2968,7 +2998,8 @@ private struct ReadTracking: View {
                 of: SeenInputs(
                     conversation: context, thread: thread,
                     reports: [matrix.shownConversationReport, matrix.shownThreadReport],
-                    items: matrix.activity.items.map(\.id)), initial: true
+                    items: matrix.activity.items.map(\.id),
+                    timelines: [.init(matrix.messages), .init(matrix.threadMessages)]), initial: true
             ) {
                 let seen = inputs.seen(matrix)
                 matrix.activity.markSeen { item in

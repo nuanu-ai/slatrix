@@ -2805,13 +2805,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let originalRoom = try requireRoom(target.roomID)
         try await retryingReceipt(retries) {
             try await readDelivery.perform(roomID: target.roomID) { [weak self] in
-                guard let self, isCurrent() else { throw CancellationError() }
-                try await UnreadSDKActions.acknowledge(timeline: originalTimeline, eventID: target.eventID) {
+                guard let self else { throw CancellationError() }
+                // Asked before each write, as when the attempt starts, so Mark unread meanwhile stops the rest.
+                let check = {
                     _ = try self.validatedReadTimeline(target)
+                    guard isCurrent() else { throw CancellationError() }
                 }
+                try await UnreadSDKActions.acknowledge(
+                    timeline: originalTimeline, eventID: target.eventID, validate: check)
                 if self.rooms.first(where: { $0.id == target.roomID })?.isMarkedUnread == true {
                     try await originalRoom.setUnreadFlag(newValue: false)
-                    _ = try self.validatedReadTimeline(target)
+                    try check()
                 }
                 self.lastAutomaticReceipt = target
                 self.requestRefresh()

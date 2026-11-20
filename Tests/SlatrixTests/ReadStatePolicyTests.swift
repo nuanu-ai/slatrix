@@ -170,7 +170,7 @@ struct ReadStatePolicyTests {
     func messageSeen(seen: Seen) {
         #expect(
             ReadStatePolicy.seen(
-                seen.event, shown: seen.shown, in: ["$a", "$b", "$c", "$d"],
+                seen.event, shown: seen.shown, in: ReadStatePolicy.positions(["$a", "$b", "$c", "$d"]),
                 report: seen.laidOut.map { PaneReport(newestInView: seen.newestInView, laidOut: $0) }) == seen.seen)
     }
 

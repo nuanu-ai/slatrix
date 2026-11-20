@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 
 @testable import Slatrix
@@ -40,6 +41,11 @@ private struct MissingContinuation: Error {}
         guard let continuation = pendingAdds.removeValue(forKey: identifier) else { throw MissingContinuation() }
         continuation.resume(with: result)
     }
+}
+
+/// A pane's answer to whether its message is seen: false while it isn't shown, nil until it lays the message out.
+@MainActor @Observable private final class Pane {
+    var seen: Bool? = false
 }
 
 private let accountA = "@alice:example.org"
@@ -165,6 +171,43 @@ struct NotificationDeliveryTests {
         await awaitAuthorization()
         seen.append(())
         try transport.authorize(0, .success(false))
+        #expect(try await task.value == false)
+        #expect(transport.attempts.isEmpty)
+    }
+
+    /// The gate as the window asks it: the pane's first answer, announced unless it says seen.
+    private func deliver(_ message: DesktopMessageNotification, pane: Pane) -> Task<Bool, Error> {
+        Task {
+            try await delivery.deliver(message) {
+                await waitObserving(for: { pane.seen }, deadline: .now + .seconds(60)) != true
+            }
+        }
+    }
+
+    // capability: notifications.alert
+    @Test("A pane that shows while the OS answers gets its chance to show the message, and then nothing is announced")
+    func paneShownWhileAuthorizing() async throws {
+        let pane = Pane()
+        let task = deliver(try message(), pane: pane)
+        await awaitAuthorization()
+        pane.seen = nil
+        try transport.authorize(0, .success(true))
+        pane.seen = true
+        #expect(try await task.value == false)
+        #expect(transport.attempts.isEmpty)
+    }
+
+    // capability: notifications.alert
+    @Test("A message seen once the OS has answered stays unannounced though its pane goes away before delivery ends")
+    func seenVerdictStands() async throws {
+        let pane = Pane()
+        pane.seen = nil
+        let task = deliver(try message(), pane: pane)
+        await awaitAuthorization()
+        try transport.authorize(0, .success(true))
+        pane.seen = true
+        await drainMainActor()
+        pane.seen = false
         #expect(try await task.value == false)
         #expect(transport.attempts.isEmpty)
     }
