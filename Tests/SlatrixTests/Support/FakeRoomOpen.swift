@@ -29,6 +29,12 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         set { lock.withLock { pages = newValue } }
     }
     private var pages: [[TimelineItem]] = []
+    /// Why the next older page fails, as a lost connection would make it; it fails once.
+    var pageFailure: Error? {
+        get { lock.withLock { failure } }
+        set { lock.withLock { failure = newValue } }
+    }
+    private var failure: Error?
     /// Read receipts sent through this timeline, as "read:" or "fully:" and the event.
     let receipts = Recorder<String>()
     /// False until a listener is added: a timeline still being set up is not closed.
@@ -58,6 +64,12 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         }
         defer { lock.withLock { paging = false } }
         await pageGate.wait()
+        if let failure = lock.withLock({ () -> Error? in
+            defer { self.failure = nil }
+            return self.failure
+        }) {
+            throw failure
+        }
         if let page = lock.withLock({ pages.isEmpty ? nil : pages.removeFirst() }) {
             emit(page.reversed().map { .pushFront(value: $0) })
         }
