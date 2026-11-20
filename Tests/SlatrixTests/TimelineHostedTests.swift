@@ -1081,26 +1081,6 @@ struct TimelineHostedTests {
         #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
     }
 
-    @Test("A thread with more replies than the pane holds opens on its root")
-    func threadOpensOnRoot() async throws {
-        var root = Self.messages(0..<1, prefix: "Root")[0]
-        root.id = root.eventID
-        let harness = Harness(width: 400, height: 600)
-        defer { harness.close() }
-        let thread = HistoryTimeline(noHandle: .init())
-        thread.onPage = { true }
-        harness.service.configureMessageActionsForChecks(
-            client: harness.client, main: harness.timeline, thread: thread, rootID: root.eventID, sessionID: UUID(),
-            selectionID: UUID(), threadID: UUID())
-        harness.service.threadMessages = [root] + Self.messages(1..<40, prefix: "Reply")
-        var pane = harness.fixture(Self.room)
-        pane.thread = true
-        pane.threadRootID = root.eventID
-        harness.hosting.rootView = pane
-        await settle(harness) { harness.rowCount > 0 }
-        #expect(harness.firstVisibleBody == root.body)
-    }
-
     // capability: message.react.picker
     // capability: message.copy-text
     @Test("A message at rest offers its whole menu, its VoiceOver actions and the emoji picker")

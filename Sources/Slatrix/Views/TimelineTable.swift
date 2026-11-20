@@ -705,15 +705,9 @@ struct TimelineTable: NSViewRepresentable {
         let focused = pendingFocus.flatMap { focus in rows.first { $0.messageEventID == focus }?.id }
         if focused != nil { landed() }
         let remembered = configuration.live || restoresReadingPosition ? rememberedPosition : nil
-        var opening = Policy.opening(
+        let opening = Policy.opening(
             focusedRowID: restoresReadingPosition ? nil : focused, unreadRowID: index["unread"] == nil ? nil : "unread",
             startsAtUnread: configuration.startsAtUnread, remembered: remembered, contains: { index[$0] != nil })
-        // A thread with nowhere else to open opens on its root.
-        if opening == .bottom, let root = configuration.memoryKey?.threadRootID,
-            let row = rows.first(where: { $0.messageEventID == root })
-        {
-            opening = .anchored(rowID: row.id, offset: 0)
-        }
         let held = known.count
         scroll(to: opening)
         settle(keeping: opening)
