@@ -1,5 +1,5 @@
 {
-  "about": "The line under a thread's root in the thread pane: \"1 reply\", \"5 replies\". Each case is a sequence of steps, each step what the pane knows at that moment and the line it shows. loadedToRoot is whether the thread's own timeline has paged back to its root, so every reply is loaded. replies lists the replies that timeline holds, each sent, sending (this device's, not yet taken by the server), failed or deleted. rootSummary is the reply count the root carries right now in the conversation's timeline, null when the root isn't there or carries no count; zero is a count. openedWith is the count whoever opened the pane was showing (the channel's replies link, a Threads item), null when it showed none; it stays the same while the pane is open. Loaded to its root, the line counts the replies that are sent or sending, and nothing else matters. Before that it says rootSummary, else openedWith. line is the count, null for no line; zero is no line.",
+  "about": "The line under a thread's root in the thread pane: \"1 reply\", \"5 replies\". Each case is a sequence of steps, each step what the pane knows at that moment and the line it shows. loadedToRoot is whether the thread's own timeline has paged back to its root, so every reply is loaded. replies lists the replies that timeline holds, each sent, sending (this device's, not yet taken by the server), failed or deleted. rootSummary is the reply count the root carries right now in the conversation's timeline, null when the root isn't there or carries no count. openedWith is the count whoever opened the pane was showing (the channel's replies link, a Threads item), null when it showed none; it stays the same while the pane is open. Loaded to its root, the line counts the replies that are sent or sending, and nothing else matters. Before that it says the first of rootSummary and openedWith that is above zero, since a root counts zero both with no replies and when this device knows its thread only from a read receipt. line is the count, null for no line; zero is no line.",
   "cases": [
     { "name": "Loaded to its root, the line counts the loaded replies whatever the root says", "steps": [
       { "loadedToRoot": true, "replies": ["sent", "sent", "sent"], "rootSummary": 5, "openedWith": 7, "line": 3 }
@@ -43,9 +43,17 @@
       { "loadedToRoot": true, "replies": ["deleted"], "rootSummary": 1, "openedWith": 1, "line": null },
       { "loadedToRoot": true, "replies": ["deleted"], "rootSummary": null, "openedWith": 1, "line": null }
     ] },
-    { "name": "A root that now counts zero has no line, though it was opened at one", "steps": [
+    { "name": "A root that now counts zero keeps the count it was opened with until the thread loads with no replies", "steps": [
       { "loadedToRoot": false, "replies": [], "rootSummary": 1, "openedWith": 1, "line": 1 },
-      { "loadedToRoot": false, "replies": [], "rootSummary": 0, "openedWith": 1, "line": null }
+      { "loadedToRoot": false, "replies": [], "rootSummary": 0, "openedWith": 1, "line": 1 },
+      { "loadedToRoot": true, "replies": [], "rootSummary": 0, "openedWith": 1, "line": null }
+    ] },
+    { "name": "A thread known only from a read receipt says the count it was opened with, then its loaded replies", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": 0, "openedWith": 5, "line": 5 },
+      { "loadedToRoot": true, "replies": ["sent", "sent", "sent", "sent", "sent"], "rootSummary": 0, "openedWith": 5, "line": 5 }
+    ] },
+    { "name": "Opened with no count, a root counting zero has no line", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": 0, "openedWith": null, "line": null }
     ] },
     { "name": "The channel's count holds while the thread's own timeline lags behind it", "steps": [
       { "loadedToRoot": false, "replies": [], "rootSummary": 5, "openedWith": 5, "line": 5 },
