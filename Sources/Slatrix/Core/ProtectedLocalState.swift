@@ -138,10 +138,11 @@ actor ProtectedLocalStateStore {
             }.value
         }
     ) {
-        self.directory =
-            directory ?? AppPaths.applicationSupport.appendingPathComponent("ProtectedLocalState", isDirectory: true)
+        self.directory = directory ?? Self.directory(in: AppPaths.applicationSupport)
         self.keyProvider = keyProvider
     }
+
+    static func directory(in root: URL) -> URL { root.appendingPathComponent("ProtectedLocalState", isDirectory: true) }
 
     func open(accountID: String) async throws -> ProtectedLocalStateAccess {
         guard SecureSessionStore.validAccountID(accountID) else { throw ProtectedLocalStateError.invalidData }
@@ -189,7 +190,9 @@ actor ProtectedLocalStateStore {
         records[access.accountID] = record
     }
 
-    func fileURL(_ accountID: String) -> URL {
+    func fileURL(_ accountID: String) -> URL { Self.fileURL(accountID, in: directory) }
+
+    static func fileURL(_ accountID: String, in directory: URL) -> URL {
         let digest = SHA256.hash(data: Data(accountID.utf8)).map { String(format: "%02x", $0) }.joined()
         return directory.appendingPathComponent(digest + ".vault", isDirectory: false)
     }
@@ -246,6 +249,22 @@ enum ProtectedLocalStateCodec {
             }
             return payload.state
         } catch { throw ProtectedLocalStateError.invalidData }
+    }
+
+    /// Moves `url` aside as `<name>.set-aside`, replacing an earlier copy, and leaves nothing aside when `url` is
+    /// absent. Nothing reads or sweeps set-aside copies.
+    static func setAside(_ url: URL) throws {
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else {
+            if errno == ENOENT { return }
+            throw ProtectedLocalStateError.unavailable
+        }
+        let aside = url.appendingPathExtension("set-aside")
+        if lstat(aside.path, &info) == 0 { try FileManager.default.removeItem(at: aside) }
+        let folder = Darwin.open(url.deletingLastPathComponent().path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard folder >= 0 else { throw ProtectedLocalStateError.unavailable }
+        defer { Darwin.close(folder) }
+        guard rename(url.path, aside.path) == 0, fsync(folder) == 0 else { throw ProtectedLocalStateError.unavailable }
     }
 
     static func prepareDirectory(_ directory: URL) throws {

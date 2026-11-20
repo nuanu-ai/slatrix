@@ -166,6 +166,12 @@ final class SecureSessionStore: @unchecked Sendable {
         if let key = envelope.vaultKeys[accountID] { return key }
         guard envelope.session?.userId == accountID else { throw StoreError.invalidSession }
         let key = try Self.generateStoreKey()
+        // What a lost key sealed for this account can't be read with a new one, so it goes aside first and the
+        // drafts vault and attachment drafts open empty.
+        let root = fileURL?.deletingLastPathComponent() ?? AppPaths.applicationSupport
+        try ProtectedLocalStateCodec.setAside(
+            ProtectedLocalStateStore.fileURL(accountID, in: ProtectedLocalStateStore.directory(in: root)))
+        try AttachmentDraftStore.setAside(accountID, in: AttachmentDraftStore.directory(in: root))
         envelope.vaultKeys[accountID] = key
         try writeEnvelope(envelope)
         return key

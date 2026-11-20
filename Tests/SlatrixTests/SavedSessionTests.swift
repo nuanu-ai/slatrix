@@ -80,4 +80,99 @@ struct SavedSessionTests {
         #expect(throws: (any Error).self) { try credentials.delete() }
         #expect(try Data(contentsOf: file) == record)
     }
+
+    private let room = "!design:example.org"
+    private var vault: URL {
+        ProtectedLocalStateStore.fileURL(session.userId, in: ProtectedLocalStateStore.directory(in: folder.url))
+    }
+    private var attachmentFolder: URL {
+        AttachmentDraftStore.accountDirectory(session.userId, in: AttachmentDraftStore.directory(in: folder.url))
+    }
+
+    private var manifest: URL { attachmentFolder.appendingPathComponent("manifest.vault") }
+    private var asideManifest: URL {
+        attachmentFolder.appendingPathExtension("set-aside").appendingPathComponent("manifest.vault")
+    }
+
+    /// The drafts vault and attachment drafts as a fresh launch opens them, keyed by this test's record.
+    private func stores() -> (ProtectedLocalStateStore, AttachmentDraftStore) {
+        let key: @Sendable (String) async throws -> Data = { [credentials] in
+            try credentials.localStateKey(accountID: $0)
+        }
+        return (
+            ProtectedLocalStateStore(directory: ProtectedLocalStateStore.directory(in: folder.url), keyProvider: key),
+            AttachmentDraftStore(directory: AttachmentDraftStore.directory(in: folder.url), keyProvider: key)
+        )
+    }
+
+    /// Saves a draft and an attachment draft, and returns the sealed vault and attachment manifest.
+    private func saveDrafts(_ text: String) async throws -> (Data, Data) {
+        let (drafts, attachments) = stores()
+        let access = try await drafts.open(accountID: session.userId)
+        try await drafts.save(ProtectedLocalState(drafts: [room: text]), access: access, revision: 1)
+        let files = try await attachments.open(accountID: session.userId)
+        _ = try await attachments.save(
+            urls: [folder.file(text + ".txt")], address: AttachmentDraftAddress(roomID: room), access: files,
+            revision: 1)
+        await attachments.close(access: files)
+        return try (Data(contentsOf: vault), Data(contentsOf: manifest))
+    }
+
+    /// The record loses the account's key, as when Keychain loses it, and the account signs in again.
+    private func loseKey() throws {
+        try FileManager.default.removeItem(at: folder.path("credentials.json"))
+        try credentials.save(session)
+    }
+
+    @Test("A key made anew sets aside what the lost one sealed, so drafts and attachment drafts open empty")
+    func lostKeySetsAside() async throws {
+        try credentials.save(session)
+        let (sealed, sealedManifest) = try await saveDrafts("Before")
+        try loseKey()
+
+        let (drafts, attachments) = stores()
+        let access = try await drafts.open(accountID: session.userId)
+        #expect(access.state == ProtectedLocalState())
+        let files = try await attachments.open(accountID: session.userId)
+        #expect(try await attachments.restore(access: files).isEmpty)
+        #expect(try Data(contentsOf: vault.appendingPathExtension("set-aside")) == sealed)
+        #expect(try Data(contentsOf: asideManifest) == sealedManifest)
+
+        try await drafts.save(ProtectedLocalState(drafts: [room: "After"]), access: access, revision: 1)
+        #expect(try await stores().0.open(accountID: session.userId).state.drafts == [room: "After"])
+    }
+
+    @Test("Losing a key again replaces the earlier set-aside copy")
+    func setAsideReplaced() async throws {
+        try credentials.save(session)
+        _ = try await saveDrafts("First")
+        try loseKey()
+        let (sealed, sealedManifest) = try await saveDrafts("Second")
+        try loseKey()
+
+        _ = try await stores().0.open(accountID: session.userId)
+        #expect(try Data(contentsOf: vault.appendingPathExtension("set-aside")) == sealed)
+        #expect(try Data(contentsOf: asideManifest) == sealedManifest)
+    }
+
+    @Test("A first sign-in on a clean Mac has nothing to set aside")
+    func firstSignInSetsNothingAside() async throws {
+        try credentials.save(session)
+        let (drafts, attachments) = stores()
+        _ = try await drafts.open(accountID: session.userId)
+        _ = try await attachments.open(accountID: session.userId)
+        let paths = try FileManager.default.subpathsOfDirectory(atPath: folder.url.path)
+        #expect(!paths.contains { $0.hasSuffix(".set-aside") })
+    }
+
+    @Test("A vault that won't open under the key it still has fails as before, and nothing is set aside")
+    func damagedVaultWithItsKeyKept() async throws {
+        try credentials.save(session)
+        var sealed = try await saveDrafts("Before").0
+        sealed[sealed.count - 1] ^= 1
+        try sealed.write(to: vault)
+        await #expect(throws: (any Error).self) { try await stores().0.open(accountID: session.userId) }
+        #expect(try Data(contentsOf: vault) == sealed)
+        #expect(!FileManager.default.fileExists(atPath: vault.appendingPathExtension("set-aside").path))
+    }
 }
