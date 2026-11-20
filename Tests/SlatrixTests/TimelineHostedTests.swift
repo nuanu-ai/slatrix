@@ -690,6 +690,74 @@ struct TimelineHostedTests {
         #expect(abs(try #require(harness.top(of: root.body)) - opened) < 0.5)
     }
 
+    /// A thread pane showing `root` and `replies`, more of them older, each older page landing as `onPage` says.
+    private func threadPane(
+        _ harness: Harness, root: ChatMessage, replies: [ChatMessage], onPage: @escaping @MainActor () -> Bool
+    ) -> HistoryTimeline {
+        let thread = HistoryTimeline(noHandle: .init())
+        thread.gate.arm()
+        thread.onPage = onPage
+        harness.service.configureMessageActionsForChecks(
+            client: harness.client, main: harness.timeline, thread: thread, rootID: root.eventID, sessionID: UUID(),
+            selectionID: UUID(), threadID: UUID())
+        harness.service.threadMessages = [root] + replies
+        var fixture = harness.fixture(Self.room)
+        fixture.thread = true
+        fixture.threadRootID = root.eventID
+        harness.hosting.rootView = fixture
+        return thread
+    }
+
+    @Test("Older replies landing under a thread's root leave the reply you were reading where it was")
+    func olderRepliesKeepReplyStill() async throws {
+        var root = Self.messages(0..<1, prefix: "Root")[0]
+        root.id = root.eventID
+        let replies = Self.messages(1..<121, prefix: "Reply")
+        let harness = Harness(width: 400, height: 600)
+        defer { harness.close() }
+        let thread = threadPane(harness, root: root, replies: Array(replies.suffix(50))) {
+            harness.service.threadMessages = [root] + replies.suffix(100)
+            return false
+        }
+        defer { thread.gate.release() }
+        await settle(harness) { harness.top(of: "Reply 120") != nil }
+        // At the top, the root and the oldest loaded reply both show, its older replies on their way.
+        harness.scroll(toTop: 0)
+        #expect(await eventually { thread.gate.isWaiting })
+        let reading = try #require(harness.top(of: "Reply 71"))
+        try #require(harness.top(of: root.body) != nil)
+        thread.gate.release()
+        var after: CGFloat?
+        _ = await eventually {
+            harness.layout()
+            guard harness.service.threadMessages.count == 101 else { return false }
+            after = harness.top(of: "Reply 71")
+            return true
+        }
+        #expect(abs(try #require(after) - reading) < 0.5)
+    }
+
+    @Test("A thread asks for older replies as its reader nears them, not counting its root above them")
+    func rootDoesNotDelayOlder() async throws {
+        var root = Self.messages(0..<1, prefix: "Root")[0]
+        root.id = root.eventID
+        let harness = Harness(width: 400, height: 600)
+        defer { harness.close() }
+        let thread = threadPane(harness, root: root, replies: Self.messages(1..<35, prefix: "Reply")) { false }
+        defer { thread.gate.release() }
+        await settle(harness) { harness.top(of: "Reply 34") != nil }
+        // The replies alone sit within the three screens history loads ahead; with the root above them they don't.
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        let screen = 600 - Self.insets.top - Self.insets.bottom
+        let top = harness.clip.bounds.minY + Self.insets.top
+        // Under the top spacer, the day, the root, then the loading row.
+        let loadingRow = table.rect(ofRow: 3)
+        try #require(loadingRow.height == 40)
+        try #require(top >= screen * TimelineScrollPolicy.historyLead)
+        try #require(top - loadingRow.minY < screen * TimelineScrollPolicy.historyLead)
+        #expect(await eventually { thread.gate.isWaiting })
+    }
+
     @Test("Older history arrives without moving a pixel of what you are reading")
     func prependIsPixelStable() async throws {
         let current = Self.messages(0..<30)

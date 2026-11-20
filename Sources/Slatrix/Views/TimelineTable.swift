@@ -645,7 +645,12 @@ struct TimelineTable: NSViewRepresentable {
         let candidates = measured.isEmpty ? shown : measured
         let messages = candidates.filter { if case .message = rows[$0].kind { true } else { false } }
         guard let first = messages.first ?? candidates.first else { return [] }
-        return [first] + messages.drop { $0 <= first }
+        let held = [first] + messages.drop { $0 <= first }
+        // A thread's older replies land under its root and line: the first reply on screen holds still, not the root.
+        guard let older = index["older"], held.contains(where: { $0 > older && rows[$0].messageEventID != nil }) else {
+            return held
+        }
+        return held.filter { $0 > older }
     }
 
     private func screenAnchor() -> String? {
@@ -918,7 +923,9 @@ struct TimelineTable: NSViewRepresentable {
     private func checkHistory() {
         guard let configuration else { return }
         let viewport = viewport
-        if configuration.canLoadOlder && Policy.needsOlder(viewport) {
+        // A thread's root and line sit over its loading row; only the replies under it count toward the distance.
+        let above = index["older"].map { table.rect(ofRow: $0).minY - table.rect(ofRow: 1).minY } ?? 0
+        if configuration.canLoadOlder && Policy.needsOlder(viewport, above: above) {
             DispatchQueue.main.async { configuration.onLoadOlder() }
         } else if configuration.canLoadNewer && Policy.needsNewer(viewport) {
             DispatchQueue.main.async { configuration.onLoadNewer() }
