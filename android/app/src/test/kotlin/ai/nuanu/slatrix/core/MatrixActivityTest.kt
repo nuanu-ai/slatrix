@@ -54,6 +54,15 @@ class MatrixActivityTest {
         assertFalse(activity.items.value.single().unread)
     }
 
+    // capability: activity.feed
+    @Test fun aReplyShowsItsOwnTextHoweverLongTheMessageItQuotes() = runTest {
+        val activity = MatrixActivity("@alex:example.org", backgroundScope) { _, _ -> null }
+        val quoted = "> <@bob:example.org> " + "Earlier ".repeat(600) + "\n> and more\n\nMy reply"
+        activity.listener.onNotification(notification("\$reply", quoted, at = 1_000u, replyTo = "\$earlier"), "!team:example.org")
+
+        assertEquals("My reply", activity.items.first { it.isNotEmpty() }.single().body)
+    }
+
     // capability: activity.badge
     @Test fun openingAThreadMarksItsRepliesReadAndNoOtherThreads() = runTest {
         val activity = MatrixActivity("@alex:example.org", backgroundScope) { _, _ -> null }
@@ -106,9 +115,9 @@ class ActivityWorkspaceTest {
 }
 
 private fun notification(eventId: String, body: String, at: ULong, mention: Boolean = false, thread: String? = null,
-    direct: Boolean = false, sender: String = "@sam:example.org", senderName: String? = "Sam") =
+    direct: Boolean = false, sender: String = "@sam:example.org", senderName: String? = "Sam", replyTo: String? = null) =
     item(eventId, at, sender, TimelineEventContent.MessageLike(MessageLikeEventContent.RoomMessage(
-        MessageType.Text(TextMessageContent(body, null)), null)), "{}", mention, thread, direct, senderName)
+        MessageType.Text(TextMessageContent(body, null)), replyTo)), "{}", mention, thread, direct, senderName)
 
 private fun reaction(eventId: String, key: String, at: ULong) = item(eventId, at, "@sam:example.org",
     TimelineEventContent.MessageLike(MessageLikeEventContent.ReactionContent("\$mine")),

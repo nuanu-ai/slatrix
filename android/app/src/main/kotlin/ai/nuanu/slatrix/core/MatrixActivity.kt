@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.core
 
+import ai.nuanu.slatrix.push.NotificationText
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -149,12 +150,13 @@ class MatrixActivity(private val userId: String, scope: CoroutineScope,
     }
 }
 
+/** Sync notifications and fetched events come as sent, so a reply's body still opens with the message it quotes. */
 private fun text(content: MessageLikeEventContent.RoomMessage): String? = when (val type = content.messageType) {
     is MessageType.Text -> type.content.body
     is MessageType.Notice -> type.content.body
     is MessageType.Emote -> type.content.body
     else -> null
-}
+}?.let { if (content.inReplyToEventId != null) NotificationText.withoutReplyFallback(it) else it }
 
 /** The text of a message, from the SDK's cache or else the server; null when it isn't text or can't be read. */
 internal suspend fun messageText(client: Client, roomId: String, eventId: String): String? = withContext(Dispatchers.Default) {
