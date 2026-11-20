@@ -117,7 +117,6 @@ struct NotificationPayloadTests {
         #expect(shown.title == original.title && shown.body == original.body)
     }
 
-    // capability: thread.from-notification
     // capability: notifications.open
     @Test("A notification's route survives the round trip through the OS payload; an invite carries no event")
     func targetRoundTrip() throws {

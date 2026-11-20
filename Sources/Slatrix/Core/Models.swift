@@ -157,10 +157,14 @@ struct MessageJump: Equatable {
     let eventID: String
     /// Set when the message is a thread reply: the conversation shows the root, the thread's pane the reply.
     var threadRootID: String? = nil
+    /// The panes done with it, by thread, nil for the conversation's: each landed on it once, or a thread's pages
+    /// didn't reach it. A pane done with it, however often built again, goes where its reader left it.
+    var landed: Set<String?> = []
     let id = UUID()
 
     /// The message a pane scrolls to and highlights: the conversation's when `thread` is nil, else that thread's.
     func eventID(inThread thread: String?) -> String? {
+        guard !landed.contains(thread) else { return nil }
         guard let thread else { return threadRootID ?? eventID }
         return thread == threadRootID ? eventID : nil
     }

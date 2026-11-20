@@ -1033,7 +1033,8 @@ struct TimelineHostedTests {
         // In the layout that takes the jump, before the highlight changes any row.
         harness.layout()
         #expect(harness.top(of: "Message 10") != nil)
-        await settle(harness)
+        // The highlight comes as the jump lands.
+        await settle(harness) { Self.highlighted("Message-10", in: harness) }
         #expect(harness.scrollView === scrollView)
         let row = try #require(
             Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }.first { cell in
@@ -1049,6 +1050,88 @@ struct TimelineHostedTests {
         harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Message-10")
         harness.layout()
         #expect(harness.top(of: "Message 10") != nil)
+    }
+
+    /// The pane closed and opened again, as from the replies bar, or moved between the side and the overlay.
+    @Test("A thread opened again after landing on a jumped-to reply returns to where the reader was")
+    func threadJumpUsedOnce() async throws {
+        var root = Self.messages(0..<1, prefix: "Root")[0]
+        root.id = root.eventID
+        let harness = Harness(width: 400, height: 600)
+        defer { harness.close() }
+        let thread = HistoryTimeline(noHandle: .init())
+        thread.onPage = { true }
+        harness.service.configureMessageActionsForChecks(
+            client: harness.client, main: harness.timeline, thread: thread, rootID: root.eventID, sessionID: UUID(),
+            selectionID: UUID(), threadID: UUID())
+        harness.service.threadMessages = [root] + Self.messages(1..<60, prefix: "Reply")
+        harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Reply-10", threadRootID: root.eventID)
+        var pane = harness.fixture(Self.room)
+        pane.thread = true
+        pane.threadRootID = root.eventID
+        harness.hosting.rootView = pane
+        await settle(harness) { Self.highlighted("Reply-10", in: harness) }
+        harness.scroll(toTop: harness.clip.bounds.minY + 1_500)
+        let reading = try #require(harness.firstVisibleBody)
+        let before = try #require(harness.top(of: reading))
+        try #require(harness.top(of: "Reply 10") == nil)
+        // A pane of its own, as the app builds one each time.
+        pane.timeline = 1
+        harness.hosting.rootView = pane
+        await settle(harness) { harness.top(of: reading) != nil }
+        #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
+    }
+
+    @Test("A jumped-to reply that arrives late lands as it arrives: centred, highlighted then, and the jump used")
+    func lateReplyLands() async throws {
+        var root = Self.messages(0..<1, prefix: "Root")[0]
+        root.id = root.eventID
+        let harness = Harness(width: 400, height: 600)
+        defer { harness.close() }
+        let thread = HistoryTimeline(noHandle: .init())
+        thread.onPage = { true }
+        harness.service.configureMessageActionsForChecks(
+            client: harness.client, main: harness.timeline, thread: thread, rootID: root.eventID, sessionID: UUID(),
+            selectionID: UUID(), threadID: UUID())
+        harness.service.threadMessages = [root] + Self.messages(30..<60, prefix: "Reply")
+        harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Reply-20", threadRootID: root.eventID)
+        var pane = harness.fixture(Self.room)
+        pane.thread = true
+        pane.threadRootID = root.eventID
+        harness.hosting.rootView = pane
+        await settle(harness) { harness.top(of: "Reply 59") != nil }
+        #expect(harness.service.jump?.eventID(inThread: root.eventID) == "Reply-20")
+        // An older page brings it, far from both ends.
+        harness.service.threadMessages = [root] + Self.messages(1..<60, prefix: "Reply")
+        await settle(harness) { Self.highlighted("Reply-20", in: harness) }
+        #expect(Self.highlighted("Reply-20", in: harness))
+        let cell = try #require(harness.cell(showing: "Reply-20"))
+        let row = cell.convert(cell.bounds, to: nil)
+        #expect(abs(row.midY - (harness.composerTop + harness.headerBottom) / 2) <= 2)
+        #expect(harness.service.jump?.eventID(inThread: root.eventID) == nil)
+    }
+
+    @Test("A pane taken away before its landing is reported leaves the jump for the pane that comes next")
+    func detachedPaneLeavesJump() async throws {
+        let harness = Harness(messages: Self.messages(0..<80))
+        defer { harness.close() }
+        await settle(harness)
+        harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Message-10")
+        // The layout that lands it queues the report; the pane goes before the report runs.
+        harness.layout()
+        #expect(harness.top(of: "Message 10") != nil)
+        harness.window.contentView = nil
+        await drainMainActor()
+        #expect(harness.service.jump?.eventID(inThread: nil) == "Message-10")
+    }
+
+    /// Whether the row of `eventID` is on screen with its jump highlight.
+    private static func highlighted(_ eventID: String, in harness: Harness) -> Bool {
+        Harness.views(in: harness.hosting).contains { view in
+            guard let cell = view as? TimelineCell, cell.window != nil, case .message(let entry) = cell.entry?.kind
+            else { return false }
+            return entry.message.eventID == eventID && entry.highlighted
+        }
     }
 
     // capability: message.react.picker

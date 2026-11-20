@@ -114,6 +114,8 @@ struct TimelineTable: NSViewRepresentable {
     var scroller: TimelineScroller
     var onLoadOlder: () -> Void
     var onLoadNewer: () -> Void
+    /// The jump this table landed on, once it centres its message.
+    var onLand: (UUID) -> Void = { _ in }
     /// Whether the newest message is on screen, whether to offer "Jump to recent", whether messages sit above the
     /// top edge (nil until the table shows its rows), and what the read checks need of what it shows.
     var onScroll: (Bool, Bool, Bool?, PaneReport) -> Void
@@ -254,7 +256,10 @@ struct TimelineTable: NSViewRepresentable {
         }
         configuration.scroller.bottom = { [weak self] in self?.scrollToBottom(animated: true) }
         configuration.scroller.anchor = { [weak self] in self?.screenAnchor() }
-        if previous?.focusedEventID != configuration.focusedEventID || previous?.jumpID != configuration.jumpID {
+        // A jump that landed and went changes nothing; a new one goes again.
+        if previous?.focusedEventID != configuration.focusedEventID
+            || configuration.jumpID != nil && previous?.jumpID != configuration.jumpID
+        {
             pendingFocus = configuration.focusedEventID
         }
         inset(configuration.insets)
@@ -700,7 +705,7 @@ struct TimelineTable: NSViewRepresentable {
         }
         opened = true
         let focused = pendingFocus.flatMap { focus in rows.first { $0.messageEventID == focus }?.id }
-        if focused != nil { pendingFocus = nil }
+        if focused != nil { landed() }
         let remembered = configuration.live || restoresReadingPosition ? rememberedPosition : nil
         let opening = Policy.opening(
             focusedRowID: restoresReadingPosition ? nil : focused, unreadRowID: index["unread"] == nil ? nil : "unread",
@@ -873,7 +878,7 @@ struct TimelineTable: NSViewRepresentable {
         guard let configuration else { return }
         closeGap()
         if let pendingFocus, let row = rows.first(where: { $0.messageEventID == pendingFocus }) {
-            self.pendingFocus = nil
+            landed()
             scrolledByReader = false
             applying = true
             scroll(to: .centered(rowID: row.id))
@@ -896,6 +901,17 @@ struct TimelineTable: NSViewRepresentable {
             DispatchQueue.main.async { configuration.onScroll(state.0, state.1, state.2, state.3) }
         }
         checkHistory()
+    }
+
+    /// The focus is on screen; a jump that put it there landed, once.
+    private func landed() {
+        pendingFocus = nil
+        guard let configuration, let jump = configuration.jumpID else { return }
+        // SwiftUI state; never changed from inside its own update or layout.
+        DispatchQueue.main.async { [weak self] in
+            guard self?.scrollView.window != nil else { return }
+            configuration.onLand(jump)
+        }
     }
 
     /// Also before the table opens: history of only hidden events leaves nothing to open at until a page shows some.

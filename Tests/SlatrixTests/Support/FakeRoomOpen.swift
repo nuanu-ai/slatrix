@@ -23,6 +23,12 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         set { lock.withLock { answers = newValue } }
     }
     private var answers: [Bool] = []
+    /// What the next older pages add before what the timeline holds, in order.
+    var olderPages: [[TimelineItem]] {
+        get { lock.withLock { pages } }
+        set { lock.withLock { pages = newValue } }
+    }
+    private var pages: [[TimelineItem]] = []
     /// Read receipts sent through this timeline, as "read:" or "fully:" and the event.
     let receipts = Recorder<String>()
     /// False until a listener is added: a timeline still being set up is not closed.
@@ -52,6 +58,9 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         }
         defer { lock.withLock { paging = false } }
         await pageGate.wait()
+        if let page = lock.withLock({ pages.isEmpty ? nil : pages.removeFirst() }) {
+            emit(page.reversed().map { .pushFront(value: $0) })
+        }
         return lock.withLock { answers.isEmpty ? reachedStart : answers.removeFirst() }
     }
     /// Loaded around an older message, it already reaches the newest one.
@@ -117,6 +126,10 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     var focusedError: Error?
     /// What a thread's timeline loads; the cache when nil.
     var threadItems: [TimelineItem]?
+    /// The older pages of a thread's replies, newest page first.
+    var threadPages: [[TimelineItem]] = []
+    /// Whether the thread's first older page reaches its start.
+    var threadStartReached = false
     /// Thread replies the room can load, by event ID, with their thread's root.
     var threadRoots: [String: String] = [:]
     let membersGate = Gate()
@@ -144,10 +157,17 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
         if case .event = configuration.focus, let focusedItems { items = focusedItems }
         if case .thread = configuration.focus, let threadItems { items = threadItems }
         let timeline = FakeLiveTimeline(items, pageGate: pageGate, forwardGate: forwardGate)
+        if case .thread = configuration.focus {
+            timeline.olderPages = threadPages
+            timeline.startReached = threadStartReached
+        }
         timelines.append(timeline)
         return timeline
     }
+    /// The events looked up one by one.
+    let lookups = Recorder<String>()
     override func loadOrFetchEvent(eventId: String) async throws -> TimelineEvent {
+        lookups.append(eventId)
         guard let root = threadRoots[eventId] else { throw URLError(.resourceUnavailable) }
         return FakeThreadReply(root: root)
     }
@@ -189,6 +209,12 @@ private final class FakeThreadReply: TimelineEvent, @unchecked Sendable {
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
     override func threadRootEventId() -> String? { root }
+    // Asked whether it was deleted.
+    override func content() throws -> TimelineEventContent {
+        .messageLike(
+            content: .roomMessage(
+                messageType: .text(content: TextMessageContent(body: "Reply", formatted: nil)), inReplyToEventId: nil))
+    }
 }
 
 private final class FakePowerLevels: RoomPowerLevels, @unchecked Sendable {

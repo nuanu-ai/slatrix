@@ -714,6 +714,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// The open conversation's live timeline; nil while it shows one opened at an older message.
     private var liveTimeline: KeptTimeline?
     private var recentTimelines = RecentTimelines<KeptTimeline>()
+    /// A jump inside the conversation on screen, prepared aside by its own token while that conversation keeps
+    /// `selection`.
+    private var jumping: UUID?
     /// A live timeline opened ahead of a click, reading its first page; at most one, for the room last pointed at.
     private var prepared: (roomID: String, token: UUID, task: Task<PreparedRoom?, Never>)?
     private typealias PreparedRoom = (
@@ -749,6 +752,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var threadRevision = 0
     private var threadSelection = UUID()
     private var loadedThreadRootID: String?
+    /// The open thread's listener, whose snapshot holds what its timeline does, shown or not.
+    private var threadSnapshot: TimelineObserver?
+    private(set) var reach: Task<Void, Never>?
     private var readyThreadReadSelection: UUID?
     private var lastThreadReceipt: ThreadReadReceiptTarget?
     var threadReadIdentity: ThreadReadIdentity? {
@@ -795,6 +801,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard visibleActionThreadID != rootID else { return }
         visibleActionThreadID = rootID
         messageActionThreadPresentationID = UUID()
+        // A jump reads back through a thread only while its pane shows.
+        reach?.cancel()
+        reach = rootID.map { root in Task { [weak self] in await self?.reachJump(inThread: root) } }
     }
     var messageActionContext: MessageActionTarget.Context {
         MessageActionTarget.Context(
@@ -1303,6 +1312,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         searchIndexingState = .idle
         focusedEventID = nil
         jump = nil
+        jumping = nil
         for copy in pendingCopies { copy.cancel() }
         threadOrigins = [:]
         TimelineMemory.positions = TimelineMemory.positions.filter { $0.key.sessionID != sessionGeneration }
@@ -1483,6 +1493,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     func selectRoom(_ id: String) async {
         jump = nil
+        jumping = nil
         let key = TimelineMemory.Key(sessionID: notificationSessionID, roomID: id)
         let remembered = selectedRoomID == id ? nil : TimelineMemory.positions[key]?.eventID
         let anchor = remembered.flatMap { $0.hasPrefix("$") ? $0 : nil }
@@ -1497,15 +1508,80 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Opens a conversation with unread messages at its unread line.
     func resumeRoom(_ id: String, at anchor: String) async {
         jump = nil
+        jumping = nil
         await open(id, at: anchor, resuming: true)
     }
 
     /// Opens a conversation scrolled to a message, which it highlights. A thread reply opens the conversation at its
-    /// thread's root, which it returns for the thread to open at the reply.
+    /// thread's root, which it returns for the thread to open at the reply. Inside the conversation on screen, that
+    /// conversation stays as it is, taking its updates, until a timeline that holds the message takes its place; if
+    /// none can, it stays, with the error.
     @discardableResult
-    func jumpToMessage(roomID: String, eventID: String) async -> String? {
-        jump = MessageJump(roomID: roomID, eventID: eventID)
-        return await open(roomID, at: eventID)
+    func jumpToMessage(roomID id: String, eventID: String) async -> String? {
+        jumping = nil
+        guard selectedRoomID == id, !isPreview, eventID.hasPrefix("$") else {
+            jump = MessageJump(roomID: id, eventID: eventID)
+            return await open(id, at: eventID)
+        }
+        let token = UUID()
+        jumping = token
+        do {
+            if try await land(MessageJump(roomID: id, eventID: eventID), holding: eventID, token: token) { return nil }
+            guard jumping == token else { return nil }
+            let root = (try? await requireRoom(id).loadOrFetchEvent(eventId: eventID))?.threadRootEventId()
+            let jump = MessageJump(roomID: id, eventID: eventID, threadRootID: root)
+            if let root, try await land(jump, holding: root, token: token) { return root }
+            guard jumping == token else { return nil }
+            let target = root ?? eventID
+            if try await land(jump, holding: target, around: target, token: token) { return root }
+            throw MatrixServiceError.request("Couldn’t find that message.")
+        } catch {
+            guard jumping == token else { return nil }
+            jumping = nil
+            errorMessage = Self.safeError(error)
+            return nil
+        }
+    }
+
+    /// Swaps in a timeline of the conversation that holds `target`: the live one, still open or else built aside, or
+    /// one loaded around `eventID`. False when it doesn't hold it, or when a newer click dropped the jump.
+    private func land(_ jump: MessageJump, holding target: String, around eventID: String? = nil, token: UUID)
+        async throws -> Bool
+    {
+        guard jumping == token else { return false }
+        let id = jump.roomID
+        func landed() {
+            jumping = nil
+            dropPrepared()
+            self.jump = jump
+        }
+        if eventID == nil, showRecentRoom(id, containing: target) {
+            landed()
+            return true
+        }
+        let room = try requireRoom(id)
+        // An invitation on screen stays as it is.
+        guard room.membership() != .invited else {
+            jumping = nil
+            return true
+        }
+        let focus =
+            eventID.map {
+                TimelineFocus.event(eventId: $0, numContextEvents: 30, threadMode: .automatic(hideThreadedEvents: true))
+            } ?? .live(hideThreadedEvents: true)
+        guard
+            let (next, observer, listener) = try await openTimeline(
+                room, focus: focus, eventID: eventID, token: token, while: { self.jumping == token })
+        else { return false }
+        guard Self.contains(observer.snapshot.items, target) else {
+            listener.cancel()
+            return false
+        }
+        landed()
+        selection = token
+        updateSubscriptions(id)
+        install(room, timeline: next, observer: observer, listener: listener, eventID: eventID, token: token)
+        return true
     }
 
     /// Live, as Slack does, when the live timeline open or in the cache holds `eventID`; else loaded around it. The
@@ -1549,12 +1625,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             anchor.map { Self.contains(kept.observer.snapshot.items, $0) } ?? true
         }
         if let live = liveTimeline, live.roomID == id, holds(live) {
-            // Already on screen; this drops any other conversation that was still opening.
+            // Already on screen; this drops any other conversation that was still opening, or jump being prepared.
+            jumping = nil
             selection = live.token
             showTimeline(live.observer.snapshot, roomID: id)
             return true
         }
         guard let kept = recentTimelines.entry(id), holds(kept) else { return false }
+        jumping = nil
         _ = recentTimelines.take(id)
         selection = kept.token
         showConversation(id, eventID: nil, token: kept.token)
@@ -1668,18 +1746,16 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 if shownSelection == token { openState = nil }
                 return true
             }
-            let next: Timeline
-            let observer: TimelineObserver
-            let listenerHandle: TaskHandle
+            let opened: (Timeline, TimelineObserver, TaskHandle)?
             var firstPage: Task<Bool, Error>?
             if let ready = await ahead?.task.value {
-                (next, observer, listenerHandle, firstPage) = ready
+                opened = (ready.timeline, ready.observer, ready.listener)
+                firstPage = ready.firstPage
             } else {
-                next = try await room.timelineWithConfiguration(configuration: Self.timelineConfiguration(focus))
-                guard selection == token else { return true }
-                observer = mainObserver(roomID: id, token: token, focus: eventID)
-                listenerHandle = await next.addListener(listener: observer)
+                opened = try await openTimeline(
+                    room, focus: focus, eventID: eventID, token: token, while: { self.selection == token })
             }
+            guard let (next, observer, listenerHandle) = opened else { return true }
             guard selection == token else {
                 listenerHandle.cancel()
                 return true
@@ -1688,38 +1764,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 listenerHandle.cancel()
                 return false
             }
-            showConversation(id, eventID: eventID, token: token)
-            timeline = next
-            timelineHandle = listenerHandle
-            openState = .ready
-            hasMoreForwardHistory = eventID != nil
-            if eventID == nil {
-                liveTimeline = KeptTimeline(
-                    roomID: id, token: token, timeline: next, observer: observer, listener: listenerHandle)
-            }
-            // The cached rows arrived with the listener; they go up in this same turn.
-            showTimeline(observer.snapshot, roomID: id)
-            watchTyping(room, token: token)
-            Task { [weak self] in
-                guard let self, self.selection == token else { return }
-                await self.loadMembers()
-            }
-            if eventID == nil {
-                // A timeline opened ahead of the click is already reading its first page; the conversation is open
-                // without waiting for it.
-                let page = firstPage ?? readOlder(next)
-                Task { [weak self] in
-                    do {
-                        let endReached = try await page.value
-                        self?.reached(endReached, in: next, roomID: id)
-                    } catch {
-                        guard let self, self.timeline === next else { return }
-                        self.errorMessage = Self.safeError(error)
-                    }
-                }
-                // Loading or restoring a timeline does not mean the user has seen it.
-                // The visible live viewport submits an exact-event receipt separately.
-            }
+            install(
+                room, timeline: next, observer: observer, listener: listenerHandle, firstPage: firstPage,
+                eventID: eventID, token: token)
         } catch {
             guard selection == token else { return true }
             showConversation(id, eventID: eventID, token: token)
@@ -1727,6 +1774,61 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             errorMessage = Self.safeError(error)
         }
         return true
+    }
+
+    /// A timeline of `room` and its listener, whose updates show once `token` is on screen; nil, with nothing left
+    /// open, once `current` turns false on the way.
+    private func openTimeline(
+        _ room: Room, focus: TimelineFocus, eventID: String?, token: UUID, while current: () -> Bool
+    ) async throws -> (Timeline, TimelineObserver, TaskHandle)? {
+        let next = try await room.timelineWithConfiguration(configuration: Self.timelineConfiguration(focus))
+        guard current() else { return nil }
+        let observer = mainObserver(roomID: room.id(), token: token, focus: eventID)
+        let listener = await next.addListener(listener: observer)
+        guard current() else {
+            listener.cancel()
+            return nil
+        }
+        return (next, observer, listener)
+    }
+
+    /// Puts `room`'s timeline on screen in place of the conversation there, in the turn `token` was selected. A
+    /// timeline opened ahead of the click is already reading its `firstPage`.
+    private func install(
+        _ room: Room, timeline next: Timeline, observer: TimelineObserver, listener: TaskHandle,
+        firstPage: Task<Bool, Error>? = nil, eventID: String?, token: UUID
+    ) {
+        let id = room.id()
+        showConversation(id, eventID: eventID, token: token)
+        timeline = next
+        timelineHandle = listener
+        openState = .ready
+        hasMoreForwardHistory = eventID != nil
+        if eventID == nil {
+            liveTimeline = KeptTimeline(
+                roomID: id, token: token, timeline: next, observer: observer, listener: listener)
+        }
+        // The cached rows arrived with the listener; they go up in this same turn.
+        showTimeline(observer.snapshot, roomID: id)
+        watchTyping(room, token: token)
+        Task { [weak self] in
+            guard let self, self.selection == token else { return }
+            await self.loadMembers()
+        }
+        guard eventID == nil else { return }
+        // The conversation is open without waiting for its first page.
+        let page = firstPage ?? readOlder(next)
+        Task { [weak self] in
+            do {
+                let endReached = try await page.value
+                self?.reached(endReached, in: next, roomID: id)
+            } catch {
+                guard let self, self.timeline === next else { return }
+                self.errorMessage = Self.safeError(error)
+            }
+        }
+        // Loading or restoring a timeline does not mean the user has seen it.
+        // The visible live viewport submits an exact-event receipt separately.
     }
 
     /// Shows the open conversation's timeline as it changes, once it is on screen and until another conversation or
@@ -2304,6 +2406,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadMessages = [opening]
         threadRevision = 0
         threadTimeline = nil
+        threadSnapshot = nil
         loadedThreadRootID = nil
         hasMoreThreadHistory = true
         let token = selection
@@ -2324,6 +2427,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             threadTimeline = ready.timeline
             loadedThreadRootID = root.eventID
             threadHandle = ready.listener
+            threadSnapshot = ready.observer
             hasMoreThreadHistory = ready.endReached != true
             if ready.endReached != nil { readyThreadReadSelection = threadToken }
             // Updates that came before the pane opened were dropped; its snapshot holds them.
@@ -2345,8 +2449,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard token == selection, threadToken == threadSelection else { return }
         threadTimeline = next
         loadedThreadRootID = root.eventID
-        let listenerHandle = await next.addListener(
-            listener: threadObserver(root, token: token, threadToken: threadToken))
+        let observer = threadObserver(root, token: token, threadToken: threadToken)
+        threadSnapshot = observer
+        let listenerHandle = await next.addListener(listener: observer)
         guard token == selection, threadToken == threadSelection else {
             listenerHandle.cancel()
             return
@@ -2354,6 +2459,31 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadHandle = listenerHandle
         // The pane shows what the SDK has cached now; the first page arrives whenever the network allows.
         Task { _ = try? await loadMoreThread(rootID: root.eventID) }
+    }
+
+    /// A jump to a reply beyond its thread's first page reads back to it while the thread's pane shows, ten pages past
+    /// the first at most. Out of reach, the thread opens as it would, with nothing highlighted.
+    private func reachJump(inThread rootID: String) async {
+        guard let jumpID = jump?.id, let target = jump?.eventID(inThread: rootID), loadedThreadRootID == rootID,
+            let observer = threadSnapshot
+        else { return }
+        let token = threadSelection
+        func current() -> Bool { !Task.isCancelled && threadSelection == token && jump?.id == jumpID }
+        // What the timeline holds, whether or not the pane has shown it yet.
+        func holds() -> Bool { Self.contains(observer.snapshot.items, target) }
+        // The first page, which the thread asks for as it opens.
+        if readyThreadReadSelection != token { _ = try? await loadMoreThread(rootID: rootID) }
+        for _ in 0..<10 where current() && !holds() && hasMoreThreadHistory {
+            guard (try? await loadMoreThread(rootID: rootID)) == false else { break }
+        }
+        guard current(), !holds() else { return }
+        jump?.landed.insert(rootID)
+    }
+
+    /// The pane showing `thread`, or the conversation's for nil, landed on the jump, which has nowhere left to go there.
+    func landed(_ jump: UUID, inThread thread: String?) {
+        guard self.jump?.id == jump else { return }
+        self.jump?.landed.insert(thread)
     }
 
     private func actionMedia(_ target: MessageActionTarget) throws -> ShownMedia {

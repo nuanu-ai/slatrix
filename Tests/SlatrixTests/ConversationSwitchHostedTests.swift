@@ -270,6 +270,13 @@ struct ConversationSwitchHostedTests {
             RunLoop.main.add(click, forMode: .common)
         }
 
+        /// Clicks a notification for `eventID` in conversation `index`, as the OS hands its payload back.
+        func notify(_ index: Int, _ eventID: String) throws {
+            let sent = try #require(
+                MatrixNotificationTarget(accountID: "@me:example.org", roomID: rooms[index].id(), eventID: eventID))
+            PlatformIntegration.shared.open(try #require(MatrixNotificationTarget(userInfo: sent.userInfo)))
+        }
+
         /// Until ten run-loop passes go by without a row measured, so the rows measured after a click are the click's
         /// and not those the conversation on screen was still preparing for a scroll.
         func idle() async {
@@ -438,5 +445,26 @@ struct ConversationSwitchHostedTests {
         #expect(before.table != nil && held.table == before.table && held.rows == before.rows, "\(before)\n\(held)")
         room.buildGate.release()
         await jumping.value
+    }
+
+    /// Room `index` with a thread on its message `root` holding `$reply`.
+    private func thread(_ harness: Harness, _ index: Int, root: String) {
+        let room = harness.rooms[index]
+        room.threadRoots["$reply"] = root
+        room.threadItems = [
+            FakeTimelineItem(textEvent(root, body: "Root")), FakeTimelineItem(textEvent("$reply", body: "Reply")),
+        ]
+    }
+
+    // capability: thread.from-notification
+    @Test("A notification for a thread reply opens its conversation with the reply in its thread beside it")
+    func notificationOpensReply() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        try #require(await harness.settled(on: 0))
+        thread(harness, 1, root: "$s1-30")
+        try harness.notify(1, "$reply")
+        #expect(await eventually(timeout: .seconds(20)) { harness.sample().rows["$reply"] != nil })
+        #expect(harness.matrix.selectedRoomID == harness.rooms[1].id())
     }
 }
