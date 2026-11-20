@@ -16,6 +16,12 @@
     { "name": "Before it loads to its root, the root's count, not the replies loaded so far", "steps": [
       { "loadedToRoot": false, "replies": ["sent"], "rootSummary": 4, "openedWith": 2, "line": 4 }
     ] },
+    { "name": "Before it loads, the root's count wins over a larger one it was opened with", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": 3, "openedWith": 5, "line": 3 }
+    ] },
+    { "name": "Loaded to its root, its replies count though the root says zero", "steps": [
+      { "loadedToRoot": true, "replies": ["sent", "sent"], "rootSummary": 0, "openedWith": null, "line": 2 }
+    ] },
     { "name": "Before it loads, with no count on the root, the count it was opened with", "steps": [
       { "loadedToRoot": false, "replies": ["sent"], "rootSummary": null, "openedWith": 5, "line": 5 }
     ] },
@@ -66,6 +72,10 @@
       { "loadedToRoot": false, "replies": [], "rootSummary": null, "openedWith": null, "line": null },
       { "loadedToRoot": false, "replies": [], "rootSummary": 2, "openedWith": null, "line": 2 },
       { "loadedToRoot": true, "replies": ["sent", "sent"], "rootSummary": 2, "openedWith": null, "line": 2 }
+    ] },
+    { "name": "Opened from a jump that showed no count, the line goes when the root's count does", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": 4, "openedWith": null, "line": 4 },
+      { "loadedToRoot": false, "replies": [], "rootSummary": null, "openedWith": null, "line": null }
     ] }
   ]
 }
