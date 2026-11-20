@@ -159,6 +159,22 @@ struct TimelineLayoutTests {
             } == ["Today", "Yesterday", "Today"])
     }
 
+    @Test("A day line keeps its identity when older history from its day arrives above an earlier day's line")
+    func dayIdentitySurvivesOlderHistory() {
+        func divider(above id: String, in messages: [ChatMessage]) -> String? {
+            let rows = TimelineLayout.rows(
+                messages, unreadBoundaryEventID: nil, groups: true, now: Self.now, calendar: Self.calendar,
+                locale: Self.locale)
+            guard let row = rows.firstIndex(where: { $0.id == id }), row > 0 else { return nil }
+            return rows[row - 1].id
+        }
+        // Server timestamps out of order: Tuesday's message shown above Monday's.
+        let shown = [message("tuesday", "@alice", at: 2 * 24 * 60), message("monday", "@bob", at: 3 * 24 * 60)]
+        let before = divider(above: "monday", in: shown)
+        let after = divider(above: "monday", in: [message("older", "@alice", at: 3 * 24 * 60 + 10)] + shown)
+        #expect(before != nil && after == before)
+    }
+
     @Test("Row identities survive older messages arriving above them")
     func stableIdentities() {
         let recent = [message("b", "@alice", at: 10)]
