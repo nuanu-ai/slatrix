@@ -68,8 +68,13 @@ struct ConversationSwitchHostedTests {
             let key: @Sendable (String) async throws -> Data = { try credentials.localStateKey(accountID: $0) }
             matrix = MatrixService(
                 credentials: credentials, storeRoots: [folder.path("support"), folder.path("caches")])
-            // Every window opens as it first would, on the first conversation.
-            for key in ["layout.paneWidth", "layout.sidebarHidden", "room.@me:example.org"] {
+            // Every window opens as it first would, on the first conversation and in the default dark look, whatever
+            // another suite left behind. The pane is captured without the window behind it, so light mode's
+            // placeholder rows, black at a few percent, read as no pixels at all.
+            for key in [
+                "layout.paneWidth", "layout.sidebarHidden", "room.@me:example.org", "appearance.mode",
+                "appearance.theme", "appearance.density",
+            ] {
                 UserDefaults.standard.removeObject(forKey: key)
             }
             let rooms = (0..<4).map { index in
