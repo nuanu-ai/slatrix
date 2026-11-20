@@ -144,6 +144,21 @@ struct ActivityTests {
         #expect(item?.body == "@Sam Okafor and @kai, look")
     }
 
+    @Test(
+        "Only a reply loses the quote it opens with; another message keeps a quote that starts it",
+        arguments: [
+            (nil, "> <config>old value</config>\n\nUse this value."), ("$earlier", "My reply"),
+        ])
+    func replyFallback(inReplyTo: String?, shown: String) {
+        let event = NotificationEvent(noHandle: .init())
+        let body = inReplyTo == nil ? shown : "> <@bob:example.org> Earlier\n\nMy reply"
+        event.value = .messageLike(
+            content: .roomMessage(
+                messageType: .text(content: TextMessageContent(body: body, formatted: nil)),
+                inReplyToEventId: inReplyTo))
+        #expect(activity.receive(notification(event), roomID: room.id, ownUserID: me)?.body == shown)
+    }
+
     enum Ignored: CaseIterable { case own, roomState, verification }
 
     @Test("My own messages, room state and verification signalling stay out of Activity", arguments: Ignored.allCases)

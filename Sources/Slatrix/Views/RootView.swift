@@ -359,7 +359,7 @@ struct RootView: View {
                 matrix: matrix, onClose: closeModal,
                 onLogout: {
                     closeModal()
-                    logoutConfirmation = true
+                    signOut()
                 },
                 // Preferences sits above every other modal, so it steps aside for the one it opens.
                 onRecovery: {
@@ -476,7 +476,11 @@ struct RootView: View {
 
     private var roomObservedContent: some View {
         presentedContent
-            .background(RoomListWatcher(matrix: matrix, onRooms: roomsChanged, onWorkspaces: settleWorkspace))
+            .background(
+                RoomListWatcher(
+                    matrix: matrix, notifications: appearance.notifications, onRooms: roomsChanged,
+                    onWorkspaces: settleWorkspace)
+            )
             .onChange(of: workspaceID) { _, id in
                 Performance.finishOnScreen(.workspaceSwitch)
                 cancelStaleThreadOpen()
@@ -601,7 +605,7 @@ struct RootView: View {
             if let message = try? await matrix.messagePreview(roomID: item.roomID, eventID: item.eventID) {
                 let text = DesktopMessageNotification.message(
                     room: room?.name ?? "", sender: message.senderName, direct: room?.isDirect ?? false,
-                    body: message.body)
+                    body: message.body, reply: message.replyToID != nil)
                 (title, body) = (text.title, "Reminder: \(text.text)")
             }
             return DesktopMessageNotification(target: target, title: title, body: body, playSound: true)
@@ -1028,15 +1032,7 @@ struct RootView: View {
 
     /// An update waiting, or the preview's one way out: everything else in it is the real interface.
     private var sidebarAccessory: (title: String, action: () -> Void)? {
-        if matrix.isPreview {
-            return (
-                "Sign in",
-                {
-                    matrix.exitPreview()
-                    resetUI()
-                }
-            )
-        }
+        if matrix.isPreview { return ("Sign in", leavePreview) }
         return updater.updateAvailable ? ("Update", { updater.checkForUpdates() }) : nil
     }
 
@@ -1072,7 +1068,7 @@ struct RootView: View {
             onProfile: {
                 if let me = matrix.user { profilePane = ProfileSelection(id: me.id, fallback: me) }
             },
-            onSignOut: { logoutConfirmation = true },
+            onSignOut: signOut,
             onMarkUnread: { markReadState($0, unread: true) },
             onMarkRead: { markReadState($0, unread: false) },
             onInviteWorkspace: { id in
@@ -2527,7 +2523,6 @@ struct RootView: View {
         cancelStaleThreadOpen()
         cancelStaleForward()
         cancelStaleCaption()
-        PlatformIntegration.shared.setBadge(rooms.reduce(0) { $0 + $1.unread })
         if let target = editTarget, room?.id != target.message.roomID || room?.membership != "join" {
             cancelCurrentEdit()
         }
@@ -2638,6 +2633,14 @@ struct RootView: View {
     }
     private var logoutOwner: LogoutOwner {
         LogoutOwner(sessionID: matrix.notificationSessionID, userID: matrix.user?.id, isPreview: matrix.isPreview)
+    }
+    /// Signing out asks first. The sample workspace has nothing to lose, so leaving it goes straight to sign-in.
+    private func signOut() {
+        if matrix.isPreview { leavePreview() } else { logoutConfirmation = true }
+    }
+    private func leavePreview() {
+        matrix.exitPreview()
+        resetUI()
     }
     private func beginLogout() {
         let owner = logoutOwner
@@ -3033,10 +3036,14 @@ private struct ReadTracking: View {
 /// Follows the room list for the window, so a change to a room reruns these checks, not the window's body.
 private struct RoomListWatcher: View {
     let matrix: MatrixService
+    let notifications: Bool
     let onRooms: ([ChatRoom]) -> Void
     let onWorkspaces: () -> Void
     var body: some View {
         Color.clear
+            .onChange(of: UnreadBadge.dock(matrix.rooms, notifications: notifications), initial: true) { _, count in
+                PlatformIntegration.shared.setBadge(count)
+            }
             .onChange(of: matrix.rooms) { _, rooms in onRooms(rooms) }
             .onChange(of: matrix.workspaces) { _, _ in onWorkspaces() }
     }

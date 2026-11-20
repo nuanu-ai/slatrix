@@ -36,14 +36,15 @@ enum ActivityBadge {
         return mentions + items.count { $0.kind == .message && $0.threadRootID != nil && !$0.hasMention && !$0.opened }
     }
 
-    /// Whether Activity marks the item unread: a thread reply until you open it, anything else until you open it or
-    /// read its conversation, so the marks match what the count holds.
+    /// Whether Activity marks the item unread: a thread reply until you open it, a mention until you open it or read
+    /// its conversation's mentions, anything else until you open it or read its conversation, so the marks match what
+    /// the count holds.
     static func isUnread(_ item: ActivityItem, room: ChatRoom?) -> Bool {
         guard !item.opened else { return false }
         if item.kind == .invite { return true }
         if item.threadRootID != nil && !item.hasMention { return true }
         guard let room else { return false }
-        return room.mentions > 0 || room.hasUnread
+        return item.hasMention ? room.mentions > 0 : room.hasUnread
     }
 }
 
@@ -75,13 +76,15 @@ enum ActivityBadge {
             if let content = try? event.content() {
                 guard case .messageLike(let like) = content else { return nil }
                 switch like {
-                case .roomMessage(let type, _):
+                case .roomMessage(let type, let inReplyTo):
+                    let reply = inReplyTo != nil
                     switch type {
-                    case .text(let value): body = Self.previewBody(value.body, formatted: value.formatted, names: names)
+                    case .text(let value):
+                        body = Self.previewBody(value.body, formatted: value.formatted, names: names, reply: reply)
                     case .notice(let value):
-                        body = Self.previewBody(value.body, formatted: value.formatted, names: names)
+                        body = Self.previewBody(value.body, formatted: value.formatted, names: names, reply: reply)
                     case .emote(let value):
-                        body = Self.previewBody(value.body, formatted: value.formatted, names: names)
+                        body = Self.previewBody(value.body, formatted: value.formatted, names: names, reply: reply)
                     default: body = "Shared an attachment"
                     }
                 case .poll(let question): body = "Poll: " + String(question.prefix(4096))
@@ -119,10 +122,16 @@ enum ActivityBadge {
         "\(roomID.utf8.count):\(roomID)\(eventID)"
     }
 
-    nonisolated static func previewBody(_ body: String, formatted: FormattedBody?, names: [String: String] = [:])
+    nonisolated static func previewBody(
+        _ body: String, formatted: FormattedBody?, names: [String: String] = [:], reply: Bool = false
+    )
         -> String
     {
-        String(MatrixMapping.previewText(body, formatted: formatted, names: names).prefix(4096))
+        String(
+            MatrixMapping.previewText(
+                reply ? DesktopMessageNotification.withoutReplyFallback(body) : body, formatted: formatted,
+                names: names
+            ).prefix(4096))
     }
 
     /// The people a message notification mentions, so their names can be looked up before it shows.

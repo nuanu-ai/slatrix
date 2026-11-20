@@ -628,28 +628,30 @@ struct TimelineTable: NSViewRepresentable {
         return Policy.RowFrame(id: id, top: rect.minY, height: rect.height)
     }
 
-    /// The first message on screen anchors the view: unlike a day divider it never moves among its neighbours.
-    /// Rows about to be measured anchor it only when nothing else is on screen.
-    private func firstVisibleRow(excluding excluded: IndexSet) -> Policy.RowFrame? {
-        guard let range = Range(table.rows(in: visible)) else { return nil }
+    /// The rows on screen that hold the view still: the first message, which unlike a day divider never moves among
+    /// its neighbours, or the first row when no message is there; then the messages after it to stand in for it, as
+    /// only a message's ID never passes to another row. Rows about to be measured hold it only when nothing else is on
+    /// screen.
+    private func visibleRows(excluding excluded: IndexSet) -> [Int] {
+        guard let range = Range(table.rows(in: visible)) else { return [] }
         let shown = range.filter { rows[$0].kind != .spacer && rows[$0].kind != .end }
         // After a jump into rows never measured, the first of them holds its place while they are.
         let measured = shown.filter { !excluded.contains($0) }
         let candidates = measured.isEmpty ? shown : measured
-        let row = candidates.first { if case .message = rows[$0].kind { true } else { false } } ?? candidates.first
-        return row.flatMap { frame(rows[$0].id) }
+        let messages = candidates.filter { if case .message = rows[$0].kind { true } else { false } }
+        guard let first = messages.first ?? candidates.first else { return [] }
+        return [first] + messages.drop { $0 <= first }
     }
 
     private func screenAnchor() -> String? {
-        guard viewport.isAtBottom, let first = firstVisibleRow(excluding: []), let row = index[first.id] else {
-            return nil
-        }
+        guard viewport.isAtBottom, let row = visibleRows(excluding: []).first else { return nil }
         return rows[..<row].last { $0.messageEventID != nil }?.messageEventID ?? rows[row].messageEventID
     }
 
-    private func position(excluding excluded: IndexSet = []) -> Policy.Position {
+    private func position(excluding excluded: IndexSet = [], standIns: Bool = true) -> Policy.Position {
         Policy.position(
-            of: viewport, live: configuration?.live ?? true, firstVisibleRow: firstVisibleRow(excluding: excluded))
+            of: viewport, live: configuration?.live ?? true,
+            visibleRows: visibleRows(excluding: excluded).prefix(standIns ? .max : 1).compactMap { frame(rows[$0].id) })
     }
 
     /// Applies a change to rows or heights and puts the viewport back where the policy says, before display: where
@@ -771,7 +773,7 @@ struct TimelineTable: NSViewRepresentable {
     private func scroll(to position: Policy.Position) {
         // A row the reader has mostly scrolled past is off screen to the settle that follows, so an estimate of its
         // height would move everything after it.
-        if case .anchored(let id, _) = position, known[id] == nil, let row = index[id] {
+        if case .anchored(let id, _, _) = position, known[id] == nil, let row = index[id] {
             prepare(row)
             noteHeights([row])
         }
@@ -915,7 +917,8 @@ struct TimelineTable: NSViewRepresentable {
             return
         }
         guard opened else { return }
-        if case .anchored(let id, let offset) = position(), let row = index[id], let eventID = rows[row].messageEventID
+        if case .anchored(let id, let offset, _) = position(standIns: false), let row = index[id],
+            let eventID = rows[row].messageEventID
         {
             TimelineMemory.positions[key] = TimelineMemory.Anchor(eventID: eventID, offset: offset)
         } else {

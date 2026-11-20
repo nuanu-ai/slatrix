@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.core
 
 import java.time.Instant
 import java.time.ZoneId
+import kotlin.math.abs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -176,7 +177,7 @@ data class ConversationState(
 
 /** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
 fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Boolean =
-    previous.senderId == message.senderId && message.timestamp - previous.timestamp < 5 * 60_000L
+    previous.senderId == message.senderId && abs(message.timestamp - previous.timestamp) < 5 * 60_000L
 
 private const val MAX_BLANK_PAGES = 5
 private const val ROOT_KEY = "thread-root"

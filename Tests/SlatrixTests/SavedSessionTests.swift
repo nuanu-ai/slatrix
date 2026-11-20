@@ -38,6 +38,18 @@ struct SavedSessionTests {
         #expect(matrix.status == .signedOut && matrix.user == nil && !matrix.isPreview)
     }
 
+    @Test("Leaving the sample workspace leaves the conversation list as it was before, still to load, and no error")
+    func leavingPreviewLeavesNothing() {
+        let matrix = MatrixService(credentials: credentials, storeRoots: storeRoots)
+        let before = (matrix.roomsLoaded, matrix.rooms, matrix.workspaces, matrix.selectedRoomID)
+        matrix.enterPreview()
+        matrix.errorMessage = "Wait for the message to send, then save it."
+        matrix.exitPreview()
+        #expect(matrix.roomsLoaded == before.0 && matrix.rooms == before.1)
+        #expect(matrix.workspaces == before.2 && matrix.selectedRoomID == before.3)
+        #expect(matrix.errorMessage == nil)
+    }
+
     @Test("Restoring over an empty saved record sweeps the service's own SDK store folders and no others")
     func restoreKeepsOtherRoots() async throws {
         let orphan = try SessionStores.create(UUID().uuidString, roots: storeRoots)
