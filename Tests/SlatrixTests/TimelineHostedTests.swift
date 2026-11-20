@@ -988,7 +988,10 @@ struct TimelineHostedTests {
         let room = FakeOpenRoom(Self.room.id, cached: (20..<40).map { item($0) })
         room.focusedItems = (0..<40).map { item($0) }
         let harness = Harness(opening: room)
-        defer { harness.close() }
+        defer {
+            room.forwardGate.release()
+            harness.close()
+        }
         // Newer history waits, so its loading row stays under the last message.
         room.forwardGate.arm()
         await harness.service.jumpToMessage(roomID: Self.room.id, eventID: "$m5")
@@ -1001,23 +1004,20 @@ struct TimelineHostedTests {
         // Only the end of the last message is on screen, above the loading row.
         #expect(try #require(harness.top(of: body(39))) > harness.headerBottom)
         let timeline = try #require(room.timelines.all.last)
+        let rows = harness.rowCount
         timeline.emit([
             .reset(values: (0..<39).map { item($0) } + [item(39, long: false)] + (40..<100).map { item($0) })
         ])
-        // The first layout with the page shows messages near its start, not its end.
-        var shown: [Int] = []
+        // The first layout with the page shows messages near its start, not its end, between the header and the
+        // composer.
         #expect(
             await eventually {
                 harness.layout()
-                guard harness.service.messages.count == 100, harness.top(of: body(39, long: false)) != nil else {
-                    return false
-                }
-                let screen = harness.clip.convert(harness.clip.bounds, to: nil)
-                shown = (40..<100).filter { index in
-                    harness.top(of: body(index)).map { $0 > screen.minY && $0 <= screen.maxY } ?? false
-                }
-                return true
+                return harness.rowCount > rows
             })
+        let shown = (40..<100).filter { index in
+            harness.top(of: body(index)).map { $0 > harness.composerTop && $0 <= harness.headerBottom } ?? false
+        }
         #expect(!shown.isEmpty && shown.allSatisfy { $0 < 70 })
     }
 
