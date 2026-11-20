@@ -48,7 +48,7 @@ struct TimelineHostedTests {
         let room: ChatRoom
         let appearance: AppearanceStore
         let popovers: Popovers
-        let atBottom: (Bool) -> Void
+        let onReport: (PaneReport) -> Void
         var zoom: CGFloat = 1
         var thread = false
         var threadRootID: String?
@@ -58,7 +58,7 @@ struct TimelineHostedTests {
             TimelineView(
                 matrix: service, room: room, thread: thread, threadRootID: threadRootID, savedIDs: [],
                 onThread: { _ in },
-                onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onBottomVisibilityChange: atBottom,
+                onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onReport: onReport,
                 insets: TimelineHostedTests.insets
             )
             // As the app's room pane, a table per timeline the service opens.
@@ -75,7 +75,7 @@ struct TimelineHostedTests {
         let popovers = Popovers()
         let window: NSWindow
         let hosting: NSHostingView<Fixture>
-        var bottomReports: [Bool] = []
+        var reports: [PaneReport] = []
 
         /// With `opening`, the conversation opens the way the app opens it, its timelines built by that room.
         init(
@@ -98,7 +98,7 @@ struct TimelineHostedTests {
             window = offscreenWindow(NSSize(width: width, height: height))
             hosting = NSHostingView(
                 rootView: Fixture(
-                    service: service, room: room, appearance: appearance, popovers: popovers, atBottom: { _ in }))
+                    service: service, room: room, appearance: appearance, popovers: popovers, onReport: { _ in }))
             hosting.rootView = fixture(room)
             window.contentView = hosting
         }
@@ -106,7 +106,7 @@ struct TimelineHostedTests {
         func fixture(_ room: ChatRoom) -> Fixture {
             Fixture(
                 service: service, room: room, appearance: appearance, popovers: popovers,
-                atBottom: { [weak self] in self?.bottomReports.append($0) })
+                onReport: { [weak self] in self?.reports.append($0) })
         }
 
         func close() {
@@ -254,8 +254,8 @@ struct TimelineHostedTests {
         #expect(harness.scrollView != nil)
         #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
         #expect(harness.top(of: "Message 39") != nil)
-        await settle(harness) { !harness.bottomReports.isEmpty }
-        #expect(harness.bottomReports == [true])
+        await settle(harness) { !harness.reports.isEmpty }
+        #expect(harness.reports.map(\.newestInView) == ["Message-39"])
     }
 
     // capability: conversation.history
@@ -322,14 +322,14 @@ struct TimelineHostedTests {
     func bottomSitsOnComposer() async throws {
         let harness = Harness(messages: Self.messages(0..<40))
         defer { harness.close() }
-        await settle(harness) { harness.bottomReports.last == true }
+        await settle(harness) { harness.reports.last?.newestInView == "Message-39" }
         let row = try #require(harness.cell(showing: "Message-39"))
         let frame = row.convert(row.bounds, to: nil)
         #expect(frame.minY >= harness.composerTop && frame.minY - harness.composerTop < frame.height)
         // Down past the composer's top, though still in the scroll view.
         harness.scroll(toTop: harness.clip.bounds.minY - (frame.maxY - harness.composerTop) - 1)
-        await settle(harness) { harness.bottomReports.last == false }
-        #expect(harness.bottomReports.last == false)
+        await settle(harness) { harness.reports.last?.newestInView == "Message-38" }
+        #expect(harness.reports.last?.newestInView == "Message-38")
     }
 
     @Test("A short channel's messages sit on the composer, under the header and clear of both")

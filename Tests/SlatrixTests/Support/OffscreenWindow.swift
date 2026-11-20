@@ -23,6 +23,8 @@ private final class OffscreenWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
     override var isKeyWindow: Bool { isKey || super.isKeyWindow }
+    /// Off every screen, nothing can be seen of it; the key window says it can, as the app's front window would.
+    override var occlusionState: NSWindow.OcclusionState { isKey ? [.visible] : super.occlusionState }
 
     // AppKit moves a titled window onto a screen when it orders it in, and a resize keeps the top edge where it was.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }

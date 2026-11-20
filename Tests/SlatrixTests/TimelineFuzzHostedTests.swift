@@ -42,7 +42,7 @@ struct TimelineFuzzHostedTests {
         var body: some View {
             TimelineView(
                 matrix: service, room: room, savedIDs: [], onThread: { _ in }, onReply: { _ in }, onEdit: { _ in },
-                onSave: { _ in }, onBottomVisibilityChange: { _ in },
+                onSave: { _ in },
                 insets: EdgeInsets(top: 52, leading: 0, bottom: 100, trailing: 0)
             )
             .id(room.id)

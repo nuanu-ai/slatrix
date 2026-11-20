@@ -90,6 +90,95 @@ struct ReadStatePolicyTests {
         #expect(!ReadStatePolicy.isCurrent(target, in: context))
     }
 
+    struct Shown: CustomTestStringConvertible, Sendable {
+        var testDescription: String
+        var roomID = "!room:example.org"
+        var threadRootID: String?
+        var conversation: Change = { _ in }
+        var thread: @Sendable (inout ThreadReadContext) -> Void = { _ in }
+        var shown: Bool
+    }
+    static let shown: [Shown] = [
+        Shown(testDescription: "a message in the conversation", shown: true),
+        Shown(testDescription: "the conversation scrolled up", conversation: { $0.isAtBottom = false }, shown: true),
+        Shown(
+            testDescription: "the conversation opened at an older message", conversation: { $0.isLiveTimeline = false },
+            shown: true),
+        Shown(
+            testDescription: "a pane in the conversation's place", conversation: { $0.isCovered = true },
+            shown: false),
+        Shown(
+            testDescription: "a window the reader can't read", conversation: { $0.isWindowActive = false },
+            shown: false),
+        Shown(testDescription: "another conversation", roomID: "!other:example.org", shown: false),
+        Shown(testDescription: "a reply in the open thread", threadRootID: "$root", shown: true),
+        Shown(
+            testDescription: "a reply to a closed thread, its conversation shown", threadRootID: "$root",
+            thread: {
+                $0.identity = nil
+                $0.isPresented = false
+            }, shown: false),
+        Shown(testDescription: "a reply to another thread", threadRootID: "$other", shown: false),
+        Shown(
+            testDescription: "the open thread scrolled up", threadRootID: "$root", thread: { $0.isAtBottom = false },
+            shown: true),
+        Shown(
+            testDescription: "the media viewer over the open thread", threadRootID: "$root",
+            thread: { $0.isCovered = true }, shown: false),
+    ]
+
+    // capability: notifications.alert
+    @Test("A message's conversation or thread is shown only where the reader can see it", arguments: shown)
+    func paneShown(shown: Shown) {
+        var conversation = Self.visible
+        shown.conversation(&conversation)
+        var thread = ThreadReadContext(
+            identity: ThreadReadIdentity(
+                accountID: "@reader:example.org", sessionID: UUID(), roomID: "!room:example.org", timelineID: UUID(),
+                rootID: "$root", threadSelectionID: UUID(), presentationID: UUID()),
+            eventID: "$reply", isPresented: true, isReady: true, isAtBottom: true, isWindowActive: true,
+            isWindowVisible: true, isWindowUnoccluded: true)
+        shown.thread(&thread)
+        #expect(
+            ReadStatePolicy.isShown(
+                roomID: shown.roomID, threadRootID: shown.threadRootID, conversation: conversation, thread: thread)
+                == shown.shown)
+    }
+
+    struct Seen: CustomTestStringConvertible, Sendable {
+        var testDescription: String
+        var event: String
+        var shown = true
+        var newestInView: String?
+        var laidOut: String? = "$c"
+        var seen: Bool?
+    }
+    static let seen: [Seen] = [
+        Seen(testDescription: "the newest message in view", event: "$c", newestInView: "$c", seen: true),
+        Seen(testDescription: "a message above the newest in view", event: "$a", newestInView: "$b", seen: true),
+        Seen(testDescription: "a message below the newest in view", event: "$c", newestInView: "$b", seen: false),
+        Seen(testDescription: "nothing in view", event: "$a", seen: false),
+        Seen(testDescription: "a message its pane has yet to lay out", event: "$d", newestInView: "$c", seen: nil),
+        Seen(testDescription: "a pane that hasn't reported", event: "$a", laidOut: nil, seen: nil),
+        Seen(
+            testDescription: "a message in a pane that isn't shown", event: "$c", shown: false, newestInView: "$c",
+            seen: false),
+    ]
+
+    // capability: notifications.alert
+    @Test(
+        "A message is seen once its shown pane has it at or before the newest message in view, asked once or again",
+        arguments: seen)
+    func messageSeen(seen: Seen) {
+        let timeline = TimelinePositions(["$a", "$b", "$c", "$d"])
+        let report = seen.laidOut.map { PaneReport(newestInView: seen.newestInView, laidOut: $0) }
+        // The first question searches the timeline, the next asks its index.
+        let answers = (0..<2).map { _ in
+            ReadStatePolicy.seen(seen.event, shown: seen.shown, in: timeline, report: report)
+        }
+        #expect(answers == [seen.seen, seen.seen])
+    }
+
     // capability: conversation.mark-unread
     @Test("Mark unread holds even while the bottom is visible and new messages arrive")
     func holdSurvivesNewMessages() throws {
