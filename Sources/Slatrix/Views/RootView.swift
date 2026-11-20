@@ -124,7 +124,7 @@ struct RootView: View {
     @State private var editText = ""
     @State private var drafts = ComposerDrafts()
     @State private var viewer = MediaViewerState()
-    @StateObject private var attachmentDrafts = AttachmentDraftController()
+    @StateObject private var attachmentDrafts: AttachmentDraftController
     @State private var invitationResponseID: String?
     @State private var navigationNotice: String?
     @State private var sendingComposers: [String: Bool] = [:]
@@ -316,10 +316,11 @@ struct RootView: View {
 
     @MainActor init(
         matrix: MatrixService, localStore: ProtectedLocalStateStore = .shared,
-        notifications: DesktopNotificationDelivery? = nil
+        attachmentDrafts: AttachmentDraftStore = .shared, notifications: DesktopNotificationDelivery? = nil
     ) {
         self.matrix = matrix
         self.localStore = localStore
+        _attachmentDrafts = StateObject(wrappedValue: AttachmentDraftController(store: attachmentDrafts))
         self.notifications = notifications ?? PlatformIntegration.shared.delivery
     }
 

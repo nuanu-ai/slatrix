@@ -124,12 +124,11 @@ actor AttachmentDraftStore {
         directory: URL? = nil, budgetBytes: Int = AttachmentDraftStore.maximumAccountBytes,
         keyProvider: @escaping @Sendable (String) async throws -> Data = { account in
             try await Task.detached(priority: .userInitiated) {
-                try SecureSessionStore.localStateKey(accountID: account)
+                try SecureSessionStore.shared.localStateKey(accountID: account)
             }.value
         }, fault: (@Sendable (FaultPoint) throws -> Void)? = nil
     ) {
-        self.directory =
-            directory ?? AppPaths.applicationSupport.appendingPathComponent("AttachmentDrafts", isDirectory: true)
+        self.directory = directory ?? Self.directory(in: AppPaths.applicationSupport)
         self.budgetBytes = budgetBytes
         self.keyProvider = keyProvider
         self.fault = fault
@@ -442,8 +441,19 @@ actor AttachmentDraftStore {
                 )
             })
     }
-    private func accountDirectory(_ account: String) -> URL {
-        directory.appendingPathComponent(Self.digest(Data(account.utf8)), isDirectory: true)
+    static func directory(in root: URL) -> URL { root.appendingPathComponent("AttachmentDrafts", isDirectory: true) }
+    private func accountDirectory(_ account: String) -> URL { Self.accountDirectory(account, in: directory) }
+    /// Moves the account's folder aside under its lease, so a folder still in use is never moved.
+    static func setAside(_ account: String, in directory: URL) throws {
+        let folder = accountDirectory(account, in: directory)
+        guard try ProtectedLocalStateCodec.existingFolder(directory),
+            try ProtectedLocalStateCodec.existingFolder(folder)
+        else { return }
+        let lease = try Lease(directory: folder)
+        try withExtendedLifetime(lease) { try ProtectedLocalStateCodec.setAside(folder) }
+    }
+    static func accountDirectory(_ account: String, in directory: URL) -> URL {
+        directory.appendingPathComponent(digest(Data(account.utf8)), isDirectory: true)
     }
     private func blobURL(_ id: String, directory: URL) -> URL { directory.appendingPathComponent(id + ".blob") }
     private func blobAuthentication(_ account: String, _ id: String) -> Data {

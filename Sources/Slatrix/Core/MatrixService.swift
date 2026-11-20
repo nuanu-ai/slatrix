@@ -427,12 +427,17 @@ private final class TypingObserver: TypingNotificationsListener, @unchecked Send
 private final class SessionPersistence: ClientSessionDelegate, @unchecked Sendable {
     let storeID: String
     let storeKey: Data
+    private let credentials: SecureSessionStore
     private let lock = NSLock()
     private var active = true
     private var cachedSession: StoredSession?
     let failure: @Sendable () -> Void
-    init(storeID: String, storeKey: Data, initialSession: StoredSession?, failure: @escaping @Sendable () -> Void) {
+    init(
+        storeID: String, storeKey: Data, credentials: SecureSessionStore, initialSession: StoredSession?,
+        failure: @escaping @Sendable () -> Void
+    ) {
         self.storeID = storeID
+        self.credentials = credentials
         self.storeKey = storeKey
         self.cachedSession = initialSession
         self.failure = failure
@@ -473,7 +478,7 @@ private final class SessionPersistence: ClientSessionDelegate, @unchecked Sendab
             deviceId: session.deviceId, homeserverUrl: session.homeserverUrl, oidcData: session.oauthData,
             storeID: storeID, storeKey: storeKey)
         cachedSession = stored
-        do { try SecureSessionStore.save(stored) } catch { failure() }
+        do { try credentials.save(stored) } catch { failure() }
     }
 }
 
@@ -516,6 +521,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
 @MainActor
 @Observable final class MatrixService {
+    /// Where the saved session and vault keys live.
+    @ObservationIgnored let credentials: SecureSessionStore
+    /// Where the SDK stores of the sessions those credentials name live.
+    @ObservationIgnored private let storeRoots: [URL]
+    convenience init() { self.init(credentials: .shared, storeRoots: SessionStores.roots) }
+    init(credentials: SecureSessionStore, storeRoots: [URL]) {
+        self.credentials = credentials
+        self.storeRoots = storeRoots
+    }
     let verification = VerificationService()
     let threadFeed = ThreadFeedService()
     let activity = ActivityService()
@@ -848,12 +862,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Starts the session as signing in does, for a client already signed in.
     func startForChecks(_ client: Client) async throws {
         try await start(
-            client, delegate: SessionPersistence(storeID: "", storeKey: Data(), initialSession: nil, failure: {}))
+            client,
+            delegate: SessionPersistence(
+                storeID: "", storeKey: Data(), credentials: credentials, initialSession: nil, failure: {}))
     }
     func stopForChecks() async { await stop() }
-    func configureRoomOpenForChecks(client: Client, roomList: RoomListService, user: ChatUser) {
+    func configureRoomOpenForChecks(client: Client, roomList: RoomListService, user: ChatUser, storeID: String? = nil) {
         self.client = client
         self.user = user
+        persistence = storeID.map {
+            SessionPersistence(
+                storeID: $0, storeKey: Data(), credentials: credentials, initialSession: nil, failure: {})
+        }
         roomSubscriptions.attach(roomList)
     }
     #endif
@@ -947,8 +967,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func buildClient(homeserver: String, storeID: String, storeKey: Data, initialSession: StoredSession? = nil)
         async throws -> (Client, SessionPersistence)
     {
-        let folders = try SessionStores.create(storeID)
-        let delegate = SessionPersistence(storeID: storeID, storeKey: storeKey, initialSession: initialSession) {
+        let folders = try SessionStores.create(storeID, roots: storeRoots)
+        let delegate = SessionPersistence(
+            storeID: storeID, storeKey: storeKey, credentials: credentials, initialSession: initialSession
+        ) {
             [weak self] in
             Task { @MainActor [weak self] in
                 self?.errorMessage =
@@ -1003,16 +1025,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 deviceId: session.deviceId, homeserverUrl: session.homeserverUrl, oidcData: session.oauthData,
                 storeID: storeID, storeKey: storeKey)
             try validateAuthentication(account)
+            let credentials = credentials
             try await Task.detached(priority: .userInitiated) {
                 delegate.cache(stored)
-                try SecureSessionStore.save(stored)
+                try credentials.save(stored)
             }.value
             storeSaved = true
             try validateAuthentication(account)
             try await start(newClient, delegate: delegate)
         } catch {
             // Once Keychain points at this store it holds the device's keys; only an unsaved one is disposable.
-            if !storeSaved { SessionStores.remove(storeID) }
+            if !storeSaved { SessionStores.remove(storeID, roots: storeRoots) }
             status = .error
             errorMessage = Self.safeError(error)
             throw MatrixServiceError.request(Self.safeError(error))
@@ -1026,9 +1049,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let account = sessionGeneration
         do {
             status = .connecting
-            let saved = try await Task.detached(priority: .userInitiated) { try SecureSessionStore.load() }.value
+            let credentials = credentials
+            let saved = try await Task.detached(priority: .userInitiated) { try credentials.load() }.value
             try validateAuthentication(account)
-            SessionStores.removeAll(except: saved?.storeID)
+            SessionStores.removeAll(except: saved?.storeID, roots: storeRoots)
             guard let stored = saved else {
                 status = .signedOut
                 return
@@ -1313,7 +1337,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         try beginLogout()
         let owner = logoutOwner
         defer { authOperation = nil }
-        if let originalClient = client {
+        // The sample workspace never signed in, so whatever client a failed start left belongs to no one here.
+        if !owner.isPreview, let originalClient = client {
             do { try await originalClient.logout() } catch {
                 try validateLogout(owner)
                 if error is CancellationError { throw error }
@@ -1341,11 +1366,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         try validateLogout(stoppedOwner)
         guard client == nil else { throw CancellationError() }
         var deletionError: Error?
-        do { try await Task.detached(priority: .userInitiated) { try SecureSessionStore.delete() }.value } catch {
-            deletionError = error
+        let credentials = credentials
+        if !owner.isPreview {
+            do { try await Task.detached(priority: .userInitiated) { try credentials.delete() }.value } catch {
+                deletionError = error
+            }
+            // While Keychain still holds the session it can restore into this store, so keep it.
+            if deletionError == nil, let storeID { SessionStores.remove(storeID, roots: storeRoots) }
         }
-        // While Keychain still holds the session it can restore into this store, so keep it.
-        if deletionError == nil, let storeID { SessionStores.remove(storeID) }
         try validateLogout(stoppedOwner)
         sessionCleanupPending = deletionError != nil
         // Keep the old account published through credential deletion; exposing
