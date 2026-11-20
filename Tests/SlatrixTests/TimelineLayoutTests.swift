@@ -30,11 +30,12 @@ struct TimelineLayoutTests {
     }
 
     private func layout(
-        _ messages: [ChatMessage], unread: String? = nil, groups: Bool = true, threadRoot: String? = nil
+        _ messages: [ChatMessage], unread: String? = nil, groups: Bool = true, threadRoot: String? = nil,
+        repliesLine: Int? = nil
     ) -> [String] {
         TimelineLayout.rows(
-            messages, unreadBoundaryEventID: unread, groups: groups, threadRootEventID: threadRoot, now: Self.now,
-            calendar: Self.calendar, locale: Self.locale
+            messages, unreadBoundaryEventID: unread, groups: groups, threadRootEventID: threadRoot,
+            repliesLine: repliesLine, now: Self.now, calendar: Self.calendar, locale: Self.locale
         ).map { row in
             switch row.kind {
             case .day(let label): "day \(label)"
@@ -118,15 +119,18 @@ struct TimelineLayoutTests {
         #expect(rows == ["day Today", "a 11:58 AM", "unread", "txn 11:59 AM"])
     }
 
-    @Test("In a thread a line counting the replies sets the root apart, and the first reply starts its own group")
+    @Test("In a thread the line counting its replies sets the root apart, and the first reply starts its own group")
     func repliesDivider() {
-        let rows = layout(
-            [message("root", "@alice", at: 3), message("a", "@alice", at: 2), message("b", "@alice", at: 1)],
-            threadRoot: "root")
-        #expect(rows == ["day Today", "root 11:57 AM", "2 replies", "a 11:58 AM", "b grouped 11:59 AM"])
+        let thread = [message("root", "@alice", at: 3), message("a", "@alice", at: 2), message("b", "@alice", at: 1)]
+        #expect(
+            layout(thread, threadRoot: "root", repliesLine: 5)
+                == ["day Today", "root 11:57 AM", "5 replies", "a 11:58 AM", "b grouped 11:59 AM"])
+        // No count, no line; the first reply still starts its own group.
+        #expect(
+            layout(thread, threadRoot: "root") == ["day Today", "root 11:57 AM", "a 11:58 AM", "b grouped 11:59 AM"])
         // Older replies still to load sit above the newest, with the root not yet among them: no line.
         #expect(
-            layout([message("a", "@alice", at: 2), message("b", "@alice", at: 1)], threadRoot: "root")
+            layout(Array(thread.dropFirst()), threadRoot: "root", repliesLine: 5)
                 == ["day Today", "a 11:58 AM", "b grouped 11:59 AM"])
     }
 

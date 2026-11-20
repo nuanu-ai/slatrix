@@ -29,10 +29,10 @@ class ThreadsFeedScreenTest {
         val thread = ThreadFeedItem("!design:example.org", "design", false, "\$root",
             ThreadFeedMessage("Sam", "S", 0, "Shall we ship?", 1_000), ThreadFeedMessage("Mira", "M", 1, "Yes, Friday", 2_000),
             replies = 3, unread = true)
-        var opened: Pair<String, String>? = null
+        var opened: ThreadFeedItem? = null
         compose.setContent {
             SlatrixTheme {
-                ActivityScreen(emptyList(), {}, { room, root -> opened = room to root }) { onOpenThread ->
+                ActivityScreen(emptyList(), {}, { opened = it }) { onOpenThread ->
                     ThreadsFeed(ThreadFeedState(listOf(thread), loading = false), onOpenThread)
                 }
             }
@@ -43,6 +43,6 @@ class ThreadsFeedScreenTest {
         compose.onNodeWithText("Yes, Friday", substring = true).assertExists()
         compose.onNodeWithText("3 replies").assertExists()
         compose.onNodeWithText("Shall we ship?").performClick()
-        compose.runOnIdle { assertEquals("!design:example.org" to "\$root", opened) }
+        compose.runOnIdle { assertEquals(thread, opened) }
     }
 }

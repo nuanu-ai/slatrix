@@ -134,7 +134,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** The thread a copy of a thread reply came from, which its row names; null when the reply isn't in a thread. */
     loadThreadOrigin: suspend (replyEventId: String) -> ThreadOrigin? = { null },
     /** Told once what the reader sent is in view. */
-    onSendShown: () -> Unit = {}) {
+    onSendShown: () -> Unit = {},
+    /** Opens a thread from its replies bar, with the count the bar shows. */
+    onOpenReplies: (rootEventId: String, replies: Int) -> Unit = { _, _ -> }) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val videos = rememberVideoPlayback(loadFile)
@@ -315,7 +317,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     @Composable
     fun messageRow(row: ConversationMessage, last: Boolean, lifted: Boolean = false) = LiveMessageRow(row, last, named,
         state.ownUserId, state.names, actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null },
-        onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
+        onOpenReplies.takeIf { threadRoot == null }, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
         loadThreadOrigin, actions.onQuote, lifted) { y -> menu = Pressed(row, last, y) }
     var origin by remember { mutableFloatStateOf(0f) }
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow().y }) {
@@ -347,11 +349,6 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     Box(Modifier.fillMaxSize().glassSource(glass).wallpaper()) {
         Box(Modifier.fillMaxSize()) {
             val rows = state.rows
-            // A reset re-pages the thread; the last count stays until the new one is known, so the bar doesn't blank.
-            var replies by remember { mutableStateOf<Int?>(null) }
-            if (threadRoot != null && !state.hasMore) {
-                replies = rows.count { it is ConversationMessage && it.eventId != null && it.eventId != threadRoot }
-            }
             val firstReply = remember(rows, threadRoot) {
                 rows.getOrNull(rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot } + 1)?.id.takeIf { threadRoot != null }
             }
@@ -382,8 +379,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val last = next == null || !next.grouped || restarts(next)
                             val root = threadRoot != null && row.eventId == threadRoot
                             messageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last)
-                            // Counted once the whole thread has loaded; until then the bar keeps its place, so nothing moves.
-                            if (root) RepliesBar(replies)
+                            if (root) state.replies?.let { RepliesBar(it) }
                         }
                     }
                 } }
@@ -522,13 +518,12 @@ internal fun membersLabel(count: Long) = if (count == 1L) "1 member" else "$coun
 
 /** Slack's bar between a thread's root and its replies. */
 @Composable
-private fun RepliesBar(count: Int?) {
+private fun RepliesBar(count: Int) {
     val colors = SlatrixTheme.colors
-    if (count == 0) return
     Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         HorizontalDivider(Modifier.weight(1f), color = colors.borderStrong)
-        Text(when (count) { null -> ""; 1 -> "1 reply"; else -> "$count replies" }, style = MaterialTheme.typography.labelMedium,
+        Text(if (count == 1) "1 reply" else "$count replies", style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary)
         HorizontalDivider(Modifier.weight(1f), color = colors.borderStrong)
     }
@@ -601,7 +596,8 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
  */
 @Composable
 private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, named: Boolean, me: String?, names: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
-    onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
+    onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReplies: ((String, Int) -> Unit)?,
+    onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?, onReply: ((ConversationMessage) -> Unit)?,
     /** Brought forward over the message sheet, on a shadow. */
@@ -731,8 +727,9 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, nam
                 }
                 val root = message.eventId
                 // Inside a thread the root's replies bar says it instead.
-                if (message.thread != null && root != null && onOpenThread != null) {
-                    Box(inset) { ThreadReplies(message.thread) { onOpenThread(root) } }
+                val thread = message.shownThread?.takeIf { it.replies > 0 }
+                if (thread != null && root != null && onOpenReplies != null) {
+                    Box(inset) { ThreadReplies(thread) { onOpenReplies(root, thread.replies) } }
                 }
             }
             // In the bubble's bottom padding, so the bar comes and goes without moving anything.

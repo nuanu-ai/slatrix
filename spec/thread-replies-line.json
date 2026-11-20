@@ -1,0 +1,89 @@
+{
+  "about": "The line under a thread's root in the thread pane: \"1 reply\", \"5 replies\". Each case is a sequence of steps, each step what the pane knows at that moment and the line it shows. loadedToRoot is whether the thread's own timeline has paged back to its root, so every reply is loaded. replies lists the replies that timeline holds, each sent, sending (this device's, not yet taken by the server), failed or deleted. rootSummary is the reply count the root carries right now in the conversation's timeline, null when the root isn't there or carries no count. openedWith is the count whoever opened the pane was showing (the channel's replies link, a Threads item), null when it showed none; it stays the same while the pane is open. Loaded to its root, the line counts the replies that are sent or sending, and nothing else matters. Before that it says the first of rootSummary and openedWith that is above zero, since a root counts zero both with no replies and when this device knows its thread only from a read receipt. line is the count, null for no line; zero is no line.",
+  "cases": [
+    { "name": "Loaded to its root, the line counts the loaded replies whatever the root says", "steps": [
+      { "loadedToRoot": true, "replies": ["sent", "sent", "sent"], "rootSummary": 5, "openedWith": 7, "line": 3 }
+    ] },
+    { "name": "Loaded to its root with no replies, no line", "steps": [
+      { "loadedToRoot": true, "replies": [], "rootSummary": 2, "openedWith": 2, "line": null }
+    ] },
+    { "name": "A failed reply isn't counted", "steps": [
+      { "loadedToRoot": true, "replies": ["sent", "failed"], "rootSummary": null, "openedWith": null, "line": 1 }
+    ] },
+    { "name": "A deleted reply isn't counted, as the server's count leaves it out", "steps": [
+      { "loadedToRoot": true, "replies": ["sent", "deleted"], "rootSummary": null, "openedWith": null, "line": 1 }
+    ] },
+    { "name": "Before it loads to its root, the root's count, not the replies loaded so far", "steps": [
+      { "loadedToRoot": false, "replies": ["sent"], "rootSummary": 4, "openedWith": 2, "line": 4 }
+    ] },
+    { "name": "Before it loads, the root's count wins over a larger one it was opened with", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": 3, "openedWith": 5, "line": 3 }
+    ] },
+    { "name": "Loaded to its root, its replies count though the root says zero", "steps": [
+      { "loadedToRoot": true, "replies": ["sent", "sent"], "rootSummary": 0, "openedWith": null, "line": 2 }
+    ] },
+    { "name": "Before it loads, with no count on the root, the count it was opened with", "steps": [
+      { "loadedToRoot": false, "replies": ["sent"], "rootSummary": null, "openedWith": 5, "line": 5 }
+    ] },
+    { "name": "Before it loads, with no count anywhere, no line", "steps": [
+      { "loadedToRoot": false, "replies": ["sent", "sent"], "rootSummary": null, "openedWith": null, "line": null }
+    ] },
+    { "name": "A thread's first reply and its line appear together, and stay as the server takes the reply", "steps": [
+      { "loadedToRoot": true, "replies": [], "rootSummary": null, "openedWith": null, "line": null },
+      { "loadedToRoot": true, "replies": ["sending"], "rootSummary": null, "openedWith": null, "line": 1 },
+      { "loadedToRoot": true, "replies": ["sent"], "rootSummary": null, "openedWith": null, "line": 1 },
+      { "loadedToRoot": true, "replies": ["sent"], "rootSummary": 1, "openedWith": null, "line": 1 }
+    ] },
+    { "name": "The last page arrives with its replies, so the count never steps through a partial one", "steps": [
+      { "loadedToRoot": false, "replies": ["sent"], "rootSummary": 2, "openedWith": 2, "line": 2 },
+      { "loadedToRoot": true, "replies": ["sent", "sent"], "rootSummary": 2, "openedWith": 2, "line": 2 }
+    ] },
+    { "name": "Deleting the last reply takes the line away, whatever the root said before", "steps": [
+      { "loadedToRoot": true, "replies": ["sent"], "rootSummary": 1, "openedWith": 1, "line": 1 },
+      { "loadedToRoot": true, "replies": ["deleted"], "rootSummary": 1, "openedWith": 1, "line": null },
+      { "loadedToRoot": true, "replies": ["deleted"], "rootSummary": null, "openedWith": 1, "line": null }
+    ] },
+    { "name": "A root that now counts zero keeps the count it was opened with until the thread loads with no replies", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": 1, "openedWith": 1, "line": 1 },
+      { "loadedToRoot": false, "replies": [], "rootSummary": 0, "openedWith": 1, "line": 1 },
+      { "loadedToRoot": true, "replies": [], "rootSummary": 0, "openedWith": 1, "line": null }
+    ] },
+    { "name": "A thread known only from a read receipt says the count it was opened with, then its loaded replies", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": 0, "openedWith": 5, "line": 5 },
+      { "loadedToRoot": true, "replies": ["sent", "sent", "sent", "sent", "sent"], "rootSummary": 0, "openedWith": 5, "line": 5 }
+    ] },
+    { "name": "Opened with no count, a root counting zero has no line", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": 0, "openedWith": null, "line": null }
+    ] },
+    { "name": "The channel's count holds while the thread's own timeline lags behind it", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": 5, "openedWith": 5, "line": 5 },
+      { "loadedToRoot": false, "replies": ["sent"], "rootSummary": 5, "openedWith": 5, "line": 5 },
+      { "loadedToRoot": false, "replies": ["sent"], "rootSummary": 6, "openedWith": 5, "line": 6 }
+    ] },
+    { "name": "A copy of the root without a count, then a change to a reply, keeps the count it was opened with", "steps": [
+      { "loadedToRoot": false, "replies": ["sent"], "rootSummary": 5, "openedWith": 5, "line": 5 },
+      { "loadedToRoot": false, "replies": ["sent"], "rootSummary": null, "openedWith": 5, "line": 5 },
+      { "loadedToRoot": false, "replies": ["sent"], "rootSummary": null, "openedWith": 5, "line": 5 }
+    ] },
+    { "name": "Opened from Threads with no channel holding the root, the count Threads showed", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": null, "openedWith": 5, "line": 5 },
+      { "loadedToRoot": false, "replies": ["sent"], "rootSummary": null, "openedWith": 5, "line": 5 },
+      { "loadedToRoot": true, "replies": ["sent", "sent", "sent", "sent", "sent"], "rootSummary": null, "openedWith": 5, "line": 5 }
+    ] },
+    { "name": "A reply arriving live before the thread loads to its root counts once the root's count does", "steps": [
+      { "loadedToRoot": false, "replies": ["sent"], "rootSummary": 3, "openedWith": 3, "line": 3 },
+      { "loadedToRoot": false, "replies": ["sent", "sent"], "rootSummary": 3, "openedWith": 3, "line": 3 },
+      { "loadedToRoot": false, "replies": ["sent", "sent"], "rootSummary": 4, "openedWith": 3, "line": 4 },
+      { "loadedToRoot": true, "replies": ["sent", "sent", "sent", "sent"], "rootSummary": 4, "openedWith": 3, "line": 4 }
+    ] },
+    { "name": "Opened from a notification or Activity with no count, the line waits for one", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": null, "openedWith": null, "line": null },
+      { "loadedToRoot": false, "replies": [], "rootSummary": 2, "openedWith": null, "line": 2 },
+      { "loadedToRoot": true, "replies": ["sent", "sent"], "rootSummary": 2, "openedWith": null, "line": 2 }
+    ] },
+    { "name": "Opened from a jump that showed no count, the line goes when the root's count does", "steps": [
+      { "loadedToRoot": false, "replies": [], "rootSummary": 4, "openedWith": null, "line": 4 },
+      { "loadedToRoot": false, "replies": [], "rootSummary": null, "openedWith": null, "line": null }
+    ] }
+  ]
+}

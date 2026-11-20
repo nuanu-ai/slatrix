@@ -13,6 +13,8 @@ struct TimelineView: View {
     var threadRootID: String? = nil
     var savedIDs: Set<String>
     var onThread: (ChatMessage) -> Void
+    /// Opens a thread from its replies link, which shows a count.
+    var onOpenReplies: (ChatMessage) -> Void = { _ in }
     var onReply: (ChatMessage) -> Void
     var onEdit: (MessageActionTarget) -> Void
     var onSave: (ChatMessage) -> Void
@@ -192,7 +194,8 @@ struct TimelineView: View {
     private var entries: [TimelineEntry] {
         let rows = layout.rows(
             messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
-            groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil)
+            groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil,
+            repliesLine: thread ? matrix.threadRepliesLine : nil)
         let context = matrix.messageActionContext
         let offline = matrix.connectionState == .offline
         let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
@@ -270,6 +273,7 @@ struct TimelineView: View {
         context.appearance = appearance
         context.openURL = openURL
         context.onThread = onThread
+        context.onOpenReplies = onOpenReplies
         context.onReply = onReply
         context.onEdit = onEdit
         context.onSave = onSave
@@ -392,7 +396,7 @@ struct TimelineView: View {
 /// Lays the messages out once per change, and pins the "New messages" line to the first unread event as the
 /// conversation opens, so reading does not move the line and nothing arriving while it's open adds one.
 @MainActor final class TimelineLayoutCache {
-    private var input: (messages: [ChatMessage], unread: String?, groups: Bool)?
+    private var input: (messages: [ChatMessage], unread: String?, groups: Bool, repliesLine: Int?)?
     private var rows: [TimelineLayout.Row] = []
     private var unreadBoundary: String?
     private var opened = false
@@ -428,20 +432,25 @@ struct TimelineView: View {
     }
 
     /// A cache serves one timeline, so `threadRootEventID` never changes under it.
-    func rows(_ messages: [ChatMessage], firstUnreadEventID: String?, groups: Bool, threadRootEventID: String? = nil)
-        -> [TimelineLayout.Row]
-    {
+    func rows(
+        _ messages: [ChatMessage], firstUnreadEventID: String?, groups: Bool, threadRootEventID: String? = nil,
+        repliesLine: Int? = nil
+    ) -> [TimelineLayout.Row] {
         if !opened, !messages.isEmpty {
             opened = true
             if let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID }) {
                 unreadBoundary = firstUnreadEventID
             }
         }
-        if let input, input.groups == groups, input.unread == unreadBoundary, input.messages == messages { return rows }
+        if let input, input.groups == groups, input.unread == unreadBoundary, input.repliesLine == repliesLine,
+            input.messages == messages
+        {
+            return rows
+        }
         rows = TimelineLayout.rows(
             messages, unreadBoundaryEventID: unreadBoundary, groups: groups, threadRootEventID: threadRootEventID,
-            now: Date(), calendar: .current, locale: .current)
-        input = (messages, unreadBoundary, groups)
+            repliesLine: repliesLine, now: Date(), calendar: .current, locale: .current)
+        input = (messages, unreadBoundary, groups, repliesLine)
         return rows
     }
 }
@@ -450,6 +459,8 @@ struct TimelineView: View {
 struct MessageRowActions {
     var openProfile: (() -> Void)?
     var thread: () -> Void = {}
+    /// Opens the thread from its replies link.
+    var openReplies: () -> Void = {}
     /// Opens the thread's timeline ahead of a click on its replies.
     var prepareThread: () -> Void = {}
     var reply: () -> Void = {}
@@ -611,10 +622,10 @@ struct MessageRow: View {
                     // A reused cell shows another message: a download or preview in flight must not carry over.
                     if let attachment { attachment.padding(.top, m(6)).id(message.id) }
                     if !message.reactions.isEmpty { reactions.padding(.top, m(3)) }
-                    if !isThread && message.replyCount > 0 {
+                    if !isThread, let count = message.replyCount, count > 0 {
                         ThreadRepliesBar(
-                            count: message.replyCount, lastReply: message.lastReply, avatar: replierAvatar,
-                            prepare: actions.prepareThread, action: actions.thread
+                            count: count, lastReply: message.lastReply, avatar: replierAvatar,
+                            prepare: actions.prepareThread, action: actions.openReplies
                         ).padding(.top, m.sp4)
                     }
                     if pendingSend, let failure = sendFailure {
@@ -889,7 +900,8 @@ extension TimelineRowContext {
                         ChatUser(id: message.senderID, name: message.senderName, avatarURL: message.avatarURL))
                 }
             },
-            thread: { self.onThread(message) }, prepareThread: { self.matrix?.prepareThread(message) },
+            thread: { self.onThread(message) }, openReplies: { self.onOpenReplies(message) },
+            prepareThread: { self.matrix?.prepareThread(message) },
             reply: { self.onReply(message) }, save: { self.onSave(message) },
             react: target.map { target in { self.onReact(target, $0) } },
             openReactions: target.map { target in
