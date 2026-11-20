@@ -114,9 +114,10 @@ struct TimelineTable: NSViewRepresentable {
     var onLoadOlder: () -> Void
     var onLoadNewer: () -> Void
     /// Whether the newest message is on screen, whether to offer "Jump to recent", whether messages sit above the
-    /// top edge (nil until the table shows its rows), and whether any part of the newest message shows, which reads
-    /// it.
-    var onScroll: (Bool, Bool, Bool?, Bool) -> Void
+    /// top edge (nil until the table shows its rows), and what the read checks need of what it shows.
+    var onScroll: (Bool, Bool, Bool?, PaneReport) -> Void
+    /// What the read checks take the report for; when it changes, the table reports again.
+    var readKey: AnyHashable? = nil
     /// The header's and the composer's heights: rows scroll under both, and the reader sees only what is between.
     var insets = EdgeInsets()
 
@@ -191,7 +192,7 @@ struct TimelineTable: NSViewRepresentable {
     /// Whether the reader moved the view since the table last put it somewhere.
     private var scrolledByReader = false
     private var atOlderMessage = false
-    private var reported: (Bool, Bool, Bool?, Bool)?
+    private var reported: (Bool, Bool, Bool?, PaneReport)?
     /// Where the reader was before the scroll view laid out its clip, which a new size has already moved.
     private var tiling: Policy.Position?
     /// While the table waits for its first rows.
@@ -261,8 +262,9 @@ struct TimelineTable: NSViewRepresentable {
             preservingPosition(keeping: .bottom) {}
         }
         apply(configuration.entries)
+        if let previous, previous.readKey != configuration.readKey { reported = nil }
         // A jump within rows already shown changes none of them.
-        if opened, pendingFocus != nil { afterScroll() }
+        if opened, pendingFocus != nil || reported == nil { afterScroll() }
     }
 
     // MARK: Rows
@@ -606,12 +608,17 @@ struct TimelineTable: NSViewRepresentable {
         return NSRect(x: 0, y: viewport.top, width: scrollView.contentView.bounds.width, height: viewport.height)
     }
 
-    private var newestSeen: Bool {
-        guard let row = rows.lastIndex(where: { $0.messageEventID != nil }) else { return false }
-        let rect = table.rect(ofRow: row)
+    private var report: PaneReport {
         let visible = visible
-        return ReadStatePolicy.isSeen(
-            top: rect.minY, bottom: rect.maxY, screenTop: visible.minY, screenBottom: visible.maxY)
+        let inView = Range(table.rows(in: visible))?.reversed().lazy.compactMap { row -> String? in
+            let rect = self.table.rect(ofRow: row)
+            guard
+                ReadStatePolicy.isSeen(
+                    top: rect.minY, bottom: rect.maxY, screenTop: visible.minY, screenBottom: visible.maxY)
+            else { return nil }
+            return self.rows[row].messageEventID
+        }.first
+        return PaneReport(newestInView: inView, laidOut: rows.last { $0.messageEventID != nil }?.messageEventID)
     }
 
     private func frame(_ id: String) -> Policy.RowFrame? {
@@ -878,7 +885,7 @@ struct TimelineTable: NSViewRepresentable {
             opened
                 && Policy.showsJumpToLatest(viewport, live: configuration.live, scrolledByReader: scrolledByReader),
             opened ? viewport.top > 0.5 : nil,
-            newestSeen
+            report
         )
         if reported.map({ $0 != state }) ?? true {
             reported = state

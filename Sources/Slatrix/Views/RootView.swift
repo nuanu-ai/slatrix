@@ -41,6 +41,9 @@ struct RootView: View {
     let matrix: MatrixService
     /// Drafts, saved messages and recent searches, each account's sealed with its vault key.
     private let localStore: ProtectedLocalStateStore
+    /// Where desktop notifications for messages go; whoever passes one in tells it the account, since the window's
+    /// account changes and clears go to `PlatformIntegration`'s.
+    private let notifications: DesktopNotificationDelivery
     @ObservedObject private var platform = PlatformIntegration.shared
     @ObservedObject private var updater = AppUpdater.shared
     @EnvironmentObject var appearance: AppearanceStore
@@ -71,6 +74,7 @@ struct RootView: View {
     @State private var recentSearches: [String] = []
     /// Any modal at all, such as a confirmation the timeline opened; read outside the body only.
     @State private var modalShown = false
+    @State private var identityPrompt = false
     @State private var showRecovery = false
     @State private var editingProfile = false
     @State private var creation: CreationKind?
@@ -137,9 +141,8 @@ struct RootView: View {
     @State private var historyIndex = -1
     @State private var logoutConfirmation = false
     @StateObject private var logoutRecovery = LogoutRecoveryController()
-    @State private var visibleBottomRoomID: String?
-    @State private var threadReadViewport = ThreadReadViewport()
     @State private var windowCanRead = false
+    @State private var hostWindow = WindowReference()
     @State private var readHold = ReadStateHold()
     private var colors: AppColors { appearance.colors }
     /// Threads and profiles share one pane width, as in Slack.
@@ -165,7 +168,7 @@ struct RootView: View {
     private var coverage: Coverage {
         Coverage(
             pane: paneCovers, viewer: viewer.message != nil, dialog: modalShown,
-            drawer: sidebarCollapsed && sidebarDrawer)
+            drawer: sidebarCollapsed && sidebarDrawer, identity: identityPrompt, profile: profilePane != nil)
     }
     /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
     /// open pane.
@@ -311,13 +314,14 @@ struct RootView: View {
     /// Every modal, for actions that must wait for all of them; read outside the body only.
     private var hasModal: Bool { hasPresentedSheet || modals.current != nil || modalShown }
 
-    init(
+    @MainActor init(
         matrix: MatrixService, localStore: ProtectedLocalStateStore = .shared,
-        attachmentDrafts: AttachmentDraftStore = .shared
+        attachmentDrafts: AttachmentDraftStore = .shared, notifications: DesktopNotificationDelivery? = nil
     ) {
         self.matrix = matrix
         self.localStore = localStore
         _attachmentDrafts = StateObject(wrappedValue: AttachmentDraftController(store: attachmentDrafts))
+        self.notifications = notifications ?? PlatformIntegration.shared.delivery
     }
 
     var body: some View {
@@ -395,8 +399,8 @@ struct RootView: View {
         // What a modal held back: a notification to open, and messages the reader can see again.
         openPendingNotification()
         Task {
-            await acknowledgeVisibleTimeline()
-            await acknowledgeVisibleThread()
+            await acknowledgeVisibleTimeline(retries: [])
+            await acknowledgeVisibleThread(retries: [])
         }
     }
 
@@ -423,14 +427,19 @@ struct RootView: View {
                     try await flushLocalData()
                     await attachmentDrafts.close()
                 }
-                windowCanRead = platform.conversationWindowIsVisible
+                windowCanRead = PlatformIntegration.canRead(hostWindow.window)
             }
+            .background(
+                WindowReader(reference: hostWindow) {
+                    windowCanRead = PlatformIntegration.canRead(hostWindow.window)
+                }
+            )
             .onReceive(readWindowChanges) { notification in
                 if notification.name == NSWindow.willBeginSheetNotification {
                     windowCanRead = false
                 } else {
                     DispatchQueue.main.async {
-                        windowCanRead = platform.conversationWindowIsVisible
+                        windowCanRead = PlatformIntegration.canRead(hostWindow.window)
                         if notification.name == NSWindow.didEndSheetNotification { openPendingNotification() }
                     }
                 }
@@ -442,8 +451,8 @@ struct RootView: View {
             .background(
                 ReadTracking(
                     matrix: matrix, inputs: readInputs, onReadContext: { readHold.observe($0) },
-                    onThreadIdentity: { threadReadViewport.observe($0) },
-                    acknowledgeTimeline: acknowledgeVisibleTimeline, acknowledgeThread: acknowledgeVisibleThread))
+                    acknowledgeTimeline: { await acknowledgeVisibleTimeline() },
+                    acknowledgeThread: { await acknowledgeVisibleThread() }))
     }
 
     private var notificationAwareContent: some View {
@@ -703,14 +712,21 @@ struct RootView: View {
                     else { return }
                     platform.setNotificationAccount(identity.userID)
                     Task {
-                        guard appearance.notifications, composerIdentity == identity,
-                            matrix.notificationSessionID == session,
-                            !(platform.conversationWindowIsVisible && route == .home
-                                && matrix.focusedEventID == nil && matrix.selectedRoomID == notification.target.roomID
-                                && !hasModal && !hasNativeModal && !matrix.verification.isPresented)
-                        else { return }
+                        let target = notification.target
                         let value = notification.applyingPreviewPreference(appearance.notificationPreview)
-                        do { try await platform.notify(value) } catch {
+                        do {
+                            try await notifications.deliver(value) {
+                                // A shown pane gets the chance to lay the message out; its first answer decides.
+                                let seen = await waitObserving(
+                                    for: {
+                                        target.eventID.map {
+                                            readInputs.seen(matrix)($0, target.roomID, notification.threadRootID)
+                                        } ?? false
+                                    }, deadline: .now + ReadStatePolicy.layoutDeadline)
+                                return seen != true && appearance.notifications && composerIdentity == identity
+                                    && matrix.notificationSessionID == session
+                            }
+                        } catch {
                             if composerIdentity == identity, matrix.notificationSessionID == session {
                                 matrix.errorMessage = MatrixService.safeError(error)
                             }
@@ -740,7 +756,8 @@ struct RootView: View {
             } else {
                 IdentityGate(
                     verification: matrix.verification, accountID: matrix.isPreview ? nil : matrix.user?.id,
-                    hasIdentity: { await matrix.accountHasIdentity() }, onRecovery: { showRecovery = true }
+                    hasIdentity: { await matrix.accountHasIdentity() }, onRecovery: { showRecovery = true },
+                    onPrompting: { identityPrompt = $0 }
                 ) {
                     HStack(spacing: 0) {
                         if !sidebarCollapsed {
@@ -925,14 +942,17 @@ struct RootView: View {
         widths.sidebar = nil
     }
 
-    private func acknowledgeVisibleTimeline() async {
+    /// The keyed read task retries a refused receipt; a one-off caller sends it once.
+    private func acknowledgeVisibleTimeline(retries: [Duration] = MatrixService.receiptRetries) async {
         guard let target = automaticReadTarget else { return }
+        let current = {
+            PlatformIntegration.canRead(hostWindow.window) && modals.current == nil
+                && ReadStatePolicy.isCurrent(target, in: readContext, hold: readHold)
+        }
         do {
             try await Task.sleep(for: .milliseconds(350))
-            guard platform.conversationWindowIsVisible, modals.current == nil,
-                ReadStatePolicy.isCurrent(target, in: readContext, hold: readHold)
-            else { return }
-            try await matrix.markVisibleRead(target)
+            guard current() else { return }
+            try await matrix.markVisibleRead(target, retries: retries, isCurrent: current)
         } catch {
             // An unseen or offline snapshot stays unread; retry on the next visible live update.
         }
@@ -940,18 +960,16 @@ struct RootView: View {
 
     private var threadReadContext: ThreadReadContext { readInputs.threadReadContext(matrix) }
     private var automaticThreadReadTarget: ThreadReadReceiptTarget? { ThreadReadPolicy.target(threadReadContext) }
-    private func acknowledgeVisibleThread() async {
+    private func acknowledgeVisibleThread(retries: [Duration] = MatrixService.receiptRetries) async {
         guard let target = automaticThreadReadTarget else { return }
+        let current = {
+            PlatformIntegration.canRead(hostWindow.window) && modals.current == nil
+                && ThreadReadPolicy.isCurrent(target, in: threadReadContext)
+        }
         do {
             try await Task.sleep(for: .milliseconds(350))
-            guard platform.conversationWindowIsVisible, modals.current == nil,
-                ThreadReadPolicy.isCurrent(target, in: threadReadContext)
-            else {
-                return
-            }
-            try await matrix.markVisibleThreadRead(target) {
-                platform.conversationWindowIsVisible && ThreadReadPolicy.isCurrent(target, in: threadReadContext)
-            }
+            guard current() else { return }
+            try await matrix.markVisibleThreadRead(target, retries: retries, isVisible: current)
         } catch {
             // Anything not confirmed as seen stays unread.
         }
@@ -972,16 +990,17 @@ struct RootView: View {
             [
                 NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
                 NSWindow.didChangeOcclusionStateNotification, NSWindow.didBecomeKeyNotification,
+                NSWindow.didResignKeyNotification,
                 NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification,
                 NSWindow.willBeginSheetNotification, NSWindow.didEndSheetNotification, NSWindow.willCloseNotification,
             ].map { NotificationCenter.default.publisher(for: $0) })
     }
     private var readInputs: ReadInputs {
         ReadInputs(
-            route: screen.route, workspaceID: workspaceID, visibleBottomRoomID: visibleBottomRoomID,
-            windowCanRead: windowCanRead, hasPresentedSheet: hasPresentedSheet, threadRootID: threadRoot?.eventID,
+            route: screen.route, workspaceID: workspaceID, windowCanRead: windowCanRead, window: hostWindow,
+            hasPresentedSheet: hasPresentedSheet, threadRootID: threadRoot?.eventID,
             threadReadyID: threadReadyID, openingThreadID: openingThreadID, threadLoadFailed: threadLoadError != nil,
-            localReady: localReady, threadReadViewport: threadReadViewport, readHold: readHold,
+            localReady: localReady, readHold: readHold,
             conversationCovered: coverage.conversation, threadCovered: coverage.thread)
     }
     private var readContext: ReadStateContext { readInputs.readContext(matrix) }
@@ -1135,13 +1154,8 @@ struct RootView: View {
                         }, onEdit: startEdit, onSave: toggleSave,
                         onShowReply: { selectRoom(room.id, record: true, eventID: $0) }, onOpenProfile: openProfile,
                         canPinMessages: canPin(room), onTogglePin: togglePin,
-                        onBottomVisibilityChange: { visible in
-                            if visible {
-                                visibleBottomRoomID = room.id
-                            } else if visibleBottomRoomID == room.id {
-                                visibleBottomRoomID = nil
-                            }
-                        }, onJumpToLatest: { selectRoom(room.id) }, startsAtUnread: isResumingUnread,
+                        onReport: { [timeline = matrix.shownTimelineID] in matrix.record($0, timeline: timeline) },
+                        onJumpToLatest: { selectRoom(room.id) }, startsAtUnread: isResumingUnread,
                         editing: editTarget?.surface == .conversation, onForward: startForward,
                         onEditCaption: startCaption,
                         onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
@@ -1300,9 +1314,8 @@ struct RootView: View {
                 }, onEdit: startEdit, onSave: toggleSave,
                 onShowReply: { selectRoom(room.id, record: true, eventID: $0) }, onOpenProfile: openProfile,
                 canPinMessages: canPin(room), onTogglePin: togglePin,
-                onBottomVisibilityChange: { [identity = matrix.threadReadIdentity] visible in
-                    threadReadViewport.record(visible, from: identity, current: matrix.threadReadIdentity)
-                }, onForward: startForward, onEditCaption: startCaption,
+                onReport: { [identity = matrix.threadReadIdentity] in matrix.record($0, thread: identity) },
+                readKey: matrix.threadReadIdentity, onForward: startForward, onEditCaption: startCaption,
                 onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) },
                 inlineVideo: viewer.inlineVideo, contentAbove: $threadContentAbove, insets: insets
             ).id(root.eventID)
@@ -1909,7 +1922,6 @@ struct RootView: View {
     /// A thread in the conversation on screen opens beside it, which stays as it is; one elsewhere opens with its
     /// conversation.
     private func openThread(_ root: ChatMessage, room id: String) {
-        matrix.activity.markThreadOpened(roomID: id, rootID: root.eventID)
         guard id == matrix.selectedRoomID, pendingRoomID == nil, route == .home,
             matrix.isPreview || matrix.isLiveTimelineReady(roomID: id)
         else { return selectRoom(id, record: true, thread: root) }
@@ -2199,8 +2211,6 @@ struct RootView: View {
             }
             return
         }
-        matrix.activity.markOpened(item.id)
-        if let rootID = item.threadRootID { matrix.activity.markThreadOpened(roomID: item.roomID, rootID: rootID) }
         if let eventID = item.eventID {
             selectRoom(item.roomID, record: true, eventID: eventID)
         } else {
@@ -2588,7 +2598,7 @@ struct RootView: View {
         localRevision += 1
         let state = localState
         let revision = localRevision
-        return { [localStore] in try await localStore.save(state, access: access, revision: revision) }
+        return { try await localStore.save(state, access: access, revision: revision) }
     }
     private func saveLocalData() {
         guard let save = capturedLocalSave(), let generation = localAccess?.generation else { return }
@@ -2668,8 +2678,6 @@ struct RootView: View {
         sendingComposers = [:]
         invitationResponseID = nil
         navigationNotice = nil
-        visibleBottomRoomID = nil
-        threadReadViewport = ThreadReadViewport()
         readHold = ReadStateHold()
         cancelCurrentEdit()
         cancelReply()
@@ -2871,15 +2879,14 @@ struct RootView: View {
 private struct ReadInputs {
     var route: AppRoute
     var workspaceID: String?
-    var visibleBottomRoomID: String?
     var windowCanRead: Bool
+    var window: WindowReference
     var hasPresentedSheet: Bool
     var threadRootID: String?
     var threadReadyID: String?
     var openingThreadID: String?
     var threadLoadFailed: Bool
     var localReady: Bool
-    var threadReadViewport: ThreadReadViewport
     var readHold: ReadStateHold
     /// Something lies over the conversation, or over the thread, so it isn't on screen.
     var conversationCovered: Bool
@@ -2892,7 +2899,7 @@ private struct ReadInputs {
 
     @MainActor func readContext(_ matrix: MatrixService) -> ReadStateContext {
         let latest = matrix.messages.last(where: { $0.eventID.hasPrefix("$") })
-        let visible = windowCanRead && PlatformIntegration.shared.conversationWindowIsVisible
+        let visible = windowCanRead && PlatformIntegration.canRead(window.window)
         return ReadStateContext(
             accountID: matrix.user?.id, sessionGeneration: matrix.notificationSessionID,
             timelineGeneration: matrix.timelineSelectionID, roomID: matrix.selectedRoomID ?? "",
@@ -2901,7 +2908,12 @@ private struct ReadInputs {
             isPreview: matrix.isPreview, isJoined: shownRoom(matrix, workspaceID: workspaceID)?.membership == "join",
             isMainTimeline: route == .home,
             isLiveTimeline: matrix.focusedEventID == nil && matrix.status == .ready,
-            isAtBottom: visibleBottomRoomID == matrix.selectedRoomID && visibleBottomRoomID != nil,
+            isAtBottom: latest.map { latest in
+                TimelinePositions(matrix.messages.lazy.map(\.eventID)).ask {
+                    ReadStatePolicy.isSeen(
+                        latest.eventID, newestInView: matrix.shownConversationReport?.newestInView, position: $0)
+                }
+            } ?? false,
             isWindowActive: visible, isWindowVisible: visible, isWindowUnoccluded: visible,
             hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented,
             isCovered: conversationCovered
@@ -2911,17 +2923,60 @@ private struct ReadInputs {
     @MainActor func threadReadContext(_ matrix: MatrixService) -> ThreadReadContext {
         let identity = matrix.threadReadIdentity
         let latest = matrix.threadMessages.last(where: { $0.eventID.hasPrefix("$") })
-        let visible = windowCanRead && PlatformIntegration.shared.conversationWindowIsVisible
+        let visible = windowCanRead && PlatformIntegration.canRead(window.window)
         return ThreadReadContext(
             identity: identity, eventID: latest?.kind == "m.room.encrypted" ? nil : latest?.eventID,
             isPresented: route == .home && threadRootID == identity?.rootID
                 && shownRoom(matrix, workspaceID: workspaceID)?.id == identity?.roomID,
             isReady: identity != nil && localReady && matrix.status == .ready && threadReadyID == identity?.rootID
                 && openingThreadID == nil && !threadLoadFailed,
-            isAtBottom: threadReadViewport.isAtBottom(identity), isWindowActive: visible, isWindowVisible: visible,
+            isAtBottom: latest.map { latest in
+                TimelinePositions(matrix.threadMessages.lazy.map(\.eventID)).ask {
+                    ReadStatePolicy.isSeen(
+                        latest.eventID, newestInView: matrix.shownThreadReport?.newestInView, position: $0)
+                }
+            } ?? false, isWindowActive: visible, isWindowVisible: visible,
             isWindowUnoccluded: visible,
             hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented,
             isCovered: threadCovered, manualUnreadHeld: readHold.blocks(readContext(matrix)))
+    }
+
+    /// Whether the reader has seen a message, by its event, its room and its thread's root when it has one: nil while
+    /// its pane, shown, has yet to lay it out.
+    @MainActor func seen(_ matrix: MatrixService) -> (String, String, String?) -> Bool? {
+        let conversation = readContext(matrix)
+        let thread = threadReadContext(matrix)
+        let messages = TimelinePositions(matrix.messages.lazy.map(\.eventID))
+        let replies = TimelinePositions(matrix.threadMessages.lazy.map(\.eventID))
+        let reports = (conversation: matrix.shownConversationReport, thread: matrix.shownThreadReport)
+        return { eventID, roomID, threadRootID in
+            let shown = ReadStatePolicy.isShown(
+                roomID: roomID, threadRootID: threadRootID, conversation: conversation, thread: thread)
+            return threadRootID == nil
+                ? ReadStatePolicy.seen(eventID, shown: shown, in: messages, report: reports.conversation)
+                : ReadStatePolicy.seen(eventID, shown: shown, in: replies, report: reports.thread)
+        }
+    }
+}
+
+/// What decides which of Activity's messages the reader has seen.
+private struct SeenInputs: Equatable {
+    let conversation: ReadStateContext
+    let thread: ThreadReadContext
+    let reports: [PaneReport?]
+    let items: [String]
+    /// The shown timelines' lengths and ends: a page of older messages changes what is seen without moving a report.
+    let timelines: [Ends]
+
+    struct Ends: Equatable {
+        let count: Int
+        let first: String?
+        let last: String?
+        init(_ messages: [ChatMessage]) {
+            count = messages.count
+            first = messages.first?.eventID
+            last = messages.last?.eventID
+        }
     }
 }
 
@@ -2930,16 +2985,28 @@ private struct ReadTracking: View {
     let matrix: MatrixService
     let inputs: ReadInputs
     let onReadContext: (ReadStateContext) -> Void
-    let onThreadIdentity: (ThreadReadIdentity?) -> Void
     let acknowledgeTimeline: () async -> Void
     let acknowledgeThread: () async -> Void
     var body: some View {
         let context = inputs.readContext(matrix)
+        let thread = inputs.threadReadContext(matrix)
         Color.clear
             .onChange(of: context) { _, context in onReadContext(context) }
             .task(id: ReadStatePolicy.automaticTarget(context, hold: inputs.readHold)) { await acknowledgeTimeline() }
-            .onChange(of: matrix.threadReadIdentity) { _, identity in onThreadIdentity(identity) }
-            .task(id: ThreadReadPolicy.target(inputs.threadReadContext(matrix))) { await acknowledgeThread() }
+            .task(id: ThreadReadPolicy.target(thread)) { await acknowledgeThread() }
+            // Activity takes what the reader has seen off its count, the messages that land in view too.
+            .onChange(
+                of: SeenInputs(
+                    conversation: context, thread: thread,
+                    reports: [matrix.shownConversationReport, matrix.shownThreadReport],
+                    items: matrix.activity.items.map(\.id),
+                    timelines: [.init(matrix.messages), .init(matrix.threadMessages)]), initial: true
+            ) {
+                let seen = inputs.seen(matrix)
+                matrix.activity.markSeen { item in
+                    item.eventID.flatMap { seen($0, item.roomID, item.threadRootID) } == true
+                }
+            }
     }
 }
 

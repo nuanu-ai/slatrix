@@ -47,24 +47,11 @@ struct ThreadReadPolicyTests {
         reason.apply(to: &context)
         #expect(ThreadReadPolicy.target(context) == nil)
     }
+}
 
-    @Test("Reopening a thread needs a new bottom sample; late samples from the old pane are ignored")
-    func viewportBelongsToItsPane() {
-        let old = Self.identity
-        let reopened = ThreadReadIdentity(
-            accountID: old.accountID, sessionID: old.sessionID, roomID: old.roomID, timelineID: old.timelineID,
-            rootID: old.rootID, threadSelectionID: old.threadSelectionID, presentationID: UUID())
-        var viewport = ThreadReadViewport()
-        viewport.record(true, from: old, current: old)
-        #expect(viewport.isAtBottom(old))
-        viewport.observe(reopened)
-        #expect(!viewport.isAtBottom(reopened))
-        viewport.record(true, from: old, current: reopened)
-        #expect(!viewport.isAtBottom(reopened))
-        viewport.record(true, from: reopened, current: reopened)
-        viewport.record(false, from: old, current: reopened)
-        #expect(viewport.isAtBottom(reopened))
-    }
+/// The window's Mark unread hold, which the read policy asks before each write.
+@MainActor private final class Reader {
+    var hold = ReadStateHold()
 }
 
 @MainActor
@@ -82,6 +69,36 @@ struct ThreadReadTests {
     }
     private func target(_ f: ActionFixture) throws -> ThreadReadReceiptTarget {
         ThreadReadReceiptTarget(identity: try #require(f.service.threadReadIdentity), eventID: "$reply")
+    }
+
+    // capability: activity.badge
+    @Test("A reply to an open thread counts in Activity until the reader sees it")
+    func openThreadIsNotOpenedReply() {
+        let f = fixture()
+        f.service.activity.record(
+            ActivityItem(
+                id: "reply", roomID: f.roomID, eventID: "$late", roomName: "Actions", senderID: "@alice:example.org",
+                senderName: "Alice", body: "Reply", timestamp: Date(), hasMention: false, threadRootID: f.rootID,
+                kind: .message))
+        #expect(ActivityBadge.count(rooms: [], items: f.service.activity.items) == 1)
+    }
+
+    @Test("A thread pane's report counts only for the thread ready to read, not one made before it was or for another")
+    func reportBelongsToItsThread() throws {
+        let f = fixture()
+        let identity = try #require(f.service.threadReadIdentity)
+        let newest = PaneReport(newestInView: "$reply", laidOut: "$reply")
+        f.service.record(newest, thread: nil)
+        #expect(f.service.shownThreadReport == nil)
+        let reopened = ThreadReadIdentity(
+            accountID: identity.accountID, sessionID: identity.sessionID, roomID: identity.roomID,
+            timelineID: identity.timelineID, rootID: identity.rootID, threadSelectionID: identity.threadSelectionID,
+            presentationID: UUID())
+        f.service.record(newest, thread: identity)
+        #expect(f.service.shownThreadReport == newest)
+        // Late, from a pane on the same thread opened again.
+        f.service.record(PaneReport(), thread: reopened)
+        #expect(f.service.shownThreadReport == newest)
     }
 
     // capability: thread.open
@@ -119,6 +136,22 @@ struct ThreadReadTests {
         _ = try await f.service.loadMoreThread(rootID: f.rootID)
         #expect(f.service.threadReadIdentity != nil)
         #expect(f.thread.writes.all.isEmpty && f.main.writes.all.isEmpty)
+    }
+
+    @Test("A thread opened ahead of a click whose first page failed stays unread until a retry loads it")
+    func failedPreparedPageStaysUnready() async throws {
+        let f = ActionFixture(threadReady: false)
+        f.service.user = ChatUser(id: "@reader:example.org", name: "Reader")
+        let root = f.message(f.rootID)
+        f.service.messages = [root]
+        f.thread.failsPagination = true
+        f.service.prepareThread(root)
+        try await f.service.loadThread(root)
+        f.service.setMessageActionThread(rootID: f.rootID)
+        #expect(f.service.threadReadIdentity == nil)
+        f.thread.failsPagination = false
+        _ = try await f.service.loadMoreThread(rootID: f.rootID)
+        #expect(f.service.threadReadIdentity != nil)
     }
 
     // capability: thread.read-state
@@ -168,7 +201,7 @@ struct ThreadReadTests {
             accountID: "@reader:example.org", sessionGeneration: f.session, timelineGeneration: f.selection,
             roomID: f.roomID, eventID: f.rootID)
         f.main.gate.arm()
-        let blocking = Task { try await f.service.markVisibleRead(mainRead) }
+        let blocking = Task { try await f.service.markVisibleRead(mainRead, isCurrent: { true }) }
         #expect(await eventually { f.main.gate.isWaiting })
         var asked = false
         var visible = true
@@ -188,17 +221,86 @@ struct ThreadReadTests {
         #expect(f.thread.writes.all.isEmpty)
     }
 
-    @Test("A thread receipt the SDK rejected is sent again on the next attempt")
-    func failedReceiptIsRetried() async throws {
-        let f = fixture()
-        let target = try target(f)
-        f.thread.failsWrites = true
-        await #expect(throws: MatrixServiceError.self) {
-            try await f.service.markVisibleThreadRead(target, isVisible: { true })
+    /// Reads the conversation, or the thread, retrying on `delays` while `isCurrent` holds.
+    private func read(
+        _ f: ActionFixture, inThread: Bool, delays: [Duration], isCurrent: @escaping @MainActor () -> Bool
+    ) async throws {
+        if inThread {
+            try await f.service.markVisibleThreadRead(try target(f), retries: delays, isVisible: isCurrent)
+        } else {
+            try await f.service.markVisibleRead(
+                ReadReceiptTarget(
+                    accountID: "@reader:example.org", sessionGeneration: f.session, timelineGeneration: f.selection,
+                    roomID: f.roomID, eventID: f.rootID), retries: delays, isCurrent: isCurrent)
         }
-        f.thread.failsWrites = false
-        try await f.service.markVisibleThreadRead(target, isVisible: { true })
-        #expect(f.thread.writes.all == ["mark-read", "mark-read"])
+    }
+
+    // capability: conversation.read
+    @Test(
+        "A receipt the server turned down goes again after each delay until one goes through", arguments: [false, true])
+    func failedReceiptIsRetried(inThread: Bool) async throws {
+        let f = fixture()
+        let timeline = inThread ? f.thread : f.main
+        timeline.failsNextWrites = 3
+        try await read(f, inThread: inThread, delays: [.zero, .zero, .zero], isCurrent: { true })
+        let fullyRead = inThread ? [] : ["fully:\(f.rootID)"]
+        #expect(timeline.writes.all == Array(repeating: "mark-read", count: 4) + fullyRead)
+    }
+
+    @Test("A refused receipt is not sent again once the read policy no longer sends it", arguments: [false, true])
+    func retryStopsWhenNoLongerCurrent(inThread: Bool) async throws {
+        let f = fixture()
+        let timeline = inThread ? f.thread : f.main
+        timeline.failsNextWrites = 3
+        var asked = 0
+        await #expect(throws: CancellationError.self) {
+            try await read(f, inThread: inThread, delays: [.zero, .zero, .zero]) {
+                asked += 1
+                return timeline.writes.all.isEmpty
+            }
+        }
+        #expect(asked > 1 && timeline.writes.all == ["mark-read"])
+    }
+
+    @Test("Mark unread while a refused receipt goes again stops the writes after the one in flight")
+    func markUnreadDuringRetry() async throws {
+        let f = fixture()
+        let target = ReadReceiptTarget(
+            accountID: "@reader:example.org", sessionGeneration: f.session, timelineGeneration: f.selection,
+            roomID: f.roomID, eventID: f.rootID)
+        let context = ReadStateContext(
+            accountID: target.accountID, sessionGeneration: f.session, timelineGeneration: f.selection,
+            roomID: f.roomID, selectedRoomID: f.roomID, latestVisibleEventID: f.rootID, isJoined: true,
+            isMainTimeline: true, isLiveTimeline: true, isAtBottom: true, isWindowActive: true, isWindowVisible: true,
+            isWindowUnoccluded: true)
+        let reader = Reader()
+        f.main.failsNextWrites = 1
+        f.main.gate.arm()
+        let reading = Task {
+            try await f.service.markVisibleRead(target, retries: [.zero]) {
+                ReadStatePolicy.isCurrent(target, in: context, hold: reader.hold)
+            }
+        }
+        #expect(await eventually { f.main.gate.isWaiting })
+        // The first attempt fails; the retry's first write waits.
+        f.main.gate.release()
+        f.main.gate.arm()
+        #expect(await eventually { f.main.gate.isWaiting && f.main.writes.all.count == 2 })
+        reader.hold.markUnread(context)
+        f.main.gate.release()
+        await #expect(throws: CancellationError.self) { try await reading.value }
+        #expect(f.main.writes.all == ["mark-read", "mark-read"])
+    }
+
+    @Test("A thread closed and opened again has no report until its pane reports again")
+    func reopenedThreadHasNoReport() throws {
+        let f = fixture()
+        let report = PaneReport(newestInView: "$reply", laidOut: "$reply")
+        f.service.record(report, thread: try #require(f.service.threadReadIdentity))
+        #expect(f.service.shownThreadReport == report)
+        f.apply(.threadReopened)
+        #expect(f.service.threadReadIdentity != nil)
+        #expect(f.service.shownThreadReport == nil)
     }
 
     @Test("A receipt in flight when the thread is reopened finishes once and is not credited to the new pane")

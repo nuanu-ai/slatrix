@@ -49,21 +49,14 @@ struct ActivityBadgeTests {
         #expect(ActivityBadge.count(rooms: rooms, items: items) == spec.count)
     }
 
-    @Test("Opening a thread takes its replies off the count, and a reply decrypted again stays opened")
-    func openingThread() {
+    @Test("Only the replies the reader has seen leave the count, and one decrypted again stays seen")
+    func seeingReplies() {
         let activity = ActivityService()
         activity.record(Self.reply(0))
-        activity.markThreadOpened(roomID: "!room-0", rootID: "$root")
+        activity.record(Self.reply(1))
+        activity.markSeen { $0.id == Self.reply(0).id }
         activity.record(Self.reply(0))
-        #expect(ActivityBadge.count(rooms: [], items: activity.items) == 0)
-    }
-
-    @Test("A reply that lands while its thread shows counts as opened")
-    func replyToShownThread() {
-        let activity = ActivityService()
-        activity.shownThread = (roomID: "!room-0", rootID: "$root")
-        activity.record(Self.reply(0))
-        #expect(ActivityBadge.count(rooms: [], items: activity.items) == 0)
+        #expect(ActivityBadge.count(rooms: [], items: activity.items) == 1)
     }
 
     @Test("A mention shows unread until it's opened or its conversation is read")

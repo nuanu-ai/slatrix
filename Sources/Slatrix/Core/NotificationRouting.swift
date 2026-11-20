@@ -36,6 +36,7 @@ struct DesktopMessageNotification {
     var title: String
     var body: String
     var playSound: Bool
+    var threadRootID: String? = nil
 
     /// The title and one-line text of a message, as the cases in `spec/notification-text.json` say.
     static func message(room: String, sender: String, direct: Bool, body: String) -> (title: String, text: String) {
@@ -112,16 +113,21 @@ enum DesktopNotificationError: LocalizedError {
         transport.clear()
     }
 
-    @discardableResult func deliver(_ message: DesktopMessageNotification) async throws -> Bool {
+    /// `stillAnnounce` decides once the OS has answered, and nothing after it but the checks above can stop the alert,
+    /// so a message the reader has seen by then goes quietly.
+    @discardableResult func deliver(
+        _ message: DesktopMessageNotification, stillAnnounce: () async -> Bool = { true }
+    ) async throws -> Bool {
         guard message.target.accountID == accountID else { return false }
         let token = generation
-        let allowed: Bool
-        do { allowed = try await transport.isAuthorized() } catch {
-            guard token == generation, message.target.accountID == accountID, !Task.isCancelled else { return false }
-            throw error
+        let allowed: Result<Bool, Error>
+        do { allowed = .success(try await transport.isAuthorized()) } catch { allowed = .failure(error) }
+        // A seen message stays quiet, a failed permission check included.
+        let announce = await stillAnnounce()
+        guard token == generation, message.target.accountID == accountID, !Task.isCancelled, announce else {
+            return false
         }
-        guard token == generation, message.target.accountID == accountID, !Task.isCancelled else { return false }
-        guard allowed else { throw DesktopNotificationError.notificationsDisabled }
+        guard try allowed.get() else { throw DesktopNotificationError.notificationsDisabled }
         let request = DesktopNotificationRequest(identifier: UUID().uuidString, message: message)
         do { try await transport.add(request) } catch {
             guard token == generation, message.target.accountID == accountID, !Task.isCancelled else { return false }

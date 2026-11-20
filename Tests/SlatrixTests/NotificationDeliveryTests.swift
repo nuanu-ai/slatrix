@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 
 @testable import Slatrix
@@ -14,6 +15,8 @@ private struct MissingContinuation: Error {}
     private(set) var pendingAdds: [String: CheckedContinuation<Void, Error>] = [:]
     private(set) var delivered: [String: DesktopNotificationRequest] = [:]
     private(set) var removed: [String] = []
+    /// Whether a submission waits for the test to finish it; when false it is recorded and returns at once.
+    var holdsAdds = true
 
     func isAuthorized() async throws -> Bool {
         let index = authorizationCalls
@@ -22,7 +25,7 @@ private struct MissingContinuation: Error {}
     }
     func add(_ request: DesktopNotificationRequest) async throws {
         attempts.append(request)
-        try await withCheckedThrowingContinuation { pendingAdds[request.identifier] = $0 }
+        if holdsAdds { try await withCheckedThrowingContinuation { pendingAdds[request.identifier] = $0 } }
         // The OS shows a submission only after add() returns, possibly after clear() already ran.
         delivered[request.identifier] = request
     }
@@ -39,6 +42,17 @@ private struct MissingContinuation: Error {}
     func finishAdd(_ identifier: String, _ result: Result<Void, Error> = .success(())) throws {
         guard let continuation = pendingAdds.removeValue(forKey: identifier) else { throw MissingContinuation() }
         continuation.resume(with: result)
+    }
+}
+
+/// A pane's answer to whether its message is seen: false while it isn't shown, nil until it lays the message out.
+@MainActor @Observable private final class Pane {
+    var seen: Bool? = false
+    /// Whether delivery has asked for the pane's answer.
+    @ObservationIgnored private(set) var asked = false
+    var answer: Bool? {
+        asked = true
+        return seen
     }
 }
 
@@ -155,6 +169,77 @@ struct NotificationDeliveryTests {
         try transport.finishAdd(request.identifier)
         #expect(try await task.value)
         #expect(transport.delivered[request.identifier] != nil)
+    }
+
+    // capability: notifications.alert
+    @Test("A message the reader sees while the OS answers whether alerts may show goes unannounced, quietly")
+    func seenWhileAuthorizing() async throws {
+        let seen = Recorder<Void>()
+        let task = Task { try await delivery.deliver(try message(), stillAnnounce: { seen.all.isEmpty }) }
+        await awaitAuthorization()
+        seen.append(())
+        try transport.authorize(0, .success(false))
+        #expect(try await task.value == false)
+        #expect(transport.attempts.isEmpty)
+    }
+
+    /// The gate as the window asks it: the pane's first answer, announced unless it says seen.
+    private func deliver(_ message: DesktopMessageNotification, pane: Pane) -> Task<Bool, Error> {
+        Task {
+            try await delivery.deliver(message) {
+                await waitObserving(for: { pane.answer }, deadline: .now + .seconds(60)) != true
+            }
+        }
+    }
+
+    // capability: notifications.alert
+    @Test("A pane that shows while the OS answers gets its chance to show the message, and then nothing is announced")
+    func paneShownWhileAuthorizing() async throws {
+        transport.holdsAdds = false
+        let pane = Pane()
+        let task = deliver(try message(), pane: pane)
+        await awaitAuthorization()
+        pane.seen = nil
+        try transport.authorize(0, .success(true))
+        #expect(await eventually { pane.asked })
+        pane.seen = true
+        #expect(try await task.value == false)
+        #expect(transport.attempts.isEmpty)
+    }
+
+    // capability: notifications.alert
+    @Test("A message seen once the OS has answered stays unannounced though its pane goes away before delivery ends")
+    func seenVerdictStands() async throws {
+        transport.holdsAdds = false
+        let pane = Pane()
+        pane.seen = nil
+        let task = deliver(try message(), pane: pane)
+        await awaitAuthorization()
+        try transport.authorize(0, .success(true))
+        #expect(await eventually { pane.asked })
+        pane.seen = true
+        await drainMainActor()
+        pane.seen = false
+        #expect(try await task.value == false)
+        #expect(transport.attempts.isEmpty)
+    }
+
+    // capability: notifications.alert
+    @Test(
+        "A failed permission check stays quiet for a message the reader has seen and is reported otherwise",
+        arguments: [true, false])
+    func failedCheckAfterVerdict(seen: Bool) async throws {
+        let pane = Pane()
+        pane.seen = seen
+        let task = deliver(try message(), pane: pane)
+        await awaitAuthorization()
+        try transport.authorize(0, .failure(TransportFailure.authorization))
+        if seen {
+            #expect(try await task.value == false)
+        } else {
+            await #expect(throws: TransportFailure.authorization) { try await task.value }
+        }
+        #expect(transport.attempts.isEmpty)
     }
 
     @Test("An invitation is shown silently without an event, next to message notifications")

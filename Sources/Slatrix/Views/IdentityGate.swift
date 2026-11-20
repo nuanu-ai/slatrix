@@ -8,6 +8,8 @@ struct IdentityGate<Content: View>: View {
     let accountID: String?
     let hasIdentity: () async -> Bool?
     let onRecovery: () -> Void
+    /// Whether the prompt lies over the content.
+    var onPrompting: (Bool) -> Void = { _ in }
     @ViewBuilder let content: Content
     @State private var identity = IdentityGatePolicy.Identity.unknown
     @State private var skipped = false
@@ -28,6 +30,7 @@ struct IdentityGate<Content: View>: View {
             .overlay {
                 if prompting { ConfirmIdentityView(verification: verification, onRecovery: onRecovery, onSkip: skip) }
             }
+            .onChange(of: prompting, initial: true) { _, prompting in onPrompting(prompting) }
             .task(id: "\(deviceKey ?? "")|\(verification.deviceStatus)") {
                 identity = .unknown
                 skipped = deviceKey.map { Self.skippedDevices.contains($0) } ?? false
