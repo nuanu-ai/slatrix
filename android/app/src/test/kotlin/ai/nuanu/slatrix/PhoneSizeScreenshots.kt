@@ -135,7 +135,7 @@ class PhoneSizeScreenshots(private val screen: String, private val width: Int, p
                     onMarkUnread = {}))
             "Thread" -> LiveChannelScreen(room, ConversationState(listOf(conversation[0].copy(thread = null),
                 message("r1", "Jordan", "Works for me.", 10), message("r2", "Mira", "Great, sending the invite now.", 20)),
-                loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$a")
+                loading = false, hasMore = false, replies = 2), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$a")
             "Browse" -> BrowseChannelsScreen("Harbor", ChannelDirectoryState(listOf(
                 DirectoryChannel("!design:example.org", "design", "Reviews and crits", 12, canJoin = true),
                 DirectoryChannel("!general:example.org", "general", "Company-wide announcements and work-based matters", 40, canJoin = true),

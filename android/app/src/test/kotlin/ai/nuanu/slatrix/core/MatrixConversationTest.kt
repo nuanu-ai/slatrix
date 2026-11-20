@@ -1229,6 +1229,33 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    @Test fun aThreadOpenedOnARootThatCountsRepliesSaysSoFromItsFirstFrame() = runTest {
+        val root = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", "Plan?", null, 1_700_000_000_000L,
+            MessageKind.Text, MessageSendState.Sent, false, "MC", 0, thread = MessageThread(4, null, null))
+        // Opened from Reply in thread, which shows no count.
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(ConversationTimeline(
+            listOf(conversationItem("reply", "\$reply", "Yes")))), threadRoot = "\$root", root = root)
+        assertEquals(4, conversation.state.value.replies)
+        assertEquals(4, opening(root).replies)
+        assertEquals(4, conversation.state.first { it.rows.messages.any { row -> row.body == "Yes" } }.replies)
+        conversation.close()
+    }
+
+    @Test fun aThreadLoadedToItsRootKeepsItsCountWhenTheTimelineStartsOverWithTheSameReplies() = runTest {
+        val thread = listOf(conversationItem("root", "\$root", "Plan?"), conversationItem("one", "\$one", "Yes"),
+            conversationItem("two", "\$two", "Agreed"))
+        val timeline = ConversationTimeline(thread)
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root")
+        conversation.state.first { it.rows.messages.any { row -> row.body == "Agreed" } }
+        timeline.page.complete(true)
+        conversation.loadOlder()
+        assertEquals(2, conversation.state.first { !it.hasMore }.replies)
+        // A reset with the same root and replies asks for older history again; the next page isn't asked for here.
+        timeline.emit(listOf(TimelineDiff.Reset(thread)))
+        assertEquals(2, conversation.state.first { it.hasMore }.replies)
+        conversation.close()
+    }
+
     @Test fun aThreadsLineFollowsItsRootsOwnCountNeverTheServersListCount() = runTest {
         val channelTimeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 0u)),
             conversationItem("other", "\$other", "Hello")))

@@ -187,11 +187,11 @@ private fun ConversationMessage.asThreadRoot() = copy(id = ROOT_KEY, grouped = f
 
 /**
  * What a conversation shows before its timeline loads: a thread's [root] at once, in the row it then keeps, and the
- * reply count its opener showed.
+ * line under it from the root's own count and the one its opener showed.
  */
 internal fun opening(root: ConversationMessage?, error: String? = null, openedWith: Int? = null) =
     ConversationState(rows = listOfNotNull(root?.asThreadRoot()), loading = root == null, error = error,
-        replies = ThreadRepliesLine.count(false, emptyList(), null, openedWith))
+        replies = ThreadRepliesLine.count(false, emptyList(), root?.thread?.replies, openedWith))
 private const val NOTICE_MILLIS = 4_000L
 
 /** The relation that puts an attachment in a thread, as the Mac sends it. */
@@ -223,8 +223,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     /** The root's row as the channel holds it now; while the channel holds none, the thread's own row stands. */
     @Volatile private var mirror = this.root
     /** The reply count the root carries in the channel now; null while the channel holds no root or it carries none. */
-    @Volatile private var rootSummary: Int? = null
-    /** Whether the thread's own timeline holds its root, which the SDK adds only with the thread's start. */
+    @Volatile private var rootSummary = root?.thread?.replies
+    /**
+     * Whether the thread's own timeline holds its root, which the SDK adds only once it has every reply; a reset that
+     * asks for older history again keeps it.
+     */
     @Volatile private var holdsRoot = false
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
@@ -543,7 +546,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     /** A thread's state with the line under its root, from what it holds now; nothing else decides that line. */
     private fun ConversationState.counted() = if (threadRoot == null) this else copy(replies = ThreadRepliesLine.count(
-        holdsRoot && !hasMore, rows.filterIsInstance<ConversationMessage>().filter { it.eventId != threadRoot }, rootSummary, openedWith))
+        holdsRoot, rows.filterIsInstance<ConversationMessage>().filter { it.eventId != threadRoot }, rootSummary, openedWith))
 
     /** It as the channel shows it, deleted, or with an edit the server refused and the channel took back. */
     private fun ConversationMessage.withEdit(channel: ConversationMessage) = copy(kind = channel.kind, body = channel.body,
