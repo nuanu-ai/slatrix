@@ -82,7 +82,7 @@ struct ThreadRepliesLineServiceTests {
     }
 
     // capability: threads.feed
-    @Test("Opened from Threads, with no channel holding its root, a thread says the count Threads showed")
+    @Test("Opened from Threads, a thread keeps its root and the count Threads showed until it holds its root")
     func openedFromThreads() async throws {
         await service.selectRoom(room.id())
         room.pageGate.arm()
@@ -90,15 +90,44 @@ struct ThreadRepliesLineServiceTests {
         let feed = ThreadFeedMapping.project(
             [ThreadListItem(rootEvent: threadEvent("$root"), latestEvent: threadEvent("$third"), numReplies: 5)],
             room: ChatRoom(id: room.id(), name: "Team"))
-        try await service.loadThread(try #require(feed.first).root)
-        #expect(await eventually { service.threadMessages.contains { $0.eventID == "$third" } })
+        let root = try #require(feed.first).root
+        try await service.loadThread(root, openedWith: root.replyCount)
+        #expect(await eventually { service.threadMessages.map(\.eventID) == ["$root", "$third"] })
         #expect(service.threadRepliesLine == 5)
-
-        try #require(room.timelines.all.last).emit([.reset(values: [item("$root"), item("$second"), item("$third")])])
-        #expect(await eventually { service.threadMessages.count == 3 })
-        #expect(service.threadRepliesLine == 5)
+        // The thread says it reached its start before its root has come.
         try reachRoot()
+        #expect(await eventually { !service.hasMoreThreadHistory })
+        #expect(service.threadRepliesLine == 5)
+        try #require(room.timelines.all.last).emit([.reset(values: [item("$root"), item("$second"), item("$third")])])
         #expect(await eventually { service.threadRepliesLine == 2 })
+    }
+
+    @Test("Opened with its first page read ahead of the click, a thread keeps its root above a page without it")
+    func preparedKeepsRoot() async throws {
+        room.threadItems = [item("$reply")]
+        await service.selectRoom(room.id())
+        try #require(room.timelines.all.first).emit([.reset(values: [item("$root", replies: 5)])])
+        #expect(await eventually { service.messages.first?.eventID == "$root" })
+        let root = try #require(service.messages.first)
+        room.pageGate.arm()
+        service.prepareThread(root)
+        #expect(await eventually { room.pageGate.isWaiting })
+        room.pageGate.release()
+        try await service.loadThread(root, openedWith: root.replyCount)
+        #expect(service.threadMessages.map(\.eventID) == ["$root", "$reply"])
+        #expect(service.threadRepliesLine == 5)
+    }
+
+    @Test("A thread loads older replies once a page comes without its root, until its own timeline holds the root")
+    func pagesUntilItHoldsItsRoot() async throws {
+        _ = try #require(await opened(root: item("$root", replies: 2), thread: []))
+        // The root it opened with, alone, has nothing above it.
+        #expect(!service.loadsMoreThreadHistory)
+        let thread = try #require(room.timelines.all.last)
+        thread.emit([.reset(values: [item("$two")])])
+        #expect(await eventually { service.loadsMoreThreadHistory })
+        thread.emit([.reset(values: [item("$root"), item("$one"), item("$two")])])
+        #expect(await eventually { !service.loadsMoreThreadHistory })
     }
 
     @Test("Before the thread loads to its root, the line says the count its root carries in the channel now")
@@ -116,6 +145,24 @@ struct ThreadRepliesLineServiceTests {
         #expect(await eventually { service.threadRepliesLine == nil })
     }
 
+    @Test("Opened by a jump that showed no count, the line follows its root's count and goes with it")
+    func jumpShowsNoCount() async throws {
+        let main = try #require(await opened(root: item("$root", replies: 4), showingCount: false))
+        #expect(service.threadRepliesLine == 4)
+        main.emit([.reset(values: [item("$root")])])
+        #expect(await eventually { service.messages.first?.replyCount == nil })
+        #expect(service.threadRepliesLine == nil)
+    }
+
+    @Test("A closed thread pane counts nothing as its conversation changes")
+    func closedCountsNothing() async throws {
+        let main = try #require(await opened(root: item("$root", replies: 3)))
+        service.closeThread()
+        main.emit([.reset(values: [item("$root", replies: 6)])])
+        #expect(await eventually { service.messages.first?.replyCount == 6 })
+        #expect(service.threadRepliesLine == nil)
+    }
+
     @Test("Loaded to its root, the thread counts its own replies, and a deleted last reply takes the line away")
     func countsLoadedReplies() async throws {
         let main = try #require(await opened(root: item("$root", replies: 1), thread: [item("$root"), item("$one")]))
@@ -131,8 +178,11 @@ struct ThreadRepliesLineServiceTests {
         #expect(service.threadRepliesLine == nil)
     }
 
-    /// Opens the thread of `root`, which the channel holds, from its replies link, with the thread's first page held.
-    private func opened(root: FakeTimelineItem, thread: [FakeTimelineItem]? = nil) async -> FakeLiveTimeline? {
+    /// Opens the thread of `root`, which the channel holds, from its replies link or, without `showingCount`, from a
+    /// jump that showed no count; the thread's first page is held.
+    private func opened(root: FakeTimelineItem, thread: [FakeTimelineItem]? = nil, showingCount: Bool = true) async
+        -> FakeLiveTimeline?
+    {
         room.threadItems = thread ?? [item("$reply")]
         await service.selectRoom(room.id())
         guard let main = room.timelines.all.first else { return nil }
@@ -140,8 +190,8 @@ struct ThreadRepliesLineServiceTests {
         guard await eventually({ service.messages.first?.eventID == "$root" }), let opener = service.messages.first
         else { return nil }
         room.pageGate.arm()
-        try? await service.loadThread(opener)
-        guard await eventually({ service.threadMessages.count == (thread?.count ?? 1) }) else { return nil }
+        try? await service.loadThread(opener, openedWith: showingCount ? opener.replyCount : nil)
+        await drainMainActor()
         return main
     }
 }

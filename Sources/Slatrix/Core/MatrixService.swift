@@ -605,7 +605,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var mainSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private var threadSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     var threadMessages: [ChatMessage] = [] { didSet { countThreadReplies() } }
-    /// The open thread's root, and the reply count its opener showed, which stays while the thread shows.
+    /// The open thread's root, and the reply count its opener showed, which stays while the thread shows; nil while no
+    /// thread pane shows.
     var threadOpening: (rootID: String, openedWith: Int?)? { didSet { countThreadReplies() } }
     /// Whether the open thread's own timeline holds its root, which the SDK adds only with the thread's start.
     private var threadHoldsRoot = false
@@ -615,7 +616,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func countThreadReplies() {
         let line = threadOpening.flatMap { opening in
             ThreadRepliesLine.count(
-                loadedToRoot: threadHoldsRoot && !hasMoreThreadHistory,
+                loadedToRoot: isPreview || (threadHoldsRoot && !hasMoreThreadHistory),
                 replies: threadMessages.lazy.filter { $0.eventID != opening.rootID },
                 rootSummary: messages.first { $0.eventID == opening.rootID }?.replyCount,
                 openedWith: opening.openedWith)
@@ -633,10 +634,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var firstUnreadEventID: String?
     private var forwardLoadID: UUID?
     private(set) var hasMoreThreadHistory = true { didSet { countThreadReplies() } }
-    /// The SDK adds a thread's root only once it has every reply, and the pane opens on the root: nothing loads above
-    /// it, and a loading row there would only drop the thread when the first page ends.
-    func loadsMoreThreadHistory(rootID: String?) -> Bool {
-        hasMoreThreadHistory && threadMessages.first?.eventID != rootID
+    /// The SDK adds a thread's root only once it has every reply. Until a page has come without it, the pane shows
+    /// only the root it opened with, and a loading row would only drop when the first page ends.
+    var loadsMoreThreadHistory: Bool {
+        hasMoreThreadHistory && !threadHoldsRoot && threadMessages.count > 1
     }
     var members: [ChatUser] = []
     /// Whether your power level lets you notify the whole selected room, read with its members.
@@ -1401,6 +1402,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         roomsLoaded = false
         messages = []
         threadMessages = []
+        threadOpening = nil
         members = []
         canMentionRoom = false
         user = nil
@@ -1829,6 +1831,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         focusedEventID = eventID
         messages = []
         threadMessages = []
+        threadOpening = nil
         members = []
         canMentionRoom = false
         typingUsers = []
@@ -2206,17 +2209,27 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     revision > self.threadRevision
                 else { return }
                 self.threadRevision = revision
-                var messages = Performance.measure(.timelineProject, ["items": items.count]) {
+                let messages = Performance.measure(.timelineProject, ["items": items.count]) {
                     self.project(items, roomID: root.roomID, inThread: true)
                 }
-                if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
-                    messages[index].id = root.eventID
-                }
                 self.threadHoldsRoot = messages.contains { $0.eventID == root.eventID }
-                self.threadMessages = messages
+                self.threadMessages = Self.rootFirst(messages, root)
                 self.showEditedThreadRoot()
             }
         }
+    }
+    /// The thread's messages under its root, which keeps one identity in the pane from the moment it opens, whichever
+    /// timeline it came from. A page without the root goes under the one the pane opened with.
+    private static func rootFirst(_ messages: [ChatMessage], _ root: ChatMessage) -> [ChatMessage] {
+        var messages = messages
+        if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
+            messages[index].id = root.eventID
+        } else {
+            var opening = root
+            opening.id = root.eventID
+            messages.insert(opening, at: 0)
+        }
+        return messages
     }
     /// The SDK's thread timeline keeps its root as first sent: an edit or deletion of the root, or one the server
     /// refused and the channel took back, arrives in the main timeline.
@@ -2252,7 +2265,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         return endReached
     }
-    func loadThread(_ root: ChatMessage) async throws {
+    func loadThread(_ root: ChatMessage, openedWith: Int? = nil) async throws {
         try assertDestination(root.roomID)
         threadProjections = [:]
         threadMedia = [:]
@@ -2260,12 +2273,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         readyThreadReadSelection = nil
         lastThreadReceipt = nil
         threadHandle?.cancel()
-        // The root keeps one identity in the pane from the moment it opens, whichever timeline it came from.
-        var opening = root
-        opening.id = root.eventID
         threadHoldsRoot = false
-        threadOpening = (root.eventID, root.replyCount)
-        threadMessages = [opening]
+        threadOpening = (root.eventID, openedWith)
+        threadMessages = Self.rootFirst([], root)
         threadRevision = 0
         threadTimeline = nil
         loadedThreadRootID = nil
@@ -2293,14 +2303,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             // Updates that came before the pane opened were dropped; its snapshot holds them.
             let snapshot = ready.observer.snapshot
             threadRevision = snapshot.revision
-            var messages = project(snapshot.items, roomID: root.roomID, inThread: true)
-            if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
-                messages[index].id = root.eventID
-            }
-            if !messages.isEmpty {
-                threadHoldsRoot = messages.contains { $0.eventID == root.eventID }
-                threadMessages = messages
-            }
+            let messages = project(snapshot.items, roomID: root.roomID, inThread: true)
+            threadHoldsRoot = messages.contains { $0.eventID == root.eventID }
+            threadMessages = Self.rootFirst(messages, root)
             showEditedThreadRoot()
             return
         }
@@ -2729,6 +2734,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
         } catch { threadFeed.unavailable(Self.safeError(error)) }
     }
+
+    /// The thread pane closed: nothing counts its replies until another opens.
+    func closeThread() { threadOpening = nil }
 
     func checkMoreThreads() async { await threadFeed.checkMore() }
     func loadOlderThreads(roomID: String) async { await threadFeed.loadOlder(roomID: roomID) }

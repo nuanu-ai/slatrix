@@ -13,6 +13,8 @@ struct TimelineView: View {
     var threadRootID: String? = nil
     var savedIDs: Set<String>
     var onThread: (ChatMessage) -> Void
+    /// Opens a thread from its replies link, which shows a count.
+    var onOpenReplies: (ChatMessage) -> Void = { _ in }
     var onReply: (ChatMessage) -> Void
     var onEdit: (MessageActionTarget) -> Void
     var onSave: (ChatMessage) -> Void
@@ -56,7 +58,7 @@ struct TimelineView: View {
     /// A conversation loaded around an older message does not follow new messages.
     private var live: Bool { thread || matrix.focusedEventID == nil }
     private var hasOlder: Bool {
-        !matrix.isPreview && (thread ? matrix.loadsMoreThreadHistory(rootID: threadRootID) : matrix.loadsMoreHistory)
+        !matrix.isPreview && (thread ? matrix.loadsMoreThreadHistory : matrix.loadsMoreHistory)
     }
     /// The intro tops a conversation loaded back to its start, or one with nothing else to show.
     private var reachedStart: Bool { matrix.isPreview || !matrix.hasMoreHistory }
@@ -271,6 +273,7 @@ struct TimelineView: View {
         context.appearance = appearance
         context.openURL = openURL
         context.onThread = onThread
+        context.onOpenReplies = onOpenReplies
         context.onReply = onReply
         context.onEdit = onEdit
         context.onSave = onSave
@@ -456,6 +459,8 @@ struct TimelineView: View {
 struct MessageRowActions {
     var openProfile: (() -> Void)?
     var thread: () -> Void = {}
+    /// Opens the thread from its replies link.
+    var openReplies: () -> Void = {}
     /// Opens the thread's timeline ahead of a click on its replies.
     var prepareThread: () -> Void = {}
     var reply: () -> Void = {}
@@ -620,7 +625,7 @@ struct MessageRow: View {
                     if !isThread, let count = message.replyCount, count > 0 {
                         ThreadRepliesBar(
                             count: count, lastReply: message.lastReply, avatar: replierAvatar,
-                            prepare: actions.prepareThread, action: actions.thread
+                            prepare: actions.prepareThread, action: actions.openReplies
                         ).padding(.top, m.sp4)
                     }
                     if pendingSend, let failure = sendFailure {
@@ -895,7 +900,8 @@ extension TimelineRowContext {
                         ChatUser(id: message.senderID, name: message.senderName, avatarURL: message.avatarURL))
                 }
             },
-            thread: { self.onThread(message) }, prepareThread: { self.matrix?.prepareThread(message) },
+            thread: { self.onThread(message) }, openReplies: { self.onOpenReplies(message) },
+            prepareThread: { self.matrix?.prepareThread(message) },
             reply: { self.onReply(message) }, save: { self.onSave(message) },
             react: target.map { target in { self.onReact(target, $0) } },
             openReactions: target.map { target in

@@ -54,6 +54,7 @@ struct TimelineMessageEntry: Hashable {
     var appearance: AppearanceStore?
     var openURL = OpenURLAction { _ in .systemAction }
     var onThread: (ChatMessage) -> Void = { _ in }
+    var onOpenReplies: (ChatMessage) -> Void = { _ in }
     var onReply: (ChatMessage) -> Void = { _ in }
     var onEdit: (MessageActionTarget) -> Void = { _ in }
     var onSave: (ChatMessage) -> Void = { _ in }

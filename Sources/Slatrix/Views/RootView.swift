@@ -160,8 +160,9 @@ struct RootView: View {
     /// The open thread couldn't load.
     @ViewBuilder private var threadNotice: some View {
         if let threadLoadError, let root = threadRoot {
+            let openedWith = matrix.threadOpening?.openedWith
             Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
-                Button("Retry") { [open = openThreadAction] in open(root) }
+                Button("Retry") { [open = threadAction { _ in openedWith }] in open(root) }
             }
         }
     }
@@ -251,6 +252,7 @@ struct RootView: View {
         let workspace: String?
         let sourceRoute: AppRoute
         let selectedRoomID: String?
+        let openedWith: Int?
     }
     private struct ProfileSelection: Identifiable {
         var id: String
@@ -488,6 +490,7 @@ struct RootView: View {
                 }
                 if route == .home && pendingRoomID == nil && invitationResponseID == nil && room == nil {
                     matrix.setMessageActionThread(rootID: nil)
+                    matrix.closeThread()
                     threadRoot = nil
                     route = .home
                     if let first = matrix.rooms.first(where: {
@@ -523,6 +526,7 @@ struct RootView: View {
                     navigationGeneration = UUID()
                     pendingRoomID = nil
                     matrix.setMessageActionThread(rootID: nil)
+                    matrix.closeThread()
                     threadRoot = nil
                     threadReadyID = nil
                     openingThreadID = nil
@@ -867,7 +871,9 @@ struct RootView: View {
                 if let threadOpenError {
                     Banner(text: threadOpenError, symbol: "exclamationmark.triangle.fill") {
                         Button("Retry") {
-                            if isCurrentThreadOpen(request) { openThread(request.message) }
+                            if isCurrentThreadOpen(request) {
+                                openThread(request.message, openedWith: request.openedWith)
+                            }
                         }
                         Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
                     }
@@ -1148,7 +1154,7 @@ struct RootView: View {
                 TimelineUnderBars { insets in
                     TimelineView(
                         matrix: matrix, room: room, savedIDs: savedIDs,
-                        onThread: openThreadAction,
+                        onThread: openThreadAction, onOpenReplies: openRepliesAction,
                         onReply: { [session = matrix.notificationSessionID, timeline = matrix.timelineSelectionID] in
                             startReply($0, surface: .conversation, session: session, timeline: timeline)
                         }, onEdit: startEdit, onSave: toggleSave,
@@ -1456,7 +1462,7 @@ struct RootView: View {
         case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
         case .threads:
             ThreadsFeedView(
-                matrix: matrix, feed: matrix.threadFeed, workspaceID: $workspaceID, onOpen: openThreadAction)
+                matrix: matrix, feed: matrix.threadFeed, workspaceID: $workspaceID, onOpen: openRepliesAction)
         case .files:
             SharedFilesView(
                 matrix: matrix, service: matrix.sharedFiles, workspaceID: workspaceID,
@@ -1811,7 +1817,7 @@ struct RootView: View {
         sidebarDrawer = drawer
     }
     private func selectRoom(
-        _ id: String, record: Bool, eventID: String? = nil, thread: ChatMessage? = nil,
+        _ id: String, record: Bool, eventID: String? = nil, thread: ChatMessage? = nil, openedWith: Int? = nil,
         keepPendingNotification: Bool = false, restoringReply: MessageReplyTarget? = nil
     ) {
         sidebarDrawer = false
@@ -1859,6 +1865,7 @@ struct RootView: View {
         route = .home
         if id != matrix.selectedRoomID { channelPanel = nil }
         matrix.setMessageActionThread(rootID: nil)
+        matrix.closeThread()
         threadRoot = nil
         threadReadyID = nil
         openingThreadID = nil
@@ -1911,7 +1918,9 @@ struct RootView: View {
                 // A jump to a thread reply opens its thread beside the conversation, as Slack does.
                 let replyRoot = replyRootID.flatMap { root in matrix.messages.first { $0.eventID == root } }
                 if let thread = thread ?? replyRoot ?? leftThread {
-                    await loadThread(thread, generation: generation, identity: identity, restoringReply: restoringReply)
+                    await loadThread(
+                        thread, generation: generation, identity: identity, restoringReply: restoringReply,
+                        openedWith: openedWith)
                 } else if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
                     replyOpening = false
                     replyError = nil
@@ -1921,10 +1930,10 @@ struct RootView: View {
     }
     /// A thread in the conversation on screen opens beside it, which stays as it is; one elsewhere opens with its
     /// conversation.
-    private func openThread(_ root: ChatMessage, room id: String) {
+    private func openThread(_ root: ChatMessage, room id: String, openedWith: Int?) {
         guard id == matrix.selectedRoomID, pendingRoomID == nil, route == .home,
             matrix.isPreview || matrix.isLiveTimelineReady(roomID: id)
-        else { return selectRoom(id, record: true, thread: root) }
+        else { return selectRoom(id, record: true, thread: root, openedWith: openedWith) }
         let generation = UUID()
         navigationGeneration = generation
         matrix.setMessageActionThread(rootID: nil)
@@ -1937,16 +1946,20 @@ struct RootView: View {
             return
         }
         let identity = composerIdentity
-        Task { @MainActor in await loadThread(root, generation: generation, identity: identity, restoringReply: nil) }
+        Task { @MainActor in
+            await loadThread(
+                root, generation: generation, identity: identity, restoringReply: nil, openedWith: openedWith)
+        }
     }
     private func loadThread(
-        _ thread: ChatMessage, generation: UUID, identity: ComposerIdentity, restoringReply: MessageReplyTarget?
+        _ thread: ChatMessage, generation: UUID, identity: ComposerIdentity, restoringReply: MessageReplyTarget?,
+        openedWith: Int?
     ) async {
         let id = thread.roomID
         threadRoot = thread
         openingThreadID = thread.eventID
         do {
-            try await matrix.loadThread(thread)
+            try await matrix.loadThread(thread, openedWith: openedWith)
             guard navigationGeneration == generation, composerIdentity == identity,
                 matrix.selectedRoomID == id, threadRoot?.eventID == thread.eventID
             else { return }
@@ -1975,7 +1988,11 @@ struct RootView: View {
         historyIndex = next
         selectRoom(history[next], record: false)
     }
-    private var openThreadAction: (ChatMessage) -> Void {
+    /// Opens a message's thread from a place that showed no reply count.
+    private var openThreadAction: (ChatMessage) -> Void { threadAction { _ in nil } }
+    /// Opens a thread from its replies link or a Threads item, with the count it showed.
+    private var openRepliesAction: (ChatMessage) -> Void { threadAction(\.replyCount) }
+    private func threadAction(_ openedWith: @escaping (ChatMessage) -> Int?) -> (ChatMessage) -> Void {
         let owner = composerIdentity
         let selection = matrix.timelineSelectionID
         let navigation = navigationGeneration
@@ -1986,10 +2003,10 @@ struct RootView: View {
                 navigation == navigationGeneration,
                 workspace == workspaceID, sourceRoute == route
             else { return }
-            openThread(message)
+            openThread(message, openedWith: openedWith(message))
         }
     }
-    private func openThread(_ message: ChatMessage) {
+    private func openThread(_ message: ChatMessage, openedWith: Int? = nil) {
         guard pendingRoomID == nil, localReady,
             matrix.rooms.contains(where: { $0.id == message.roomID && $0.membership == "join" })
         else { return }
@@ -1999,7 +2016,7 @@ struct RootView: View {
             guard let root = candidates.first(where: { $0.eventID == rootID && $0.roomID == message.roomID }) else {
                 return
             }
-            openThread(root, room: root.roomID)
+            openThread(root, room: root.roomID, openedWith: openedWith)
             return
         }
         Performance.start(.threadOpen)
@@ -2010,7 +2027,7 @@ struct RootView: View {
             message: message, owner: composerIdentity,
             selection: matrix.timelineSelectionID, navigation: navigationGeneration,
             workspace: workspaceID, sourceRoute: route,
-            selectedRoomID: matrix.selectedRoomID)
+            selectedRoomID: matrix.selectedRoomID, openedWith: openedWith)
         pendingThreadOpen = request
         threadOpenTask = Task { @MainActor in
             do {
@@ -2022,7 +2039,7 @@ struct RootView: View {
                 threadOpenTask = nil
                 pendingThreadOpen = nil
                 threadOpenError = nil
-                openThread(root, room: root.roomID)
+                openThread(root, room: root.roomID, openedWith: openedWith)
             } catch is CancellationError {
                 if pendingThreadOpen?.id == request.id { cancelThreadOpen() }
             } catch {
@@ -2175,6 +2192,7 @@ struct RootView: View {
         pendingRoomID = nil
         route = .home
         matrix.setMessageActionThread(rootID: nil)
+        matrix.closeThread()
         threadRoot = nil
         if let first = matrix.rooms.first(where: {
             !$0.isSpace && !$0.isDirect && $0.membership == "join" && $0.spaceIDs.contains(spaceID)
@@ -2687,6 +2705,7 @@ struct RootView: View {
         pendingRoomID = nil
         preferredRoomID = nil
         matrix.setMessageActionThread(rootID: nil)
+        matrix.closeThread()
         threadRoot = nil
         threadReadyID = nil
         openingThreadID = nil
@@ -2729,6 +2748,7 @@ struct RootView: View {
         navigationGeneration = UUID()
         if replyTarget?.threadID != nil { cancelReply() }
         matrix.setMessageActionThread(rootID: nil)
+        matrix.closeThread()
         threadRoot = nil
         threadReadyID = nil
         openingThreadID = nil
