@@ -1103,7 +1103,7 @@ struct TimelineHostedTests {
         #expect(harness.firstVisibleBody == root.body)
     }
 
-    @Test("An unread visit whose read marker comes after its first rows opens at the New line if the reader hasn't scrolled")
+    @Test("An unread visit whose read marker comes late opens at the New line if the reader hasn't scrolled")
     func lateMarkerPlacesLine() async throws {
         let items = (0..<40).map {
             FakeTimelineItem(textEvent("$late-\($0)", body: "Late \($0)", sender: "@other:example.org"))
