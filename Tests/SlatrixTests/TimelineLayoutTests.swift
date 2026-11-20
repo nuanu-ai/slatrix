@@ -87,6 +87,12 @@ struct TimelineLayoutTests {
         #expect(grouped == spec.grouped)
     }
 
+    @Test("A message shown after the same person's but stamped hours earlier starts its own group")
+    func backwardTimesDoNotGroup() {
+        let rows = layout([message("evening", "@alice", at: 60), message("morning", "@alice", at: 9 * 60)])
+        #expect(rows == ["day Today", "evening 11:00 AM", "morning 3:00 AM"])
+    }
+
     @Test("Compact density never groups")
     func compactDoesNotGroup() {
         let rows = layout([message("a", "@alice", at: 3), message("b", "@alice", at: 2)], groups: false)

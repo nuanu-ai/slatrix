@@ -67,7 +67,7 @@ enum TimelineLayout {
                 groups && !newDay && !unread && (threadRootEventID == nil || previous?.eventID != threadRootEventID)
                 && previous.map {
                     $0.senderID == message.senderID
-                        && message.timestamp.timeIntervalSince($0.timestamp) < groupingInterval
+                        && abs(message.timestamp.timeIntervalSince($0.timestamp)) < groupingInterval
                 } == true
             rows.append(
                 Row(id: message.id, kind: .message(message, grouped: grouped, time: message.timestamp.formatted(time))))
