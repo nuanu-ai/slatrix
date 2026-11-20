@@ -135,7 +135,7 @@ struct VerificationServiceTests {
     // capability: verify.recovery-key
     @Test("A recovery key unlocks history through the SDK, and a key the SDK refuses fails the unlock")
     func recoveryKey() async throws {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.configureMessageActionsForChecks(
             client: client, main: nil, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(),
             threadID: UUID())

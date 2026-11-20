@@ -12,7 +12,7 @@ struct SavedMessagesHostedTests {
     @Test("A click anywhere on a saved message opens it, as in Slack")
     func clickOnMessageOpensIt() async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         matrix.selectPreviewRoom(PreviewMedia.roomID)
         let message = try #require(matrix.messages.first { !$0.body.isEmpty })

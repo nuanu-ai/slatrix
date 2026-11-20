@@ -14,7 +14,7 @@ struct ProfilePaneHostedTests {
     func senderNameOpensPane() async throws {
         _ = NSApplication.shared
         UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(AppearanceStore()))
         let window = offscreenWindow(NSSize(width: 1_440, height: 900))

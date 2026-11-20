@@ -12,7 +12,7 @@ struct SharedFilesHostedTests {
     @Test("A click on a file row opens it in the viewer, and → steps to the file in the next row")
     func clickOpensViewer() async throws {
         _ = NSApplication.shared
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         matrix.enterPreview()
         matrix.selectPreviewRoom(PreviewMedia.roomID)
         let viewer = MediaViewerState()

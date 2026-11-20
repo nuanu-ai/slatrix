@@ -10,7 +10,7 @@ struct ThreadRootEditTests {
     let room = FakeOpenRoom(
         "!team:example.org",
         cached: [FakeTimelineItem(textEvent("$root", body: "After the edit", edited: true), uniqueID: "root")])
-    let service = MatrixService()
+    let service = MatrixService.scratch()
 
     init() {
         room.threadItems = [

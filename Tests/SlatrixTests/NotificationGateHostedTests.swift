@@ -13,7 +13,7 @@ import Testing
 struct NotificationGateHostedTests {
     @MainActor final class Harness {
         let room: FakeOpenRoom
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         let appearance = AppearanceStore()
         let transport = FakeNotificationCenter()
         let delivery: DesktopNotificationDelivery

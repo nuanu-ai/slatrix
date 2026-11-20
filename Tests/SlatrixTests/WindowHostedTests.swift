@@ -11,7 +11,7 @@ import Testing
     .serialized, .tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
 struct WindowHostedTests {
     @MainActor private final class Harness {
-        let matrix = MatrixService()
+        let matrix = MatrixService.scratch()
         let appearance = AppearanceStore()
         let window: NSWindow
         let hosting: NSHostingView<AnyView>

@@ -48,7 +48,7 @@ struct LostSendResponseTests {
         let sent = DeliveryTimeline(roomID: server.room)
         let senderHandle = await senderTimeline.addListener(listener: sent)
         defer { senderHandle.cancel() }
-        let app = MatrixService()
+        let app = MatrixService.scratch()
         app.configureMessageActionsForChecks(
             client: sender, main: senderTimeline, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(),
             threadID: UUID())
@@ -173,7 +173,7 @@ struct LostSendResponseTests {
         }
 
         let relaunched = try await signIn("me", to: server, in: scratch)
-        let app = MatrixService()
+        let app = MatrixService.scratch()
         try await app.startForChecks(relaunched)
         #expect(
             await eventually(timeout: .seconds(15)) { server.bodies.contains("second") }, "Server has \(server.bodies)")
@@ -270,7 +270,7 @@ struct LostSendResponseTests {
     private func started(_ client: Client, main: Timeline?, room: String, threadRootID: String? = nil) async throws
         -> MatrixService
     {
-        let app = MatrixService()
+        let app = MatrixService.scratch()
         try await app.startForChecks(client)
         app.configureMessageActionsForChecks(
             client: client, main: main, thread: nil, rootID: threadRootID, sessionID: app.notificationSessionID,

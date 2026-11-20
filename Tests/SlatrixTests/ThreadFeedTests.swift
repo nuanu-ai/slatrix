@@ -214,7 +214,7 @@ struct ActivityTests {
 
 @MainActor
 struct ThreadRoutingTests {
-    private let service = MatrixService()
+    private let service = MatrixService.scratch()
     private let root = ChatMessage(
         id: "$root", roomID: room.id, senderID: "@alice:example.org", senderName: "Alice", body: "Root",
         timestamp: .distantPast)

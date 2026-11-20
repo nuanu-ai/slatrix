@@ -179,7 +179,7 @@ final class ActionClient: Client, @unchecked Sendable {
 /// A signed-in `MatrixService` with one joined room open, a main timeline and an optional thread on `rootID`.
 @MainActor
 final class ActionFixture {
-    let service = MatrixService()
+    let service = MatrixService.scratch()
     let roomID = "!actions:example.org"
     let userID = "@owner:example.org"
     let rootID: String

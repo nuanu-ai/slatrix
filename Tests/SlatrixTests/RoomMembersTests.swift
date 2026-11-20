@@ -28,7 +28,7 @@ struct RoomMembersTests {
         let members = ThreadRecordingMembers()
         let room = FakeRoom(roomInfo(id: "!large:example.org"))
         room.memberList = members
-        let service = MatrixService()
+        let service = MatrixService.scratch()
         service.configureMessageActionsForChecks(
             client: FakeClient(rooms: [room]), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
             selectionID: UUID(), threadID: UUID())
@@ -46,7 +46,7 @@ struct RoomMembersTests {
             roomMember("@al:example.org", membership: .join), roomMember("@bo:example.org", membership: .invite),
             roomMember("@cy:example.org", membership: .leave), roomMember("@di:example.org", membership: .ban),
         ]
-        let service = MatrixService()
+        let service = MatrixService.scratch()
         service.configureMessageActionsForChecks(
             client: FakeClient(rooms: [room]), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
             selectionID: UUID(), threadID: UUID())
@@ -60,7 +60,7 @@ struct RoomMembersTests {
         let room = FakeOpenRoom("!team:example.org", cached: [])
         room.memberList = [roomMember("@me:example.org")]
         room.canNotifyRoom = allowed
-        let service = MatrixService()
+        let service = MatrixService.scratch()
         service.configureMessageActionsForChecks(
             client: FakeClient(rooms: [room]), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
             selectionID: UUID(), threadID: UUID())

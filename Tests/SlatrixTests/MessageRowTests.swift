@@ -26,7 +26,7 @@ struct MessageRowTests {
 
     /// The row as the timeline builds it, from the message alone.
     private func row(_ message: ChatMessage, hovered: Bool = false, context: TimelineRowContext) -> TimelineRow {
-        context.matrix = context.matrix ?? MatrixService()
+        context.matrix = context.matrix ?? MatrixService.scratch()
         context.appearance = context.appearance ?? AppearanceStore()
         let entry = TimelineEntry(
             id: message.id,

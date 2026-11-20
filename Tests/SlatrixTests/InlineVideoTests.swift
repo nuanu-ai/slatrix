@@ -10,7 +10,7 @@ private func videoConversation() throws -> MatrixService {
     let roomID = "!videos:example.org"
     let client = FakeClient(rooms: [FakeRoom(roomInfo(id: roomID))])
     client.file = Data("not a movie".utf8)
-    let service = MatrixService()
+    let service = MatrixService.scratch()
     service.configureMessageActionsForChecks(
         client: client, main: nil, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(), threadID: UUID())
     service.selectedRoomID = roomID
