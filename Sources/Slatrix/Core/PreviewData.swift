@@ -104,6 +104,7 @@ import Foundation
         messages[2].isEdited = true
     }
     func openPreviewThread(_ root: ChatMessage) {
+        threadOpening = (root.eventID, nil)
         threadMessages = [
             root,
             ChatMessage(
@@ -126,6 +127,7 @@ import Foundation
         workspaces = []
         messages = []
         threadMessages = []
+        threadOpening = nil
         members = []
         people.preview = nil
         selectedRoomID = nil

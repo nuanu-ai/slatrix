@@ -31,10 +31,10 @@ enum TimelineLayout {
     }
 
     /// `unreadBoundaryEventID` is the event the "New messages" line goes above; `groups` is false in compact density;
-    /// `threadRootEventID` is a thread's root, which gets the line counting its replies once it has loaded.
+    /// `threadRootEventID` is a thread's root, with `repliesLine` the count on the line under it, nil for none.
     static func rows(
         _ messages: [ChatMessage], unreadBoundaryEventID: String?, groups: Bool, threadRootEventID: String? = nil,
-        now: Date, calendar: Calendar, locale: Locale
+        repliesLine: Int? = nil, now: Date, calendar: Calendar, locale: Locale
     ) -> [Row] {
         let time = Date.FormatStyle(
             date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
@@ -46,7 +46,7 @@ enum TimelineLayout {
         // The previous message's day; one calendar lookup per day rather than per message.
         var currentDay: DateInterval?
         var dayIDs = Set<String>()
-        for (index, message) in messages.enumerated() {
+        for message in messages {
             let newDay = currentDay.map { !($0.start <= message.timestamp && message.timestamp < $0.end) } ?? true
             if newDay {
                 currentDay = calendar.dateInterval(of: .day, for: message.timestamp)
@@ -73,8 +73,8 @@ enum TimelineLayout {
             rows.append(
                 Row(id: message.id, kind: .message(message, grouped: grouped, time: message.timestamp.formatted(time))))
             previous = message
-            if message.eventID == threadRootEventID {
-                rows.append(Row(id: "replies", kind: .replies(messages.count - index - 1)))
+            if message.eventID == threadRootEventID, let repliesLine {
+                rows.append(Row(id: "replies", kind: .replies(repliesLine)))
             }
         }
         return rows

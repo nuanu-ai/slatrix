@@ -94,7 +94,8 @@ class MessageContentTest {
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
                     onOpenThread = { thread = it }, actions = MessageActions(onReact = { message, key -> toggled = message to key }),
                     onOpenMessage = { jumped = it }, loadPicture = { _, width, _, _ -> asked += width; picture.await() },
-                    onOpenFile = { opened = it; opening.await() }, loadFile = { download })
+                    onOpenFile = { opened = it; opening.await() }, loadFile = { download },
+                    onOpenReplies = { root, _ -> thread = root })
             }
         }
     }

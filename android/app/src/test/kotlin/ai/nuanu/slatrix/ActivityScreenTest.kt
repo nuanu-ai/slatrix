@@ -37,7 +37,7 @@ class ActivityScreenTest {
             item("\$t", ActivityKind.ThreadReply, "Agreed", thread = "\$root"),
             item("\$d", ActivityKind.Message, "Lunch?", direct = true),
         )
-        compose.setContent { SlatrixTheme { ActivityScreen(items, {}, { _, _ -> }) } }
+        compose.setContent { SlatrixTheme { ActivityScreen(items, {}, {}) } }
         listOf("Can you review?", "Agreed", "Lunch?").forEach { compose.onNodeWithText(it).assertExists() }
         compose.onNodeWithText("Mentioned in #design").assertExists()
 
@@ -52,7 +52,7 @@ class ActivityScreenTest {
     // capability: activity.feed
     @Test fun aReactionNamesItsEmojiAboveTheMessageItReactedTo() {
         val liked = item("\$r", ActivityKind.Reaction, "👍").copy(reactedTo = "Ship it on Friday?")
-        compose.setContent { SlatrixTheme { ActivityScreen(listOf(liked), {}, { _, _ -> }) } }
+        compose.setContent { SlatrixTheme { ActivityScreen(listOf(liked), {}, {}) } }
         compose.onNodeWithText("Reacted 👍 in #design").assertExists()
         compose.onNodeWithText("Ship it on Friday?").assertExists()
     }
@@ -60,7 +60,7 @@ class ActivityScreenTest {
     // capability: activity.feed
     @Test fun theUnreadsPillShowsOnlyWhatYouHaventOpenedYet() {
         val items = listOf(item("\$m", ActivityKind.Mention, "Can you review?"), item("\$d", ActivityKind.Message, "Lunch?", direct = true).copy(unread = false))
-        compose.setContent { SlatrixTheme { ActivityScreen(items, {}, { _, _ -> }) } }
+        compose.setContent { SlatrixTheme { ActivityScreen(items, {}, {}) } }
         compose.onNodeWithText("Can you review?").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Unread"))
         compose.onNodeWithText("Lunch?").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
         compose.onNodeWithText("Unreads").performClick()
@@ -72,7 +72,7 @@ class ActivityScreenTest {
 
     // capability: activity.feed
     @Test fun anEmptyFeedSaysSoInTheMiddleWithUnreadsAmongTheFilters() {
-        compose.setContent { SlatrixTheme { ActivityScreen(emptyList(), {}, { _, _ -> }) } }
+        compose.setContent { SlatrixTheme { ActivityScreen(emptyList(), {}, {}) } }
         fun bounds(text: String) = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
         assertEquals(root.center.x, bounds("You’re all caught up").center.x, 1f)
@@ -83,7 +83,7 @@ class ActivityScreenTest {
     @Test fun anItemOpensAtItsOwnMessageAndAThreadReplyNamesItsThread() {
         val items = listOf(item("\$m", ActivityKind.Mention, "Can you review?"), item("\$t", ActivityKind.ThreadReply, "Agreed", thread = "\$root"))
         var opened: ActivityItem? = null
-        compose.setContent { SlatrixTheme { ActivityScreen(items, { opened = it }, { _, _ -> }) } }
+        compose.setContent { SlatrixTheme { ActivityScreen(items, { opened = it }, {}) } }
         compose.onNodeWithText("Agreed").performClick()
         compose.runOnIdle { assertEquals("\$t" to "\$root", opened?.eventId to opened?.threadRoot) }
         compose.onNodeWithText("Can you review?").performClick()

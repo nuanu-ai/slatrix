@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.ActivityItem
 import ai.nuanu.slatrix.core.ActivityKind
+import ai.nuanu.slatrix.core.ThreadFeedItem
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -51,8 +52,9 @@ private enum class ActivityFilter(val label: String) { All("All"), Dms("DMs"), M
 
 /** Slack's Activity tab: filter chips over what notified you, newest first. An item opens at its message. */
 @Composable
-fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit, onOpenThread: (roomId: String, root: String) -> Unit,
-    threads: @Composable (onOpenThread: (roomId: String, root: String) -> Unit) -> Unit = {}) {
+fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit,
+    onOpenThread: (ThreadFeedItem) -> Unit,
+    threads: @Composable (onOpenThread: (ThreadFeedItem) -> Unit) -> Unit = {}) {
     var filter by rememberSaveable { mutableStateOf(ActivityFilter.All) }
     var unreadOnly by rememberSaveable { mutableStateOf(false) }
     val shown = remember(items, filter, unreadOnly) {

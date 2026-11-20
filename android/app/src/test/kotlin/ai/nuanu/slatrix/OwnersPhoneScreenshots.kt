@@ -151,7 +151,7 @@ class OwnersPhoneScreenshots(private val screen: String, private val dark: Boole
                     item("d", "Анна Белова", ActivityKind.Message, null, "в четверг в 15:00, сейчас пришлю приглашение", at(1, 10, 20), false),
                     item("e", "Ольга Нестерова", ActivityKind.Mention, "Design", "@Dmitry Ukhanov макеты онбординга готовы, посмотришь?",
                         at(2, 15, 0), false),
-                ), {}, { _, _ -> })
+                ), {}, {})
             })
             else -> LiveChannelScreen(RoomSummary("!anna:example.org", "Анна Белова", true, "", UnreadBadge.None, "АБ",
                 AvatarPlaceholder.colorIndex("Анна Белова"), memberCount = 2),
