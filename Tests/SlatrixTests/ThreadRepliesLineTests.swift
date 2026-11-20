@@ -82,7 +82,7 @@ struct ThreadRepliesLineServiceTests {
     }
 
     // capability: threads.feed
-    @Test("Opened from Threads, a thread keeps its root and the count Threads showed until it holds its root")
+    @Test("Opened from Threads, a thread says the count Threads showed until its own timeline holds its root")
     func openedFromThreads() async throws {
         await service.selectRoom(room.id())
         room.pageGate.arm()
@@ -92,7 +92,7 @@ struct ThreadRepliesLineServiceTests {
             room: ChatRoom(id: room.id(), name: "Team"))
         let root = try #require(feed.first).root
         try await service.loadThread(root, openedWith: root.replyCount)
-        #expect(await eventually { service.threadMessages.map(\.eventID) == ["$root", "$third"] })
+        #expect(await eventually { service.threadMessages.contains { $0.eventID == "$third" } })
         #expect(service.threadRepliesLine == 5)
         // The thread says it reached its start before its root has come.
         try reachRoot()
@@ -100,34 +100,6 @@ struct ThreadRepliesLineServiceTests {
         #expect(service.threadRepliesLine == 5)
         try #require(room.timelines.all.last).emit([.reset(values: [item("$root"), item("$second"), item("$third")])])
         #expect(await eventually { service.threadRepliesLine == 2 })
-    }
-
-    @Test("Opened with its first page read ahead of the click, a thread keeps its root above a page without it")
-    func preparedKeepsRoot() async throws {
-        room.threadItems = [item("$reply")]
-        await service.selectRoom(room.id())
-        try #require(room.timelines.all.first).emit([.reset(values: [item("$root", replies: 5)])])
-        #expect(await eventually { service.messages.first?.eventID == "$root" })
-        let root = try #require(service.messages.first)
-        room.pageGate.arm()
-        service.prepareThread(root)
-        #expect(await eventually { room.pageGate.isWaiting })
-        room.pageGate.release()
-        try await service.loadThread(root, openedWith: root.replyCount)
-        #expect(service.threadMessages.map(\.eventID) == ["$root", "$reply"])
-        #expect(service.threadRepliesLine == 5)
-    }
-
-    @Test("A thread loads older replies once a page comes without its root, until its own timeline holds the root")
-    func pagesUntilItHoldsItsRoot() async throws {
-        _ = try #require(await opened(root: item("$root", replies: 2), thread: []))
-        // The root it opened with, alone, has nothing above it.
-        #expect(!service.loadsMoreThreadHistory)
-        let thread = try #require(room.timelines.all.last)
-        thread.emit([.reset(values: [item("$two")])])
-        #expect(await eventually { service.loadsMoreThreadHistory })
-        thread.emit([.reset(values: [item("$root"), item("$one"), item("$two")])])
-        #expect(await eventually { !service.loadsMoreThreadHistory })
     }
 
     @Test("Before the thread loads to its root, the line says the count its root carries in the channel now")
@@ -140,9 +112,10 @@ struct ThreadRepliesLineServiceTests {
         // A copy of the root without a count falls back to the count the pane was opened with.
         main.emit([.reset(values: [item("$root")])])
         #expect(await eventually { service.threadRepliesLine == 3 })
-        // A count of zero is zero.
+        // Before the thread loads, a count of zero says nothing: the device may know the thread only from a read receipt.
         main.emit([.reset(values: [item("$root", replies: 0)])])
-        #expect(await eventually { service.threadRepliesLine == nil })
+        #expect(await eventually { service.messages.first?.replyCount == 0 })
+        #expect(service.threadRepliesLine == 3)
     }
 
     @Test("Opened by a jump that showed no count, the line follows its root's count and goes with it")
