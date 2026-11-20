@@ -134,7 +134,7 @@ actor ProtectedLocalStateStore {
         directory: URL? = nil,
         keyProvider: @escaping @Sendable (String) async throws -> Data = { account in
             try await Task.detached(priority: .userInitiated) {
-                try SecureSessionStore.localStateKey(accountID: account)
+                try SecureSessionStore.shared.localStateKey(accountID: account)
             }.value
         }
     ) {

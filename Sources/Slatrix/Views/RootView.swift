@@ -39,6 +39,8 @@ enum AppRoute: String, CaseIterable {
 
 struct RootView: View {
     let matrix: MatrixService
+    /// Drafts, saved messages and recent searches, each account's sealed with its vault key.
+    private let localStore: ProtectedLocalStateStore
     @ObservedObject private var platform = PlatformIntegration.shared
     @ObservedObject private var updater = AppUpdater.shared
     @EnvironmentObject var appearance: AppearanceStore
@@ -118,7 +120,7 @@ struct RootView: View {
     @State private var editText = ""
     @State private var drafts = ComposerDrafts()
     @State private var viewer = MediaViewerState()
-    @StateObject private var attachmentDrafts = AttachmentDraftController()
+    @StateObject private var attachmentDrafts: AttachmentDraftController
     @State private var invitationResponseID: String?
     @State private var navigationNotice: String?
     @State private var sendingComposers: [String: Bool] = [:]
@@ -308,6 +310,15 @@ struct RootView: View {
 
     /// Every modal, for actions that must wait for all of them; read outside the body only.
     private var hasModal: Bool { hasPresentedSheet || modals.current != nil || modalShown }
+
+    init(
+        matrix: MatrixService, localStore: ProtectedLocalStateStore = .shared,
+        attachmentDrafts: AttachmentDraftStore = .shared
+    ) {
+        self.matrix = matrix
+        self.localStore = localStore
+        _attachmentDrafts = StateObject(wrappedValue: AttachmentDraftController(store: attachmentDrafts))
+    }
 
     var body: some View {
         ModalHost(
@@ -2555,7 +2566,7 @@ struct RootView: View {
             await previous?.value
             guard localGeneration == generation, composerIdentity == identity else { return }
             do {
-                let access = try await ProtectedLocalStateStore.shared.open(accountID: accountID)
+                let access = try await localStore.open(accountID: accountID)
                 guard localGeneration == generation, composerIdentity == identity else { return }
                 localAccess = access
                 localRevision = 0
@@ -2580,7 +2591,7 @@ struct RootView: View {
         localRevision += 1
         let state = localState
         let revision = localRevision
-        return { try await ProtectedLocalStateStore.shared.save(state, access: access, revision: revision) }
+        return { [localStore] in try await localStore.save(state, access: access, revision: revision) }
     }
     private func saveLocalData() {
         guard let save = capturedLocalSave(), let generation = localAccess?.generation else { return }

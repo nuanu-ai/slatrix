@@ -42,7 +42,9 @@ struct ConversationSwitchHostedTests {
 
     @MainActor final class Harness {
         let rooms: [FakeOpenRoom]
-        let matrix = MatrixService()
+        /// Credentials and vaults of its own, so the window never reaches the development build's.
+        private let folder: TemporaryDirectory
+        let matrix: MatrixService
         let window: NSWindow
         let hosting: NSHostingView<AnyView>
         var frames: [Frame] = []
@@ -53,8 +55,12 @@ struct ConversationSwitchHostedTests {
         private var clickDate = Date()
         private var passes = 0
 
-        init() {
+        init() throws {
             _ = NSApplication.shared
+            folder = try TemporaryDirectory()
+            let credentials = SecureSessionStore(file: folder.path("credentials.json"))
+            let key: @Sendable (String) async throws -> Data = { try credentials.localStateKey(accountID: $0) }
+            matrix = MatrixService(credentials: credentials)
             // Every window opens as it first would, on the first conversation.
             for key in ["layout.paneWidth", "layout.sidebarHidden", "room.@me:example.org"] {
                 UserDefaults.standard.removeObject(forKey: key)
@@ -81,7 +87,11 @@ struct ConversationSwitchHostedTests {
             matrix.status = .ready
             hosting = NSHostingView(
                 rootView: AnyView(
-                    RootView(matrix: matrix).environmentObject(AppearanceStore())
+                    RootView(
+                        matrix: matrix,
+                        localStore: ProtectedLocalStateStore(directory: folder.path("drafts"), keyProvider: key),
+                        attachmentDrafts: AttachmentDraftStore(directory: folder.path("files"), keyProvider: key)
+                    ).environmentObject(AppearanceStore())
                         .environment(\.metrics, Metrics(zoom: 1))))
             window = offscreenWindow(
                 NSSize(width: 1_440, height: 900),
@@ -359,7 +369,7 @@ struct ConversationSwitchHostedTests {
 
     @Test("Coming back to a conversation still open shows it whole in the frame of the click, and nothing moves")
     func heldSwitch() async throws {
-        let harness = Harness()
+        let harness = try Harness()
         defer { harness.close() }
         #expect(await harness.settled(on: 0))
         harness.menu("next-conversation")
@@ -380,7 +390,7 @@ struct ConversationSwitchHostedTests {
         "Opening a conversation not held shows it at once, and its rows land where they stay",
         arguments: [200, 600])
     func coldSwitch(read milliseconds: Int) async throws {
-        let harness = Harness()
+        let harness = try Harness()
         defer { harness.close() }
         #expect(await harness.settled(on: 0))
         await harness.idle()
@@ -402,7 +412,7 @@ struct ConversationSwitchHostedTests {
 
     @Test("A jump to a message the conversation on screen lacks keeps its table while it checks the live timeline")
     func jumpKeepsPane() async throws {
-        let harness = Harness()
+        let harness = try Harness()
         defer { harness.close() }
         #expect(await harness.settled(on: 0))
         await harness.idle()

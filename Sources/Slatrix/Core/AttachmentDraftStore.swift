@@ -124,7 +124,7 @@ actor AttachmentDraftStore {
         directory: URL? = nil, budgetBytes: Int = AttachmentDraftStore.maximumAccountBytes,
         keyProvider: @escaping @Sendable (String) async throws -> Data = { account in
             try await Task.detached(priority: .userInitiated) {
-                try SecureSessionStore.localStateKey(accountID: account)
+                try SecureSessionStore.shared.localStateKey(accountID: account)
             }.value
         }, fault: (@Sendable (FaultPoint) throws -> Void)? = nil
     ) {

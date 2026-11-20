@@ -60,8 +60,15 @@ struct CredentialEnvelope: Codable, Equatable {
     }
 }
 
-enum SecureSessionStore {
-    private static let lock = NSLock()
+/// The saved session and each account's vault key. Whoever reads or writes them is handed one of these.
+final class SecureSessionStore: @unchecked Sendable {
+    /// The app's own: Keychain in release builds, a file in the development build's folder in debug ones.
+    static let shared = SecureSessionStore(file: nil)
+    private let lock = NSLock()
+    private let file: URL?
+
+    /// With `file`, the record lives in that file, as a test's does.
+    init(file: URL?) { self.file = file }
     enum StoreError: LocalizedError {
         case keychain(OSStatus)
         case invalidSession
@@ -103,21 +110,21 @@ enum SecureSessionStore {
         return try JSONEncoder().encode(envelope)
     }
 
-    private static func readEnvelope() throws -> CredentialEnvelope {
-        try readData().map(decodeEnvelope) ?? CredentialEnvelope()
+    private func readEnvelope() throws -> CredentialEnvelope {
+        try readData().map(Self.decodeEnvelope) ?? CredentialEnvelope()
     }
 
-    private static func writeEnvelope(_ envelope: CredentialEnvelope) throws {
-        try writeData(encodeEnvelope(envelope))
+    private func writeEnvelope(_ envelope: CredentialEnvelope) throws {
+        try writeData(Self.encodeEnvelope(envelope))
     }
 
-    static func load() throws -> StoredSession? {
+    func load() throws -> StoredSession? {
         lock.lock()
         defer { lock.unlock() }
         return try readEnvelope().session
     }
 
-    static func save(_ session: StoredSession) throws {
+    func save(_ session: StoredSession) throws {
         try session.validate()
         lock.lock()
         defer { lock.unlock() }
@@ -126,38 +133,45 @@ enum SecureSessionStore {
         try writeEnvelope(envelope)
     }
 
-    static func delete() throws {
+    func delete() throws {
         lock.lock()
         defer { lock.unlock() }
         guard let data = try readData() else { return }
-        var envelope = try decodeEnvelope(data)
+        var envelope = try Self.decodeEnvelope(data)
         envelope.session = nil
         // Keep the local-state keys so drafts saved by this account stay readable after a future sign-in.
         try writeEnvelope(envelope)
     }
 
-    static func localStateKey(accountID: String) throws -> Data {
-        guard validAccountID(accountID) else { throw StoreError.invalidSession }
+    func localStateKey(accountID: String) throws -> Data {
+        guard Self.validAccountID(accountID) else { throw StoreError.invalidSession }
         lock.lock()
         defer { lock.unlock() }
         var envelope = try readEnvelope()
         if let key = envelope.vaultKeys[accountID] { return key }
         guard envelope.session?.userId == accountID else { throw StoreError.invalidSession }
-        let key = try generateStoreKey()
+        let key = try Self.generateStoreKey()
         envelope.vaultKeys[accountID] = key
         try writeEnvelope(envelope)
         return key
     }
 
     // Debug builds are not stably signed, so each rebuild would land in a new Keychain partition and prompt again.
-    #if DEBUG
-    private static var fileURL: URL { AppPaths.applicationSupport.appendingPathComponent("credentials.json") }
+    private var fileURL: URL? {
+        #if DEBUG
+        file ?? AppPaths.applicationSupport.appendingPathComponent("credentials.json")
+        #else
+        file
+        #endif
+    }
 
-    private static func readData() throws -> Data? {
+    private func readData() throws -> Data? {
+        guard let fileURL else { return try Self.readKeychain() }
         do { return try Data(contentsOf: fileURL) } catch CocoaError.fileReadNoSuchFile { return nil }
     }
 
-    private static func writeData(_ data: Data) throws {
+    private func writeData(_ data: Data) throws {
+        guard let fileURL else { return try Self.writeKeychain(data) }
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -170,14 +184,14 @@ enum SecureSessionStore {
         try handle.synchronize()
         guard rename(staging.path, fileURL.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     }
-    #else
+
     private static let keychainItem: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: "ai.nuanu.slatrix",
         kSecAttrAccount as String: "matrix-session",
     ]
 
-    private static func readData() throws -> Data? {
+    private static func readKeychain() throws -> Data? {
         var query = keychainItem
         query[kSecReturnData as String] = true
         var result: CFTypeRef?
@@ -188,7 +202,7 @@ enum SecureSessionStore {
         return data
     }
 
-    private static func writeData(_ data: Data) throws {
+    private static func writeKeychain(_ data: Data) throws {
         var status = SecItemUpdate(keychainItem as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
             var item = keychainItem
@@ -199,5 +213,4 @@ enum SecureSessionStore {
         }
         guard status == errSecSuccess else { throw StoreError.keychain(status) }
     }
-    #endif
 }
