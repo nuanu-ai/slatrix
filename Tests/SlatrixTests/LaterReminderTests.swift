@@ -155,3 +155,36 @@ struct LaterReminderTests {
         #expect(queue.queued.values.map(\.1.body) == ["Reminder: launch moves to Friday"])
     }
 }
+
+/// Whose reminders the queue holds while the app finds out who is signed in.
+struct LaterReminderAudienceTests {
+    struct Case: CustomTestStringConvertible, Sendable {
+        var name: String
+        var restoring = false
+        var status = ConnectionStatus.ready
+        var user: String? = "@owner:example.org"
+        var laterLoaded = true
+        var notifications = true
+        var preview = false
+        var expected: LaterReminderSchedule.Audience
+        var testDescription: String { name }
+    }
+
+    @Test(
+        "Reminders sync only for whoever is known to be signed in, and stay queued while that's unknown",
+        arguments: [
+            Case(name: "Still restoring", restoring: true, status: .connecting, user: nil, expected: .unknown),
+            Case(name: "Restore failed with no one signed in", status: .error, user: nil, expected: .unknown),
+            Case(name: "Signed in, Later not loaded yet", laterLoaded: false, expected: .unknown),
+            Case(name: "Signed out", status: .signedOut, user: nil, expected: .nobody),
+            Case(name: "Notifications off", notifications: false, expected: .nobody),
+            Case(name: "The sample workspace", user: "preview.you", preview: true, expected: .nobody),
+            Case(name: "Signed in and loaded", expected: .account("@owner:example.org")),
+        ])
+    func audience(_ spec: Case) {
+        #expect(
+            LaterReminderSchedule.audience(
+                restoring: spec.restoring, status: spec.status, userID: spec.user, laterLoaded: spec.laterLoaded,
+                notifications: spec.notifications, preview: spec.preview) == spec.expected)
+    }
+}

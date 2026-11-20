@@ -19,6 +19,24 @@ import Foundation
 
     init(transport: LaterReminderTransport) { self.transport = transport }
 
+    /// Whose reminders the queue holds: nobody's withdraws them all, and unknown leaves the queue as it is.
+    enum Audience: Equatable {
+        case unknown, nobody
+        case account(String)
+    }
+
+    /// Still restoring, a restore that failed, or Later not loaded yet is unknown, not signed out, so a reminder
+    /// due meanwhile isn't withdrawn.
+    nonisolated static func audience(
+        restoring: Bool, status: ConnectionStatus, userID: String?, laterLoaded: Bool, notifications: Bool,
+        preview: Bool
+    ) -> Audience {
+        if !notifications || preview { return .nobody }
+        if restoring { return .unknown }
+        guard let userID else { return status == .signedOut ? .nobody : .unknown }
+        return laterLoaded ? .account(userID) : .unknown
+    }
+
     /// Queues what `list` has still to come for `accountID`, and withdraws everything else queued; a nil account,
     /// as when signed out or notifications are off, withdraws all. With `preview` on, `notification` reads what a
     /// reminder says; with it off the reminder is generic and the message is never read. A change to it rewrites
