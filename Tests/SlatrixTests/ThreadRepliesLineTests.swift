@@ -110,8 +110,10 @@ struct ThreadRepliesLineServiceTests {
         #expect(await eventually { service.messages.first?.eventID == "$root" })
         let root = try #require(service.messages.first)
         room.pageGate.arm()
+        let timelines = room.timelines.all.count
         service.prepareThread(root)
-        #expect(await eventually { room.pageGate.isWaiting })
+        // The thread's own timeline, not the conversation's still reading its first page.
+        #expect(await eventually { room.timelines.all.count > timelines && room.pageGate.isWaiting })
         try #require(room.timelines.all.last).startReached = true
         room.pageGate.release()
         try await service.loadThread(root, openedWith: 5)
