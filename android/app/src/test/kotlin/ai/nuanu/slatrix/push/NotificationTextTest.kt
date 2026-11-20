@@ -12,7 +12,8 @@ class NotificationTextTest {
             val case = item.asJsonObject
             fun text(key: String) = case[key].asString
             assertEquals(text("name"), text("title") to text("text"),
-                NotificationText.message(text("room"), text("sender"), case["direct"].asBoolean, text("body")))
+                NotificationText.message(text("room"), text("sender"), case["direct"].asBoolean, text("body"),
+                    case["reply"]?.asBoolean ?: false))
         }
     }
 }

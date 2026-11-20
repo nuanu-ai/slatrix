@@ -131,22 +131,26 @@ class PushNotifications(private val context: Context) {
 
 /** What a message notification says, as the cases in `spec/notification-text.json` say. */
 internal object NotificationText {
-    fun message(room: String, sender: String, direct: Boolean, body: String): Pair<String, String> =
-        plain(body).let { if (direct) sender to it else room to "$sender: $it" }
+    /** [reply] marks a body that still opens with its reply fallback; the SDK already drops it from a push's body. */
+    fun message(room: String, sender: String, direct: Boolean, body: String, reply: Boolean = false): Pair<String, String> =
+        plain(body, reply).let { if (direct) sender to it else room to "$sender: $it" }
 
     private val markers = listOf(
         "\\*\\*(.+?)\\*\\*", "__(.+?)__", "~~(.+?)~~", "`([^`]+)`",
         "(?<![\\w*])\\*(?!\\s)(.+?)(?<!\\s)\\*(?![\\w*])", "(?<![\\w_])_(?!\\s)(.+?)(?<!\\s)_(?![\\w_])",
     ).map(::Regex)
 
-    fun plain(body: String): String {
-        var lines = body.split("\n")
-        // A reply's body opens with the quoted message, "> <@sender> …", and a blank line.
-        val blank = lines.indexOfFirst { !it.startsWith(">") }
-        if (lines.first().startsWith("> <") && blank >= 0 && lines[blank].isEmpty()) lines = lines.drop(blank + 1)
-        val joined = lines.filterNot { it.trim().startsWith("```") }
+    fun plain(body: String, reply: Boolean = false): String {
+        val joined = (if (reply) withoutReplyFallback(body) else body).split("\n").filterNot { it.trim().startsWith("```") }
             .joinToString(" ") { if (it.startsWith(">")) it.drop(1) else it }
         return markers.fold(joined) { text, marker -> marker.replace(text, "$1") }.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+    }
+
+    /** A reply's body opens with the quoted message, "> <@sender> …", and a blank line. */
+    fun withoutReplyFallback(body: String): String {
+        val lines = body.split("\n")
+        val blank = lines.indexOfFirst { !it.startsWith(">") }
+        return if (lines.first().startsWith("> <") && blank >= 0 && lines[blank].isEmpty()) lines.drop(blank + 1).joinToString("\n") else body
     }
 }
 
