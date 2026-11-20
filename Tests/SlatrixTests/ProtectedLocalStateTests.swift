@@ -192,6 +192,20 @@ struct ProtectedLocalStateStoreTests {
         #expect(try await store.open(accountID: account).state == expected)
     }
 
+    @Test("A saved draft that grows past its limit keeps the copy last saved, and the rest still saves")
+    func outgrownDraftKeepsSavedCopy() async throws {
+        let access = try await store.open(accountID: account)
+        try await store.save(original, access: access, revision: 1)
+        var grown = original
+        grown.drafts[reference.roomID] = String(repeating: "a", count: 131_073)
+        grown.threadDrafts[reference.id] = String(repeating: "a", count: 131_073)
+        grown.drafts["!other:example.org"] = "typed meanwhile"
+        try await store.save(grown, access: access, revision: 2)
+        var expected = original
+        expected.drafts["!other:example.org"] = "typed meanwhile"
+        #expect(try await store.open(accountID: account).state == expected)
+    }
+
     // capability: message.save.sync
     @Test("Messages taken out of Later are kept with the account's other private state, so the removal can still sync")
     func savedRemovalsPersist() async throws {

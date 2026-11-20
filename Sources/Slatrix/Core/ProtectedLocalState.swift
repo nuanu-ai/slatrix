@@ -58,10 +58,16 @@ struct ProtectedLocalState: Codable, Equatable {
     static let maximumDraftBytes = 131_072
 
     /// Leaves out each entry over its own limit, so one pasted draft or long search never stops the rest from saving.
-    func fitted() -> ProtectedLocalState {
+    /// A draft that outgrew its limit keeps the copy `saved` has, so at most what was typed since is lost.
+    func fitted(keeping saved: ProtectedLocalState) -> ProtectedLocalState {
+        func fit(_ entries: [String: String], _ saved: [String: String]) -> [String: String] {
+            entries.reduce(into: [:]) { fitting, entry in
+                fitting[entry.key] = entry.value.utf8.count <= Self.maximumDraftBytes ? entry.value : saved[entry.key]
+            }
+        }
         var state = self
-        state.drafts = drafts.filter { $0.value.utf8.count <= Self.maximumDraftBytes }
-        state.threadDrafts = threadDrafts.filter { $0.value.utf8.count <= Self.maximumDraftBytes }
+        state.drafts = fit(drafts, saved.drafts)
+        state.threadDrafts = fit(threadDrafts, saved.threadDrafts)
         state.recentSearches = recentSearches?.filter { $0.utf8.count <= RecentSearches.maximumBytes }
         return state
     }
@@ -179,10 +185,10 @@ actor ProtectedLocalStateStore {
     }
 
     func save(_ state: ProtectedLocalState, access: ProtectedLocalStateAccess, revision: UInt64) throws {
-        let state = state.fitted()
         guard var record = records[access.accountID], record.generation == access.generation else {
             throw ProtectedLocalStateError.staleAccess
         }
+        let state = state.fitted(keeping: record.state)
         guard revision > 0 else { throw ProtectedLocalStateError.invalidRevision }
         guard revision >= record.revision else { return }
         if revision == record.revision {
