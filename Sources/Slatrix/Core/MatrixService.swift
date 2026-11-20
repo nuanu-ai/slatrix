@@ -701,8 +701,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     @ObservationIgnored var notifications: DesktopNotificationDelivery?
     /// Messages a pass is asking about, so another pass doesn't ask again before the answer.
     @ObservationIgnored private var asking = Set<String>()
-    /// Where the next pass starts in the list of copies, so a long list is asked about in turns.
-    @ObservationIgnored private var rotation = 0
+    /// The pass that last asked about each copy, so a long list is asked about in turns.
+    @ObservationIgnored private var askedInPass: [String: Int] = [:]
+    @ObservationIgnored private var passes = 0
     var notificationSessionID: UUID { sessionGeneration }
     let notificationRetries = NotificationSettingsRetryState()
     private var client: Client?
@@ -1307,6 +1308,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         TimelineMemory.positions = TimelineMemory.positions.filter { $0.key.sessionID != sessionGeneration }
         TimelineMemory.heights.removeAll { $0.key.sessionID == sessionGeneration }
         sessionGeneration = UUID()
+        asking = []
+        askedInPass = [:]
         selection = UUID()
         notificationRetries.reset()
         profileLoadTask?.cancel()
@@ -3709,8 +3712,9 @@ extension MatrixService {
 
     /// Starts a pass over the copies of messages outside their timelines: Activity's unopened rows and the banners in
     /// Notification Center. Each message is asked about once, newest first, at most `recheckLimit` of them; a longer
-    /// list is asked about in turns, the next pass starting where this one stopped. A message another pass is asking
-    /// about is skipped. The pass ends at its bound, and its answers apply while the account stays the same.
+    /// list is asked about in turns, those never asked about first, then those asked about longest ago. A message
+    /// another pass is asking about is skipped. The pass ends at its bound, and its answers apply while the account
+    /// stays the same.
     @discardableResult func recheckCopies() -> Task<Void, Never> {
         let session = sessionGeneration
         return Task {
@@ -3727,13 +3731,19 @@ extension MatrixService {
             }
             var seen = Set<String>()
             copies = copies.sorted { $0.date > $1.date }.filter { seen.insert($0.key).inserted }
-            let start = copies.count > Self.recheckLimit ? rotation % copies.count : 0
-            rotation = start + Self.recheckLimit
-            for copy in (copies[start...] + copies[..<start]).prefix(Self.recheckLimit) {
+            askedInPass = askedInPass.filter { seen.contains($0.key) }
+            passes += 1
+            let pass = passes
+            // Never asked first, then those asked longest ago; newest first within each.
+            let turn = copies.enumerated().sorted {
+                (askedInPass[$0.element.key] ?? 0, $0.offset) < (askedInPass[$1.element.key] ?? 0, $1.offset)
+            }
+            for copy in turn.map(\.element).prefix(Self.recheckLimit) {
                 guard asking.insert(copy.key).inserted else { continue }
+                askedInPass[copy.key] = pass
                 let exists = await messageExists(roomID: copy.roomID, eventID: copy.eventID)
-                asking.remove(copy.key)
                 guard session == sessionGeneration else { return }
+                asking.remove(copy.key)
                 if !exists { messagesGone([copy.key]) }
             }
         }

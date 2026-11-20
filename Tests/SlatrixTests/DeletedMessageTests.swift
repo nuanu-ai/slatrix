@@ -100,6 +100,23 @@ extension DeletedMessageTests {
             kind: .message)
     }
 
+    /// Notification Center as the window wires it to the service.
+    private func notificationCenter() -> (FakeNotificationCenter, DesktopNotificationDelivery) {
+        let center = FakeNotificationCenter()
+        let delivery = DesktopNotificationDelivery(transport: center)
+        delivery.useAccount("@me:example.org")
+        service.notifications = delivery
+        return (center, delivery)
+    }
+
+    private func show(_ eventID: String, in delivery: DesktopNotificationDelivery) async throws {
+        let target = try #require(
+            MatrixNotificationTarget(accountID: "@me:example.org", roomID: Self.room, eventID: eventID))
+        #expect(
+            try await delivery.deliver(
+                DesktopMessageNotification(target: target, title: "Room", body: "New", playSound: true)))
+    }
+
     // capability: message.deleted
     @Test("Activity drops the rows of deleted messages it hasn't opened; any other answer keeps its row")
     func activityDropsDeleted() async {
@@ -114,8 +131,8 @@ extension DeletedMessageTests {
     }
 
     // capability: message.deleted
-    @Test("With more rows than a pass asks about, the next pass goes on where it stopped and reaches the oldest")
-    func rotation() async {
+    @Test("With more rows than a pass asks about, the next pass asks about those not yet asked and reaches the oldest")
+    func turns() async {
         let ids = (0...MatrixService.recheckLimit).map { "$m\($0)" }
         let oldest = ids[ids.count - 1]
         let room = AnsweringRoom(
@@ -126,6 +143,24 @@ extension DeletedMessageTests {
         #expect(service.activity.items.compactMap(\.eventID) == ids)
         await service.recheckCopies().value
         #expect(service.activity.items.compactMap(\.eventID) == Array(ids.dropLast()))
+    }
+
+    // capability: message.deleted
+    @Test("A banner that comes and goes between passes never keeps a deleted row from its turn")
+    func changingList() async throws {
+        let ids = (0..<(2 * MatrixService.recheckLimit - 1)).map { "$m\($0)" }
+        let deleted = ids[MatrixService.recheckLimit - 1]
+        var answers = Dictionary(uniqueKeysWithValues: ids.map { ($0, $0 == deleted ? EventAnswer.deleted : .message) })
+        answers["$banner"] = .message
+        use([AnsweringRoom(Self.room, answers: answers)])
+        for (age, id) in ids.enumerated() { service.activity.record(item(id, age: age)) }
+        let (center, delivery) = notificationCenter()
+        try await show("$banner", in: delivery)
+        await service.recheckCopies().value
+        // The reader closes it.
+        center.remove(try #require(center.shown.first).identifier)
+        await service.recheckCopies().value
+        #expect(!service.activity.items.contains { $0.eventID == deleted })
     }
 
     // capability: message.deleted
@@ -166,6 +201,72 @@ extension DeletedMessageTests {
     }
 
     // capability: message.deleted
+    @Test("A question still out from the account signed out never keeps the next one from asking about that message")
+    func questionFromSignedOutAccount() async throws {
+        let folder = try TemporaryDirectory()
+        let matrix = MatrixService(
+            credentials: SecureSessionStore(file: folder.path("credentials.json")),
+            storeRoots: [folder.path("support"), folder.path("caches")])
+        let before = AnsweringRoom(Self.room, answers: ["$shared": .deleted], held: ["$shared"])
+        matrix.configureRoomOpenForChecks(
+            client: FakeClient(rooms: [before]), roomList: FakeRoomListService(),
+            user: ChatUser(id: "@me:example.org", name: "Me"))
+        matrix.activity.record(item("$shared"))
+        before.gate.arm()
+        let held = matrix.recheckCopies()
+        #expect(await eventually { before.gate.isWaiting })
+        try await matrix.logoutLocally()
+        matrix.configureRoomOpenForChecks(
+            client: FakeClient(rooms: [AnsweringRoom(Self.room, answers: ["$shared": .deleted])]),
+            roomList: FakeRoomListService(), user: ChatUser(id: "@other:example.org", name: "Other"))
+        matrix.activity.record(item("$shared"))
+        await matrix.recheckCopies().value
+        #expect(matrix.activity.items.isEmpty)
+        before.gate.release()
+        await held.value
+    }
+
+    // capability: message.deleted
+    @Test("A message whose content can't be read keeps its row and its banner")
+    func unreadableStays() async throws {
+        use([AnsweringRoom(Self.room, answers: ["$odd": .unreadable])])
+        let (center, delivery) = notificationCenter()
+        try await show("$odd", in: delivery)
+        service.activity.record(item("$odd"))
+        await service.recheckCopies().value
+        await drainMainActor()
+        #expect(service.activity.items.count == 1 && center.shown.count == 1)
+    }
+
+    // capability: message.deleted
+    @Test("Taking back a deleted message's banner leaves another account's banner for the same message")
+    func otherAccountsBanner() async throws {
+        let (center, delivery) = notificationCenter()
+        try await show("$gone", in: delivery)
+        let elsewhere = try #require(
+            MatrixNotificationTarget(accountID: "@other:example.org", roomID: Self.room, eventID: "$gone"))
+        try await center.add(
+            DesktopNotificationRequest(
+                identifier: "elsewhere",
+                message: DesktopMessageNotification(target: elsewhere, title: "Room", body: "New", playSound: true)))
+        await delivery.withdraw([ActivityService.key(roomID: Self.room, eventID: "$gone")])
+        #expect(center.shown.map(\.identifier) == ["elsewhere"])
+    }
+
+    // capability: message.deleted
+    @Test("Notification Center is read only once a banner went up since the last clear")
+    func readsAfterABanner() async throws {
+        let (center, delivery) = notificationCenter()
+        let key = ActivityService.key(roomID: Self.room, eventID: "$gone")
+        await delivery.withdraw([key])
+        #expect(center.reads == 0)
+        try await show("$other", in: delivery)
+        delivery.clear()
+        await delivery.withdraw([key])
+        #expect(center.reads == 0)
+    }
+
+    // capability: message.deleted
     @Test("A message deleted before its notification came makes no row, so no banner")
     func deletedBeforeNotification() {
         let notification = NotificationItem(
@@ -189,42 +290,38 @@ extension DeletedMessageTests {
 
     // capability: message.deleted
     @Test(
-        "A message deleted in an open or kept timeline leaves Activity and Notification Center at once",
+        "Messages deleted in an open or kept timeline leave Activity and Notification Center at once, in one read of it",
         arguments: Place.allCases)
     func deletedInTimeline(_ place: Place) async throws {
         let root = FakeTimelineItem(textEvent("$root", body: "Root"), uniqueID: "root")
         let message = FakeTimelineItem(textEvent("$gone", body: "Hello"), uniqueID: "gone")
-        let room = FakeOpenRoom(Self.room, cached: [root, message])
-        room.threadItems = [root, message]
+        let also = FakeTimelineItem(textEvent("$also", body: "Hi"), uniqueID: "also")
+        let room = FakeOpenRoom(Self.room, cached: [root, message, also])
+        room.threadItems = [root, message, also]
         let other = FakeOpenRoom("!other:example.org", cached: [])
         use([room, other])
-        let center = FakeNotificationCenter()
-        let delivery = DesktopNotificationDelivery(transport: center)
-        delivery.useAccount("@me:example.org")
-        service.notifications = delivery
-        for id in ["$gone", "$kept"] {
-            let target = try #require(
-                MatrixNotificationTarget(accountID: "@me:example.org", roomID: Self.room, eventID: id))
-            #expect(
-                try await delivery.deliver(
-                    DesktopMessageNotification(target: target, title: "Room", body: "New", playSound: true)))
+        let (center, delivery) = notificationCenter()
+        for id in ["$gone", "$also", "$kept"] {
+            try await show(id, in: delivery)
+            service.activity.record(item(id))
         }
-        service.activity.record(item("$gone"))
-        service.activity.record(item("$kept"))
         await service.selectRoom(room.id())
         switch place {
         case .open: break
         case .kept: await service.selectRoom(other.id())
         case .thread:
             try await service.loadThread(try #require(service.messages.first))
-            #expect(await eventually { service.threadMessages.count == 2 })
+            #expect(await eventually { service.threadMessages.count == 3 })
         }
         let timeline = try #require(place == .thread ? room.timelines.all.last : room.timelines.all.first)
-        let deleted = FakeTimelineItem(textEvent("$gone", body: "", redacted: true), uniqueID: "gone")
-        timeline.emit([.set(index: 1, value: deleted)])
+        timeline.emit([
+            .set(index: 1, value: FakeTimelineItem(textEvent("$gone", body: "", redacted: true), uniqueID: "gone")),
+            .set(index: 2, value: FakeTimelineItem(textEvent("$also", body: "", redacted: true), uniqueID: "also")),
+        ])
         await drainMainActor()
         #expect(service.activity.items.compactMap(\.eventID) == ["$kept"])
         #expect(await eventually { center.shown.map(\.target.eventID) == ["$kept"] })
+        #expect(center.reads == 1)
     }
 }
 

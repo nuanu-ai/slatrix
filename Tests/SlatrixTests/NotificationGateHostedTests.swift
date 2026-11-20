@@ -162,11 +162,9 @@ struct NotificationGateHostedTests {
         #expect(
             try await harness.delivery.deliver(
                 DesktopMessageNotification(target: target, title: "away", body: "New", playSound: false)))
-        // Again until the window listens.
-        #expect(
-            await eventually {
-                NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
-                return harness.transport.shown.isEmpty
-            })
+        // Once the window has wired its handlers.
+        #expect(await eventually { harness.matrix.notificationHandler != nil })
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        #expect(await eventually { harness.transport.shown.isEmpty })
     }
 }

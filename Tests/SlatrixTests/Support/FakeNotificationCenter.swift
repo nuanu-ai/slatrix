@@ -8,18 +8,24 @@ import Foundation
     private(set) var asked = 0
     private(set) var added: [String?] = []
     private(set) var shown: [DeliveredNotification] = []
+    /// How often the app read what Notification Center shows.
+    private(set) var reads = 0
     func isAuthorized() async throws -> Bool {
         asked += 1
         return true
     }
     func add(_ request: DesktopNotificationRequest) async throws {
         added.append(request.message.target.eventID)
+        // Later than any test message, in the order they came.
         shown.append(
             DeliveredNotification(
                 identifier: request.identifier, target: request.message.target,
-                date: Date(timeIntervalSince1970: Double(added.count))))
+                date: Date(timeIntervalSinceReferenceDate: Double(added.count))))
     }
     func remove(_ identifier: String) { shown.removeAll { $0.identifier == identifier } }
     func clear() { shown = [] }
-    func deliveredNotifications() async -> [DeliveredNotification] { shown }
+    func deliveredNotifications() async -> [DeliveredNotification] {
+        reads += 1
+        return shown
+    }
 }
