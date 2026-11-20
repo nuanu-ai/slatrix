@@ -45,7 +45,7 @@ enum TimelineLayout {
         var previous: ChatMessage?
         // The previous message's day; one calendar lookup per day rather than per message.
         var currentDay: DateInterval?
-        var days: [(row: Int, id: String)] = []
+        var dayIDs = Set<String>()
         for (index, message) in messages.enumerated() {
             let newDay = currentDay.map { !($0.start <= message.timestamp && message.timestamp < $0.end) } ?? true
             if newDay {
@@ -58,8 +58,9 @@ enum TimelineLayout {
                         calendar.isDate(message.timestamp, inSameDayAs: $0)
                     } == true ? "Yesterday" : message.timestamp.formatted(day)
                 let dayID = "day-\(components.year ?? 0)-\(components.month ?? 0)-\(components.day ?? 0)"
-                days.append((rows.count, dayID))
-                rows.append(Row(id: "\(dayID)-\(message.id)", kind: .day(label)))
+                // Server timestamps can return to a day already shown.
+                let id = dayIDs.insert(dayID).inserted ? dayID : "\(dayID)-\(message.id)"
+                rows.append(Row(id: id, kind: .day(label)))
             }
             let unread = unreadBoundaryEventID != nil && message.eventID == unreadBoundaryEventID
             if unread { rows.append(Row(id: "unread", kind: .unread)) }
@@ -75,12 +76,6 @@ enum TimelineLayout {
             if message.eventID == threadRootEventID {
                 rows.append(Row(id: "replies", kind: .replies(messages.count - index - 1)))
             }
-        }
-        // Server timestamps can return to a day already shown. Its newest line takes the day's own ID, so older history
-        // arriving above never hands that ID to another line.
-        var seen = Set<String>()
-        for day in days.reversed() where seen.insert(day.id).inserted {
-            rows[day.row] = Row(id: day.id, kind: rows[day.row].kind)
         }
         return rows
     }

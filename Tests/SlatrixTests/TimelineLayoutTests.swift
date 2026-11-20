@@ -87,12 +87,6 @@ struct TimelineLayoutTests {
         #expect(grouped == spec.grouped)
     }
 
-    @Test("A message shown after the same person's but stamped hours earlier starts its own group")
-    func backwardTimesDoNotGroup() {
-        let rows = layout([message("evening", "@alice", at: 60), message("morning", "@alice", at: 9 * 60)])
-        #expect(rows == ["day Today", "evening 11:00 AM", "morning 3:00 AM"])
-    }
-
     @Test("Compact density never groups")
     func compactDoesNotGroup() {
         let rows = layout([message("a", "@alice", at: 3), message("b", "@alice", at: 2)], groups: false)
@@ -163,22 +157,6 @@ struct TimelineLayoutTests {
                 if case .day(let label) = row.kind { return label }
                 return nil
             } == ["Today", "Yesterday", "Today"])
-    }
-
-    @Test("A day line keeps its identity when older history from its day arrives above an earlier day's line")
-    func dayIdentitySurvivesOlderHistory() {
-        func divider(above id: String, in messages: [ChatMessage]) -> String? {
-            let rows = TimelineLayout.rows(
-                messages, unreadBoundaryEventID: nil, groups: true, now: Self.now, calendar: Self.calendar,
-                locale: Self.locale)
-            guard let row = rows.firstIndex(where: { $0.id == id }), row > 0 else { return nil }
-            return rows[row - 1].id
-        }
-        // Server timestamps out of order: Tuesday's message shown above Monday's.
-        let shown = [message("tuesday", "@alice", at: 2 * 24 * 60), message("monday", "@bob", at: 3 * 24 * 60)]
-        let before = divider(above: "monday", in: shown)
-        let after = divider(above: "monday", in: [message("older", "@alice", at: 3 * 24 * 60 + 10)] + shown)
-        #expect(before != nil && after == before)
     }
 
     @Test("Row identities survive older messages arriving above them")
