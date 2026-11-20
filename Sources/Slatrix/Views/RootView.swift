@@ -563,16 +563,15 @@ struct RootView: View {
     }
     private var reminderAudience: LaterReminderSchedule.Audience {
         LaterReminderSchedule.audience(
-            restoring: bootstrapping, status: matrix.status, userID: matrix.user?.id, laterLoaded: localReady,
+            restoring: bootstrapping, status: matrix.status, userID: matrix.user?.id, localReady: localReady,
+            localFailed: localError != nil,
             notifications: appearance.notifications, preview: matrix.isPreview)
     }
     private func syncLaterReminders() async {
         let preview = appearance.notificationPreview
         let audience = reminderAudience
-        guard audience != .unknown else { return }
-        let account: String? = if case .account(let id) = audience { id } else { nil }
-        await platform.laterReminders.sync(matrix.savedMessages.list, accountID: account, preview: preview) { item in
-            guard let account,
+        await platform.laterReminders.sync(matrix.savedMessages.list, audience: audience, preview: preview) { item in
+            guard case .account(let account) = audience,
                 let target = MatrixNotificationTarget(accountID: account, roomID: item.roomID, eventID: item.eventID)
             else { return nil }
             let room = matrix.rooms.first { $0.id == item.roomID }

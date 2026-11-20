@@ -19,32 +19,35 @@ import Foundation
 
     init(transport: LaterReminderTransport) { self.transport = transport }
 
-    /// Whose reminders the queue holds: nobody's withdraws them all, and unknown leaves the queue as it is.
+    /// Whose reminders the queue holds: nobody's withdraws them all. Unknown keeps the queue, except that with
+    /// previews off it keeps only reminders that hide the message.
     enum Audience: Equatable {
         case unknown, nobody
         case account(String)
     }
 
-    /// Still restoring, a restore that failed, or Later not loaded yet is unknown, not signed out, so a reminder
-    /// due meanwhile isn't withdrawn.
+    /// Still restoring, a restore that failed, or drafts and Later still opening is unknown, not signed out, so a
+    /// reminder due meanwhile isn't withdrawn. Drafts that failed to open leave Later to the server, so that's known.
     nonisolated static func audience(
-        restoring: Bool, status: ConnectionStatus, userID: String?, laterLoaded: Bool, notifications: Bool,
-        preview: Bool
+        restoring: Bool, status: ConnectionStatus, userID: String?, localReady: Bool, localFailed: Bool,
+        notifications: Bool, preview: Bool
     ) -> Audience {
         if !notifications || preview { return .nobody }
         if restoring { return .unknown }
         guard let userID else { return status == .signedOut ? .nobody : .unknown }
-        return laterLoaded ? .account(userID) : .unknown
+        return localReady || localFailed ? .account(userID) : .unknown
     }
 
-    /// Queues what `list` has still to come for `accountID`, and withdraws everything else queued; a nil account,
-    /// as when signed out or notifications are off, withdraws all. With `preview` on, `notification` reads what a
+    /// Queues what `list` has still to come for the audience's account, and withdraws everything else queued;
+    /// nobody, as when signed out or notifications are off, withdraws all. With `preview` on, `notification` reads what a
     /// reminder says; with it off the reminder is generic and the message is never read. A change to it rewrites
     /// every reminder queued.
     func sync(
-        _ list: SavedMessages, accountID: String?, preview: Bool,
+        _ list: SavedMessages, audience: Audience, preview: Bool,
         notification: (SavedMessageReference) async -> DesktopMessageNotification?
     ) async {
+        if audience == .unknown && preview { return }
+        let accountID: String? = if case .account(let id) = audience { id } else { nil }
         let wanted: [(String, SavedMessageReference, Date)] =
             accountID.map { account in
                 list.reminders(after: Date()).compactMap { item in
@@ -60,13 +63,14 @@ import Foundation
         latest = Set(wanted.map(\.0))
         let queued = Set(await transport.scheduled().filter { $0.hasPrefix(Self.prefix) })
         guard newest == sync else { return }
-        transport.cancel(Array(queued.subtracting(wanted.map(\.0))))
+        if audience == .unknown { latest = queued.filter { $0.hasSuffix(".private") } }
+        transport.cancel(Array(queued.subtracting(latest)))
         for (identifier, item, date) in wanted where !queued.contains(identifier) {
             let generic = accountID.flatMap {
                 MatrixNotificationTarget(accountID: $0, roomID: item.roomID, eventID: item.eventID)
             }.map { DesktopMessageNotification(target: $0, title: "Slatrix", body: "Reminder", playSound: true) }
-            guard !Task.isCancelled, let message = preview ? await notification(item) : generic, newest == sync,
-                !Task.isCancelled
+            guard !Task.isCancelled, newest == sync, let message = preview ? await notification(item) : generic,
+                newest == sync, !Task.isCancelled
             else { return }
             try? await transport.schedule(identifier, at: date, notification: message)
             // A newer sync that read the queue before this landed couldn't withdraw it, so this one does.
