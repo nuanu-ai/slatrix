@@ -1406,17 +1406,11 @@ struct Snapshots {
             window.close()
         }
         _ = try await settledImage(hosting)
-        // Files sits just left of the toolbar capsule's ⋯, which ends a gap short of the search field.
-        let m = Metrics()
-        let x = 1440 - m.sp16 - m(RootView.searchWidth) - m.sp12 - m.sp4 - 1.5 * m.control
-        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            window.sendEvent(
-                try #require(
-                    NSEvent.mouseEvent(
-                        with: type, location: NSPoint(x: x, y: 900 - m.paneHeader / 2), modifierFlags: [],
-                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                        context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
-        }
+        // Pressed by what it is: a synthetic mouse-down that lands in a text field waits there for a real mouse-up.
+        VoiceOver.listen()
+        let pressed = accessible("Files and links", in: hosting).contains { $0.accessibilityPerformPress?() == true }
+        VoiceOver.done()
+        try #require(pressed)
         try write(await settledImage(hosting), "files-pane-\(theme.rawValue)")
     }
 
