@@ -36,14 +36,15 @@ enum ActivityBadge {
         return mentions + items.count { $0.kind == .message && $0.threadRootID != nil && !$0.hasMention && !$0.opened }
     }
 
-    /// Whether Activity marks the item unread: a thread reply until you open it, anything else until you open it or
-    /// read its conversation, so the marks match what the count holds.
+    /// Whether Activity marks the item unread: a thread reply until you open it, a mention until you open it or read
+    /// its conversation's mentions, anything else until you open it or read its conversation, so the marks match what
+    /// the count holds.
     static func isUnread(_ item: ActivityItem, room: ChatRoom?) -> Bool {
         guard !item.opened else { return false }
         if item.kind == .invite { return true }
         if item.threadRootID != nil && !item.hasMention { return true }
         guard let room else { return false }
-        return room.mentions > 0 || room.hasUnread
+        return item.hasMention ? room.mentions > 0 : room.hasUnread
     }
 }
 
