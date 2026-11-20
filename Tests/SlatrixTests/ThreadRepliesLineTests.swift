@@ -102,6 +102,22 @@ struct ThreadRepliesLineServiceTests {
         #expect(await eventually { service.threadRepliesLine == 2 })
     }
 
+    @Test("Opened with its thread read to its root ahead of the click, the line counts its replies at once")
+    func preparedLoadedCountsReplies() async throws {
+        room.threadItems = [item("$root"), item("$one"), item("$two")]
+        await service.selectRoom(room.id())
+        try #require(room.timelines.all.first).emit([.reset(values: [item("$root", replies: 5)])])
+        #expect(await eventually { service.messages.first?.eventID == "$root" })
+        let root = try #require(service.messages.first)
+        room.pageGate.arm()
+        service.prepareThread(root)
+        #expect(await eventually { room.pageGate.isWaiting })
+        try #require(room.timelines.all.last).startReached = true
+        room.pageGate.release()
+        try await service.loadThread(root, openedWith: 5)
+        #expect(service.threadRepliesLine == 2)
+    }
+
     @Test("Before the thread loads to its root, the line says the count its root carries in the channel now")
     func followsChannelCount() async throws {
         let main = try #require(await opened(root: item("$root", replies: 3)))
