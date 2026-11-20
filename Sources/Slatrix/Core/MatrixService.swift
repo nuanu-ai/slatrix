@@ -714,9 +714,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// The open conversation's live timeline; nil while it shows one opened at an older message.
     private var liveTimeline: KeptTimeline?
     private var recentTimelines = RecentTimelines<KeptTimeline>()
-    /// The jump being prepared aside, by its own token, while the conversation on screen keeps `selection`.
-    private var jumping: (token: UUID, roomID: String)?
-    var preparesJump: Bool { jumping != nil }
+    /// A jump inside the conversation on screen, prepared aside by its own token while that conversation keeps
+    /// `selection`.
+    private var jumping: UUID?
     /// A live timeline opened ahead of a click, reading its first page; at most one, for the room last pointed at.
     private var prepared: (roomID: String, token: UUID, task: Task<PreparedRoom?, Never>)?
     private typealias PreparedRoom = (
@@ -1380,7 +1380,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func beginLogout() throws {
         guard authOperation == nil, connectionStopTask == nil else { throw Self.authBusy }
         authOperation = .signingOut
-        dropJump()
     }
 
     private var logoutOwner: LogoutOwner {
@@ -1494,7 +1493,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     func selectRoom(_ id: String) async {
         jump = nil
-        dropJump()
+        jumping = nil
         let key = TimelineMemory.Key(sessionID: notificationSessionID, roomID: id)
         let remembered = selectedRoomID == id ? nil : TimelineMemory.positions[key]?.eventID
         let anchor = remembered.flatMap { $0.hasPrefix("$") ? $0 : nil }
@@ -1509,74 +1508,61 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Opens a conversation with unread messages at its unread line.
     func resumeRoom(_ id: String, at anchor: String) async {
         jump = nil
-        dropJump()
+        jumping = nil
         await open(id, at: anchor, resuming: true)
     }
 
     /// Opens a conversation scrolled to a message, which it highlights. A thread reply opens the conversation at its
-    /// thread's root, which it returns for the thread to open at the reply. The conversation on screen stays as it is,
-    /// taking its updates, until a timeline that holds the message takes its place in the turn `swap` runs; if none
-    /// can, it stays, with the error. With no conversation on screen, it opens as any conversation does.
+    /// thread's root, which it returns for the thread to open at the reply. Inside the conversation on screen, that
+    /// conversation stays as it is, taking its updates, until a timeline that holds the message takes its place; if
+    /// none can, it stays, with the error.
     @discardableResult
-    func jumpToMessage(roomID id: String, eventID: String, swap: () -> Void = {}) async -> String? {
-        guard eventID.hasPrefix("$") else {
-            errorMessage = "This message hasn’t been sent yet."
-            return nil
-        }
-        guard let shown = selectedRoomID else {
-            dropJump()
-            swap()
+    func jumpToMessage(roomID id: String, eventID: String) async -> String? {
+        jumping = nil
+        guard selectedRoomID == id, !isPreview, eventID.hasPrefix("$") else {
             jump = MessageJump(roomID: id, eventID: eventID)
             return await open(id, at: eventID)
         }
         let token = UUID()
-        jumping = (token, id)
-        updateSubscriptions(shown, reports: false)
+        jumping = token
         do {
-            if try await land(MessageJump(roomID: id, eventID: eventID), holding: eventID, token: token, swap: swap) {
-                return nil
-            }
-            guard jumping?.token == token else { return nil }
+            if try await land(MessageJump(roomID: id, eventID: eventID), holding: eventID, token: token) { return nil }
+            guard jumping == token else { return nil }
             let root = (try? await requireRoom(id).loadOrFetchEvent(eventId: eventID))?.threadRootEventId()
             let jump = MessageJump(roomID: id, eventID: eventID, threadRootID: root)
-            if let root, try await land(jump, holding: root, token: token, swap: swap) { return root }
-            guard jumping?.token == token else { return nil }
+            if let root, try await land(jump, holding: root, token: token) { return root }
+            guard jumping == token else { return nil }
             let target = root ?? eventID
-            if try await land(jump, holding: target, around: target, token: token, swap: swap) { return root }
+            if try await land(jump, holding: target, around: target, token: token) { return root }
             throw MatrixServiceError.request("Couldn’t find that message.")
         } catch {
-            guard jumping?.token == token else { return nil }
-            dropJump()
+            guard jumping == token else { return nil }
+            jumping = nil
             errorMessage = Self.safeError(error)
             return nil
         }
     }
 
-    /// Swaps in a timeline of the jump's room that holds `target`: the live one, still open or else built aside, or
+    /// Swaps in a timeline of the conversation that holds `target`: the live one, still open or else built aside, or
     /// one loaded around `eventID`. False when it doesn't hold it, or when a newer click dropped the jump.
-    private func land(
-        _ jump: MessageJump, holding target: String, around eventID: String? = nil, token: UUID, swap: () -> Void
-    ) async throws -> Bool {
+    private func land(_ jump: MessageJump, holding target: String, around eventID: String? = nil, token: UUID)
+        async throws -> Bool
+    {
+        guard jumping == token else { return false }
         let id = jump.roomID
-        guard jumping?.token == token else { return false }
-        func swapIn() throws {
-            guard rooms.contains(where: { $0.id == id && $0.membership != "leave" }) else {
-                throw MatrixServiceError.request("Couldn’t find that message.")
-            }
+        func landed() {
             jumping = nil
             dropPrepared()
-            swap()
             self.jump = jump
         }
-        if eventID == nil, try showKept(id, containing: target, swap: swapIn) { return true }
-        guard let room = try await waitForRoom(id, while: { self.jumping?.token == token }) else { return false }
-        if room.membership() == .invited {
-            // An invitation shows as any does.
-            try swapIn()
-            selection = token
-            updateSubscriptions(id)
-            showConversation(id, eventID: nil, token: token)
-            openState = nil
+        if eventID == nil, showRecentRoom(id, containing: target) {
+            landed()
+            return true
+        }
+        let room = try requireRoom(id)
+        // An invitation on screen stays as it is.
+        guard room.membership() != .invited else {
+            jumping = nil
             return true
         }
         let focus =
@@ -1585,28 +1571,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             } ?? .live(hideThreadedEvents: true)
         guard
             let (next, observer, listener) = try await openTimeline(
-                room, focus: focus, eventID: eventID, token: token, while: { self.jumping?.token == token })
+                room, focus: focus, eventID: eventID, token: token, while: { self.jumping == token })
         else { return false }
         guard Self.contains(observer.snapshot.items, target) else {
             listener.cancel()
             return false
         }
-        do { try swapIn() } catch {
-            listener.cancel()
-            throw error
-        }
+        landed()
         selection = token
         updateSubscriptions(id)
         install(room, timeline: next, observer: observer, listener: listener, eventID: eventID, token: token)
         return true
-    }
-
-    /// A newer click, another page, an edit or signing out drops the jump being prepared; its timeline closes as it
-    /// arrives.
-    func dropJump() {
-        guard jumping != nil else { return }
-        jumping = nil
-        if let id = selectedRoomID { updateSubscriptions(id, reports: false) }
     }
 
     /// Live, as Slack does, when the live timeline open or in the cache holds `eventID`; else loaded around it. The
@@ -1638,32 +1613,26 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     private func openLive(_ id: String, holding eventID: String) async -> Bool {
-        if showKept(id, containing: eventID, swap: {}) { return true }
+        if showRecentRoom(id, containing: eventID) { return true }
         return await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil, containing: eventID)
     }
 
     /// Shows a conversation whose live timeline is still open, rows and all, in the frame of the click. False when
     /// none is open, or when it does not hold `anchor`.
     func showRecentRoom(_ id: String, containing anchor: String? = nil) -> Bool {
-        dropJump()
-        return showKept(id, containing: anchor, swap: {})
-    }
-
-    /// `swap` runs first, in the same turn, when it shows one.
-    private func showKept(_ id: String, containing anchor: String? = nil, swap: () throws -> Void) rethrows -> Bool {
         guard connectionStopTask == nil, client != nil, !isPreview else { return false }
         func holds(_ kept: KeptTimeline) -> Bool {
             anchor.map { Self.contains(kept.observer.snapshot.items, $0) } ?? true
         }
         if let live = liveTimeline, live.roomID == id, holds(live) {
-            try swap()
-            // Already on screen; this drops any other conversation that was still opening.
+            // Already on screen; this drops any other conversation that was still opening, or jump being prepared.
+            jumping = nil
             selection = live.token
             showTimeline(live.observer.snapshot, roomID: id)
             return true
         }
         guard let kept = recentTimelines.entry(id), holds(kept) else { return false }
-        try swap()
+        jumping = nil
         _ = recentTimelines.take(id)
         selection = kept.token
         showConversation(id, eventID: nil, token: kept.token)
@@ -1762,7 +1731,16 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         // between. Checking whether the conversation on screen holds a message changes nothing on screen.
         if anchor == nil || selectedRoomID != id { showConversation(id, eventID: eventID, token: token) }
         do {
-            guard let room = try await waitForRoom(id, while: { self.selection == token }) else { return true }
+            let client = try requireClient()
+            var pendingRoom = try client.getRoom(roomId: id)
+            for _ in 0..<50 where pendingRoom == nil {
+                try await Task.sleep(nanoseconds: 200_000_000)
+                guard selection == token else { return true }
+                pendingRoom = try client.getRoom(roomId: id)
+            }
+            guard let room = pendingRoom else {
+                throw MatrixServiceError.request("This conversation is still loading. Try again in a moment.")
+            }
             if room.membership() == .invited {
                 showConversation(id, eventID: eventID, token: token)
                 if shownSelection == token { openState = nil }
@@ -1796,21 +1774,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             errorMessage = Self.safeError(error)
         }
         return true
-    }
-
-    /// The room, waiting up to ten seconds for one the client doesn't know yet; nil once `current` turns false.
-    private func waitForRoom(_ id: String, while current: () -> Bool) async throws -> Room? {
-        let client = try requireClient()
-        var pendingRoom = try client.getRoom(roomId: id)
-        for _ in 0..<50 where pendingRoom == nil {
-            try await Task.sleep(nanoseconds: 200_000_000)
-            guard current() else { return nil }
-            pendingRoom = try client.getRoom(roomId: id)
-        }
-        guard let room = pendingRoom else {
-            throw MatrixServiceError.request("This conversation is still loading. Try again in a moment.")
-        }
-        return room
     }
 
     /// A timeline of `room` and its listener, whose updates show once `token` is on screen; nil, with nothing left
@@ -1945,15 +1908,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             })
     }
 
-    /// Recent conversations stay subscribed: sync keeps their timelines whole, and their member lists stay loaded. So
-    /// does the conversation a jump is being prepared in.
-    private func updateSubscriptions(_ id: String, reports: Bool = true) {
-        let recent =
-            recentTimelines.roomIDs + (liveTimeline.map { [$0.roomID] } ?? []) + (jumping.map { [$0.roomID] } ?? [])
+    /// Recent conversations stay subscribed: sync keeps their timelines whole, and their member lists stay loaded.
+    private func updateSubscriptions(_ id: String) {
+        let recent = recentTimelines.roomIDs + (liveTimeline.map { [$0.roomID] } ?? [])
         Task { [weak self] in
             do { try await self?.roomSubscriptions.setActiveRoom(id, recent: recent) } catch is CancellationError {
             } catch {
-                guard let self, reports, self.selectedRoomID == id else { return }
+                guard let self, self.selectedRoomID == id else { return }
                 self.errorMessage = Self.safeError(error)
             }
         }

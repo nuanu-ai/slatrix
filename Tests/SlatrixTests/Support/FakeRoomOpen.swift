@@ -209,6 +209,12 @@ private final class FakeThreadReply: TimelineEvent, @unchecked Sendable {
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
     override func threadRootEventId() -> String? { root }
+    // Asked whether it was deleted.
+    override func content() throws -> TimelineEventContent {
+        .messageLike(
+            content: .roomMessage(
+                messageType: .text(content: TextMessageContent(body: "Reply", formatted: nil)), inReplyToEventId: nil))
+    }
 }
 
 private final class FakePowerLevels: RoomPowerLevels, @unchecked Sendable {
@@ -240,14 +246,9 @@ final class FakeMembers: RoomMembersIterator, @unchecked Sendable {
 /// Records each set of rooms the app asks sync to keep subscribed.
 final class FakeRoomListService: RoomListService, @unchecked Sendable {
     let subscriptions = Recorder<[String]>()
-    /// What every subscription change throws, after it is recorded.
-    var subscriptionError: Error?
     init() { super.init(noHandle: .init()) }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
-    override func setRoomSubscriptions(roomIds: [String]) async throws {
-        subscriptions.append(roomIds)
-        if let subscriptionError { throw subscriptionError }
-    }
+    override func setRoomSubscriptions(roomIds: [String]) async throws { subscriptions.append(roomIds) }
 }
 
 /// A send's handle, carrying its transaction.

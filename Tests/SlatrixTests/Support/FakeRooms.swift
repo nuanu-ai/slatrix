@@ -133,11 +133,7 @@ final class FakeClient: Client, @unchecked Sendable {
     private var serverLogout = false
     /// Whether anything asked the server to end this session.
     var loggedOut: Bool { lock.withLock { serverLogout } }
-    let logoutGate = Gate()
-    override func logout() async throws {
-        await logoutGate.wait()
-        lock.withLock { serverLogout = true }
-    }
+    override func logout() async throws { lock.withLock { serverLogout = true } }
 
     private var downloadCount = 0
     var downloads: Int { lock.withLock { downloadCount } }

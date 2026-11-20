@@ -1104,6 +1104,7 @@ struct TimelineHostedTests {
         // An older page brings it, far from both ends.
         harness.service.threadMessages = [root] + Self.messages(1..<60, prefix: "Reply")
         await settle(harness) { Self.highlighted("Reply-20", in: harness) }
+        #expect(Self.highlighted("Reply-20", in: harness))
         let cell = try #require(harness.cell(showing: "Reply-20"))
         let row = cell.convert(cell.bounds, to: nil)
         #expect(abs(row.midY - (harness.composerTop + harness.headerBottom) / 2) <= 2)
