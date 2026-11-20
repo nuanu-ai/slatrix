@@ -143,6 +143,23 @@ enum MatrixMapping {
         }
     }
 
+    /// The event ID of a message `item` shows deleted.
+    static func deletedEventID(_ item: TimelineItem) -> String? {
+        guard let event = item.asEvent(), case .msgLike(let content) = event.content, case .redacted = content.kind,
+            case .eventId(let id) = event.eventOrTransactionId
+        else { return nil }
+        return id
+    }
+
+    /// Whether the event cache or the server holds `event` redacted: the bindings throw this for a redacted message's
+    /// content, and something else for a type they can't read.
+    static func isRedacted(_ event: TimelineEvent) -> Bool {
+        do { _ = try event.content() } catch ClientError.Generic(let message, _) {
+            return message == "Failed to get original content"
+        } catch {}
+        return false
+    }
+
     static func identifier(_ id: EventOrTransactionId) -> String {
         switch id {
         case .eventId(let id), .transactionId(let id): return id
@@ -395,8 +412,9 @@ private final class TimelineObserver: TimelineListener, @unchecked Sendable {
     private let lock = NSLock()
     private var items: [TimelineItem] = []
     private var revision = 0
-    let callback: @Sendable ([TimelineItem], Int) -> Void
-    init(_ callback: @escaping @Sendable ([TimelineItem], Int) -> Void) { self.callback = callback }
+    /// The items, their revision, and the event IDs of the messages this update shows deleted.
+    let callback: @Sendable ([TimelineItem], Int, [String]) -> Void
+    init(_ callback: @escaping @Sendable ([TimelineItem], Int, [String]) -> Void) { self.callback = callback }
     var snapshot: (items: [TimelineItem], revision: Int) { lock.withLock { (items, revision) } }
     func onUpdate(diff: [TimelineDiff]) {
         let changes = diff.map(\.change)
@@ -406,9 +424,10 @@ private final class TimelineObserver: TimelineListener, @unchecked Sendable {
         let snapshot = items
         let nextRevision = revision
         lock.unlock()
+        let values = changes.flatMap(\.values)
         // Off the main thread, before the rows that show these bodies exist.
-        MatrixMapping.renderBodies(of: changes.flatMap(\.values))
-        callback(snapshot, nextRevision)
+        MatrixMapping.renderBodies(of: values)
+        callback(snapshot, nextRevision, values.compactMap(MatrixMapping.deletedEventID))
     }
 }
 
@@ -678,6 +697,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var jump: MessageJump?
     private(set) var homeserverURL: String?
     var notificationHandler: ((DesktopMessageNotification) -> Void)?
+    /// The banners a deleted message takes back; the window sets it.
+    @ObservationIgnored var notifications: DesktopNotificationDelivery?
+    /// Messages a pass is asking about, so another pass doesn't ask again before the answer.
+    @ObservationIgnored private var asking = Set<String>()
+    /// The pass that last asked about each copy, so a long list is asked about in turns.
+    @ObservationIgnored private var askedInPass: [String: Int] = [:]
+    @ObservationIgnored private var passes = 0
     var notificationSessionID: UUID { sessionGeneration }
     let notificationRetries = NotificationSettingsRetryState()
     private var client: Client?
@@ -1282,6 +1308,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         TimelineMemory.positions = TimelineMemory.positions.filter { $0.key.sessionID != sessionGeneration }
         TimelineMemory.heights.removeAll { $0.key.sessionID == sessionGeneration }
         sessionGeneration = UUID()
+        asking = []
+        askedInPass = [:]
         selection = UUID()
         notificationRetries.reset()
         profileLoadTask?.cancel()
@@ -1704,10 +1732,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Shows the open conversation's timeline as it changes, once it is on screen and until another conversation or
     /// timeline takes its place.
     private func mainObserver(roomID id: String, token: UUID, focus eventID: String?) -> TimelineObserver {
-        TimelineObserver { [weak self] items, revision in
+        TimelineObserver { [weak self] items, revision, deleted in
             Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Kept timelines too, though nothing shows them.
+                self.messagesGone(Set(deleted.map { ActivityService.key(roomID: id, eventID: $0) }))
                 // Until its timeline is in place, which shows the rows it has read so far.
-                guard let self, self.selection == token, self.shownSelection == token, self.timeline != nil,
+                guard self.selection == token, self.shownSelection == token, self.timeline != nil,
                     self.focusedEventID == eventID
                 else { return }
                 self.showTimeline((items, revision), roomID: id)
@@ -2203,9 +2234,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     private func threadObserver(_ root: ChatMessage, token: UUID, threadToken: UUID) -> TimelineObserver {
-        TimelineObserver { [weak self] items, revision in
+        TimelineObserver { [weak self] items, revision, deleted in
             Task { @MainActor [weak self] in
-                guard let self, token == self.selection, threadToken == self.threadSelection,
+                guard let self else { return }
+                self.messagesGone(Set(deleted.map { ActivityService.key(roomID: root.roomID, eventID: $0) }))
+                guard token == self.selection, threadToken == self.threadSelection,
                     revision > self.threadRevision
                 else { return }
                 self.threadRevision = revision
@@ -3662,5 +3695,65 @@ extension MatrixService {
         let list = rooms.entriesWithDynamicAdapters(pageSize: .max, listener: listener)
         // The dynamic list emits nothing until a filter is set; false means the list is already gone.
         return list.controller().setFilter(kind: .all(filters: [])) ? list : nil
+    }
+}
+
+extension MatrixService {
+    /// Whether a message still exists. The SDK's event cache holds a message redacted once the redaction syncs, and the
+    /// server answers with the redacted form; only that answer says no. A failed or unreadable answer keeps it.
+    func messageExists(roomID: String, eventID: String) async -> Bool {
+        guard let event = try? await requireRoom(roomID).loadOrFetchEvent(eventId: eventID) else { return true }
+        return !MatrixMapping.isRedacted(event)
+    }
+
+    /// About a window of Activity rows. A question the event cache answers costs under a millisecond, one the server
+    /// answers a round trip, and a pass asks one at a time, newest first.
+    static let recheckLimit = 20
+
+    /// Starts a pass over the copies of messages outside their timelines: Activity's unopened rows and the banners in
+    /// Notification Center. Each message is asked about once, newest first, at most `recheckLimit` of them; a longer
+    /// list is asked about in turns, those never asked about first, then those asked about longest ago. A message
+    /// another pass is asking about is skipped. The pass ends at its bound, and its answers apply while the account
+    /// stays the same.
+    @discardableResult func recheckCopies() -> Task<Void, Never> {
+        let session = sessionGeneration
+        return Task {
+            var copies: [(key: String, roomID: String, eventID: String, date: Date)] = []
+            for banner in await notifications?.shown() ?? [] {
+                let target = banner.target
+                guard let eventID = target.eventID else { continue }
+                copies.append((DesktopNotificationDelivery.key(target), target.roomID, eventID, banner.date))
+            }
+            guard session == sessionGeneration else { return }
+            for row in activity.items where row.kind == .message && !row.opened {
+                guard let eventID = row.eventID else { continue }
+                copies.append((row.id, row.roomID, eventID, row.timestamp))
+            }
+            var seen = Set<String>()
+            copies = copies.sorted { $0.date > $1.date }.filter { seen.insert($0.key).inserted }
+            askedInPass = askedInPass.filter { seen.contains($0.key) }
+            passes += 1
+            let pass = passes
+            // Never asked first, then those asked longest ago; newest first within each.
+            let turn = copies.enumerated().sorted {
+                (askedInPass[$0.element.key] ?? 0, $0.offset) < (askedInPass[$1.element.key] ?? 0, $1.offset)
+            }
+            for copy in turn.map(\.element).prefix(Self.recheckLimit) {
+                guard asking.insert(copy.key).inserted else { continue }
+                askedInPass[copy.key] = pass
+                let exists = await messageExists(roomID: copy.roomID, eventID: copy.eventID)
+                guard session == sessionGeneration else { return }
+                asking.remove(copy.key)
+                if !exists { messagesGone([copy.key]) }
+            }
+        }
+    }
+
+    /// Deleted messages, by Activity key, leave Activity and Notification Center.
+    func messagesGone(_ keys: Set<String>) {
+        guard !keys.isEmpty else { return }
+        activity.remove(keys)
+        guard let notifications else { return }
+        Task { await notifications.withdraw(keys) }
     }
 }

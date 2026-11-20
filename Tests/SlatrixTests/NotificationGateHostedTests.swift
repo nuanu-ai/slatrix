@@ -11,41 +11,29 @@ import Testing
 @Suite(
     .serialized, .tags(.hosted), .enabled(if: ProcessInfo.processInfo.environment["SLATRIX_HOSTED_UI_CHECKS"] != nil))
 struct NotificationGateHostedTests {
-    /// The OS notification center, which allows alerts and records the events it was handed.
-    @MainActor final class Transport: DesktopNotificationTransport {
-        private(set) var asked = 0
-        private(set) var added: [String?] = []
-        func isAuthorized() async throws -> Bool {
-            asked += 1
-            return true
-        }
-        func add(_ request: DesktopNotificationRequest) async throws { added.append(request.message.target.eventID) }
-        func remove(_ identifier: String) {}
-        func clear() {}
-    }
-
     @MainActor final class Harness {
         let room: FakeOpenRoom
         let matrix = MatrixService()
         let appearance = AppearanceStore()
-        let transport = Transport()
+        let transport = FakeNotificationCenter()
+        let delivery: DesktopNotificationDelivery
         let window: NSWindow
         let hosting: NSHostingView<AnyView>
         /// Drafts and attachment drafts of its own, away from the development build's.
         private let local: TemporaryDirectory
 
-        init(_ cached: [TimelineItem]) throws {
+        init(_ cached: [TimelineItem], others: [Room] = []) throws {
             _ = NSApplication.shared
             local = try TemporaryDirectory()
             let key: @Sendable (String) async throws -> Data = { _ in Data(repeating: 0x5a, count: 32) }
             UserDefaults.standard.removeObject(forKey: "room.@me:example.org")
             room = FakeOpenRoom("!gate:example.org", cached: cached)
             matrix.configureRoomOpenForChecks(
-                client: FakeClient(rooms: [room]), roomList: FakeRoomListService(),
+                client: FakeClient(rooms: [room] + others), roomList: FakeRoomListService(),
                 user: ChatUser(id: "@me:example.org", name: "Me"))
             matrix.status = .ready
             appearance.notifications = true
-            let delivery = DesktopNotificationDelivery(transport: transport)
+            delivery = DesktopNotificationDelivery(transport: transport)
             delivery.useAccount("@me:example.org")
             hosting = NSHostingView(
                 rootView: AnyView(
@@ -161,5 +149,22 @@ struct NotificationGateHostedTests {
         #expect(await eventually { harness.transport.added == ["$new"] })
         #expect(ContinuousClock.now - start < ReadStatePolicy.layoutDeadline, "It went without waiting out the pane")
         #expect(!harness.shows("$new"))
+    }
+
+    // capability: message.deleted
+    @Test("Coming back to the app takes back the banner of a message deleted while it was away")
+    func deletedBannerLeaves() async throws {
+        let away = AnsweringRoom("!away:example.org", answers: ["$gone": .deleted])
+        let harness = try Harness(Self.messages(1), others: [away])
+        defer { harness.close() }
+        let target = try #require(
+            MatrixNotificationTarget(accountID: "@me:example.org", roomID: away.id(), eventID: "$gone"))
+        #expect(
+            try await harness.delivery.deliver(
+                DesktopMessageNotification(target: target, title: "away", body: "New", playSound: false)))
+        // Once the window has wired its handlers.
+        #expect(await eventually { harness.matrix.notificationHandler != nil })
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+        #expect(await eventually { harness.transport.shown.isEmpty })
     }
 }

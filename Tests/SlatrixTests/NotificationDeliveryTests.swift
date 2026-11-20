@@ -34,6 +34,17 @@ private struct MissingContinuation: Error {}
         delivered[identifier] = nil
     }
     func clear() { delivered = [:] }
+    /// Shown in the order they were submitted.
+    func deliveredNotifications() async -> [DeliveredNotification] {
+        attempts.enumerated().compactMap { order, request in
+            guard delivered[request.identifier] != nil else { return nil }
+            return DeliveredNotification(
+                identifier: request.identifier, target: request.message.target,
+                date: Date(timeIntervalSince1970: Double(order)))
+        }
+    }
+    /// The reader closes a banner in Notification Center.
+    func dismiss(_ identifier: String) { delivered[identifier] = nil }
 
     func authorize(_ index: Int, _ result: Result<Bool, Error>) throws {
         guard let continuation = pendingAuthorizations.removeValue(forKey: index) else { throw MissingContinuation() }
@@ -423,5 +434,90 @@ struct NotificationTextTests {
             room: spec.room, sender: spec.sender, direct: spec.direct, body: spec.body, reply: reply)
         #expect(synced.title == spec.title && synced.text == spec.text)
         #expect(later.title == spec.title && later.text == spec.text)
+    }
+}
+
+/// Banners of messages deleted after they came in.
+extension NotificationDeliveryTests {
+    /// Shows a banner for `eventID` and returns its identifier.
+    private func show(_ eventID: String) async throws -> String {
+        let index = transport.authorizationCalls
+        let task = deliver(try message(eventID: eventID))
+        await awaitAuthorization(index)
+        try transport.authorize(index, .success(true))
+        #expect(try await task.value)
+        return try #require(transport.attempts.last).identifier
+    }
+
+    private func key(_ eventID: String) throws -> String {
+        DesktopNotificationDelivery.key(try message(eventID: eventID).target)
+    }
+
+    // capability: message.deleted
+    @Test("A deleted message's banner leaves Notification Center, and the others stay")
+    func withdrawsDelivered() async throws {
+        transport.holdsAdds = false
+        _ = try await show("$gone")
+        let kept = try await show("$kept")
+        await delivery.withdraw([try key("$gone")])
+        #expect(Array(transport.delivered.keys) == [kept])
+    }
+
+    // capability: message.deleted
+    @Test(
+        "A banner on its way when its message is deleted never stays, whether the OS had it yet or not",
+        arguments: [false, true])
+    func withdrawnOnTheWay(submitted: Bool) async throws {
+        transport.holdsAdds = submitted
+        let task = deliver(try message(eventID: "$gone"))
+        await awaitAuthorization()
+        if submitted {
+            try transport.authorize(0, .success(true))
+            await awaitSubmission()
+        }
+        await delivery.withdraw([try key("$gone")])
+        if submitted {
+            try transport.finishAdd(transport.attempts[0].identifier)
+        } else {
+            try transport.authorize(0, .success(true))
+        }
+        #expect(try await !task.value)
+        #expect(transport.delivered.isEmpty)
+    }
+
+    // capability: message.deleted
+    @Test("Two banners of one message on their way: the older one landing leaves the newer one to show")
+    func sameMessageTwice() async throws {
+        let older = deliver(try message(eventID: "$twice"))
+        await awaitAuthorization(0)
+        try transport.authorize(0, .success(true))
+        await awaitSubmission(1)
+        let newer = deliver(try message(eventID: "$twice"))
+        await awaitAuthorization(1)
+        try transport.authorize(1, .success(true))
+        await awaitSubmission(2)
+        try transport.finishAdd(transport.attempts[0].identifier)
+        #expect(try await older.value)
+        try transport.finishAdd(transport.attempts[1].identifier)
+        #expect(try await newer.value)
+        #expect(transport.delivered[transport.attempts[1].identifier] != nil)
+    }
+
+    // capability: message.deleted
+    @Test("Coming back to the app asks about the banners still shown, newest first, and takes back those deleted")
+    func recheckDelivered() async throws {
+        transport.holdsAdds = false
+        let old = try await show("$old")
+        transport.dismiss(try await show("$dismissed"))
+        _ = try await show("$new")
+        let room = AnsweringRoom("!room:example.org", answers: ["$old": .message, "$new": .deleted])
+        let matrix = MatrixService()
+        matrix.configureRoomOpenForChecks(
+            client: FakeClient(rooms: [room]), roomList: FakeRoomListService(),
+            user: ChatUser(id: accountA, name: "Alice"))
+        matrix.notifications = delivery
+        await matrix.recheckCopies().value
+        #expect(room.asked.all == ["$new", "$old"])
+        #expect(await eventually { Array(transport.delivered.keys) == [old] })
     }
 }
