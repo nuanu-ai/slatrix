@@ -1114,6 +1114,7 @@ struct RootView: View {
             HStack(spacing: m.sp12) {
                 title().frame(maxWidth: .infinity, alignment: .leading)
                 trailing()
+                JumpProgress(matrix: matrix)
                 ToolbarCapsule {
                     IconButton(symbol: "chevron.left", label: "Back", role: .body) { navigateHistory(-1) }
                         .disabled(historyIndex <= 0)
@@ -3072,6 +3073,15 @@ extension FocusedValues {
     var rightPaneShown: Bool? {
         get { self[RightPaneShownKey.self] }
         set { self[RightPaneShownKey.self] = newValue }
+    }
+}
+
+/// A jump being prepared, in a place that is always there so nothing beside it moves.
+private struct JumpProgress: View {
+    let matrix: MatrixService
+    @Environment(\.metrics) private var m
+    var body: some View {
+        DelayedProgress(active: matrix.preparesJump).accessibilityLabel("Opening…").frame(width: m.sp16, height: m.sp16)
     }
 }
 

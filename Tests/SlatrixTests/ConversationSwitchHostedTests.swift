@@ -270,6 +270,14 @@ struct ConversationSwitchHostedTests {
             RunLoop.main.add(click, forMode: .common)
         }
 
+        /// Whether a progress indicator shows in the toolbar, above the conversation's rows.
+        var toolbarProgress: Bool {
+            let views = Self.views(in: hosting).filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
+            guard let scroll = views.first(where: { $0 is TimelineScrollView }) as? NSScrollView else { return false }
+            let top = scroll.convert(scroll.bounds, to: nil).maxY - scroll.contentInsets.top
+            return views.contains { $0 is NSProgressIndicator && $0.convert($0.bounds, to: nil).minY >= top }
+        }
+
         /// Clicks a notification for `eventID` in conversation `index`, as the OS hands its payload back.
         func notify(_ index: Int, _ eventID: String) throws {
             let sent = try #require(
@@ -496,5 +504,41 @@ struct ConversationSwitchHostedTests {
         let after = harness.sample()
         #expect(after.rows == before.rows && after.table == before.table, "\(before)\n\(after)")
         #expect(remembered() == harness.rooms[0].id())
+    }
+
+    @Test("A jump that waits shows its progress in the toolbar after the loading delay, moving nothing, until it ends")
+    func jumpProgress() async throws {
+        let harness = try Harness()
+        VoiceOver.listen()
+        defer {
+            VoiceOver.done()
+            harness.close()
+        }
+        try #require(await harness.settled(on: 0))
+        await harness.idle()
+        let before = harness.sample()
+        // A button left of the indicator's place, which would move if the place opened.
+        func files() -> NSRect? {
+            accessible("Files and links", in: harness.hosting).first?.accessibilityFrame?()
+        }
+        let place = try #require(files())
+        let room = harness.rooms[1]
+        room.eventGate.arm()
+        room.focusedError = URLError(.notConnectedToInternet)
+        try harness.notify(1, "$far")
+        #expect(await eventually { harness.toolbarProgress })
+        #expect(room.eventGate.isWaiting && harness.sample().rows == before.rows && files() == place)
+        room.eventGate.release()
+        #expect(await eventually { harness.matrix.errorMessage != nil })
+        #expect(await eventually { !harness.toolbarProgress })
+        // And one that lands.
+        room.focusedError = nil
+        room.focusedItems = [FakeTimelineItem(textEvent("$far", body: "Far back"))]
+        room.eventGate.arm()
+        try harness.notify(1, "$far")
+        #expect(await eventually { harness.toolbarProgress })
+        room.eventGate.release()
+        #expect(await eventually { harness.sample().rows["$far"] != nil })
+        #expect(await eventually { !harness.toolbarProgress })
     }
 }

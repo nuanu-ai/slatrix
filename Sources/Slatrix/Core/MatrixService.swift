@@ -690,6 +690,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var recentTimelines = RecentTimelines<KeptTimeline>()
     /// The jump being prepared aside, by its own token, while the conversation on screen keeps `selection`.
     private var jumping: (token: UUID, roomID: String)?
+    var preparesJump: Bool { jumping != nil }
     /// A live timeline opened ahead of a click, reading its first page; at most one, for the room last pointed at.
     private var prepared: (roomID: String, token: UUID, task: Task<PreparedRoom?, Never>)?
     private typealias PreparedRoom = (
