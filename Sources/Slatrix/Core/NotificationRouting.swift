@@ -94,6 +94,14 @@ struct DesktopNotificationRequest {
     func add(_ request: DesktopNotificationRequest) async throws
     func remove(_ identifier: String)
     func clear()
+    /// The message banners still in Notification Center.
+    func deliveredNotifications() async -> [DeliveredNotification]
+}
+
+struct DeliveredNotification {
+    let identifier: String
+    let target: MatrixNotificationTarget
+    let date: Date
 }
 
 enum DesktopNotificationError: LocalizedError {
@@ -108,6 +116,11 @@ enum DesktopNotificationError: LocalizedError {
     private let transport: DesktopNotificationTransport
     private(set) var accountID: String?
     private var generation = UUID()
+    /// Banners on their way, each by its message's Activity key. Deleting a message drops its entries, so their
+    /// banners never stay.
+    private var deliveries: [UUID: String] = [:]
+    /// Whether a banner went up since the last clear; until one does, Notification Center holds none to take back.
+    private var hasShown = false
 
     init(transport: DesktopNotificationTransport) { self.transport = transport }
 
@@ -119,7 +132,26 @@ enum DesktopNotificationError: LocalizedError {
 
     func clear() {
         generation = UUID()
+        hasShown = false
         transport.clear()
+    }
+
+    /// Takes back the banners of deleted messages, by Activity key: those on their way at once, those shown with one
+    /// read of Notification Center.
+    func withdraw(_ keys: Set<String>) async {
+        deliveries = deliveries.filter { !keys.contains($0.value) }
+        for banner in await shown() where keys.contains(Self.key(banner.target)) { transport.remove(banner.identifier) }
+    }
+
+    /// This account's message banners in Notification Center.
+    func shown() async -> [DeliveredNotification] {
+        guard hasShown else { return [] }
+        let account = accountID
+        return await transport.deliveredNotifications().filter { $0.target.accountID == account }
+    }
+
+    static func key(_ target: MatrixNotificationTarget) -> String {
+        ActivityService.key(roomID: target.roomID, eventID: target.eventID ?? "")
     }
 
     /// `stillAnnounce` decides once the OS has answered, and nothing after it but the checks above can stop the alert,
@@ -129,23 +161,29 @@ enum DesktopNotificationError: LocalizedError {
     ) async throws -> Bool {
         guard message.target.accountID == accountID else { return false }
         let token = generation
+        let delivery = UUID()
+        deliveries[delivery] = Self.key(message.target)
+        defer { deliveries[delivery] = nil }
+        func due() -> Bool {
+            token == generation && message.target.accountID == accountID && !Task.isCancelled
+                && deliveries[delivery] != nil
+        }
         let allowed: Result<Bool, Error>
         do { allowed = .success(try await transport.isAuthorized()) } catch { allowed = .failure(error) }
         // A seen message stays quiet, a failed permission check included.
         let announce = await stillAnnounce()
-        guard token == generation, message.target.accountID == accountID, !Task.isCancelled, announce else {
-            return false
-        }
+        guard due(), announce else { return false }
         guard try allowed.get() else { throw DesktopNotificationError.notificationsDisabled }
         let request = DesktopNotificationRequest(identifier: UUID().uuidString, message: message)
         do { try await transport.add(request) } catch {
-            guard token == generation, message.target.accountID == accountID, !Task.isCancelled else { return false }
+            guard due() else { return false }
             throw error
         }
-        guard token == generation, message.target.accountID == accountID, !Task.isCancelled else {
+        guard due() else {
             transport.remove(request.identifier)
             return false
         }
+        hasShown = true
         return true
     }
 }

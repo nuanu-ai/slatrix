@@ -448,6 +448,8 @@ struct RootView: View {
                 // Sync doesn't say when your profile changes elsewhere, so coming back to Slatrix checks.
                 if notification.name == NSApplication.didBecomeActiveNotification {
                     Task { await matrix.refreshOwnProfile() }
+                    // Nothing says when a message is deleted in a conversation that isn't open, so coming back asks.
+                    matrix.recheckCopies()
                 }
             }
             .background(
@@ -713,6 +715,7 @@ struct RootView: View {
             }
             .task {
                 Task.detached(priority: .utility) { ComposerAttachmentImporter.cleanupOrphans() }
+                matrix.notifications = notifications
                 matrix.notificationHandler = { notification in
                     let identity = composerIdentity
                     let session = matrix.notificationSessionID
@@ -1471,7 +1474,10 @@ struct RootView: View {
         case .activity:
             ActivityFeedView(
                 matrix: matrix, activity: matrix.activity, workspaceID: $workspaceID, onOpenMessage: openActivity,
-                onOpenRoom: selectRoom)
+                onOpenRoom: selectRoom
+            )
+            // For a deletion since the app last became active.
+            .onAppear { matrix.recheckCopies() }
         case .search:
             SearchResultsView(
                 matrix: matrix, bar: searchBar,
