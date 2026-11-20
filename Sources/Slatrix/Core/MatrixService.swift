@@ -1453,23 +1453,26 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     /// Opens a conversation scrolled to a message, which it highlights. A thread reply opens the conversation at its
-    /// thread's root, which it returns for the thread to open at the reply.
+    /// thread's root, which it returns for the thread to open at the reply. Until a timeline holds the message, the
+    /// conversation on screen stays as it is, and it stays if none can.
     @discardableResult
     func jumpToMessage(roomID: String, eventID: String) async -> String? {
-        jump = MessageJump(roomID: roomID, eventID: eventID)
-        return await open(roomID, at: eventID)
+        await open(roomID, at: eventID, jumping: true)
     }
 
     /// Live, as Slack does, when the live timeline open or in the cache holds `eventID`; else loaded around it. The
     /// live timeline never holds a thread reply, and around one the SDK shows only its thread, so a reply opens at its
     /// root, which it returns; a read marker on one opens the conversation live.
     @discardableResult
-    private func open(_ id: String, at eventID: String, resuming: Bool = false) async -> String? {
+    private func open(_ id: String, at eventID: String, resuming: Bool = false, jumping: Bool = false) async -> String?
+    {
         guard eventID.hasPrefix("$") else {
             errorMessage = "This message hasn’t been sent yet."
             return nil
         }
-        if await openLive(id, holding: eventID) { return nil }
+        if await openLive(id, holding: eventID, jump: jumping ? MessageJump(roomID: id, eventID: eventID) : nil) {
+            return nil
+        }
         let token = selection
         let root = (try? await requireRoom(id).loadOrFetchEvent(eventId: eventID))?.threadRootEventId()
         guard selection == token else { return nil }
@@ -1477,25 +1480,24 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil)
             return nil
         }
-        if let root {
-            jump = MessageJump(roomID: id, eventID: eventID, threadRootID: root)
-            if await openLive(id, holding: root) { return root }
-        }
+        let jump = jumping ? MessageJump(roomID: id, eventID: eventID, threadRootID: root) : nil
+        if let root, await openLive(id, holding: root, jump: jump) { return root }
         let target = root ?? eventID
         let focus = TimelineFocus.event(
             eventId: target, numContextEvents: 30, threadMode: .automatic(hideThreadedEvents: true))
-        await setupRoom(id, focus: focus, eventID: target)
+        await setupRoom(id, focus: focus, eventID: target, jump: jump)
         return root
     }
 
-    private func openLive(_ id: String, holding eventID: String) async -> Bool {
-        if showRecentRoom(id, containing: eventID) { return true }
-        return await setupRoom(id, focus: .live(hideThreadedEvents: true), eventID: nil, containing: eventID)
+    private func openLive(_ id: String, holding eventID: String, jump: MessageJump?) async -> Bool {
+        if showRecentRoom(id, containing: eventID, jump: jump) { return true }
+        return await setupRoom(
+            id, focus: .live(hideThreadedEvents: true), eventID: nil, containing: eventID, jump: jump)
     }
 
-    /// Shows a conversation whose live timeline is still open, rows and all, in the frame of the click. False when
-    /// none is open, or when it does not hold `anchor`.
-    func showRecentRoom(_ id: String, containing anchor: String? = nil) -> Bool {
+    /// Shows a conversation whose live timeline is still open, rows and all, in the frame of the click, at `jump` if
+    /// given. False when none is open, or when it does not hold `anchor`.
+    func showRecentRoom(_ id: String, containing anchor: String? = nil, jump: MessageJump? = nil) -> Bool {
         guard connectionStopTask == nil, client != nil, !isPreview else { return false }
         func holds(_ kept: KeptTimeline) -> Bool {
             anchor.map { Self.contains(kept.observer.snapshot.items, $0) } ?? true
@@ -1503,6 +1505,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         if let live = liveTimeline, live.roomID == id, holds(live) {
             // Already on screen; this drops any other conversation that was still opening.
             selection = live.token
+            if let jump { self.jump = jump }
             showTimeline(live.observer.snapshot, roomID: id)
             return true
         }
@@ -1510,6 +1513,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         _ = recentTimelines.take(id)
         selection = kept.token
         showConversation(id, eventID: nil, token: kept.token)
+        if let jump { self.jump = jump }
         liveTimeline = kept
         timeline = kept.timeline
         timelineHandle = kept.listener
@@ -1587,9 +1591,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         Task { await prepared.task.value?.listener.cancel() }
     }
 
-    private func setupRoom(_ id: String, focus: TimelineFocus, eventID: String?, containing anchor: String? = nil)
-        async -> Bool
-    {
+    /// A `jump` leaves the conversation on screen as it is until the timeline holding its message is in place, and if
+    /// none can be, stays there with the error.
+    private func setupRoom(
+        _ id: String, focus: TimelineFocus, eventID: String?, containing anchor: String? = nil,
+        jump: MessageJump? = nil
+    ) async -> Bool {
         let ahead: (token: UUID, task: Task<PreparedRoom?, Never>)?
         if case .live = focus, eventID == nil, let prepared, prepared.roomID == id {
             ahead = (prepared.token, prepared.task)
@@ -1603,7 +1610,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         updateSubscriptions(id)
         // A conversation goes up as it is chosen and its rows follow, so the one being left is never redrawn in
         // between. Checking whether the conversation on screen holds a message changes nothing on screen.
-        if anchor == nil || selectedRoomID != id { showConversation(id, eventID: eventID, token: token) }
+        if jump == nil, anchor == nil || selectedRoomID != id { showConversation(id, eventID: eventID, token: token) }
         do {
             let client = try requireClient()
             var pendingRoom = try client.getRoom(roomId: id)
@@ -1641,6 +1648,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 return false
             }
             showConversation(id, eventID: eventID, token: token)
+            if let jump { self.jump = jump }
             timeline = next
             timelineHandle = listenerHandle
             openState = .ready
@@ -1674,6 +1682,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
         } catch {
             guard selection == token else { return true }
+            if jump != nil, let shown = shownSelection, shown != token {
+                // The conversation on screen takes its updates again.
+                selection = shown
+                errorMessage = Self.safeError(error)
+                return true
+            }
             showConversation(id, eventID: eventID, token: token)
             openState = .failed
             errorMessage = Self.safeError(error)

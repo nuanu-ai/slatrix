@@ -1885,15 +1885,23 @@ struct RootView: View {
                     }
                 }
                 var replyRootID: String?
+                var missed = false
                 if let resumeAnchor, eventID == nil {
                     await matrix.resumeRoom(id, at: resumeAnchor)
                 } else if let destinationEventID {
+                    let previous = matrix.jump?.id
                     replyRootID = await matrix.jumpToMessage(roomID: id, eventID: destinationEventID)
+                    missed = matrix.jump?.id == previous
                 } else if thread == nil || requiresRoomSelection {
                     await matrix.selectRoom(id)
                 }
-                guard navigationGeneration == generation, composerIdentity == identity, matrix.selectedRoomID == id
-                else { return }
+                guard navigationGeneration == generation, composerIdentity == identity else { return }
+                guard !missed, matrix.selectedRoomID == id else {
+                    // A jump that couldn't load leaves the screen it was made from as it was.
+                    pendingRoomID = nil
+                    if let pickedFrom { route = pickedFrom.route }
+                    return
+                }
                 pendingRoomID = nil
                 if let restoringReply {
                     guard restoringReply.isCurrent(replyTarget, owner: replyOwner), route == .home, room?.id == id

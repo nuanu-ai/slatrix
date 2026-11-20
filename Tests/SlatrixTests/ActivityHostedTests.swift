@@ -97,6 +97,25 @@ struct ActivityHostedTests {
         #expect(ActivityBadge.count(rooms: matrix.rooms, items: matrix.activity.items) == 1)
     }
 
+    @Test("A message clicked in Activity that can't load leaves Activity on screen, with the error")
+    func failedOpenStaysOnActivity() async throws {
+        let room = FakeOpenRoom("!activity:example.org", cached: [])
+        room.focusedError = URLError(.notConnectedToInternet)
+        let body = "Message \(UUID().uuidString)"
+        let (matrix, hosting, window) = host(room, item: item("$message", body: body, root: nil), key: false)
+        VoiceOver.listen()
+        defer {
+            VoiceOver.done()
+            window.contentView = nil
+            window.close()
+        }
+        await click(body, in: hosting)
+        #expect(await eventually { matrix.errorMessage != nil })
+        await drainMainActor()
+        hosting.layoutSubtreeIfNeeded()
+        #expect(!accessible(body, in: hosting).isEmpty)
+    }
+
     // capability: activity.open-item
     @Test(
         "A reply or mention opened from Activity loses its dot once the reader sees it, with newer messages out of view",
