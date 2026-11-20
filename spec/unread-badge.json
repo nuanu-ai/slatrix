@@ -43,6 +43,11 @@
       "rooms": [{ "messages": 3 }, { "mentions": 2 }, { "direct": true, "messages": 4 }],
       "badge": "6"
     },
+    {
+      "name": "A direct conversation adds its row's count, and a channel's notifications add nothing",
+      "rooms": [{ "direct": true, "messages": 4, "notifications": 2 }, { "notifications": 3 }],
+      "badge": "4"
+    },
     { "name": "A total above 99 reads 99+", "rooms": [{ "mentions": 60 }, { "direct": true, "messages": 60 }], "badge": "99+" },
     {
       "name": "Left and invited conversations and workspaces add nothing",

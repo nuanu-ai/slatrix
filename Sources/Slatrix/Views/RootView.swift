@@ -473,7 +473,11 @@ struct RootView: View {
 
     private var roomObservedContent: some View {
         presentedContent
-            .background(RoomListWatcher(matrix: matrix, onRooms: roomsChanged, onWorkspaces: settleWorkspace))
+            .background(
+                RoomListWatcher(
+                    matrix: matrix, notifications: appearance.notifications, onRooms: roomsChanged,
+                    onWorkspaces: settleWorkspace)
+            )
             .onChange(of: workspaceID) { _, id in
                 Performance.finishOnScreen(.workspaceSwitch)
                 cancelStaleThreadOpen()
@@ -2508,7 +2512,6 @@ struct RootView: View {
         cancelStaleThreadOpen()
         cancelStaleForward()
         cancelStaleCaption()
-        PlatformIntegration.shared.setBadge(rooms.reduce(0) { $0 + $1.unread })
         if let target = editTarget, room?.id != target.message.roomID || room?.membership != "join" {
             cancelCurrentEdit()
         }
@@ -3012,10 +3015,14 @@ private struct ReadTracking: View {
 /// Follows the room list for the window, so a change to a room reruns these checks, not the window's body.
 private struct RoomListWatcher: View {
     let matrix: MatrixService
+    let notifications: Bool
     let onRooms: ([ChatRoom]) -> Void
     let onWorkspaces: () -> Void
     var body: some View {
         Color.clear
+            .onChange(of: UnreadBadge.dock(matrix.rooms, notifications: notifications), initial: true) { _, count in
+                PlatformIntegration.shared.setBadge(count)
+            }
             .onChange(of: matrix.rooms) { _, rooms in onRooms(rooms) }
             .onChange(of: matrix.workspaces) { _, _ in onWorkspaces() }
     }

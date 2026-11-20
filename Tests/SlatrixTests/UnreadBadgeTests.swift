@@ -62,4 +62,15 @@ struct UnreadBadgeTests {
     func combined(spec: Combined) {
         #expect(Self.label(UnreadBadge.combined(spec.rooms.map(\.chatRoom))) == spec.badge)
     }
+
+    // capability: home.unread-badges
+    @Test(
+        "The Dock adds up the counts the sidebar's rows show, and shows nothing while notifications are off",
+        arguments: try SharedSpec.decode("spec/unread-badge.json", as: Spec.self).combined)
+    func dock(spec: Combined) {
+        let rooms = spec.rooms.map(\.chatRoom)
+        let count = UnreadBadge.dock(rooms, notifications: true)
+        #expect((count > 0 ? UnreadBadge.label(count) : "none") == (spec.badge == "bold" ? "none" : spec.badge))
+        #expect(UnreadBadge.dock(rooms, notifications: false) == 0)
+    }
 }
