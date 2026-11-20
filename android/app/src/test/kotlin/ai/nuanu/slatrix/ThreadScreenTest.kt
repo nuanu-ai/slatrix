@@ -51,7 +51,7 @@ class ThreadScreenTest {
         var back = false
         compose.setContent {
             SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false), draft.value,
+                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false, replies = 2), draft.value,
                     { draft.value = draft.value.copy(text = it) }, { sent = draft.value.text }, { back = true },
                     {}, {}, {}, {}, {}, threadRoot = "\$root")
             }

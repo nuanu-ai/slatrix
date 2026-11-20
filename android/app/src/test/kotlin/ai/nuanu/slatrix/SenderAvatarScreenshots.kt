@@ -87,7 +87,7 @@ class SenderAvatarScreenshots {
         compose.setContent {
             CompositionLocalProvider(LocalAvatarLoader provides pictures) {
                 SlatrixTheme(dark = false) {
-                    LiveHomeScreen("@alex:example.org", RoomListState(loading = false), {}, {}, {}) { ActivityScreen(items, {}, { _, _ -> }) {} }
+                    LiveHomeScreen("@alex:example.org", RoomListState(loading = false), {}, {}, {}) { ActivityScreen(items, {}, { _, _, _ -> }) {} }
                 }
             }
         }

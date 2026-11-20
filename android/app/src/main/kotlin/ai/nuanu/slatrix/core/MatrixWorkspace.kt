@@ -32,12 +32,14 @@ data class OpenChannel(
     val root: ConversationMessage? = null,
     /** [at] is where its unread messages start, which it opens at without a highlight. */
     val resume: Boolean = false,
+    /** The reply count the thread's opener showed, such as a Threads item's. */
+    val openedWith: Int? = null,
     /** Who else is typing here, and telling them you are. */
     val typing: MatrixTyping? = null,
 )
 
 /** What shows while the conversation opens: a thread's root, as its channel showed it. */
-fun OpenChannel.waiting(): ConversationState = opening(root, error)
+fun OpenChannel.waiting(): ConversationState = opening(root, error, openedWith)
 
 private const val RECENT = 4
 
@@ -89,7 +91,7 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                     composerRoom = checkNotNull(client.getRoom(requested.room.id))
                     currentCoroutineContext().ensureActive()
                     val timeline = kept?.first?.also { it.revisit() } ?: MatrixConversation(session, checkNotNull(conversationRoom),
-                        requested.threadRoot, requested.at, requested.root, requested.resume)
+                        requested.threadRoot, requested.at, requested.root, requested.resume, openedWith = requested.openedWith)
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
                     if (generation.get() == token) {
@@ -117,9 +119,11 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
     }
 
     /** Opens [room]; a channel opened without [at] opens where its unread messages start, as on the Mac. */
-    fun open(room: RoomSummary, threadRoot: String? = null, at: String? = null, root: ConversationMessage? = null) {
+    fun open(room: RoomSummary, threadRoot: String? = null, at: String? = null, root: ConversationMessage? = null,
+        openedWith: Int? = null) {
         val resume = room.resumeAt?.takeIf { at == null && threadRoot == null }
-        select(OpenChannel(room, threadRoot = threadRoot, at = at ?: resume, root = root, resume = resume != null))
+        select(OpenChannel(room, threadRoot = threadRoot, at = at ?: resume, root = root, resume = resume != null,
+            openedWith = openedWith))
     }
 
     /**

@@ -124,7 +124,7 @@ class PhoneSizeScreenshots(private val screen: String, private val width: Int, p
                     "@Alex could you take a look at the launch checklist before Friday?", now - hour, ActivityKind.Mention, null),
                 ActivityItem("b", "!wm:example.org", "\$2", "Wanda Moss", true, "Wanda Moss", "WM", 1,
                     "Can you look at the release notes before lunch?", now - 2 * hour, ActivityKind.Message, null).copy(unread = false),
-            ), {}, { _, _ -> })
+            ), {}, { _, _, _ -> })
             "You" -> LiveYouScreen("@alexandra.rivera:harbor-collective.example.org", "Alexandra Rivera", {}, {}, onBack = {})
             "Preferences" -> LivePreferencesScreen(dark, null, false, {}, {}, {}) { NotificationRows(NotifyAbout.DirectAndMentions, true, null, {}, {}) }
             "SignIn" -> AccountProviderScreen("", {}, connecting = false, error = null, onContinue = {}, onCancel = {})

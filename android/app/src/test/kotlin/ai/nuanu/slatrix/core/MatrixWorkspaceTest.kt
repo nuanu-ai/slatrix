@@ -193,6 +193,16 @@ class MatrixWorkspaceTest {
         assertEquals("The root keeps its row, so it never redraws", opening.rows.map { it.id }, opened.rows.map { it.id })
     }
 
+    // capability: threads.feed
+    @Test fun aThreadOpenedFromThreadsSaysTheCountThreadsShowedFromItsFirstFrame() = runTest {
+        val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
+
+        workspace.open(workspaceRoom("!alpha:example.org", "Alpha"), threadRoot = "\$root", openedWith = 5)
+        assertEquals(5, requireNotNull(workspace.selected.value).waiting().replies)
+        runCurrent()
+        assertEquals(5, requireNotNull(workspace.selected.value?.conversation).state.value.replies)
+    }
+
     @Test fun aThreadOpensOnItsRootWithADraftApartFromItsChannel() = runTest {
         val client = WorkspaceClient()
         val workspace = MatrixWorkspace(backgroundScope, client)

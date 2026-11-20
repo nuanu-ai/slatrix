@@ -51,8 +51,9 @@ private enum class ActivityFilter(val label: String) { All("All"), Dms("DMs"), M
 
 /** Slack's Activity tab: filter chips over what notified you, newest first. An item opens at its message. */
 @Composable
-fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit, onOpenThread: (roomId: String, root: String) -> Unit,
-    threads: @Composable (onOpenThread: (roomId: String, root: String) -> Unit) -> Unit = {}) {
+fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit,
+    onOpenThread: (roomId: String, root: String, replies: Int) -> Unit,
+    threads: @Composable (onOpenThread: (roomId: String, root: String, replies: Int) -> Unit) -> Unit = {}) {
     var filter by rememberSaveable { mutableStateOf(ActivityFilter.All) }
     var unreadOnly by rememberSaveable { mutableStateOf(false) }
     val shown = remember(items, filter, unreadOnly) {

@@ -166,6 +166,8 @@ data class ConversationState(
     val names: Map<String, String> = emptyMap(),
     /** The pictures of those who have one, for the faces on reactions. */
     val avatars: Map<String, String> = emptyMap(),
+    /** A thread's "N replies" line under its root, as spec/thread-replies-line.json has it; null for none. */
+    val replies: Int? = null,
 )
 
 /** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
@@ -178,9 +180,13 @@ private const val ROOT_KEY = "thread-root"
 // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
 private fun ConversationMessage.asThreadRoot() = copy(id = ROOT_KEY, grouped = false)
 
-/** What a conversation shows before its timeline loads: a thread's [root] at once, in the row it then keeps. */
-internal fun opening(root: ConversationMessage?, error: String? = null) =
-    ConversationState(rows = listOfNotNull(root?.asThreadRoot()), loading = root == null, error = error)
+/**
+ * What a conversation shows before its timeline loads: a thread's [root] at once, in the row it then keeps, and the
+ * reply count its opener showed.
+ */
+internal fun opening(root: ConversationMessage?, error: String? = null, openedWith: Int? = null) =
+    ConversationState(rows = listOfNotNull(root?.asThreadRoot()), loading = root == null, error = error,
+        replies = ThreadRepliesLine.count(false, emptyList(), null, openedWith))
 private const val NOTICE_MILLIS = 4_000L
 
 /** The relation that puts an attachment in a thread, as the Mac sends it. */
@@ -205,17 +211,24 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     root: ConversationMessage? = null,
     /** [at] is where the unread messages start, so it opens there without a highlight. */
     private val resume: Boolean = false,
-    private val view: ConversationView = ConversationView.Timeline) {
+    private val view: ConversationView = ConversationView.Timeline,
+    /** The reply count whoever opened this thread was showing; it stays while the thread shows. */
+    private val openedWith: Int? = null) {
     @Volatile private var root = root?.asThreadRoot()
     /** The root's row as the channel holds it now; while the channel holds none, the thread's own row stands. */
     @Volatile private var mirror = this.root
+    /** The reply count the root carries in the channel now; null while the channel holds no root or it carries none. */
+    @Volatile private var rootSummary: Int? = null
+    /** Whether the thread's own timeline holds its root, which the SDK adds only with the thread's start. */
+    @Volatile private var holdsRoot = false
     private val lifetime = SupervisorJob(scope.coroutineContext[Job])
     private val operations = CoroutineScope(scope.coroutineContext + lifetime)
     /** Thread replies waiting to be copied to the channel: they outlast the thread, and end with the session's [scope]. */
     private val copies = SupervisorJob(scope.coroutineContext[Job])
     private val copying = CoroutineScope(scope.coroutineContext + copies)
     private val ownUserId = room.ownUserId()
-    private val mutableState = MutableStateFlow(opening(this.root).copy(ownUserId = ownUserId, startsAtUnread = resume))
+    private val mutableState = MutableStateFlow(opening(this.root, openedWith = openedWith)
+        .copy(ownUserId = ownUserId, startsAtUnread = resume))
     val state: StateFlow<ConversationState> = mutableState.asStateFlow()
     private val ready = CompletableDeferred<Unit>()
     private val updates = Channel<Update>(Channel.UNLIMITED)
@@ -239,8 +252,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private var retryPage: () -> Unit = ::loadOlder
     @Volatile private var blankPages = 0
     /**
-     * The server's count for each recent thread, by its root. The SDK counts only replies it has seen, and a phone
-     * that slept through them has none, so their roots would show no replies at all.
+     * The server's count for each recent thread, by its root, for a root that carries none. The SDK counts only replies
+     * it has seen, and a phone that slept through them has none, so their roots would show no replies at all.
      */
     @Volatile private var serverThreads = emptyMap<String, MessageThread>()
 
@@ -317,9 +330,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
                 val first = rows.firstOrNull { it is ConversationMessage }?.id
                 if (first != oldest) { oldest = first; blankPages = 0 }
+                holdsRoot = source.holds(threadRoot)
                 mutableState.update {
                     it.copy(rows = withRoot(rows), loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
-                        highlight = it.highlight ?: at?.takeIf { id -> !resume && source.holds(id) }, firstUnread = unread)
+                        highlight = it.highlight ?: at?.takeIf { id -> !resume && source.holds(id) }, firstUnread = unread).counted()
                 }
             }
         } catch (cancelled: CancellationException) {
@@ -400,7 +414,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     currentCoroutineContext().ensureActive()
                     // Counted once it went through: a failed request says nothing about what the room holds.
                     blankPages++
-                    mutableState.update { it.copy(hasMore = !endReached) }
+                    mutableState.update { it.copy(hasMore = !endReached).counted() }
                     // A page of edits and reactions shows nothing new, so it reads on until an older message resets the count.
                     caughtUp()
                 } while (!endReached && blankPages in 1 until MAX_BLANK_PAGES)
@@ -510,14 +524,20 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             .distinctUntilChanged().collect { copy ->
                 operations.launch {
                     mirror = copy
-                    if (copy == null) return@launch
-                    root = copy.asThreadRoot()
+                    rootSummary = copy?.thread?.replies
+                    if (copy != null) root = copy.asThreadRoot()
                     mutableState.update { state ->
-                        state.copy(rows = state.rows.map { if (it is ConversationMessage && it.id == ROOT_KEY) it.withEdit(copy) else it })
+                        (if (copy == null) state
+                            else state.copy(rows = state.rows.map { if (it is ConversationMessage && it.id == ROOT_KEY) it.withEdit(copy) else it }))
+                            .counted()
                     }
                 }
             }
     }
+
+    /** A thread's state with the line under its root, from what it holds now; nothing else decides that line. */
+    private fun ConversationState.counted() = if (threadRoot == null) this else copy(replies = ThreadRepliesLine.count(
+        holdsRoot && !hasMore, rows.filterIsInstance<ConversationMessage>().filter { it.eventId != threadRoot }, rootSummary, openedWith))
 
     /** It as the channel shows it, deleted, or with an edit the server refused and the channel took back. */
     private fun ConversationMessage.withEdit(channel: ConversationMessage) = copy(kind = channel.kind, body = channel.body,
@@ -901,8 +921,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             divider = null
             val grouped = previous?.let { groupsUnder(it, row) } == true
             val seen = !readers[row.id].isNullOrEmpty()
-            val server = row.eventId?.let(serverThreads::get)
-            val thread = if (server != null && server.replies > (row.thread?.replies ?: 0)) server else row.thread
+            val thread = row.thread ?: row.eventId?.let(serverThreads::get)
             // Stored back, so an unchanged row stays the same object in the next batch.
             val current = if (row.grouped == grouped && row.seen == seen && row.thread == thread) row
                 else row.copy(grouped = grouped, seen = seen, thread = thread).also { items[index] = it }
@@ -1046,7 +1065,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     latest?.let { it.senderProfile.nameOf(it.sender) },
                     latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong(),
                     (latest?.senderProfile as? ProfileDetails.Ready)?.avatarUrl)
-            }?.takeIf { it.replies > 0 },
+            },
             replyTo = content.inReplyTo?.let { replyPreview(it, (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId) },
             repliedToThread = content.threadRoot == null && content.inReplyTo?.let { quotesOwnWords(event.sender, content.kind, it) } == true,
             attachment = shown.attachment?.let { if (event.isOwn) it.copy(own = true) else it },

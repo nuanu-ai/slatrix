@@ -608,6 +608,17 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("2 replies", useUnmergedTree = true).assertIsDisplayed()
     }
 
+    @Test fun aMessageWhoseThreadCountsNoRepliesShowsNoRepliesBar() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message("Review: two nits", 0).copy(thread = MessageThread(0, null, null))),
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread = {})
+            }
+        }
+        compose.onNodeWithText("Review: two nits", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("0 replies", useUnmergedTree = true).assertDoesNotExist()
+    }
+
     // capability: thread.send-to-channel
     @Test fun aCopyOfAThreadReplySaysItRepliedToAThreadAndOpensIt() {
         fun copy(id: String, body: String, reply: String) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", body, null,
