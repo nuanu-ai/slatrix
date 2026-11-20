@@ -167,6 +167,44 @@ extension DeletedMessageTests {
         #expect(withdrawn.all.isEmpty)
         #expect(service.activity.items.isEmpty == (interruption == .rowGone))
     }
+
+    enum Place: CaseIterable {
+        case open
+        /// Open before another conversation took its place.
+        case kept
+        case thread
+    }
+
+    // capability: message.deleted
+    @Test(
+        "A message deleted in an open or kept timeline leaves Activity and Notification Center at once",
+        arguments: Place.allCases)
+    func deletedInTimeline(_ place: Place) async throws {
+        let root = FakeTimelineItem(textEvent("$root", body: "Root"), uniqueID: "root")
+        let message = FakeTimelineItem(textEvent("$gone", body: "Hello"), uniqueID: "gone")
+        let room = FakeOpenRoom(Self.room, cached: [root, message])
+        room.threadItems = [root, message]
+        let other = FakeOpenRoom("!other:example.org", cached: [])
+        use([room, other])
+        let withdrawn = Recorder<String>()
+        service.onMessageGone = { withdrawn.append($1) }
+        service.activity.record(item("$gone"))
+        service.activity.record(item("$kept"))
+        await service.selectRoom(room.id())
+        switch place {
+        case .open: break
+        case .kept: await service.selectRoom(other.id())
+        case .thread:
+            try await service.loadThread(try #require(service.messages.first))
+            #expect(await eventually { service.threadMessages.count == 2 })
+        }
+        let timeline = try #require(place == .thread ? room.timelines.all.last : room.timelines.all.first)
+        let deleted = FakeTimelineItem(textEvent("$gone", body: "", redacted: true), uniqueID: "gone")
+        timeline.emit([.set(index: 1, value: deleted)])
+        await drainMainActor()
+        #expect(withdrawn.all == ["$gone"])
+        #expect(service.activity.items.compactMap(\.eventID) == ["$kept"])
+    }
 }
 
 /// The real SDK against the loopback homeserver: what it answers once a message is deleted on the server.

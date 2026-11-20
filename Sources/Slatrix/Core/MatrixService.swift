@@ -143,6 +143,14 @@ enum MatrixMapping {
         }
     }
 
+    /// The event ID of a message `item` shows deleted.
+    static func deletedEventID(_ item: TimelineItem) -> String? {
+        guard let event = item.asEvent(), case .msgLike(let content) = event.content, case .redacted = content.kind,
+            case .eventId(let id) = event.eventOrTransactionId
+        else { return nil }
+        return id
+    }
+
     static func identifier(_ id: EventOrTransactionId) -> String {
         switch id {
         case .eventId(let id), .transactionId(let id): return id
@@ -395,8 +403,9 @@ private final class TimelineObserver: TimelineListener, @unchecked Sendable {
     private let lock = NSLock()
     private var items: [TimelineItem] = []
     private var revision = 0
-    let callback: @Sendable ([TimelineItem], Int) -> Void
-    init(_ callback: @escaping @Sendable ([TimelineItem], Int) -> Void) { self.callback = callback }
+    /// The items, their revision, and the event IDs of the messages this update shows deleted.
+    let callback: @Sendable ([TimelineItem], Int, [String]) -> Void
+    init(_ callback: @escaping @Sendable ([TimelineItem], Int, [String]) -> Void) { self.callback = callback }
     var snapshot: (items: [TimelineItem], revision: Int) { lock.withLock { (items, revision) } }
     func onUpdate(diff: [TimelineDiff]) {
         let changes = diff.map(\.change)
@@ -406,9 +415,10 @@ private final class TimelineObserver: TimelineListener, @unchecked Sendable {
         let snapshot = items
         let nextRevision = revision
         lock.unlock()
+        let values = changes.flatMap(\.values)
         // Off the main thread, before the rows that show these bodies exist.
-        MatrixMapping.renderBodies(of: changes.flatMap(\.values))
-        callback(snapshot, nextRevision)
+        MatrixMapping.renderBodies(of: values)
+        callback(snapshot, nextRevision, values.compactMap(MatrixMapping.deletedEventID))
     }
 }
 
@@ -1688,10 +1698,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Shows the open conversation's timeline as it changes, once it is on screen and until another conversation or
     /// timeline takes its place.
     private func mainObserver(roomID id: String, token: UUID, focus eventID: String?) -> TimelineObserver {
-        TimelineObserver { [weak self] items, revision in
+        TimelineObserver { [weak self] items, revision, deleted in
             Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Kept timelines too, though nothing shows them.
+                for eventID in deleted { self.messageGone(roomID: id, eventID: eventID) }
                 // Until its timeline is in place, which shows the rows it has read so far.
-                guard let self, self.selection == token, self.shownSelection == token, self.timeline != nil,
+                guard self.selection == token, self.shownSelection == token, self.timeline != nil,
                     self.focusedEventID == eventID
                 else { return }
                 self.showTimeline((items, revision), roomID: id)
@@ -2186,9 +2199,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     private func threadObserver(_ root: ChatMessage, token: UUID, threadToken: UUID) -> TimelineObserver {
-        TimelineObserver { [weak self] items, revision in
+        TimelineObserver { [weak self] items, revision, deleted in
             Task { @MainActor [weak self] in
-                guard let self, token == self.selection, threadToken == self.threadSelection,
+                guard let self else { return }
+                for eventID in deleted { self.messageGone(roomID: root.roomID, eventID: eventID) }
+                guard token == self.selection, threadToken == self.threadSelection,
                     revision > self.threadRevision
                 else { return }
                 self.threadRevision = revision
