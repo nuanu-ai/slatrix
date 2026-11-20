@@ -128,16 +128,19 @@ struct MessageActionTests {
     @Test("A failed reply preview marks only the pane that asked, and Retry fetches it again")
     func replyPreviewFailureAndRetry() async throws {
         let f = ActionFixture()
-        let root = quotingRoot(f)
-        f.service.messages = [root]
-        f.service.threadMessages = [root]
+        // A reply the conversation shows too; the thread's root is the conversation's own row.
+        var reply = quotingRoot(f)
+        reply.id = "$historical"
+        reply.threadRootID = f.rootID
+        f.service.messages = [reply]
+        f.service.threadMessages = [reply]
         f.thread.failsWrites = true
-        let target = try f.target(root, .thread(rootID: f.rootID))
+        let target = try f.target(reply, .thread(rootID: f.rootID))
         await f.service.loadReplyPreview(for: target)
         #expect(f.service.threadMessages[0].replyPreview?.state == .failed)
         #expect(f.service.messages[0].replyPreview?.state == .unavailable)
         await f.service.loadReplyPreview(for: target)
-        #expect(f.thread.writes.all == ["details:$root", "details:$root"])
+        #expect(f.thread.writes.all == ["details:$historical", "details:$historical"])
         #expect(f.main.writes.all.isEmpty)
     }
 

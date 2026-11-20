@@ -890,11 +890,28 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard let current = currentActionMessage(target), !current.isRedacted, current.sendState == "sent" else {
             throw CancellationError()
         }
-        switch target.surface {
-        case .conversation: return (try requireTimeline(), current)
-        case .thread(let rootID):
-            guard loadedThreadRootID == rootID, let threadTimeline else { throw CancellationError() }
-            return (threadTimeline, current)
+        if actsInConversation(target) { return (try requireTimeline(), current) }
+        guard case .thread(let rootID) = target.surface, loadedThreadRootID == rootID, let threadTimeline else {
+            throw CancellationError()
+        }
+        return (threadTimeline, current)
+    }
+    /// Whether an action goes through the conversation's timeline: one on its rows, or on a thread's root while it
+    /// holds the root, which the thread's own timeline holds only from the thread's start.
+    private func actsInConversation(_ target: MessageActionTarget) -> Bool {
+        guard case .thread(let rootID) = target.surface else { return true }
+        return target.message.eventID == rootID
+            && messages.contains { $0.eventID == rootID && $0.roomID == target.message.roomID }
+    }
+    /// The SDK acts only on an event its timeline holds: an action on a thread's root that the conversation doesn't
+    /// hold reads the thread back to it first, ten pages past what is loaded at most.
+    private func reachThreadRoot(_ target: MessageActionTarget) async {
+        guard case .thread(let rootID) = target.surface, target.message.eventID == rootID, !actsInConversation(target),
+            let observer = threadSnapshot
+        else { return }
+        for _ in 0..<10
+        where loadedThreadRootID == rootID && !Self.contains(observer.snapshot.items, rootID) && hasMoreThreadHistory {
+            guard (try? await loadMoreThread(rootID: rootID)) == false else { break }
         }
     }
     #if DEBUG
@@ -2495,7 +2512,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     private func actionMedia(_ target: MessageActionTarget) throws -> ShownMedia {
         let (_, message) = try actionTimeline(target)
-        let shown = target.surface == .conversation ? mainMedia[message.eventID] : threadMedia[message.eventID]
+        let shown = actsInConversation(target) ? mainMedia[message.eventID] : threadMedia[message.eventID]
         guard let shown, shown.attachment == message.attachment else {
             throw MatrixServiceError.request("This attachment is updating. Reload the message and try again.")
         }
@@ -2510,6 +2527,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             formattedCaption: current.formattedBody.map { FormattedBody(format: .html, body: $0) })
     }
     func loadMediaCaption(_ target: MessageActionTarget) async throws -> MediaCaptionSnapshot {
+        await reachThreadRoot(target)
         let (timeline, _) = try actionTimeline(target)
         _ = try actionMedia(target)
         do {
@@ -2580,10 +2598,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         return ForwardMessageSourceRevision(
             kind: current.kind, body: current.body, formattedBody: current.formattedBody,
             redacted: current.isRedacted, sendState: current.sendState,
-            media: target.surface == .conversation
+            media: actsInConversation(target)
                 ? mainForwardMedia[current.eventID] : threadForwardMedia[current.eventID])
     }
     func loadForwardMessage(_ target: MessageActionTarget) async throws -> ForwardMessageReview {
+        await reachThreadRoot(target)
         let (source, mapped) = try actionTimeline(target)
         if mapped.supportsCaptionEditing { _ = try actionMedia(target) }
         do {
@@ -2609,7 +2628,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 guard message.attachment == shown.attachment,
                     try MediaCaptionContent(content).source.toJson() == shown.identity,
                     mediaRevision
-                        == (target.surface == .conversation
+                        == (actsInConversation(target)
                             ? mainForwardMedia[message.eventID] : threadForwardMedia[message.eventID])
                 else { throw ForwardMessageError.sourceUpdating }
             }
@@ -2696,15 +2715,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             current.replyToID == preview.eventID,
             current.replyToID == target.message.replyToID, current.replyPreview?.state != .ready
         else { return }
-        switch target.surface {
-        case .conversation:
+        if actsInConversation(target) {
             guard
                 let index = messages.firstIndex(where: { $0.eventID == current.eventID && $0.roomID == current.roomID })
             else {
                 return
             }
             messages[index].replyPreview = preview
-        case .thread:
+        } else {
             guard
                 let index = threadMessages.firstIndex(where: {
                     $0.eventID == current.eventID && $0.roomID == current.roomID
@@ -2715,6 +2733,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     func editMessage(_ target: MessageActionTarget, body: String) async throws {
+        await reachThreadRoot(target)
         let (timeline, current) = try actionTimeline(target)
         guard current.supportsTextEditing, current.senderID == user?.id else {
             throw MatrixServiceError.request("This message can’t be edited.")
@@ -2730,6 +2749,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func deleteMessage(_ target: MessageActionTarget) async throws {
+        await reachThreadRoot(target)
         let (timeline, current) = try actionTimeline(target)
         guard current.senderID == user?.id else {
             throw MatrixServiceError.request("You can only delete your own messages.")
@@ -2743,6 +2763,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func toggleReaction(_ target: MessageActionTarget, key: String) async throws {
+        await reachThreadRoot(target)
         let (timeline, current) = try actionTimeline(target)
         do {
             _ = try await timeline.toggleReaction(itemId: .eventId(eventId: target.message.eventID), key: key)

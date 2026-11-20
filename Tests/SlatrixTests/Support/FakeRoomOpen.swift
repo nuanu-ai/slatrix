@@ -112,9 +112,27 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         }
         let callbacks = lock.withLock {
             if let last = added.compactMap(Self.eventID).last { newest = last }
+            for change in diff {
+                switch change {
+                case .reset(let values): held = Set(values.compactMap(Self.eventID))
+                case .pushFront(let value), .pushBack(let value): held.formUnion([value].compactMap(Self.eventID))
+                case .append(let values): held.formUnion(values.compactMap(Self.eventID))
+                default: break
+                }
+            }
             return listeners
         }
         for listener in callbacks { listener.onUpdate(diff: diff) }
+    }
+    /// The events this timeline holds; like the SDK, it acts only on those.
+    private lazy var held = Set(cached.compactMap(Self.eventID))
+    /// Reactions toggled through this timeline, as the key and the event.
+    let reactions = Recorder<String>()
+    override func toggleReaction(itemId: EventOrTransactionId, key: String) async throws -> Bool {
+        let id = MatrixMapping.identifier(itemId)
+        guard lock.withLock({ held.contains(id) }) else { throw URLError(.resourceUnavailable) }
+        reactions.append("\(key) \(id)")
+        return true
     }
 }
 
