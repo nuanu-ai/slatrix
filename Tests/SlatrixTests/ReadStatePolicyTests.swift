@@ -166,12 +166,17 @@ struct ReadStatePolicyTests {
     ]
 
     // capability: notifications.alert
-    @Test("A message is seen once its shown pane has it at or before the newest message in view", arguments: seen)
+    @Test(
+        "A message is seen once its shown pane has it at or before the newest message in view, asked once or again",
+        arguments: seen)
     func messageSeen(seen: Seen) {
-        #expect(
-            ReadStatePolicy.seen(
-                seen.event, shown: seen.shown, in: ReadStatePolicy.positions(["$a", "$b", "$c", "$d"]),
-                report: seen.laidOut.map { PaneReport(newestInView: seen.newestInView, laidOut: $0) }) == seen.seen)
+        let timeline = TimelinePositions(["$a", "$b", "$c", "$d"])
+        let report = seen.laidOut.map { PaneReport(newestInView: seen.newestInView, laidOut: $0) }
+        // The first question searches the timeline, the next asks its index.
+        let answers = (0..<2).map { _ in
+            ReadStatePolicy.seen(seen.event, shown: seen.shown, in: timeline, report: report)
+        }
+        #expect(answers == [seen.seen, seen.seen])
     }
 
     // capability: conversation.mark-unread

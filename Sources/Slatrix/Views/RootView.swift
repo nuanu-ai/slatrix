@@ -2906,10 +2906,11 @@ private struct ReadInputs {
             isPreview: matrix.isPreview, isJoined: shownRoom(matrix, workspaceID: workspaceID)?.membership == "join",
             isMainTimeline: route == .home,
             isLiveTimeline: matrix.focusedEventID == nil && matrix.status == .ready,
-            isAtBottom: latest.map {
-                ReadStatePolicy.isSeen(
-                    $0.eventID, in: ReadStatePolicy.positions(matrix.messages.map(\.eventID)),
-                    newestInView: matrix.shownConversationReport?.newestInView)
+            isAtBottom: latest.map { latest in
+                TimelinePositions(matrix.messages.lazy.map(\.eventID)).ask {
+                    ReadStatePolicy.isSeen(
+                        latest.eventID, newestInView: matrix.shownConversationReport?.newestInView, position: $0)
+                }
             } ?? false,
             isWindowActive: visible, isWindowVisible: visible, isWindowUnoccluded: visible,
             hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented,
@@ -2927,10 +2928,11 @@ private struct ReadInputs {
                 && shownRoom(matrix, workspaceID: workspaceID)?.id == identity?.roomID,
             isReady: identity != nil && localReady && matrix.status == .ready && threadReadyID == identity?.rootID
                 && openingThreadID == nil && !threadLoadFailed,
-            isAtBottom: latest.map {
-                ReadStatePolicy.isSeen(
-                    $0.eventID, in: ReadStatePolicy.positions(matrix.threadMessages.map(\.eventID)),
-                    newestInView: matrix.shownThreadReport?.newestInView)
+            isAtBottom: latest.map { latest in
+                TimelinePositions(matrix.threadMessages.lazy.map(\.eventID)).ask {
+                    ReadStatePolicy.isSeen(
+                        latest.eventID, newestInView: matrix.shownThreadReport?.newestInView, position: $0)
+                }
             } ?? false, isWindowActive: visible, isWindowVisible: visible,
             isWindowUnoccluded: visible,
             hasModal: hasPresentedSheet || Self.hasNativeModal || matrix.verification.isPresented,
@@ -2942,11 +2944,8 @@ private struct ReadInputs {
     @MainActor func seen(_ matrix: MatrixService) -> (String, String, String?) -> Bool? {
         let conversation = readContext(matrix)
         let thread = threadReadContext(matrix)
-        // One pass over each shown timeline, however many messages are asked about.
-        let messages =
-            ReadStatePolicy.isShown(conversation) ? ReadStatePolicy.positions(matrix.messages.map(\.eventID)) : [:]
-        let replies =
-            ThreadReadPolicy.isShown(thread) ? ReadStatePolicy.positions(matrix.threadMessages.map(\.eventID)) : [:]
+        let messages = TimelinePositions(matrix.messages.lazy.map(\.eventID))
+        let replies = TimelinePositions(matrix.threadMessages.lazy.map(\.eventID))
         let reports = (conversation: matrix.shownConversationReport, thread: matrix.shownThreadReport)
         return { eventID, roomID, threadRootID in
             let shown = ReadStatePolicy.isShown(

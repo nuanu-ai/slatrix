@@ -105,14 +105,9 @@ enum ReadStatePolicy {
             && ThreadReadPolicy.isShown(thread)
     }
 
-    /// Each event's place in a timeline's events, in order, for `isSeen`.
-    static func positions(_ timeline: [String]) -> [String: Int] {
-        Dictionary(timeline.enumerated().map { ($1, $0) }, uniquingKeysWith: max)
-    }
-
-    /// Whether `eventID` is in the timeline at or before `newestInView`, by their `positions`.
-    static func isSeen(_ eventID: String, in positions: [String: Int], newestInView: String?) -> Bool {
-        guard let newestInView, let newest = positions[newestInView], let index = positions[eventID] else {
+    /// Whether `eventID` is in a timeline at or before `newestInView`, by `position`, each event's place in it.
+    static func isSeen(_ eventID: String, newestInView: String?, position: (String) -> Int?) -> Bool {
+        guard let newestInView, let newest = position(newestInView), let index = position(eventID) else {
             return false
         }
         return index <= newest
@@ -120,10 +115,14 @@ enum ReadStatePolicy {
 
     /// Whether the reader has seen `eventID`, whose pane is `shown` or not, with `timeline` and `report` that pane's:
     /// nil while a shown pane has yet to lay the message out.
-    static func seen(_ eventID: String, shown: Bool, in timeline: [String: Int], report: PaneReport?) -> Bool? {
+    static func seen<Events>(
+        _ eventID: String, shown: Bool, in timeline: TimelinePositions<Events>, report: PaneReport?
+    ) -> Bool? {
         guard shown else { return false }
-        guard isSeen(eventID, in: timeline, newestInView: report?.laidOut) else { return nil }
-        return isSeen(eventID, in: timeline, newestInView: report?.newestInView)
+        return timeline.ask { position in
+            guard isSeen(eventID, newestInView: report?.laidOut, position: position) else { return nil }
+            return isSeen(eventID, newestInView: report?.newestInView, position: position)
+        }
     }
 
     static func automaticTarget(_ context: ReadStateContext, hold: ReadStateHold = ReadStateHold())
@@ -156,4 +155,25 @@ enum ReadStatePolicy {
     static let layoutDeadline: Duration = .seconds(1)
 
     private static func valid(_ value: String, prefix: String) -> Bool { MatrixID.isValid(value, sigil: prefix) }
+}
+
+/// Where each event sits in a timeline, for questions about what is seen. The first question searches from the end,
+/// where the messages asked about usually are; a second builds an index, so asking about many costs one pass.
+final class TimelinePositions<Events: BidirectionalCollection<String>> where Events.Index == Int {
+    private let events: Events
+    private var index: [String: Int]?
+    private var asked = false
+
+    init(_ events: Events) { self.events = events }
+
+    /// Answers `question`, given each event's place.
+    func ask<Answer>(_ question: ((String) -> Int?) -> Answer) -> Answer {
+        guard asked else {
+            asked = true
+            return question { events.lastIndex(of: $0) }
+        }
+        let index = index ?? Dictionary(zip(events, events.indices), uniquingKeysWith: max)
+        self.index = index
+        return question { index[$0] }
+    }
 }
