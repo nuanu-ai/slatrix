@@ -263,11 +263,15 @@ struct TimelineTable: NSViewRepresentable {
             pendingFocus = configuration.focusedEventID
         }
         inset(configuration.insets)
+        let rowsKept = configuration.entries == applied
         // As in Slack, what you send brings a live conversation to it, however soon the server confirms it.
         if opened, configuration.live, let previous, previous.sends != configuration.sends {
             preservingPosition(keeping: .bottom) {}
         }
         apply(configuration.entries)
+        // Let load older again with its rows as they were (a thread's Retry, or its connection back), the table asks as
+        // its loading row would once a page lands.
+        if opened, rowsKept, previous?.canLoadOlder == false, configuration.canLoadOlder { checkHistory() }
         if let previous, previous.readKey != configuration.readKey { reported = nil }
         // A jump within rows already shown changes none of them.
         if opened, pendingFocus != nil || reported == nil { afterScroll() }

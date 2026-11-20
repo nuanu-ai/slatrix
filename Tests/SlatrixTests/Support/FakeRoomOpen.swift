@@ -137,9 +137,18 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     let reactions = Recorder<String>()
     override func toggleReaction(itemId: EventOrTransactionId, key: String) async throws -> Bool {
         let id = MatrixMapping.identifier(itemId)
-        guard lock.withLock({ items.contains { Self.eventID($0) == id } }) else { throw URLError(.resourceUnavailable) }
+        try hold(id)
         reactions.append("\(key) \(id)")
         return true
+    }
+    /// Events whose quoted message this timeline was asked to fetch.
+    let details = Recorder<String>()
+    override func fetchDetailsForEvent(eventId: String) async throws {
+        try hold(eventId)
+        details.append(eventId)
+    }
+    private func hold(_ id: String) throws {
+        guard lock.withLock({ items.contains { Self.eventID($0) == id } }) else { throw URLError(.resourceUnavailable) }
     }
 }
 
