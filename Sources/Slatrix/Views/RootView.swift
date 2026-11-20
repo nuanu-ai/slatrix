@@ -69,6 +69,7 @@ struct RootView: View {
     @State private var recentSearches: [String] = []
     /// Any modal at all, such as a confirmation the timeline opened; read outside the body only.
     @State private var modalShown = false
+    @State private var identityPrompt = false
     @State private var showRecovery = false
     @State private var editingProfile = false
     @State private var creation: CreationKind?
@@ -163,7 +164,7 @@ struct RootView: View {
     private var coverage: Coverage {
         Coverage(
             pane: paneCovers, viewer: viewer.message != nil, dialog: modalShown,
-            drawer: sidebarCollapsed && sidebarDrawer)
+            drawer: sidebarCollapsed && sidebarDrawer, identity: identityPrompt)
     }
     /// The rail and sidebar leave for a drawer: hidden by hand, or no room beside a readable conversation and an
     /// open pane.
@@ -732,7 +733,8 @@ struct RootView: View {
             } else {
                 IdentityGate(
                     verification: matrix.verification, accountID: matrix.isPreview ? nil : matrix.user?.id,
-                    hasIdentity: { await matrix.accountHasIdentity() }, onRecovery: { showRecovery = true }
+                    hasIdentity: { await matrix.accountHasIdentity() }, onRecovery: { showRecovery = true },
+                    onPrompting: { identityPrompt = $0 }
                 ) {
                     HStack(spacing: 0) {
                         if !sidebarCollapsed {

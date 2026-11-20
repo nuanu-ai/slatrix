@@ -15,8 +15,16 @@ struct CoverageTests {
             // Each closes itself before Escape reaches the conversation.
             (Coverage(viewer: true), false, true, .nothing),
             (Coverage(dialog: true), false, true, .nothing),
+            // "Confirm it's you" answers to its own buttons.
+            (Coverage(identity: true), false, true, .nothing),
         ])
     func escape(coverage: Coverage, profile: Bool, inConversation: Bool, expected: Coverage.Escape) {
         #expect(coverage.escape(profile: profile, inConversation: inConversation) == expected)
+    }
+
+    @Test("The identity prompt lies over the conversation and its thread")
+    func identityPromptCovers() {
+        let coverage = Coverage(identity: true)
+        #expect(coverage.conversation && coverage.thread)
     }
 }
