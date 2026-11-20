@@ -718,6 +718,72 @@ struct TimelineHostedTests {
         #expect(abs(try #require(after) - before) < 0.5)
     }
 
+    @Test("A long message you were reading that shrinks under the header leaves the message after it where it was")
+    func shrinkingRowKeepsNextStill() async throws {
+        let harness = Harness(
+            messages: Self.messages(0..<30) + [Self.longMessage(30)] + Self.messages(31..<70), height: 800)
+        defer { harness.close() }
+        await settle(harness)
+        _ = await eventually {
+            harness.scroll(toTop: harness.clip.bounds.minY - 200)
+            return harness.cell(showing: "Long-30") != nil
+        }
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        let row = table.row(for: try #require(harness.cell(showing: "Long-30")))
+        // Only its last 100 points below the header, with the next message under them.
+        harness.scroll(toTop: table.rect(ofRow: row).maxY - 100 - Self.insets.top)
+        let before = try #require(harness.top(of: "Message 31"))
+        let tall = table.rect(ofRow: row).height
+        // Edited down to a line, as a deletion leaves it.
+        var short = Self.longMessage(30)
+        short.body = "Short"
+        short.formattedBody = nil
+        short.reactions = []
+        harness.service.messages[30] = short
+        _ = await eventually {
+            harness.layout()
+            return table.rect(ofRow: row).height < tall
+        }
+        #expect(abs(try #require(harness.top(of: "Message 31")) - before) < 0.5)
+    }
+
+    @Test("When the message you were reading goes as older history arrives, the next one you saw stays where it was")
+    func removedRowKeepsNextStill() async throws {
+        let current = Self.messages(0..<40)
+        let harness = Harness(messages: current)
+        defer { harness.close() }
+        await settle(harness)
+        harness.scroll(toTop: harness.clip.bounds.minY - 600)
+        await settle(harness)
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        func message(_ row: Int) -> ChatMessage? {
+            guard
+                case .message(let entry) = (table.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineCell)?
+                    .entry?.kind
+            else { return nil }
+            return entry.message
+        }
+        // Two messages in a row, the first just below the header.
+        let shown = table.rows(in: harness.clip.bounds)
+        let row = try #require(
+            (shown.location..<NSMaxRange(shown) - 1).first {
+                message($0) != nil && message($0 + 1) != nil
+                    && table.rect(ofRow: $0).minY >= harness.clip.bounds.minY + Self.insets.top
+            })
+        let (gone, next) = (try #require(message(row)), try #require(message(row + 1)))
+        // The first passes 10 points under the header, so it is the row the view keeps still.
+        harness.scroll(toTop: table.rect(ofRow: row).minY - Self.insets.top + 10)
+        let before = try #require(harness.top(of: next.body))
+        let rows = harness.rowCount
+        // In one update it is deleted and a page of older history lands above.
+        harness.service.messages = Self.messages(0..<30, prefix: "Older") + current.filter { $0.id != gone.id }
+        _ = await eventually {
+            harness.layout()
+            return harness.rowCount > rows
+        }
+        #expect(abs(try #require(harness.top(of: next.body)) - before) < 0.5)
+    }
+
     @Test("A row the reader is looking at that the table cannot hold still is logged as a jump")
     func logsJumps() async throws {
         let harness = Harness(messages: Self.messages(0..<40))

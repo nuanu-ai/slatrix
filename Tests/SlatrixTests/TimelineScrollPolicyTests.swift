@@ -18,7 +18,7 @@ struct TimelineScrollPolicyTests {
         ])
     func keepsPosition(viewport: Viewport, live: Bool, expected: Policy.Position) {
         let row = Policy.RowFrame(id: "row", top: 280, height: 50)
-        #expect(Policy.position(of: viewport, live: live, firstVisibleRow: row) == expected)
+        #expect(Policy.position(of: viewport, live: live, visibleRows: [row]) == expected)
     }
 
     @Test(
@@ -38,7 +38,7 @@ struct TimelineScrollPolicyTests {
     func prependIsPixelStable() {
         let before = Viewport(top: 300, height: 600, contentHeight: 1_000)
         let position = Policy.position(
-            of: before, live: true, firstVisibleRow: Policy.RowFrame(id: "row", top: 280, height: 50))
+            of: before, live: true, visibleRows: [Policy.RowFrame(id: "row", top: 280, height: 50)])
         // 640 points of history arrive above the row.
         let top = Policy.top(for: position, contentHeight: 1_640, viewportHeight: 600) {
             $0 == "row" ? Policy.RowFrame(id: "row", top: 920, height: 50) : nil
@@ -72,6 +72,48 @@ struct TimelineScrollPolicyTests {
     func jumps(before: Policy.Position, after: Viewport, moved: CGFloat?) {
         let row = Policy.RowFrame(id: "row", top: 100, height: 50)
         #expect(Policy.jump(from: before, to: after) { $0 == row.id ? row : nil } == moved)
+    }
+
+    /// The reader is 800 points into a 1,000-point message, with the next one 200 points below the top of the screen.
+    private static let reading = Policy.position(
+        of: Viewport(top: 2_800, height: 600, contentHeight: 10_000), live: true,
+        visibleRows: [
+            Policy.RowFrame(id: "long", top: 2_000, height: 1_000), Policy.RowFrame(id: "next", top: 3_000, height: 50),
+        ])
+
+    @Test(
+        "After a change the row the reader was looking at stays where it was on screen, or the next one they saw does",
+        arguments: [
+            // The long message shrinks, but the top of the screen still falls inside it.
+            (
+                [Policy.RowFrame(id: "long", top: 2_000, height: 900), .init(id: "next", top: 2_900, height: 50)],
+                CGFloat(2_800)
+            ),
+            // Deleted down to a short row ending above that point: the next message keeps its place.
+            ([.init(id: "long", top: 2_000, height: 40), .init(id: "next", top: 2_040, height: 50)], 1_840),
+            // Gone, with a page of older history arriving above the next message.
+            ([.init(id: "next", top: 3_640, height: 50)], 3_440),
+        ])
+    func survivingRowStaysStill(after: [Policy.RowFrame], top: CGFloat) {
+        let restored = Policy.top(for: Self.reading, contentHeight: 10_000, viewportHeight: 600) { id in
+            after.first { $0.id == id }
+        }
+        #expect(restored == top)
+    }
+
+    @Test(
+        "A shrunk or deleted row no longer hides how far the rows the reader saw moved",
+        arguments: [
+            (
+                [Policy.RowFrame(id: "long", top: 2_000, height: 40), .init(id: "next", top: 2_040, height: 50)],
+                CGFloat(-960)
+            ),
+            ([.init(id: "next", top: 3_640, height: 50)], 640),
+        ])
+    func jumpsOfSurvivingRows(after: [Policy.RowFrame], moved: CGFloat) {
+        // The view stayed where the long message's old offset put it.
+        let viewport = Viewport(top: 2_800, height: 600, contentHeight: 10_000)
+        #expect(Policy.jump(from: Self.reading, to: viewport) { id in after.first { $0.id == id } } == moved)
     }
 
     @Test("A position whose row is gone restores nothing")
