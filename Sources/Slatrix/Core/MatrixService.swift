@@ -2369,23 +2369,23 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         var replies = Performance.measure(.timelineProject, ["items": items.count]) {
             project(items, roomID: root.roomID, inThread: true)
         }
-        let own = replies.firstIndex { $0.eventID == root.eventID }.map { replies.remove(at: $0) }
+        let own = replies.last { $0.eventID == root.eventID }
+        replies.removeAll { $0.eventID == root.eventID }
         threadHoldsRoot = own != nil
         threadMessages = [threadRoot(own: own) ?? own ?? root] + replies
     }
-    /// Whether the conversation has shown the open thread's root since its pane opened.
-    private var threadRootFromConversation = false
-    /// The open thread's root, from the newest copy: the conversation's, whenever it holds the root; the thread
-    /// timeline's own (`own`) when it is deleted, or while the conversation has shown none since the pane opened, as
-    /// the SDK keeps it as first sent; otherwise the copy shown last. Nil while no thread pane shows.
+    /// The open thread's root: the conversation's copy whenever it holds the root, else the copy on screen. The
+    /// thread's own copy (`own`) is the oldest there is, as the SDK keeps it as first sent, so it replaces the one on
+    /// screen only to delete it, or to read one still undecrypted. A root shown deleted stays so. Nil while no thread
+    /// pane shows.
     private func threadRoot(own: ChatMessage? = nil) -> ChatMessage? {
         guard let rootID = threadOpening?.rootID, var root = threadMessages.first, root.eventID == rootID else {
             return nil
         }
+        if root.isRedacted { return root }
         if let current = messages.last(where: { $0.eventID == rootID && $0.roomID == root.roomID }) {
             root = current
-            threadRootFromConversation = true
-        } else if let own, own.isRedacted || !threadRootFromConversation {
+        } else if let own, own.isRedacted || root.kind == "m.room.encrypted" && own.kind != "m.room.encrypted" {
             root = own
         }
         root.id = rootID
@@ -2431,7 +2431,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         var opening = root
         opening.id = root.eventID
         threadHoldsRoot = false
-        threadRootFromConversation = false
         threadOpening = (root.eventID, openedWith)
         threadMessages = [opening]
         followThreadRoot()

@@ -114,23 +114,30 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
             if let last = added.compactMap(Self.eventID).last { newest = last }
             for change in diff {
                 switch change {
-                case .reset(let values): held = Set(values.compactMap(Self.eventID))
-                case .pushFront(let value), .pushBack(let value): held.formUnion([value].compactMap(Self.eventID))
-                case .append(let values): held.formUnion(values.compactMap(Self.eventID))
-                default: break
+                case .append(let values): items += values
+                case .clear: items = []
+                case .pushFront(let value): items.insert(value, at: 0)
+                case .pushBack(let value): items.append(value)
+                case .popFront: items.removeFirst()
+                case .popBack: items.removeLast()
+                case .insert(let index, let value): items.insert(value, at: Int(index))
+                case .set(let index, let value): items[Int(index)] = value
+                case .remove(let index): items.remove(at: Int(index))
+                case .truncate(let length): items.removeSubrange(Int(length)...)
+                case .reset(let values): items = values
                 }
             }
             return listeners
         }
         for listener in callbacks { listener.onUpdate(diff: diff) }
     }
-    /// The events this timeline holds; like the SDK, it acts only on those.
-    private lazy var held = Set(cached.compactMap(Self.eventID))
+    /// What this timeline holds, as its listeners last heard it; like the SDK, it acts only on those events.
+    private lazy var items = cached
     /// Reactions toggled through this timeline, as the key and the event.
     let reactions = Recorder<String>()
     override func toggleReaction(itemId: EventOrTransactionId, key: String) async throws -> Bool {
         let id = MatrixMapping.identifier(itemId)
-        guard lock.withLock({ held.contains(id) }) else { throw URLError(.resourceUnavailable) }
+        guard lock.withLock({ items.contains { Self.eventID($0) == id } }) else { throw URLError(.resourceUnavailable) }
         reactions.append("\(key) \(id)")
         return true
     }
