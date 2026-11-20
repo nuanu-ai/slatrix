@@ -113,6 +113,8 @@ struct TimelineTable: NSViewRepresentable {
     var scroller: TimelineScroller
     var onLoadOlder: () -> Void
     var onLoadNewer: () -> Void
+    /// The jump this table landed on, once it centres its message.
+    var onLand: (UUID) -> Void = { _ in }
     /// Whether the newest message is on screen, whether to offer "Jump to recent", whether messages sit above the
     /// top edge (nil until the table shows its rows), and what the read checks need of what it shows.
     var onScroll: (Bool, Bool, Bool?, PaneReport) -> Void
@@ -253,12 +255,11 @@ struct TimelineTable: NSViewRepresentable {
         }
         configuration.scroller.bottom = { [weak self] in self?.scrollToBottom(animated: true) }
         configuration.scroller.anchor = { [weak self] in self?.screenAnchor() }
-        if previous?.focusedEventID != configuration.focusedEventID || previous?.jumpID != configuration.jumpID {
-            // A live pane focuses only on a jump, which a pane on this timeline may already have landed on.
-            let used =
-                configuration.jumpID != nil
-                && configuration.memoryKey.flatMap { TimelineMemory.landedJumps[$0] } == configuration.jumpID
-            pendingFocus = configuration.live && used ? nil : configuration.focusedEventID
+        // A jump that landed and went changes nothing; a new one goes again.
+        if previous?.focusedEventID != configuration.focusedEventID
+            || configuration.jumpID != nil && previous?.jumpID != configuration.jumpID
+        {
+            pendingFocus = configuration.focusedEventID
         }
         inset(configuration.insets)
         // As in Slack, what you send brings a live conversation to it, however soon the server confirms it.
@@ -901,11 +902,12 @@ struct TimelineTable: NSViewRepresentable {
         checkHistory()
     }
 
-    /// The focus is on screen; a jump that put it there is used.
+    /// The focus is on screen; a jump that put it there landed, once.
     private func landed() {
         pendingFocus = nil
-        guard let key = configuration?.memoryKey, let jump = configuration?.jumpID else { return }
-        TimelineMemory.landedJumps[key] = jump
+        guard let configuration, let jump = configuration.jumpID else { return }
+        // SwiftUI state; never changed from inside its own update or layout.
+        DispatchQueue.main.async { configuration.onLand(jump) }
     }
 
     /// Also before the table opens: history of only hidden events leaves nothing to open at until a page shows some.

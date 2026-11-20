@@ -270,6 +270,13 @@ struct ConversationSwitchHostedTests {
             RunLoop.main.add(click, forMode: .common)
         }
 
+        /// Clicks a notification for `eventID` in conversation `index`, as the OS hands its payload back.
+        func notify(_ index: Int, _ eventID: String) throws {
+            let sent = try #require(
+                MatrixNotificationTarget(accountID: "@me:example.org", roomID: rooms[index].id(), eventID: eventID))
+            PlatformIntegration.shared.open(try #require(MatrixNotificationTarget(userInfo: sent.userInfo)))
+        }
+
         /// Until ten run-loop passes go by without a row measured, so the rows measured after a click are the click's
         /// and not those the conversation on screen was still preparing for a scroll.
         func idle() async {
@@ -438,5 +445,56 @@ struct ConversationSwitchHostedTests {
         #expect(before.table != nil && held.table == before.table && held.rows == before.rows, "\(before)\n\(held)")
         room.buildGate.release()
         await jumping.value
+    }
+
+    /// Room `index` with a thread on its message `root` holding `$reply`.
+    private func thread(_ harness: Harness, _ index: Int, root: String) {
+        let room = harness.rooms[index]
+        room.threadRoots["$reply"] = root
+        room.threadItems = [
+            FakeTimelineItem(textEvent(root, body: "Root")), FakeTimelineItem(textEvent("$reply", body: "Reply")),
+        ]
+    }
+
+    // capability: thread.from-notification
+    @Test("A notification for a thread reply opens its conversation with the reply in its thread beside it")
+    func notificationOpensReply() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        try #require(await harness.settled(on: 0))
+        thread(harness, 1, root: "$s1-30")
+        try harness.notify(1, "$reply")
+        #expect(await eventually(timeout: .seconds(20)) { harness.sample().rows["$reply"] != nil })
+        #expect(harness.matrix.selectedRoomID == harness.rooms[1].id())
+    }
+
+    @Test(
+        "A jump that waits, then can't load, leaves the window as it was: its conversation, thread and remembered room"
+    )
+    func failedJumpKeepsWindow() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        try #require(await harness.settled(on: 0))
+        thread(harness, 0, root: "$s0-35")
+        try harness.notify(0, "$reply")
+        #expect(await eventually(timeout: .seconds(20)) { harness.sample().rows["$reply"] != nil })
+        await harness.idle()
+        let before = harness.sample()
+        func remembered() -> String? { UserDefaults.standard.string(forKey: "room.@me:example.org") }
+        let room = harness.rooms[1]
+        room.eventGate.arm()
+        room.focusedError = URLError(.notConnectedToInternet)
+        try harness.notify(1, "$far")
+        #expect(await eventually { room.eventGate.isWaiting })
+        await harness.idle()
+        let waiting = harness.sample()
+        #expect(waiting.rows == before.rows && waiting.table == before.table, "\(before)\n\(waiting)")
+        #expect(remembered() == harness.rooms[0].id())
+        room.eventGate.release()
+        #expect(await eventually { harness.matrix.errorMessage != nil })
+        await harness.idle()
+        let after = harness.sample()
+        #expect(after.rows == before.rows && after.table == before.table, "\(before)\n\(after)")
+        #expect(remembered() == harness.rooms[0].id())
     }
 }

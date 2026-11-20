@@ -144,11 +144,15 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
         let target = MatrixNotificationTarget(userInfo: response.notification.request.content.userInfo)
         Task { @MainActor in
             self.activate()
-            if let target, !self.notificationAccountConfigured || target.accountID == self.delivery.accountID {
-                self.pendingNotification = target
-            }
+            if let target { self.open(target) }
             completionHandler()
         }
+    }
+
+    /// A notification clicked: the window opens its message once it can, if it is the account's.
+    func open(_ target: MatrixNotificationTarget) {
+        guard !notificationAccountConfigured || target.accountID == delivery.accountID else { return }
+        pendingNotification = target
     }
 }
 

@@ -46,8 +46,9 @@ struct TimelineView: View {
     @State private var linkCopy: LinkCopy?
     @State private var jumpVisible = false
     @State private var atBottom = false
-    /// The message jumped to, while its highlight lasts.
+    /// The message jumped to, while its highlight lasts from the landing.
     @State private var highlighted: String?
+    @State private var landing: UUID?
     @State private var layout = TimelineLayoutCache()
     @State private var rowContext = TimelineRowContext()
     @State private var scroller = TimelineScroller()
@@ -82,6 +83,12 @@ struct TimelineView: View {
             canLoadOlder: hasOlder && !loadingHistory,
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
+            onLand: { jump in
+                guard let target = jumpTarget, matrix.jump?.id == jump else { return }
+                matrix.landed(jump, inThread: thread ? threadRootID : nil)
+                highlighted = target
+                landing = jump
+            },
             onScroll: { atBottom, showsJump, scrolled, report in
                 self.atBottom = atBottom
                 jumpVisible = showsJump
@@ -126,10 +133,9 @@ struct TimelineView: View {
             guard turnsLive else { return }
             await matrix.goLive { scroller.screenAnchorEventID }
         }
-        .task(id: jumpTarget == nil ? nil : matrix.jump?.id) {
-            highlighted = jumpTarget
+        .task(id: landing) {
             // Held long enough to find, then faded by the row.
-            guard highlighted != nil, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
+            guard landing != nil, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
             highlighted = nil
         }
         // A frame theme's doodles, which stay put while the messages scroll over them.

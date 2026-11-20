@@ -1810,12 +1810,9 @@ struct RootView: View {
         _ id: String, record: Bool, eventID: String? = nil, thread: ChatMessage? = nil,
         keepPendingNotification: Bool = false, restoringReply: MessageReplyTarget? = nil
     ) {
-        sidebarDrawer = false
-        cancelThreadOpen()
         if !keepPendingNotification, let target = PlatformIntegration.shared.pendingNotification {
             PlatformIntegration.shared.consumeNotification(target)
         }
-        navigationNotice = nil
         let resumeAnchor =
             matrix.isPreview || restoringReply != nil
             ? nil
@@ -1823,7 +1820,6 @@ struct RootView: View {
                 for: matrix.rooms.first { $0.id == id }, selectedRoomID: matrix.selectedRoomID,
                 explicitEventID: eventID, opensThread: thread != nil)
         let destinationEventID = eventID ?? resumeAnchor
-        if let current = matrix.selectedRoomID, current != id, let open = threadRoot { leftThreads[current] = open }
         // Only a plain visit: a jump to a message or a thread of its own wins.
         let leftThread = thread == nil && eventID == nil && restoringReply == nil ? leftThreads[id] : nil
         let requiresRoomSelection = !matrix.isLiveTimelineReady(roomID: id) || pendingRoomID != nil
@@ -1834,36 +1830,48 @@ struct RootView: View {
         }
         let generation = UUID()
         let identity = composerIdentity
-        navigationGeneration = generation
-        if record && history.last != id {
-            if historyIndex + 1 < history.count { history = Array(history.prefix(historyIndex + 1)) }
-            history.append(id)
-            historyIndex = history.count - 1
-        }
-        pickedFrom = screen
-        pendingRoomID = id
-        if let target = matrix.rooms.first(where: { $0.id == id }) {
-            if !target.isDirect { directMessagesColumn = false }
-            if !target.isDirect, let current = workspaceID, !target.spaceIDs.contains(current) {
-                workspaceID = WorkspaceRail.home(of: target, current: current, workspaces: matrix.workspaces)
+        // A jump changes the window only as it lands, in the turn its conversation goes up. Until then, and for good
+        // if it can't land, the window stays as it was.
+        let jumping = eventID != nil && !matrix.isPreview
+        func leave() {
+            sidebarDrawer = false
+            cancelThreadOpen()
+            navigationNotice = nil
+            if let current = matrix.selectedRoomID, current != id, let open = threadRoot {
+                leftThreads[current] = open
+            }
+            navigationGeneration = generation
+            if record && history.last != id {
+                if historyIndex + 1 < history.count { history = Array(history.prefix(historyIndex + 1)) }
+                history.append(id)
+                historyIndex = history.count - 1
+            }
+            pickedFrom = screen
+            pendingRoomID = id
+            if let target = matrix.rooms.first(where: { $0.id == id }) {
+                if !target.isDirect { directMessagesColumn = false }
+                if !target.isDirect, let current = workspaceID, !target.spaceIDs.contains(current) {
+                    workspaceID = WorkspaceRail.home(of: target, current: current, workspaces: matrix.workspaces)
+                    workspaceInitialized = true
+                }
+            } else {
+                workspaceID = nil
                 workspaceInitialized = true
             }
-        } else {
-            workspaceID = nil
-            workspaceInitialized = true
+            route = .home
+            if id != matrix.selectedRoomID { channelPanel = nil }
+            matrix.setMessageActionThread(rootID: nil)
+            threadRoot = nil
+            threadReadyID = nil
+            openingThreadID = nil
+            threadLoadError = nil
+            cancelCurrentEdit()
+            if restoringReply == nil { cancelReply() }
+            unreadResumeEventID = resumeAnchor
+            preferredRoomID = id
+            UserDefaults.standard.set(id, forKey: "room.\(storageKey)")
         }
-        route = .home
-        if id != matrix.selectedRoomID { channelPanel = nil }
-        matrix.setMessageActionThread(rootID: nil)
-        threadRoot = nil
-        threadReadyID = nil
-        openingThreadID = nil
-        threadLoadError = nil
-        cancelCurrentEdit()
-        if restoringReply == nil { cancelReply() }
-        unreadResumeEventID = resumeAnchor
-        preferredRoomID = id
-        UserDefaults.standard.set(id, forKey: "room.\(storageKey)")
+        if !jumping { leave() }
         if matrix.isPreview {
             matrix.selectPreviewRoom(id)
             pendingRoomID = nil
@@ -1876,7 +1884,7 @@ struct RootView: View {
             // A conversation still open from earlier goes up with this click; the task below then finds it shown.
             if restoringReply == nil, eventID == nil { _ = matrix.showRecentRoom(id, containing: resumeAnchor) }
             Task { @MainActor in
-                guard navigationGeneration == generation, composerIdentity == identity else { return }
+                guard jumping || navigationGeneration == generation, composerIdentity == identity else { return }
                 if let restoringReply {
                     guard restoringReply.isCurrent(replyTarget, owner: replyOwner), route == .home, room?.id == id
                     else {
@@ -1885,23 +1893,16 @@ struct RootView: View {
                     }
                 }
                 var replyRootID: String?
-                var missed = false
                 if let resumeAnchor, eventID == nil {
                     await matrix.resumeRoom(id, at: resumeAnchor)
                 } else if let destinationEventID {
-                    let previous = matrix.jump?.id
-                    replyRootID = await matrix.jumpToMessage(roomID: id, eventID: destinationEventID)
-                    missed = matrix.jump?.id == previous
+                    replyRootID = await matrix.jumpToMessage(roomID: id, eventID: destinationEventID, swap: leave)
                 } else if thread == nil || requiresRoomSelection {
                     await matrix.selectRoom(id)
                 }
-                guard navigationGeneration == generation, composerIdentity == identity else { return }
-                guard !missed, matrix.selectedRoomID == id else {
-                    // A jump that couldn't load leaves the screen it was made from as it was.
-                    pendingRoomID = nil
-                    if let pickedFrom { route = pickedFrom.route }
-                    return
-                }
+                // A jump that didn't land changed nothing here.
+                guard navigationGeneration == generation, composerIdentity == identity, matrix.selectedRoomID == id
+                else { return }
                 pendingRoomID = nil
                 if let restoringReply {
                     guard restoringReply.isCurrent(replyTarget, owner: replyOwner), route == .home, room?.id == id
