@@ -653,6 +653,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var firstUnreadEventID: String?
     private var forwardLoadID: UUID?
     private(set) var hasMoreThreadHistory = true { didSet { countThreadReplies() } }
+    /// Why the open thread's last page failed, nil once one loads. The pane says so, and asks again only when the
+    /// reader retries or the connection returns.
+    private(set) var threadPageError: String?
     var members: [ChatUser] = []
     /// Whether your power level lets you notify the whole selected room, read with its members.
     var canMentionRoom = false
@@ -1967,6 +1970,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         hasMoreHistory = true
         blankPages = 0
         hasMoreThreadHistory = true
+        threadPageError = nil
         firstUnreadEventID = nil
         lastAutomaticReceipt = nil
         readyThreadReadSelection = nil
@@ -2383,9 +2387,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             ? threadPage!.task : Task { try await threadTimeline.paginateBackwards(numEvents: 50) }
         threadPage = (token, page)
         defer { if threadPage?.task == page { threadPage = nil } }
-        let endReached = try await page.value
-        if threadSelection == token, loadedThreadRootID == rootID {
+        let current = { self.threadSelection == token && self.loadedThreadRootID == rootID }
+        let endReached: Bool
+        do {
+            endReached = try await page.value
+        } catch {
+            if current(), !(error is CancellationError) { threadPageError = Self.safeError(error) }
+            throw error
+        }
+        if current() {
             hasMoreThreadHistory = !endReached
+            threadPageError = nil
             readyThreadReadSelection = token
         }
         return endReached
@@ -2411,6 +2423,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadSnapshot = nil
         loadedThreadRootID = nil
         hasMoreThreadHistory = true
+        threadPageError = nil
         let token = selection
         var ahead: Task<PreparedTimeline?, Never>?
         if let preparedThread, preparedThread.rootID == root.eventID, preparedThread.selection == token {
@@ -3400,6 +3413,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             status = .ready
             savedMessages.resume()
             watchPresence()
+            // A thread page that failed while the connection was down asks again as it returns.
+            if threadPageError != nil, let rootID = loadedThreadRootID {
+                Task { _ = try? await loadMoreThread(rootID: rootID) }
+            }
         case .failed: status = .error
         case .idle, .connecting, .offline, .stopped: status = .syncing
         }

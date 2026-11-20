@@ -159,10 +159,17 @@ struct RootView: View {
     private var threadCovers: Bool { paneCovers && profilePane == nil && threadRoot != nil }
     /// The open thread couldn't load.
     @ViewBuilder private var threadNotice: some View {
-        if let threadLoadError, let root = threadRoot {
+        if let text = threadLoadError ?? matrix.threadPageError, let root = threadRoot {
             let openedWith = matrix.threadOpening?.openedWith
-            Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
-                Button("Retry") { [open = threadAction { _ in openedWith }] in open(root) }
+            Banner(text: text, symbol: "exclamationmark.triangle.fill") {
+                Button("Retry") { [open = threadAction { _ in openedWith }, opened = threadLoadError == nil] in
+                    // A thread that opened and then failed a page asks for that page again.
+                    if opened {
+                        Task { _ = try? await matrix.loadMoreThread(rootID: root.eventID) }
+                    } else {
+                        open(root)
+                    }
+                }
             }
         }
     }

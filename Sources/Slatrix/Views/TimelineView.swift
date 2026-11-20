@@ -82,7 +82,8 @@ struct TimelineView: View {
             memoryKey: TimelineMemory.Key(
                 sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
             timelineID: thread ? nil : matrix.shownTimelineID,
-            canLoadOlder: hasOlder && !loadingHistory,
+            // A thread whose page failed asks again when the reader retries or the connection returns.
+            canLoadOlder: hasOlder && !loadingHistory && !(thread && matrix.threadPageError != nil),
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
             onLand: { jump in
@@ -395,7 +396,8 @@ struct TimelineView: View {
                     _ = try await matrix.loadMore()
                 }
             } catch is CancellationError {} catch {
-                if matrix.notificationSessionID == session, matrix.timelineSelectionID == selection {
+                // A thread says so in its own banner.
+                if !thread, matrix.notificationSessionID == session, matrix.timelineSelectionID == selection {
                     matrix.errorMessage = MatrixService.safeError(error)
                 }
             }
