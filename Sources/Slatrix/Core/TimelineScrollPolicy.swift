@@ -9,8 +9,9 @@ enum TimelineScrollPolicy {
     enum Position: Equatable {
         /// The end of the timeline, following new messages.
         case bottom
-        /// A row kept at `offset` points from the top of the viewport (negative when its top is scrolled past).
-        case anchored(rowID: String, offset: CGFloat)
+        /// A row kept at `offset` points from the top of the viewport (negative when its top is scrolled past), and the
+        /// rows that were on screen below it at theirs, to stand in for it when it is gone or ends above its offset.
+        case anchored(rowID: String, offset: CGFloat, next: [Anchor] = [])
         /// A row centred in the viewport, for opening at a linked message.
         case centered(rowID: String)
     }
@@ -40,6 +41,11 @@ enum TimelineScrollPolicy {
         }
     }
 
+    struct Anchor: Equatable {
+        var rowID: String
+        var offset: CGFloat
+    }
+
     struct RowFrame: Equatable {
         var id: String
         var top: CGFloat
@@ -47,28 +53,47 @@ enum TimelineScrollPolicy {
     }
 
     /// The position to keep across a change of rows or viewport size. A live timeline at its end follows new
-    /// messages; anything else keeps the first row visible at the top in place.
-    static func position(of viewport: Viewport, live: Bool, firstVisibleRow: RowFrame?) -> Position {
+    /// messages; anything else keeps the first of `visibleRows` in place, or failing that the next that survives.
+    static func position(of viewport: Viewport, live: Bool, visibleRows: @autoclosure () -> [RowFrame]) -> Position {
         if live && viewport.isAtBottom { return .bottom }
-        guard let row = firstVisibleRow else { return .bottom }
-        return .anchored(rowID: row.id, offset: row.top - viewport.top)
+        let visibleRows = visibleRows()
+        guard let row = visibleRows.first else { return .bottom }
+        return .anchored(
+            rowID: row.id, offset: row.top - viewport.top,
+            next: visibleRows.dropFirst().map { Anchor(rowID: $0.id, offset: $0.top - viewport.top) })
     }
 
-    /// The viewport top that puts `position` back on screen, or nil when its row is gone.
+    /// The viewport top that puts `position` back on screen, or nil when its rows are gone.
     static func top(
         for position: Position, contentHeight: CGFloat, viewportHeight: CGFloat, frame: (String) -> RowFrame?
     ) -> CGFloat? {
         let target: CGFloat
         switch position {
         case .bottom: target = contentHeight - viewportHeight
-        case .anchored(let id, let offset):
-            guard let row = frame(id) else { return nil }
-            target = row.top - offset
+        case .anchored:
+            guard let held = held(position, viewportHeight: viewportHeight, frame: frame) else { return nil }
+            target = held.row.top - held.offset
         case .centered(let id):
             guard let row = frame(id) else { return nil }
             target = row.top + row.height / 2 - viewportHeight / 2
         }
         return min(max(0, target), max(0, contentHeight - viewportHeight))
+    }
+
+    /// The row that holds an anchored position and the offset it goes back to: the anchored row, or when it is gone or
+    /// would no longer show at its offset, the first row that was on screen below it and still would at its own.
+    private static func held(_ position: Position, viewportHeight: CGFloat, frame: (String) -> RowFrame?) -> (
+        row: RowFrame, offset: CGFloat
+    )? {
+        guard case .anchored(let id, let offset, let next) = position else { return nil }
+        var survivor: (row: RowFrame, offset: CGFloat)?
+        for anchor in [Anchor(rowID: id, offset: offset)] + next {
+            guard let row = frame(anchor.rowID) else { continue }
+            if anchor.offset + row.height > 0 && anchor.offset < viewportHeight { return (row, anchor.offset) }
+            survivor = survivor ?? (row, anchor.offset)
+        }
+        // With none on screen, the first that survives still marks the place better than leaving the view where it was.
+        return survivor
     }
 
     /// How far a change the reader didn't make moved what they were reading at `position`: their row, or the newest
@@ -77,9 +102,9 @@ enum TimelineScrollPolicy {
         let moved: CGFloat
         switch position {
         case .bottom: moved = viewport.distanceFromBottom
-        case .anchored(let id, let offset):
-            guard let row = frame(id) else { return nil }
-            moved = row.top - viewport.top - offset
+        case .anchored:
+            guard let held = held(position, viewportHeight: viewport.height, frame: frame) else { return nil }
+            moved = held.row.top - viewport.top - held.offset
         case .centered: return nil
         }
         return abs(moved) >= 1 ? moved : nil
@@ -93,7 +118,7 @@ enum TimelineScrollPolicy {
     ) -> Position {
         if startsAtUnread, let unreadRowID, contains(unreadRowID) { return .anchored(rowID: unreadRowID, offset: 0) }
         if let focusedRowID { return .centered(rowID: focusedRowID) }
-        if let remembered, case .anchored(let id, _) = remembered, contains(id) { return remembered }
+        if let remembered, case .anchored(let id, _, _) = remembered, contains(id) { return remembered }
         return .bottom
     }
 
