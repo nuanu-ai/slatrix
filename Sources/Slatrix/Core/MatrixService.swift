@@ -2292,6 +2292,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
             if !messages.isEmpty { threadMessages = messages }
             showEditedThreadRoot()
+            Task { await reachJump(inThread: root.eventID) }
             return
         }
         let next = try await requireRoom(root.roomID).timelineWithConfiguration(
@@ -2307,7 +2308,23 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         threadHandle = listenerHandle
         // The pane shows what the SDK has cached now; the first page arrives whenever the network allows.
-        Task { _ = try? await loadMoreThread(rootID: root.eventID) }
+        Task {
+            _ = try? await loadMoreThread(rootID: root.eventID)
+            await reachJump(inThread: root.eventID)
+        }
+    }
+
+    /// A jump to a reply beyond the thread's first page reads back to it, ten pages at most. Out of reach, the thread
+    /// opens as it would, with nothing highlighted.
+    private func reachJump(inThread rootID: String) async {
+        guard let target = jump?.eventID(inThread: rootID) else { return }
+        let token = threadSelection
+        func holds() -> Bool { threadMessages.contains { $0.eventID == target } }
+        for _ in 0..<10 where !holds() {
+            guard threadSelection == token, (try? await loadMoreThread(rootID: rootID)) == false else { break }
+        }
+        guard threadSelection == token, !holds(), jump?.eventID(inThread: rootID) == target else { return }
+        jump?.replyOutOfReach = true
     }
 
     private func actionMedia(_ target: MessageActionTarget) throws -> ShownMedia {

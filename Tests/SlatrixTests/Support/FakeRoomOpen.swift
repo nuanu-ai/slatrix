@@ -22,6 +22,12 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         set { lock.withLock { answers = newValue } }
     }
     private var answers: [Bool] = []
+    /// What the next older pages add before what the timeline holds, in order.
+    var olderPages: [[TimelineItem]] {
+        get { lock.withLock { pages } }
+        set { lock.withLock { pages = newValue } }
+    }
+    private var pages: [[TimelineItem]] = []
     /// Read receipts sent through this timeline, as "read:" or "fully:" and the event.
     let receipts = Recorder<String>()
     /// False until a listener is added: a timeline still being set up is not closed.
@@ -50,6 +56,9 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         }
         defer { lock.withLock { paging = false } }
         await pageGate.wait()
+        if let page = lock.withLock({ pages.isEmpty ? nil : pages.removeFirst() }) {
+            emit(page.reversed().map { .pushFront(value: $0) })
+        }
         return lock.withLock { answers.isEmpty ? reachedStart : answers.removeFirst() }
     }
     /// Loaded around an older message, it already reaches the newest one.
@@ -110,6 +119,8 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     var focusedError: Error?
     /// What a thread's timeline loads; the cache when nil.
     var threadItems: [TimelineItem]?
+    /// The older pages of a thread's replies, newest page first.
+    var threadPages: [[TimelineItem]] = []
     /// Thread replies the room can load, by event ID, with their thread's root.
     var threadRoots: [String: String] = [:]
     let membersGate = Gate()
@@ -137,6 +148,7 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
         if case .event = configuration.focus, let focusedItems { items = focusedItems }
         if case .thread = configuration.focus, let threadItems { items = threadItems }
         let timeline = FakeLiveTimeline(items, pageGate: pageGate)
+        if case .thread = configuration.focus { timeline.olderPages = threadPages }
         timelines.append(timeline)
         return timeline
     }

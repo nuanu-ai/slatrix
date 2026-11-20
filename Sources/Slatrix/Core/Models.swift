@@ -156,12 +156,15 @@ struct MessageJump: Equatable {
     let eventID: String
     /// Set when the message is a thread reply: the conversation shows the root, the thread's pane the reply.
     var threadRootID: String? = nil
+    /// Set when the thread's pages don't reach the reply: the thread opens as it would, the conversation still at its
+    /// root.
+    var replyOutOfReach = false
     let id = UUID()
 
     /// The message a pane scrolls to and highlights: the conversation's when `thread` is nil, else that thread's.
     func eventID(inThread thread: String?) -> String? {
         guard let thread else { return threadRootID ?? eventID }
-        return thread == threadRootID ? eventID : nil
+        return thread == threadRootID && !replyOutOfReach ? eventID : nil
     }
 }
 
