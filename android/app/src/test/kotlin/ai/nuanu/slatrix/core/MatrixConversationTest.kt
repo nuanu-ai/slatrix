@@ -1167,9 +1167,9 @@ class MatrixConversationTest {
         // A copy of the root without a count falls back to the count the thread was opened with.
         channel.value = ConversationState(rows = listOf(channelRow(null).copy(body = "Plan for Friday?")))
         assertEquals(3, conversation.state.first { it.rows.messages.first().body == "Plan for Friday?" }.replies)
-        // A count of zero is zero: no line, whatever it was opened with.
-        channel.value = ConversationState(rows = listOf(channelRow(replies(0))))
-        assertNull(conversation.state.first { it.replies != 3 }.replies)
+        // Before the thread loads, a count of zero says nothing: the device may know the thread only from a read receipt.
+        channel.value = ConversationState(rows = listOf(channelRow(replies(0)).copy(body = "Plan for Monday?")))
+        assertEquals(3, conversation.state.first { it.rows.messages.first().body == "Plan for Monday?" }.replies)
         conversation.close()
     }
 
@@ -1234,6 +1234,27 @@ class MatrixConversationTest {
         // The channel's root loses its count: the server's list, which still counts five, says nothing of the thread.
         channelTimeline.emit(listOf(TimelineDiff.Set(0u, conversationItem("root", "\$root", "PR 417, edited"))))
         assertNull(thread.state.first { it.rows.messages.first().body == "PR 417, edited" }.replies)
+        channel.close()
+        thread.close()
+    }
+
+    @Test fun aThreadOpenedFromABarShowingTheServersCountKeepsItThoughItsRootCountsZero() = runTest {
+        val channelTimeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 0u)),
+            conversationItem("other", "\$other", "Hello")))
+        val channelRoom = ConversationRoom(channelTimeline)
+        channelRoom.threads = listOf(listed("\$root", 5u), listed("\$other", 2u))
+        val channel = MatrixConversation(backgroundScope, channelRoom)
+        val root = channel.state.first { state -> state.rows.messages.any { it.body == "Hello" && it.shownThread != null } }
+            .rows.messages.first()
+        assertEquals(5, root.shownThread?.replies)
+        // Opened from the bar, with its five and the thread's older replies still to load.
+        val thread = MatrixConversation(backgroundScope, ConversationRoom(ConversationTimeline(
+            listOf(conversationItem("reply", "\$reply", "Yes")))), threadRoot = "\$root", root = root, openedWith = 5)
+        backgroundScope.launch { thread.followRoot(channel.state) }
+        // Once the channel's copy of the root, still counting zero, has reached the thread, the line says five.
+        channelTimeline.emit(listOf(TimelineDiff.Set(0u, conversationItem("root", "\$root", "PR 417, edited",
+            content = counted("PR 417, edited", 0u)))))
+        assertEquals(5, thread.state.first { it.rows.messages.first().body == "PR 417, edited" }.replies)
         channel.close()
         thread.close()
     }

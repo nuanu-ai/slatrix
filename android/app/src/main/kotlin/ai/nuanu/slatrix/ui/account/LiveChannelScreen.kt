@@ -134,7 +134,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** The thread a copy of a thread reply came from, which its row names; null when the reply isn't in a thread. */
     loadThreadOrigin: suspend (replyEventId: String) -> ThreadOrigin? = { null },
     /** Told once what the reader sent is in view. */
-    onSendShown: () -> Unit = {}) {
+    onSendShown: () -> Unit = {},
+    /** Opens a thread from its replies bar, with the count the bar shows. */
+    onOpenReplies: (rootEventId: String, replies: Int) -> Unit = { _, _ -> }) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val videos = rememberVideoPlayback(loadFile)
@@ -315,7 +317,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     @Composable
     fun messageRow(row: ConversationMessage, last: Boolean, lifted: Boolean = false) = LiveMessageRow(row, last, named,
         state.ownUserId, state.names, actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null },
-        onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
+        onOpenReplies.takeIf { threadRoot == null }, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
         loadThreadOrigin, actions.onQuote, lifted) { y -> menu = Pressed(row, last, y) }
     var origin by remember { mutableFloatStateOf(0f) }
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow().y }) {
@@ -594,7 +596,8 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
  */
 @Composable
 private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, named: Boolean, me: String?, names: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
-    onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReply: (String) -> Unit,
+    onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReplies: ((String, Int) -> Unit)?,
+    onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
     onPerson: (String) -> Unit, loadThreadOrigin: suspend (String) -> ThreadOrigin?, onReply: ((ConversationMessage) -> Unit)?,
     /** Brought forward over the message sheet, on a shadow. */
@@ -725,8 +728,8 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, nam
                 val root = message.eventId
                 // Inside a thread the root's replies bar says it instead.
                 val thread = message.shownThread?.takeIf { it.replies > 0 }
-                if (thread != null && root != null && onOpenThread != null) {
-                    Box(inset) { ThreadReplies(thread) { onOpenThread(root) } }
+                if (thread != null && root != null && onOpenReplies != null) {
+                    Box(inset) { ThreadReplies(thread) { onOpenReplies(root, thread.replies) } }
                 }
             }
             // In the bubble's bottom padding, so the bar comes and goes without moving anything.
