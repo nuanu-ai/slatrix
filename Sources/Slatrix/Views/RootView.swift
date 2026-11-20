@@ -449,7 +449,7 @@ struct RootView: View {
                 if notification.name == NSApplication.didBecomeActiveNotification {
                     Task { await matrix.refreshOwnProfile() }
                     // Nothing says when a message is deleted in a conversation that isn't open, so coming back asks.
-                    Task { await matrix.recheck(await notifications.delivered(), listed: notifications.holds) }
+                    matrix.recheckCopies()
                 }
             }
             .background(
@@ -714,7 +714,7 @@ struct RootView: View {
             }
             .task {
                 Task.detached(priority: .utility) { ComposerAttachmentImporter.cleanupOrphans() }
-                matrix.onMessageGone = { notifications.withdraw(roomID: $0, eventID: $1) }
+                matrix.notifications = notifications
                 matrix.notificationHandler = { notification in
                     let identity = composerIdentity
                     let session = matrix.notificationSessionID
@@ -1474,7 +1474,8 @@ struct RootView: View {
                 matrix: matrix, activity: matrix.activity, workspaceID: $workspaceID, onOpenMessage: openActivity,
                 onOpenRoom: selectRoom
             )
-            .modifier(ActivityRecheck(matrix: matrix))
+            // For a deletion since the app last became active.
+            .onAppear { matrix.recheckCopies() }
         case .search:
             SearchResultsView(
                 matrix: matrix, bar: searchBar,
@@ -3035,20 +3036,6 @@ private struct ReadTracking: View {
                     item.eventID.flatMap { seen($0, item.roomID, item.threadRootID) } == true
                 }
             }
-    }
-}
-
-/// Activity asks whether its messages still exist when it shows and each time the app comes back while it shows. Its
-/// pass stops when Activity closes or the account changes.
-private struct ActivityRecheck: ViewModifier {
-    let matrix: MatrixService
-    @State private var activations = 0
-    func body(content: Content) -> some View {
-        content
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                activations += 1
-            }
-            .task(id: "\(matrix.notificationSessionID) \(activations)") { await matrix.recheckActivity() }
     }
 }
 

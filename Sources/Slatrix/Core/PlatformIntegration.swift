@@ -176,8 +176,15 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
         center?.removePendingNotificationRequests(withIdentifiers: [identifier])
         center?.removeDeliveredNotifications(withIdentifiers: [identifier])
     }
-    func deliveredIdentifiers() async -> [String] {
-        await center?.deliveredNotifications().map(\.request.identifier) ?? []
+    /// Message banners only: Later's reminders are `LaterReminderSchedule`'s.
+    func deliveredNotifications() async -> [DeliveredNotification] {
+        await center?.deliveredNotifications().compactMap { shown in
+            let request = shown.request
+            guard !request.identifier.hasPrefix(LaterReminderSchedule.prefix),
+                let target = MatrixNotificationTarget(userInfo: request.content.userInfo)
+            else { return nil }
+            return DeliveredNotification(identifier: request.identifier, target: target, date: shown.date)
+        } ?? []
     }
     /// Later's reminders stay queued: `LaterReminderSchedule` keeps them to the account and its choices.
     func clear() {

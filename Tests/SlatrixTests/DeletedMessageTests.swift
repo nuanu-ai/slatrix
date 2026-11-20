@@ -8,35 +8,44 @@ import Testing
 enum EventAnswer: CaseIterable, Sendable {
     case message
     case deleted
+    /// Content the bindings can't read, such as an unsupported event type.
+    case unreadable
     case failure
 }
 
-/// A stored event: the bindings throw on a deleted message's content, as they do for the SDK's redacted form.
+/// A stored event whose content the bindings fail to read with `failure`, as they do for the SDK's redacted form.
 private final class StoredEvent: TimelineEvent, @unchecked Sendable {
-    let deleted: Bool
-    init(deleted: Bool) {
-        self.deleted = deleted
+    let failure: String?
+    init(failure: String? = nil) {
+        self.failure = failure
         super.init(noHandle: .init())
     }
+    static func deleted() -> StoredEvent { StoredEvent(failure: "Failed to get original content") }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func eventId() -> String { "$event" }
+    override func senderId() -> String { "@alice:example.org" }
+    override func timestamp() -> UInt64 { 1_000 }
+    override func threadRootEventId() -> String? { nil }
     override func content() throws -> TimelineEventContent {
-        if deleted { throw ClientError.Generic(msg: "Failed to get original content", details: nil) }
+        if let failure { throw ClientError.Generic(msg: failure, details: nil) }
         return .messageLike(
             content: .roomMessage(
                 messageType: .text(content: TextMessageContent(body: "Hello", formatted: nil)), inReplyToEventId: nil))
     }
 }
 
-/// A room whose event cache or server answers each event as `answers` says; a gate holds every answer.
+/// A room whose event cache or server answers each event as `answers` says; the gate holds the `held` ones.
 final class AnsweringRoom: Room, @unchecked Sendable {
     private let identifier: String
     private let lock = NSLock()
     private var values: [String: EventAnswer]
     let asked = Recorder<String>()
     let gate = Gate()
-    init(_ id: String, answers: [String: EventAnswer]) {
+    let held: Set<String>
+    init(_ id: String, answers: [String: EventAnswer], held: Set<String> = []) {
         identifier = id
         values = answers
+        self.held = held
         super.init(noHandle: .init())
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
@@ -47,10 +56,11 @@ final class AnsweringRoom: Room, @unchecked Sendable {
     override func id() -> String { identifier }
     override func loadOrFetchEvent(eventId: String) async throws -> TimelineEvent {
         asked.append(eventId)
-        await gate.wait()
+        if held.contains(eventId) { await gate.wait() }
         switch answers[eventId] ?? .failure {
-        case .message: return StoredEvent(deleted: false)
-        case .deleted: return StoredEvent(deleted: true)
+        case .message: return StoredEvent()
+        case .deleted: return StoredEvent.deleted()
+        case .unreadable: return StoredEvent(failure: "Unsupported Event Type: \"m.room.unknown\"")
         case .failure: throw URLError(.notConnectedToInternet)
         }
     }
@@ -68,7 +78,7 @@ struct DeletedMessageTests {
 
     // capability: message.deleted
     @Test(
-        "A message is gone only when the event cache or the server holds it deleted; a failed answer keeps it",
+        "A message is gone only when the event cache or the server holds it deleted; a failed or unreadable answer keeps it",
         arguments: EventAnswer.allCases)
     func messageExists(answer: EventAnswer) async {
         let room = AnsweringRoom("!room:example.org", answers: ["$event": answer])
@@ -99,73 +109,75 @@ extension DeletedMessageTests {
         use([room])
         for (age, id) in ids.enumerated() { service.activity.record(item(id, age: age)) }
         service.activity.markSeen { $0.eventID == "$opened" }
-        await service.recheckActivity()
+        await service.recheckCopies().value
         #expect(service.activity.items.compactMap(\.eventID) == ["$message", "$offline", "$opened"])
     }
 
     // capability: message.deleted
-    @Test("A pass asks about the newest rows first, each once, and no more than its bound")
-    func boundedPass() async {
-        let ids = (0..<(MatrixService.recheckLimit + 3)).map { "$m\($0)" }
-        let room = AnsweringRoom(Self.room, answers: Dictionary(uniqueKeysWithValues: ids.map { ($0, .deleted) }))
+    @Test("With more rows than a pass asks about, the next pass goes on where it stopped and reaches the oldest")
+    func rotation() async {
+        let ids = (0...MatrixService.recheckLimit).map { "$m\($0)" }
+        let oldest = ids[ids.count - 1]
+        let room = AnsweringRoom(
+            Self.room, answers: Dictionary(uniqueKeysWithValues: ids.map { ($0, $0 == oldest ? .deleted : .message) }))
         use([room])
         for (age, id) in ids.enumerated() { service.activity.record(item(id, age: age)) }
-        await service.recheckActivity()
-        #expect(room.asked.all == Array(ids.prefix(MatrixService.recheckLimit)))
-        #expect(service.activity.items.compactMap(\.eventID) == Array(ids.suffix(3)))
-    }
-
-    // capability: message.deleted
-    @Test("Two passes at once never ask about one message twice")
-    func overlappingPasses() async {
-        let ids = ["$first", "$second"]
-        let room = AnsweringRoom(Self.room, answers: ["$first": .deleted, "$second": .deleted])
-        use([room])
-        for (age, id) in ids.enumerated() { service.activity.record(item(id, age: age)) }
-        room.gate.arm()
-        let first = Task { await service.recheckActivity() }
-        #expect(await eventually { room.asked.all == ["$first"] })
-        let second = Task { await service.recheckActivity() }
-        #expect(await eventually { room.asked.all == ["$first", "$second"] })
-        room.gate.release()
-        await first.value
-        await second.value
-        #expect(room.asked.all.sorted() == ids.sorted() && service.activity.items.isEmpty)
-    }
-
-    enum Interruption: CaseIterable {
-        /// Activity closed, which cancels its pass.
-        case closed
-        case accountChanged
-        /// The row went some other way while the question was out.
-        case rowGone
+        await service.recheckCopies().value
+        #expect(service.activity.items.compactMap(\.eventID) == ids)
+        await service.recheckCopies().value
+        #expect(service.activity.items.compactMap(\.eventID) == Array(ids.dropLast()))
     }
 
     // capability: message.deleted
     @Test(
-        "An answer that lands after Activity closed, the account changed or its row went changes nothing",
-        arguments: Interruption.allCases)
-    func lateAnswer(_ interruption: Interruption) async {
-        let room = AnsweringRoom(Self.room, answers: ["$deleted": .deleted])
+        "A question still out holds only its message: a pass started meanwhile asks about the rest, and the answer applies"
+    )
+    func stuckQuestion() async {
+        let room = AnsweringRoom(Self.room, answers: ["$stuck": .deleted, "$other": .deleted], held: ["$stuck"])
         use([room])
-        let withdrawn = Recorder<String>()
-        service.onMessageGone = { withdrawn.append($1) }
+        service.activity.record(item("$stuck"))
+        service.activity.record(item("$other", age: 1))
+        room.gate.arm()
+        let first = service.recheckCopies()
+        #expect(await eventually { room.gate.isWaiting })
+        let second = service.recheckCopies()
+        #expect(await eventually { service.activity.items.compactMap(\.eventID) == ["$stuck"] })
+        room.gate.release()
+        await first.value
+        await second.value
+        #expect(service.activity.items.isEmpty)
+    }
+
+    // capability: message.deleted
+    @Test("An answer that lands after the account changed changes nothing")
+    func lateAnswer() async {
+        let room = AnsweringRoom(Self.room, answers: ["$deleted": .deleted], held: ["$deleted"])
+        use([room])
         service.activity.record(item("$deleted"))
         room.gate.arm()
-        let pass = Task { await service.recheckActivity() }
+        let pass = service.recheckCopies()
         #expect(await eventually { room.gate.isWaiting })
-        switch interruption {
-        case .closed: pass.cancel()
-        case .accountChanged:
-            service.configureMessageActionsForChecks(
-                client: FakeClient(rooms: [room]), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
-                selectionID: UUID(), threadID: UUID())
-        case .rowGone: service.activity.clear()
-        }
+        service.configureMessageActionsForChecks(
+            client: FakeClient(rooms: [room]), main: nil, thread: nil, rootID: nil, sessionID: UUID(),
+            selectionID: UUID(), threadID: UUID())
         room.gate.release()
         await pass.value
-        #expect(withdrawn.all.isEmpty)
-        #expect(service.activity.items.isEmpty == (interruption == .rowGone))
+        #expect(service.activity.items.compactMap(\.eventID) == ["$deleted"])
+    }
+
+    // capability: message.deleted
+    @Test("A message deleted before its notification came makes no row, so no banner")
+    func deletedBeforeNotification() {
+        let notification = NotificationItem(
+            event: .timeline(event: StoredEvent.deleted()), rawEvent: "",
+            senderInfo: NotificationSenderInfo(displayName: "Alice", avatarUrl: nil, isNameAmbiguous: false),
+            roomInfo: NotificationRoomInfo(
+                displayName: "Room", avatarUrl: nil, canonicalAlias: nil, topic: nil, joinRule: nil,
+                joinedMembersCount: 2, activeServiceMembersCount: 0, serviceMembers: [], isEncrypted: false,
+                isDirect: false, isSpace: false, isDm: false), isNoisy: true, hasMention: true, threadId: nil,
+            actions: nil)
+        #expect(service.activity.receive(notification, roomID: Self.room, ownUserID: "@me:example.org") == nil)
+        #expect(service.activity.items.isEmpty)
     }
 
     enum Place: CaseIterable {
@@ -186,8 +198,17 @@ extension DeletedMessageTests {
         room.threadItems = [root, message]
         let other = FakeOpenRoom("!other:example.org", cached: [])
         use([room, other])
-        let withdrawn = Recorder<String>()
-        service.onMessageGone = { withdrawn.append($1) }
+        let center = FakeNotificationCenter()
+        let delivery = DesktopNotificationDelivery(transport: center)
+        delivery.useAccount("@me:example.org")
+        service.notifications = delivery
+        for id in ["$gone", "$kept"] {
+            let target = try #require(
+                MatrixNotificationTarget(accountID: "@me:example.org", roomID: Self.room, eventID: id))
+            #expect(
+                try await delivery.deliver(
+                    DesktopMessageNotification(target: target, title: "Room", body: "New", playSound: true)))
+        }
         service.activity.record(item("$gone"))
         service.activity.record(item("$kept"))
         await service.selectRoom(room.id())
@@ -202,8 +223,8 @@ extension DeletedMessageTests {
         let deleted = FakeTimelineItem(textEvent("$gone", body: "", redacted: true), uniqueID: "gone")
         timeline.emit([.set(index: 1, value: deleted)])
         await drainMainActor()
-        #expect(withdrawn.all == ["$gone"])
         #expect(service.activity.items.compactMap(\.eventID) == ["$kept"])
+        #expect(await eventually { center.shown.map(\.target.eventID) == ["$kept"] })
     }
 }
 

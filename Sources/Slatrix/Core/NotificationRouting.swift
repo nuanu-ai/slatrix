@@ -94,8 +94,14 @@ struct DesktopNotificationRequest {
     func add(_ request: DesktopNotificationRequest) async throws
     func remove(_ identifier: String)
     func clear()
-    /// The banners still in Notification Center.
-    func deliveredIdentifiers() async -> [String]
+    /// The message banners still in Notification Center.
+    func deliveredNotifications() async -> [DeliveredNotification]
+}
+
+struct DeliveredNotification {
+    let identifier: String
+    let target: MatrixNotificationTarget
+    let date: Date
 }
 
 enum DesktopNotificationError: LocalizedError {
@@ -110,10 +116,11 @@ enum DesktopNotificationError: LocalizedError {
     private let transport: DesktopNotificationTransport
     private(set) var accountID: String?
     private var generation = UUID()
-    /// Shown banners by their message's Activity key, oldest first, as many as Activity keeps.
-    private var banners: [(key: String, identifier: String, roomID: String, eventID: String)] = []
-    /// Messages whose banner is on its way. Deleting one takes it out, and its banner never stays.
-    private var delivering = Set<String>()
+    /// Banners on their way, each by its message's Activity key. Deleting a message drops its entries, so their
+    /// banners never stay.
+    private var deliveries: [UUID: String] = [:]
+    /// Whether a banner went up since the last clear; until one does, Notification Center holds none to take back.
+    private var hasShown = false
 
     init(transport: DesktopNotificationTransport) { self.transport = transport }
 
@@ -125,25 +132,26 @@ enum DesktopNotificationError: LocalizedError {
 
     func clear() {
         generation = UUID()
-        banners = []
+        hasShown = false
         transport.clear()
     }
 
-    /// Takes back a deleted message's banner, shown or on its way.
-    func withdraw(roomID: String, eventID: String) {
-        let key = ActivityService.key(roomID: roomID, eventID: eventID)
-        delivering.remove(key)
-        for banner in banners where banner.key == key { transport.remove(banner.identifier) }
-        banners.removeAll { $0.key == key }
+    /// Takes back the banners of deleted messages, by Activity key: those on their way at once, those shown with one
+    /// read of Notification Center.
+    func withdraw(_ keys: Set<String>) async {
+        deliveries = deliveries.filter { !keys.contains($0.value) }
+        for banner in await shown() where keys.contains(Self.key(banner.target)) { transport.remove(banner.identifier) }
     }
 
-    /// Whether the message with Activity key `key` has a banner that wasn't taken back.
-    func holds(_ key: String) -> Bool { banners.contains { $0.key == key } }
+    /// This account's message banners in Notification Center.
+    func shown() async -> [DeliveredNotification] {
+        guard hasShown else { return [] }
+        let account = accountID
+        return await transport.deliveredNotifications().filter { $0.target.accountID == account }
+    }
 
-    /// The messages whose banners are still in Notification Center, newest first.
-    func delivered() async -> [(roomID: String, eventID: String)] {
-        let shown = Set(await transport.deliveredIdentifiers())
-        return banners.reversed().filter { shown.contains($0.identifier) }.map { ($0.roomID, $0.eventID) }
+    static func key(_ target: MatrixNotificationTarget) -> String {
+        ActivityService.key(roomID: target.roomID, eventID: target.eventID ?? "")
     }
 
     /// `stillAnnounce` decides once the OS has answered, and nothing after it but the checks above can stop the alert,
@@ -153,12 +161,12 @@ enum DesktopNotificationError: LocalizedError {
     ) async throws -> Bool {
         guard message.target.accountID == accountID else { return false }
         let token = generation
-        let key = message.target.eventID.map { ActivityService.key(roomID: message.target.roomID, eventID: $0) }
-        if let key { delivering.insert(key) }
-        defer { if let key { delivering.remove(key) } }
+        let delivery = UUID()
+        deliveries[delivery] = Self.key(message.target)
+        defer { deliveries[delivery] = nil }
         func due() -> Bool {
             token == generation && message.target.accountID == accountID && !Task.isCancelled
-                && key.map(delivering.contains) ?? true
+                && deliveries[delivery] != nil
         }
         let allowed: Result<Bool, Error>
         do { allowed = .success(try await transport.isAuthorized()) } catch { allowed = .failure(error) }
@@ -175,10 +183,7 @@ enum DesktopNotificationError: LocalizedError {
             transport.remove(request.identifier)
             return false
         }
-        if let key, let eventID = message.target.eventID {
-            banners.append((key, request.identifier, message.target.roomID, eventID))
-            if banners.count > ActivityService.maximumItems { banners.removeFirst() }
-        }
+        hasShown = true
         return true
     }
 }

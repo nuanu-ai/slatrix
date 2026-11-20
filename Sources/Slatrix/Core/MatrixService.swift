@@ -151,6 +151,15 @@ enum MatrixMapping {
         return id
     }
 
+    /// Whether the event cache or the server holds `event` redacted: the bindings throw this for a redacted message's
+    /// content, and something else for a type they can't read.
+    static func isRedacted(_ event: TimelineEvent) -> Bool {
+        do { _ = try event.content() } catch ClientError.Generic(let message, _) {
+            return message == "Failed to get original content"
+        } catch {}
+        return false
+    }
+
     static func identifier(_ id: EventOrTransactionId) -> String {
         switch id {
         case .eventId(let id), .transactionId(let id): return id
@@ -688,10 +697,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var jump: MessageJump?
     private(set) var homeserverURL: String?
     var notificationHandler: ((DesktopMessageNotification) -> Void)?
-    /// Takes back what a deleted message left outside the app's own lists: its banner.
-    var onMessageGone: ((_ roomID: String, _ eventID: String) -> Void)?
+    /// The banners a deleted message takes back; the window sets it.
+    @ObservationIgnored var notifications: DesktopNotificationDelivery?
     /// Messages a pass is asking about, so another pass doesn't ask again before the answer.
     @ObservationIgnored private var asking = Set<String>()
+    /// Where the next pass starts in the list of copies, so a long list is asked about in turns.
+    @ObservationIgnored private var rotation = 0
     var notificationSessionID: UUID { sessionGeneration }
     let notificationRetries = NotificationSettingsRetryState()
     private var client: Client?
@@ -1722,7 +1733,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 // Kept timelines too, though nothing shows them.
-                for eventID in deleted { self.messageGone(roomID: id, eventID: eventID) }
+                self.messagesGone(Set(deleted.map { ActivityService.key(roomID: id, eventID: $0) }))
                 // Until its timeline is in place, which shows the rows it has read so far.
                 guard self.selection == token, self.shownSelection == token, self.timeline != nil,
                     self.focusedEventID == eventID
@@ -2223,7 +2234,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         TimelineObserver { [weak self] items, revision, deleted in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                for eventID in deleted { self.messageGone(roomID: root.roomID, eventID: eventID) }
+                self.messagesGone(Set(deleted.map { ActivityService.key(roomID: root.roomID, eventID: $0) }))
                 guard token == self.selection, threadToken == self.threadSelection,
                     revision > self.threadRevision
                 else { return }
@@ -3689,44 +3700,50 @@ extension MatrixService {
     /// server answers with the redacted form; only that answer says no. A failed or unreadable answer keeps it.
     func messageExists(roomID: String, eventID: String) async -> Bool {
         guard let event = try? await requireRoom(roomID).loadOrFetchEvent(eventId: eventID) else { return true }
-        do { _ = try event.content() } catch ClientError.Generic(let message, _) {
-            // The bindings' answer for a redacted message; an unsupported event type says something else.
-            return message != "Failed to get original content"
-        } catch {}
-        return true
+        return !MatrixMapping.isRedacted(event)
     }
 
     /// About a window of Activity rows. A question the event cache answers costs under a millisecond, one the server
     /// answers a round trip, and a pass asks one at a time, newest first.
     static let recheckLimit = 20
 
-    /// Asks about Activity's rows the reader hasn't opened, newest first.
-    func recheckActivity() async {
-        let rows = activity.items.filter { $0.kind == .message && !$0.opened }
-        await recheck(rows.compactMap { row in row.eventID.map { (row.roomID, $0) } }) { [activity] key in
-            activity.items.contains { $0.id == key }
-        }
-    }
-
-    /// Asks whether each message, in order and up to `recheckLimit`, still exists, and takes back each one gone. A
-    /// message `listed` no longer holds, or one another pass is asking about, is skipped. Once the pass is cancelled
-    /// or its account changes, its answers change nothing.
-    func recheck(_ messages: [(roomID: String, eventID: String)], listed: (String) -> Bool) async {
+    /// Starts a pass over the copies of messages outside their timelines: Activity's unopened rows and the banners in
+    /// Notification Center. Each message is asked about once, newest first, at most `recheckLimit` of them; a longer
+    /// list is asked about in turns, the next pass starting where this one stopped. A message another pass is asking
+    /// about is skipped. The pass ends at its bound, and its answers apply while the account stays the same.
+    @discardableResult func recheckCopies() -> Task<Void, Never> {
         let session = sessionGeneration
-        for (roomID, eventID) in messages.prefix(Self.recheckLimit) {
-            guard !Task.isCancelled, session == sessionGeneration else { return }
-            let key = ActivityService.key(roomID: roomID, eventID: eventID)
-            guard listed(key), asking.insert(key).inserted else { continue }
-            let exists = await messageExists(roomID: roomID, eventID: eventID)
-            asking.remove(key)
-            guard !Task.isCancelled, session == sessionGeneration else { return }
-            if !exists, listed(key) { messageGone(roomID: roomID, eventID: eventID) }
+        return Task {
+            var copies: [(key: String, roomID: String, eventID: String, date: Date)] = []
+            for banner in await notifications?.shown() ?? [] {
+                let target = banner.target
+                guard let eventID = target.eventID else { continue }
+                copies.append((DesktopNotificationDelivery.key(target), target.roomID, eventID, banner.date))
+            }
+            guard session == sessionGeneration else { return }
+            for row in activity.items where row.kind == .message && !row.opened {
+                guard let eventID = row.eventID else { continue }
+                copies.append((row.id, row.roomID, eventID, row.timestamp))
+            }
+            var seen = Set<String>()
+            copies = copies.sorted { $0.date > $1.date }.filter { seen.insert($0.key).inserted }
+            let start = copies.count > Self.recheckLimit ? rotation % copies.count : 0
+            rotation = start + Self.recheckLimit
+            for copy in (copies[start...] + copies[..<start]).prefix(Self.recheckLimit) {
+                guard asking.insert(copy.key).inserted else { continue }
+                let exists = await messageExists(roomID: copy.roomID, eventID: copy.eventID)
+                asking.remove(copy.key)
+                guard session == sessionGeneration else { return }
+                if !exists { messagesGone([copy.key]) }
+            }
         }
     }
 
-    /// A deleted message's row leaves Activity and its banner leaves Notification Center.
-    func messageGone(roomID: String, eventID: String) {
-        activity.remove(roomID: roomID, eventID: eventID)
-        onMessageGone?(roomID, eventID)
+    /// Deleted messages, by Activity key, leave Activity and Notification Center.
+    func messagesGone(_ keys: Set<String>) {
+        guard !keys.isEmpty else { return }
+        activity.remove(keys)
+        guard let notifications else { return }
+        Task { await notifications.withdraw(keys) }
     }
 }

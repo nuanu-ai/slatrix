@@ -71,7 +71,8 @@ enum ActivityBadge {
         var item: ActivityItem
         switch notification.event {
         case .timeline(let event):
-            guard event.senderId() != ownUserID else { return nil }
+            // Deleted before it synced, it still notifies; it leaves no row and no banner.
+            guard event.senderId() != ownUserID, !MatrixMapping.isRedacted(event) else { return nil }
             var body = "Message preview unavailable"
             if let content = try? event.content() {
                 guard case .messageLike(let like) = content else { return nil }
@@ -152,10 +153,10 @@ enum ActivityBadge {
         return Set(runs.compactMap(\.mention).filter { $0 != "@room" })
     }
 
-    /// Drops the row of a deleted message. It stays recorded, so it never comes back.
-    func remove(roomID: String, eventID: String) {
-        let key = Self.key(roomID: roomID, eventID: eventID)
-        if let index = items.firstIndex(where: { $0.id == key }) { items.remove(at: index) }
+    /// Drops the rows of deleted messages, by key. They stay recorded, so they never come back.
+    func remove(_ keys: Set<String>) {
+        let kept = items.filter { !keys.contains($0.id) }
+        if kept.count != items.count { items = kept }
     }
 
     /// Opens the items whose message the reader has seen.
