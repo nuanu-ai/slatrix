@@ -128,6 +128,8 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     var threadItems: [TimelineItem]?
     /// The older pages of a thread's replies, newest page first.
     var threadPages: [[TimelineItem]] = []
+    /// Whether the thread's first older page reaches its start.
+    var threadStartReached = false
     /// Thread replies the room can load, by event ID, with their thread's root.
     var threadRoots: [String: String] = [:]
     let membersGate = Gate()
@@ -155,11 +157,17 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
         if case .event = configuration.focus, let focusedItems { items = focusedItems }
         if case .thread = configuration.focus, let threadItems { items = threadItems }
         let timeline = FakeLiveTimeline(items, pageGate: pageGate, forwardGate: forwardGate)
-        if case .thread = configuration.focus { timeline.olderPages = threadPages }
+        if case .thread = configuration.focus {
+            timeline.olderPages = threadPages
+            timeline.startReached = threadStartReached
+        }
         timelines.append(timeline)
         return timeline
     }
+    /// The events looked up one by one.
+    let lookups = Recorder<String>()
     override func loadOrFetchEvent(eventId: String) async throws -> TimelineEvent {
+        lookups.append(eventId)
         guard let root = threadRoots[eventId] else { throw URLError(.resourceUnavailable) }
         return FakeThreadReply(root: root)
     }
@@ -232,9 +240,14 @@ final class FakeMembers: RoomMembersIterator, @unchecked Sendable {
 /// Records each set of rooms the app asks sync to keep subscribed.
 final class FakeRoomListService: RoomListService, @unchecked Sendable {
     let subscriptions = Recorder<[String]>()
+    /// What every subscription change throws, after it is recorded.
+    var subscriptionError: Error?
     init() { super.init(noHandle: .init()) }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
-    override func setRoomSubscriptions(roomIds: [String]) async throws { subscriptions.append(roomIds) }
+    override func setRoomSubscriptions(roomIds: [String]) async throws {
+        subscriptions.append(roomIds)
+        if let subscriptionError { throw subscriptionError }
+    }
 }
 
 /// A send's handle, carrying its transaction.

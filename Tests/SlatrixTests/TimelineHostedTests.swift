@@ -1094,18 +1094,34 @@ struct TimelineHostedTests {
             client: harness.client, main: harness.timeline, thread: thread, rootID: root.eventID, sessionID: UUID(),
             selectionID: UUID(), threadID: UUID())
         harness.service.threadMessages = [root] + Self.messages(30..<60, prefix: "Reply")
-        harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Reply-10", threadRootID: root.eventID)
+        harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Reply-20", threadRootID: root.eventID)
         var pane = harness.fixture(Self.room)
         pane.thread = true
         pane.threadRootID = root.eventID
         harness.hosting.rootView = pane
         await settle(harness) { harness.top(of: "Reply 59") != nil }
-        #expect(harness.service.jump?.eventID(inThread: root.eventID) == "Reply-10")
-        // An older page brings it.
+        #expect(harness.service.jump?.eventID(inThread: root.eventID) == "Reply-20")
+        // An older page brings it, far from both ends.
         harness.service.threadMessages = [root] + Self.messages(1..<60, prefix: "Reply")
-        await settle(harness) { Self.highlighted("Reply-10", in: harness) }
-        #expect(harness.top(of: "Reply 10") != nil)
+        await settle(harness) { Self.highlighted("Reply-20", in: harness) }
+        let cell = try #require(harness.cell(showing: "Reply-20"))
+        let row = cell.convert(cell.bounds, to: nil)
+        #expect(abs(row.midY - (harness.composerTop + harness.headerBottom) / 2) <= 2)
         #expect(harness.service.jump?.eventID(inThread: root.eventID) == nil)
+    }
+
+    @Test("A pane taken away before its landing is reported leaves the jump for the pane that comes next")
+    func detachedPaneLeavesJump() async throws {
+        let harness = Harness(messages: Self.messages(0..<80))
+        defer { harness.close() }
+        await settle(harness)
+        harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Message-10")
+        // The layout that lands it queues the report; the pane goes before the report runs.
+        harness.layout()
+        #expect(harness.top(of: "Message 10") != nil)
+        harness.window.contentView = nil
+        await drainMainActor()
+        #expect(harness.service.jump?.eventID(inThread: nil) == "Message-10")
     }
 
     /// Whether the row of `eventID` is on screen with its jump highlight.

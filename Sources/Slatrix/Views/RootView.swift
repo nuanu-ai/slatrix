@@ -523,6 +523,7 @@ struct RootView: View {
                 if !(next == .home && directMessagesColumn) { sidebarDrawer = false }
                 if let request = pendingMatrixLink, request.route != next { cancelMatrixLink() }
                 if next != .home {
+                    matrix.dropJump()
                     directMessagesColumn = false
                     cancelCurrentEdit()
                     cancelReply()
@@ -2288,6 +2289,7 @@ struct RootView: View {
             room?.id == message.roomID, room?.membership == "join", matrix.isCurrentMessageAction(action),
             let target = MessageEditTarget(message: message, surface: action.surface, context: editContext)
         else { return }
+        matrix.dropJump()
         editTarget = target
         editActionTarget = action
         editText = ComposerFormat.draft(body: message.body, html: message.formattedBody)

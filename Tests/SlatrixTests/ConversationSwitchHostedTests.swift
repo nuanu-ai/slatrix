@@ -541,4 +541,61 @@ struct ConversationSwitchHostedTests {
         #expect(await eventually { harness.sample().rows["$far"] != nil })
         #expect(await eventually { !harness.toolbarProgress })
     }
+
+    @Test("Another page of the window picked while a jump waits stays, and the jump never lands")
+    func pageDropsJump() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        try #require(await harness.settled(on: 0))
+        let room = harness.rooms[1]
+        room.focusedItems = [FakeTimelineItem(textEvent("$far", body: "Far back"))]
+        room.eventGate.arm()
+        try harness.notify(1, "$far")
+        #expect(await eventually { room.eventGate.isWaiting })
+        harness.menu("later")
+        #expect(await eventually { !harness.matrix.showsConversation })
+        room.eventGate.release()
+        #expect(await eventually { !room.eventGate.isWaiting })
+        await harness.idle()
+        #expect(!harness.matrix.showsConversation && harness.matrix.selectedRoomID == harness.rooms[0].id())
+    }
+
+    @Test("An edit started while a jump waits keeps its text, and the jump never lands")
+    func editDropsJump() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        try #require(await harness.settled(on: 0))
+        try #require(harness.rooms[0].timelines.all.first).emit([
+            .pushBack(value: FakeTimelineItem(textEvent("$mine", body: "Mine to edit", sender: "@me:example.org")))
+        ])
+        #expect(await eventually { harness.sample().rows["$mine"] != nil })
+        let room = harness.rooms[1]
+        room.focusedItems = [FakeTimelineItem(textEvent("$far", body: "Far back"))]
+        room.eventGate.arm()
+        try harness.notify(1, "$far")
+        #expect(await eventually { room.eventGate.isWaiting })
+        func composer() -> NSTextView? {
+            Harness.views(in: harness.hosting).compactMap { $0 as? NSTextView }.first {
+                $0.isEditable && $0.window != nil
+            }
+        }
+        // Up from the composer edits the reader's last message.
+        let field = try #require(composer())
+        harness.window.makeFirstResponder(field)
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            harness.window.sendEvent(
+                try #require(
+                    NSEvent.keyEvent(
+                        with: type, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: harness.window.windowNumber, context: nil, characters: "\u{F700}",
+                        charactersIgnoringModifiers: "\u{F700}", isARepeat: false, keyCode: 126)))
+        }
+        #expect(await eventually { composer()?.string == "Mine to edit" })
+        composer()?.insertText(", changed", replacementRange: NSRange(location: 12, length: 0))
+        room.eventGate.release()
+        #expect(await eventually { !room.eventGate.isWaiting })
+        await harness.idle()
+        #expect(harness.matrix.selectedRoomID == harness.rooms[0].id())
+        #expect(composer()?.string == "Mine to edit, changed")
+    }
 }

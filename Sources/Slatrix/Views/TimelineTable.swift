@@ -908,7 +908,10 @@ struct TimelineTable: NSViewRepresentable {
         pendingFocus = nil
         guard let configuration, let jump = configuration.jumpID else { return }
         // SwiftUI state; never changed from inside its own update or layout.
-        DispatchQueue.main.async { configuration.onLand(jump) }
+        DispatchQueue.main.async { [weak self] in
+            guard self?.scrollView.window != nil else { return }
+            configuration.onLand(jump)
+        }
     }
 
     /// Also before the table opens: history of only hidden events leaves nothing to open at until a page shows some.
