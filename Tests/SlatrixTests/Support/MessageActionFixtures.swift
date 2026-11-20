@@ -15,6 +15,7 @@ final class ActionTimeline: Timeline, @unchecked Sendable {
     private let lock = NSLock()
     private var current: EventTimelineItem?
     private var failing = false
+    private var failingNext = 0
     private var failingPagination = false
     /// Runs after each read is released, before the read returns.
     var onRead: (@MainActor () -> Void)?
@@ -30,6 +31,11 @@ final class ActionTimeline: Timeline, @unchecked Sendable {
         get { lock.withLock { failing } }
         set { lock.withLock { failing = newValue } }
     }
+    /// Fails this many writes, then lets the rest through.
+    var failsNextWrites: Int {
+        get { lock.withLock { failingNext } }
+        set { lock.withLock { failingNext = newValue } }
+    }
     var failsPagination: Bool {
         get { lock.withLock { failingPagination } }
         set { lock.withLock { failingPagination = newValue } }
@@ -38,7 +44,11 @@ final class ActionTimeline: Timeline, @unchecked Sendable {
     private func write(_ value: String) async throws {
         writes.append(value)
         await gate.wait()
-        if failsWrites { throw MatrixServiceError.request("Fixture write failed") }
+        let failsNext = lock.withLock {
+            defer { failingNext = max(0, failingNext - 1) }
+            return failingNext > 0
+        }
+        if failsWrites || failsNext { throw MatrixServiceError.request("Fixture write failed") }
     }
     override func fetchDetailsForEvent(eventId: String) async throws { try await write("details:\(eventId)") }
     override func toggleReaction(itemId: EventOrTransactionId, key: String) async throws -> Bool {

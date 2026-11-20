@@ -660,8 +660,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private typealias PreparedRoom = (
         timeline: Timeline, observer: TimelineObserver, listener: TaskHandle, firstPage: Task<Bool, Error>
     )
+    /// `endReached` is nil when the first page failed, so the thread isn't ready to read until a later page loads.
     private typealias PreparedTimeline = (
-        timeline: Timeline, observer: TimelineObserver, listener: TaskHandle, endReached: Bool
+        timeline: Timeline, observer: TimelineObserver, listener: TaskHandle, endReached: Bool?
     )
     /// The open whose conversation is on screen, which can trail `selection` while the next one reads its cache.
     private var shownSelection: UUID?
@@ -2113,7 +2114,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     configuration: Self.timelineConfiguration(.thread(rootEventId: root.eventID)))
             else { return nil }
             let listener = await timeline.addListener(listener: observer)
-            let endReached = (try? await timeline.paginateBackwards(numEvents: 50)) ?? false
+            let endReached = try? await timeline.paginateBackwards(numEvents: 50)
             guard !Task.isCancelled else {
                 listener.cancel()
                 return nil
@@ -2216,8 +2217,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             threadTimeline = ready.timeline
             loadedThreadRootID = root.eventID
             threadHandle = ready.listener
-            hasMoreThreadHistory = !ready.endReached
-            readyThreadReadSelection = threadToken
+            hasMoreThreadHistory = ready.endReached != true
+            if ready.endReached != nil { readyThreadReadSelection = threadToken }
             // Updates that came before the pane opened were dropped; its snapshot holds them.
             let snapshot = ready.observer.snapshot
             threadRevision = snapshot.revision
@@ -2718,12 +2719,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         return data
     }
 
-    func markVisibleThreadRead(_ target: ThreadReadReceiptTarget, isVisible: @escaping @MainActor () -> Bool)
-        async throws
-    {
+    func markVisibleThreadRead(
+        _ target: ThreadReadReceiptTarget, retries: [Duration] = receiptRetries,
+        isVisible: @escaping @MainActor () -> Bool
+    ) async throws {
         guard isVisible() else { throw CancellationError() }
         let original = try validatedThreadReadTimeline(target)
-        try await retryingReceipt {
+        try await retryingReceipt(retries) {
             try await readDelivery.perform(roomID: target.identity.roomID) { [weak self] in
                 guard let self else { throw CancellationError() }
                 guard isVisible() else { throw CancellationError() }
@@ -2738,12 +2740,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
         }
     }
-    /// A receipt the server turns down goes again, a few times and further apart each time. One that stopped being
-    /// the one to send fails its checks with CancellationError, which ends it, as leaving the view does.
-    private func retryingReceipt(_ send: () async throws -> Void) async throws {
-        for delay in [1, 5, 25] {
+    /// A receipt the server turns down goes again after each of these, while the read policy still sends it.
+    static let receiptRetries: [Duration] = [.seconds(1), .seconds(5), .seconds(25)]
+    /// Each attempt asks the caller's policy first and throws CancellationError once it no longer sends the receipt,
+    /// which ends the retries, as leaving the view does.
+    private func retryingReceipt(_ delays: [Duration], _ send: () async throws -> Void) async throws {
+        for delay in delays {
             do { return try await send() } catch let error as CancellationError { throw error } catch {
-                try await Task.sleep(for: .seconds(delay))
+                try await Task.sleep(for: delay)
             }
         }
         try await send()
@@ -2771,13 +2775,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
     #endif
 
-    func markVisibleRead(_ target: ReadReceiptTarget) async throws {
+    func markVisibleRead(
+        _ target: ReadReceiptTarget, retries: [Duration] = receiptRetries, isCurrent: @escaping @MainActor () -> Bool
+    ) async throws {
         guard lastAutomaticReceipt != target else { return }
         let originalTimeline = try validatedReadTimeline(target)
         let originalRoom = try requireRoom(target.roomID)
-        try await retryingReceipt {
+        try await retryingReceipt(retries) {
             try await readDelivery.perform(roomID: target.roomID) { [weak self] in
-                guard let self else { throw CancellationError() }
+                guard let self, isCurrent() else { throw CancellationError() }
                 try await UnreadSDKActions.acknowledge(timeline: originalTimeline, eventID: target.eventID) {
                     _ = try self.validatedReadTimeline(target)
                 }

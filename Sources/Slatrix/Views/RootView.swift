@@ -385,8 +385,8 @@ struct RootView: View {
         // What a modal held back: a notification to open, and messages the reader can see again.
         openPendingNotification()
         Task {
-            await acknowledgeVisibleTimeline()
-            await acknowledgeVisibleThread()
+            await acknowledgeVisibleTimeline(retries: [])
+            await acknowledgeVisibleThread(retries: [])
         }
     }
 
@@ -433,7 +433,8 @@ struct RootView: View {
                 ReadTracking(
                     matrix: matrix, inputs: readInputs, onReadContext: { readHold.observe($0) },
                     onThreadIdentity: { threadReadViewport.observe($0) },
-                    acknowledgeTimeline: acknowledgeVisibleTimeline, acknowledgeThread: acknowledgeVisibleThread))
+                    acknowledgeTimeline: { await acknowledgeVisibleTimeline() },
+                    acknowledgeThread: { await acknowledgeVisibleThread() }))
     }
 
     private var notificationAwareContent: some View {
@@ -919,14 +920,17 @@ struct RootView: View {
         widths.sidebar = nil
     }
 
-    private func acknowledgeVisibleTimeline() async {
+    /// The keyed read task retries a refused receipt; a one-off caller sends it once.
+    private func acknowledgeVisibleTimeline(retries: [Duration] = MatrixService.receiptRetries) async {
         guard let target = automaticReadTarget else { return }
+        let current = {
+            platform.conversationWindowIsVisible && modals.current == nil
+                && ReadStatePolicy.isCurrent(target, in: readContext, hold: readHold)
+        }
         do {
             try await Task.sleep(for: .milliseconds(350))
-            guard platform.conversationWindowIsVisible, modals.current == nil,
-                ReadStatePolicy.isCurrent(target, in: readContext, hold: readHold)
-            else { return }
-            try await matrix.markVisibleRead(target)
+            guard current() else { return }
+            try await matrix.markVisibleRead(target, retries: retries, isCurrent: current)
         } catch {
             // An unseen or offline snapshot stays unread; retry on the next visible live update.
         }
@@ -934,18 +938,16 @@ struct RootView: View {
 
     private var threadReadContext: ThreadReadContext { readInputs.threadReadContext(matrix) }
     private var automaticThreadReadTarget: ThreadReadReceiptTarget? { ThreadReadPolicy.target(threadReadContext) }
-    private func acknowledgeVisibleThread() async {
+    private func acknowledgeVisibleThread(retries: [Duration] = MatrixService.receiptRetries) async {
         guard let target = automaticThreadReadTarget else { return }
+        let current = {
+            platform.conversationWindowIsVisible && modals.current == nil
+                && ThreadReadPolicy.isCurrent(target, in: threadReadContext)
+        }
         do {
             try await Task.sleep(for: .milliseconds(350))
-            guard platform.conversationWindowIsVisible, modals.current == nil,
-                ThreadReadPolicy.isCurrent(target, in: threadReadContext)
-            else {
-                return
-            }
-            try await matrix.markVisibleThreadRead(target) {
-                platform.conversationWindowIsVisible && ThreadReadPolicy.isCurrent(target, in: threadReadContext)
-            }
+            guard current() else { return }
+            try await matrix.markVisibleThreadRead(target, retries: retries, isVisible: current)
         } catch {
             // Anything not confirmed as seen stays unread.
         }
