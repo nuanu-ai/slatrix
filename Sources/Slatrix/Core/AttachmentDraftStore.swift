@@ -151,9 +151,11 @@ actor AttachmentDraftStore {
             // Establish an empty manifest before any blob exists; a later missing manifest is never a reset.
             let contents = try FileManager.default.contentsOfDirectory(
                 at: lease.directory, includingPropertiesForKeys: nil)
-            guard contents.allSatisfy({ $0.lastPathComponent == ".lease" }) else {
-                throw AttachmentDraftError.invalidData
-            }
+            // A crash before the first manifest's rename leaves only its staging copies, which are garbage. Anything
+            // else refuses the folder before a file is touched.
+            let leftovers = contents.filter { $0.lastPathComponent != ".lease" }
+            guard leftovers.allSatisfy(Self.isFirstManifestStaging) else { throw AttachmentDraftError.invalidData }
+            for url in leftovers where unlink(url.path) != 0 { throw AttachmentDraftError.unavailable }
             let encrypted = try seal(
                 JSONEncoder().encode(Manifest()), key: key, authentication: manifestAuthentication(accountID),
                 magic: "ELADM01\n")
@@ -575,6 +577,14 @@ actor AttachmentDraftStore {
             }
         }
         return result
+    }
+    /// A regular file named as `writeAtomic` names the manifest's staging copy.
+    private static func isFirstManifestStaging(_ url: URL) -> Bool {
+        let prefix = ".write-manifest.vault-"
+        let suffix = String(url.lastPathComponent.dropFirst(prefix.count))
+        var info = stat()
+        return url.lastPathComponent.hasPrefix(prefix) && UUID(uuidString: suffix)?.uuidString == suffix
+            && lstat(url.path, &info) == 0 && info.st_mode & S_IFMT == S_IFREG
     }
     private func writeAtomic(_ data: Data, to url: URL, afterRename: () throws -> Void = {}) throws {
         let staging = url.deletingLastPathComponent().appendingPathComponent(

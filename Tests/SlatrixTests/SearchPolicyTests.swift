@@ -63,6 +63,13 @@ struct RecentSearchesTests {
         #expect(RecentSearches.adding(spec.query, to: spec.recents) == spec.expected)
     }
 
+    @Test("A search over 1 KB stays out of recent searches, so it can't stop drafts from saving")
+    func overlongQueryNotKept() {
+        let fits = String(repeating: "😀", count: 256)
+        #expect(RecentSearches.adding(fits, to: ["launch"]) == [fits, "launch"])
+        #expect(RecentSearches.adding(String(repeating: "😀", count: 257), to: ["launch"]) == ["launch"])
+    }
+
     // capability: search.recent
     @Test("The search bar offers recent searches as in every shared case", arguments: try spec.get().offered)
     func offered(spec: Case) {

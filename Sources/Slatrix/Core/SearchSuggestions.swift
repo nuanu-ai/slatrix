@@ -44,10 +44,12 @@ enum SearchSuggestions {
 
 enum RecentSearches {
     static let limit = 10
+    /// The longest search the vault keeps; a longer one still runs, it just isn't remembered.
+    static let maximumBytes = 1_024
 
     static func adding(_ query: String, to recents: [String]) -> [String] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return recents }
+        guard !query.isEmpty, query.utf8.count <= maximumBytes else { return recents }
         return Array(([query] + recents.filter { $0.caseInsensitiveCompare(query) != .orderedSame }).prefix(limit))
     }
 }
