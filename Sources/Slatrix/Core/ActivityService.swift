@@ -152,6 +152,12 @@ enum ActivityBadge {
         return Set(runs.compactMap(\.mention).filter { $0 != "@room" })
     }
 
+    /// Drops the row of a deleted message. It stays recorded, so it never comes back.
+    func remove(roomID: String, eventID: String) {
+        let key = Self.key(roomID: roomID, eventID: eventID)
+        if let index = items.firstIndex(where: { $0.id == key }) { items.remove(at: index) }
+    }
+
     /// Opens the items whose message the reader has seen.
     func markSeen(_ isSeen: (ActivityItem) -> Bool) {
         for index in items.indices where !items[index].opened && isSeen(items[index]) { items[index].opened = true }

@@ -94,6 +94,8 @@ struct DesktopNotificationRequest {
     func add(_ request: DesktopNotificationRequest) async throws
     func remove(_ identifier: String)
     func clear()
+    /// The banners still in Notification Center.
+    func deliveredIdentifiers() async -> [String]
 }
 
 enum DesktopNotificationError: LocalizedError {
@@ -108,6 +110,10 @@ enum DesktopNotificationError: LocalizedError {
     private let transport: DesktopNotificationTransport
     private(set) var accountID: String?
     private var generation = UUID()
+    /// Shown banners by their message's Activity key, oldest first, as many as Activity keeps.
+    private var banners: [(key: String, identifier: String, roomID: String, eventID: String)] = []
+    /// Messages whose banner is on its way. Deleting one takes it out, and its banner never stays.
+    private var delivering = Set<String>()
 
     init(transport: DesktopNotificationTransport) { self.transport = transport }
 
@@ -119,7 +125,25 @@ enum DesktopNotificationError: LocalizedError {
 
     func clear() {
         generation = UUID()
+        banners = []
         transport.clear()
+    }
+
+    /// Takes back a deleted message's banner, shown or on its way.
+    func withdraw(roomID: String, eventID: String) {
+        let key = ActivityService.key(roomID: roomID, eventID: eventID)
+        delivering.remove(key)
+        for banner in banners where banner.key == key { transport.remove(banner.identifier) }
+        banners.removeAll { $0.key == key }
+    }
+
+    /// Whether the message with Activity key `key` has a banner that wasn't taken back.
+    func holds(_ key: String) -> Bool { banners.contains { $0.key == key } }
+
+    /// The messages whose banners are still in Notification Center, newest first.
+    func delivered() async -> [(roomID: String, eventID: String)] {
+        let shown = Set(await transport.deliveredIdentifiers())
+        return banners.reversed().filter { shown.contains($0.identifier) }.map { ($0.roomID, $0.eventID) }
     }
 
     /// `stillAnnounce` decides once the OS has answered, and nothing after it but the checks above can stop the alert,
@@ -129,22 +153,31 @@ enum DesktopNotificationError: LocalizedError {
     ) async throws -> Bool {
         guard message.target.accountID == accountID else { return false }
         let token = generation
+        let key = message.target.eventID.map { ActivityService.key(roomID: message.target.roomID, eventID: $0) }
+        if let key { delivering.insert(key) }
+        defer { if let key { delivering.remove(key) } }
+        func due() -> Bool {
+            token == generation && message.target.accountID == accountID && !Task.isCancelled
+                && key.map(delivering.contains) ?? true
+        }
         let allowed: Result<Bool, Error>
         do { allowed = .success(try await transport.isAuthorized()) } catch { allowed = .failure(error) }
         // A seen message stays quiet, a failed permission check included.
         let announce = await stillAnnounce()
-        guard token == generation, message.target.accountID == accountID, !Task.isCancelled, announce else {
-            return false
-        }
+        guard due(), announce else { return false }
         guard try allowed.get() else { throw DesktopNotificationError.notificationsDisabled }
         let request = DesktopNotificationRequest(identifier: UUID().uuidString, message: message)
         do { try await transport.add(request) } catch {
-            guard token == generation, message.target.accountID == accountID, !Task.isCancelled else { return false }
+            guard due() else { return false }
             throw error
         }
-        guard token == generation, message.target.accountID == accountID, !Task.isCancelled else {
+        guard due() else {
             transport.remove(request.identifier)
             return false
+        }
+        if let key, let eventID = message.target.eventID {
+            banners.append((key, request.identifier, message.target.roomID, eventID))
+            if banners.count > ActivityService.maximumItems { banners.removeFirst() }
         }
         return true
     }

@@ -18,6 +18,9 @@ final class FakeHomeserver: @unchecked Sendable {
     var bodies: [String] {
         queue.sync { messages.reversed().compactMap { ($0["content"] as? [String: Any])?["body"] as? String } }
     }
+    private var fetchedEvents = 0
+    /// How many single events clients asked for.
+    var eventFetches: Int { queue.sync { fetchedEvents } }
     private var sent: [String: String] = [:]
     private var dropped: String?
     private var replayed = false
@@ -139,9 +142,26 @@ final class FakeHomeserver: @unchecked Sendable {
         // PUT /_matrix/client/v3/rooms/{room}/redact/{event}/{transaction}
         if method == "PUT", segments.count == 8, segments[4] == room, segments[5] == "redact" {
             if rejectsTokenOnDeletions { return (401, ["errcode": "M_UNKNOWN_TOKEN", "error": "Expired"]) }
-            return refusesDeletions
-                ? (403, ["errcode": "M_FORBIDDEN", "error": "Not allowed"])
-                : (200, ["event_id": "$redaction-\(segments[7])"])
+            if refusesDeletions { return (403, ["errcode": "M_FORBIDDEN", "error": "Not allowed"]) }
+            let redaction: [String: Any] = [
+                "type": "m.room.redaction", "event_id": "$redaction-\(segments[7])", "sender": "@me:localhost",
+                "origin_server_ts": messages.count + 1, "redacts": segments[6], "content": ["redacts": segments[6]],
+            ]
+            // As a server keeps a deleted message: its type and envelope, no content, and what deleted it.
+            messages = messages.map { message in
+                guard message["event_id"] as? String == segments[6] else { return message }
+                return message.filter { ["type", "event_id", "sender", "origin_server_ts"].contains($0.key) }
+                    .merging(["content": [:], "unsigned": ["redacted_because": redaction]]) { $1 }
+            }
+            return (200, ["event_id": redaction["event_id"]!])
+        }
+        // GET /_matrix/client/v3/rooms/{room}/event/{event}
+        if method == "GET", segments.count == 7, segments[4] == room, segments[5] == "event" {
+            fetchedEvents += 1
+            guard let event = messages.first(where: { $0["event_id"] as? String == segments[6] }) else {
+                return (404, ["errcode": "M_NOT_FOUND", "error": "Not found"])
+            }
+            return (200, event)
         }
         // GET /_matrix/client/v3/rooms/{room}/messages: everything in one page, then the start of the room.
         if segments.count == 6, segments[4] == room, segments[5] == "messages" {

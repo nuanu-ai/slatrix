@@ -26,7 +26,7 @@ private final class DeliveryTimeline: TimelineListener, @unchecked Sendable {
 
 /// A client of `server` signed in as `user`, keeping its stores in `scratch`.
 @MainActor
-private func signIn(_ user: String, to server: FakeHomeserver, in scratch: TemporaryDirectory) async throws -> Client {
+func signIn(_ user: String, to server: FakeHomeserver, in scratch: TemporaryDirectory) async throws -> Client {
     let client = try await ClientBuilder().homeserverUrl(url: server.url).sessionPaths(
         dataPath: scratch.path("\(user)-data").path, cachePath: scratch.path("\(user)-cache").path
     ).build()

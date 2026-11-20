@@ -176,6 +176,9 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
         center?.removePendingNotificationRequests(withIdentifiers: [identifier])
         center?.removeDeliveredNotifications(withIdentifiers: [identifier])
     }
+    func deliveredIdentifiers() async -> [String] {
+        await center?.deliveredNotifications().map(\.request.identifier) ?? []
+    }
     /// Later's reminders stay queued: `LaterReminderSchedule` keeps them to the account and its choices.
     func clear() {
         guard let center else { return }

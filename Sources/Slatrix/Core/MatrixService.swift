@@ -659,6 +659,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var jump: MessageJump?
     private(set) var homeserverURL: String?
     var notificationHandler: ((DesktopMessageNotification) -> Void)?
+    /// Takes back what a deleted message left outside the app's own lists: its banner.
+    var onMessageGone: ((_ roomID: String, _ eventID: String) -> Void)?
+    /// Messages a pass is asking about, so another pass doesn't ask again before the answer.
+    @ObservationIgnored private var asking = Set<String>()
     var notificationSessionID: UUID { sessionGeneration }
     let notificationRetries = NotificationSettingsRetryState()
     private var client: Client?
@@ -3632,5 +3636,52 @@ extension MatrixService {
         let list = rooms.entriesWithDynamicAdapters(pageSize: .max, listener: listener)
         // The dynamic list emits nothing until a filter is set; false means the list is already gone.
         return list.controller().setFilter(kind: .all(filters: [])) ? list : nil
+    }
+}
+
+extension MatrixService {
+    /// Whether a message still exists. The SDK's event cache holds a message redacted once the redaction syncs, and the
+    /// server answers with the redacted form; only that answer says no. A failed or unreadable answer keeps it.
+    func messageExists(roomID: String, eventID: String) async -> Bool {
+        guard let event = try? await requireRoom(roomID).loadOrFetchEvent(eventId: eventID) else { return true }
+        do { _ = try event.content() } catch ClientError.Generic(let message, _) {
+            // The bindings' answer for a redacted message; an unsupported event type says something else.
+            return message != "Failed to get original content"
+        } catch {}
+        return true
+    }
+
+    /// About a window of Activity rows. A question the event cache answers costs under a millisecond, one the server
+    /// answers a round trip, and a pass asks one at a time, newest first.
+    static let recheckLimit = 20
+
+    /// Asks about Activity's rows the reader hasn't opened, newest first.
+    func recheckActivity() async {
+        let rows = activity.items.filter { $0.kind == .message && !$0.opened }
+        await recheck(rows.compactMap { row in row.eventID.map { (row.roomID, $0) } }) { [activity] key in
+            activity.items.contains { $0.id == key }
+        }
+    }
+
+    /// Asks whether each message, in order and up to `recheckLimit`, still exists, and takes back each one gone. A
+    /// message `listed` no longer holds, or one another pass is asking about, is skipped. Once the pass is cancelled
+    /// or its account changes, its answers change nothing.
+    func recheck(_ messages: [(roomID: String, eventID: String)], listed: (String) -> Bool) async {
+        let session = sessionGeneration
+        for (roomID, eventID) in messages.prefix(Self.recheckLimit) {
+            guard !Task.isCancelled, session == sessionGeneration else { return }
+            let key = ActivityService.key(roomID: roomID, eventID: eventID)
+            guard listed(key), asking.insert(key).inserted else { continue }
+            let exists = await messageExists(roomID: roomID, eventID: eventID)
+            asking.remove(key)
+            guard !Task.isCancelled, session == sessionGeneration else { return }
+            if !exists, listed(key) { messageGone(roomID: roomID, eventID: eventID) }
+        }
+    }
+
+    /// A deleted message's row leaves Activity and its banner leaves Notification Center.
+    func messageGone(roomID: String, eventID: String) {
+        activity.remove(roomID: roomID, eventID: eventID)
+        onMessageGone?(roomID, eventID)
     }
 }

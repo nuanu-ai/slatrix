@@ -22,6 +22,7 @@ struct NotificationGateHostedTests {
         func add(_ request: DesktopNotificationRequest) async throws { added.append(request.message.target.eventID) }
         func remove(_ identifier: String) {}
         func clear() {}
+        func deliveredIdentifiers() async -> [String] { [] }
     }
 
     @MainActor final class Harness {
