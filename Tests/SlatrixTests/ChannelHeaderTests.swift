@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import Testing
 
 @testable import Slatrix
@@ -55,5 +57,30 @@ struct ChannelHeaderTests {
         #expect(Set(ran).count == actions.count)
         #expect(items.last?.title == "Leave channel" && items.last?.isDestructive == true)
         #expect(items.dropLast().last?.isSeparator == true)
+    }
+
+    /// How many pixels of the toolbar's conversation buttons carry colour; the rest of the capsule is grey.
+    private func accentPixels(open panel: ChannelPanel) throws -> Int {
+        let room = ChatRoom(id: "!design:example.org", name: "Design")
+        let header = ChannelHeader(matrix: .scratch(), room: room, panel: .constant(panel)) { _ in }
+        let renderer = ImageRenderer(content: header.environmentObject(AppearanceStore()))
+        renderer.scale = 2
+        let bitmap = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+        var count = 0
+        for x in 0..<bitmap.pixelsWide {
+            for y in 0..<bitmap.pixelsHigh {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), color.alphaComponent > 0.5
+                else { continue }
+                let channels = [color.redComponent, color.greenComponent, color.blueComponent]
+                if channels.max()! - channels.min()! > 0.25 { count += 1 }
+            }
+        }
+        return count
+    }
+
+    @Test("An open pane's button keeps its glyph, in the accent", arguments: [ChannelPanel.files, .pins])
+    func openPaneGlyph(panel: ChannelPanel) throws {
+        let colored = try accentPixels(open: panel)
+        #expect(colored > 20)
     }
 }

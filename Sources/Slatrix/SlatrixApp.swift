@@ -23,7 +23,8 @@ struct SlatrixApp: App {
     @StateObject private var appearance = AppearanceStore()
     var body: some Scene {
         Window("Slatrix", id: "main") {
-            RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, metrics)
+            RootView(matrix: matrix, localStore: .shared, attachmentDrafts: .shared).environmentObject(appearance)
+                .environment(\.metrics, metrics)
                 .preferredColorScheme(appearance.preferredColorScheme)
                 .background(WindowConfiguration(background: NSColor(appearance.colors.frame).withAlphaComponent(1)))
                 .frame(

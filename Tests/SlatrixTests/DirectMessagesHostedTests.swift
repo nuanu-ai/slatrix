@@ -26,7 +26,7 @@ struct DirectMessagesHostedTests {
         let metrics = Metrics(zoom: 1)
         let appearance = AppearanceStore()
         let hosting = NSHostingView(
-            rootView: RootView(matrix: matrix).environmentObject(appearance).environment(\.metrics, metrics))
+            rootView: RootView(scratch: matrix).environmentObject(appearance).environment(\.metrics, metrics))
         let window = offscreenWindow(NSSize(width: 1_440, height: 900))
         window.contentView = hosting
         window.makeKeyAndOrderFront(nil)
@@ -106,7 +106,7 @@ struct DirectMessagesHostedTests {
         _ = NSApplication.shared
         let matrix = MatrixService.scratch()
         matrix.enterPreview()
-        let hosting = NSHostingView(rootView: RootView(matrix: matrix).environmentObject(AppearanceStore()))
+        let hosting = NSHostingView(rootView: RootView(scratch: matrix).environmentObject(AppearanceStore()))
         let window = offscreenWindow(NSSize(width: 1_440, height: 900))
         window.contentView = hosting
         window.makeKeyAndOrderFront(nil)

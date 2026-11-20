@@ -20,7 +20,7 @@ struct SearchHostedTests {
             // NSApp's run loop.
             UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
             matrix.enterPreview()
-            hosting = NSHostingView(rootView: AnyView(RootView(matrix: matrix).environmentObject(AppearanceStore())))
+            hosting = NSHostingView(rootView: AnyView(RootView(scratch: matrix).environmentObject(AppearanceStore())))
             window = offscreenWindow(NSSize(width: 1_440, height: 900))
             window.contentView = hosting
             window.makeKeyAndOrderFront(nil)

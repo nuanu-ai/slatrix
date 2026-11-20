@@ -42,6 +42,7 @@ import org.matrix.rustcomponents.sdk.InReplyToDetails
 import org.matrix.rustcomponents.sdk.Mentions
 import org.matrix.rustcomponents.sdk.MessageFormat
 import org.matrix.rustcomponents.sdk.MessageType
+import org.matrix.rustcomponents.sdk.MsgLikeContent
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.ProfileDetails
 import org.matrix.rustcomponents.sdk.QueueWedgeError
@@ -219,10 +220,12 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val resume: Boolean = false,
     private val view: ConversationView = ConversationView.Timeline,
     /** The reply count whoever opened this thread was showing; it stays while the thread shows. */
-    private val openedWith: Int? = null) {
+    private val openedWith: Int? = null,
+    /** [root] is Threads' row rather than the channel's, so it shows only until the thread's own loads. */
+    listedRoot: Boolean = false) {
     @Volatile private var root = root?.asThreadRoot()
     /** The root's row as the channel holds it now; while the channel holds none, the thread's own row stands. */
-    @Volatile private var mirror = this.root
+    @Volatile private var mirror = this.root.takeUnless { listedRoot }
     /** The reply count the root carries in the channel now; null while the channel holds no root or it carries none. */
     @Volatile private var rootSummary = root?.thread?.replies
     /**
@@ -951,44 +954,6 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     private object ReadMarker
 
-    private data class Shown(val kind: MessageKind, val body: String, val html: String? = null,
-        val attachment: MessageAttachment? = null)
-
-    private fun shown(kind: MsgLikeKind): Shown = when (kind) {
-        is MsgLikeKind.Message -> {
-            fun html(formatted: FormattedBody?) = formatted?.takeIf { it.format is MessageFormat.Html }?.body
-            when (val type = kind.content.msgType) {
-                is MessageType.Text -> Shown(MessageKind.Text, kind.content.body, html(type.content.formatted))
-                is MessageType.Notice -> Shown(MessageKind.Notice, kind.content.body, html(type.content.formatted))
-                is MessageType.Emote -> Shown(MessageKind.Emote, kind.content.body, html(type.content.formatted))
-                // A caption is the attachment's text; without one the text is its name, which the row doesn't repeat.
-                is MessageType.Image -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
-                    MessageAttachment.Kind.Image, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
-                    source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long)) }
-                is MessageType.Video -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
-                    MessageAttachment.Kind.Video, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
-                    source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long, info?.duration?.toMillis())) }
-                is MessageType.Audio -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
-                    MessageAttachment.Kind.Audio, filename, info?.mimetype, info?.size?.long, null, null, source)) }
-                is MessageType.File -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
-                    MessageAttachment.Kind.File, filename, info?.mimetype, info?.size?.long, null, null, source)) }
-                is MessageType.Gallery -> Shown(MessageKind.Attachment, kind.content.body)
-                else -> Shown(MessageKind.Unsupported, kind.content.body)
-            }
-        }
-        is MsgLikeKind.UnableToDecrypt -> Shown(MessageKind.Encrypted, "Waiting for this message")
-        is MsgLikeKind.Redacted -> Shown(MessageKind.Deleted, "This message was deleted")
-        is MsgLikeKind.Sticker -> Shown(MessageKind.Attachment, kind.body)
-        is MsgLikeKind.Poll -> Shown(MessageKind.Unsupported, kind.question)
-        else -> Shown(MessageKind.Unsupported, "Unsupported message")
-    }
-
-    private fun attached(text: String, html: String?, attachment: MessageAttachment) =
-        Shown(MessageKind.Attachment, text, html, attachment)
-
-    private val ULong.long get() = coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
-    private val ULong.int get() = coerceAtMost(Int.MAX_VALUE.toULong()).toInt()
-
     /** Replies whose parent was asked for, once each. */
     private val askedFor = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
@@ -1039,22 +1004,16 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             else -> null
         }
         val content = (event.content as? TimelineItemContent.MsgLike)?.content ?: return null
-        val senderName = event.senderProfile.nameOf(event.sender)
-        val shown = shown(content.kind)
+        val eventId = (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId
+        val message = messageRow(item.uniqueId().id, eventId.takeIf { event.isRemote }, event.sender, event.senderProfile,
+            event.isOwn, event.timestamp, content)
         val failure = event.localSendState as? EventSendState.SendingFailed
-        return ConversationMessage(
-            id = item.uniqueId().id,
-            eventId = if (event.isRemote) (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId else null,
-            senderId = event.sender, senderName = senderName, body = shown.body,
-            formattedBody = shown.html,
-            timestamp = event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong(), kind = shown.kind,
+        return message.copy(
             sendState = when (event.localSendState) {
                 is EventSendState.NotSentYet -> MessageSendState.Sending
                 is EventSendState.SendingFailed -> MessageSendState.Failed
                 else -> MessageSendState.Sent
             },
-            own = event.isOwn, initials = AvatarPlaceholder.initials(senderName),
-            colorIndex = AvatarPlaceholder.colorIndex(senderName),
             transactionId = (event.eventOrTransactionId as? EventOrTransactionId.TransactionId)?.transactionId,
             canRetry = failure != null && failure.error !is QueueWedgeError.ExpiredAccessToken &&
                 failure.error !is QueueWedgeError.MissingMediaContent && failure.error !is QueueWedgeError.InvalidMimeType,
@@ -1062,24 +1021,72 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             uploadProgress = (event.localSendState as? EventSendState.NotSentYet)?.progress?.progress
                 ?.takeIf { it.total > 0u }?.let { it.current.toFloat() / it.total.toFloat() },
             // An edit goes out as text, so only a text message keeps its kind.
-            editable = event.isEditable && shown.kind == MessageKind.Text,
-            edited = (content.kind as? MsgLikeKind.Message)?.content?.isEdited == true,
+            editable = event.isEditable && message.kind == MessageKind.Text,
             readBy = event.readReceipts.keys.toList(),
             reactions = event.reactions.map { reaction ->
                 MessageReaction(reaction.key, reaction.senders.size, reaction.senders.any { it.senderId == ownUserId },
                     reaction.senders.map { it.senderId })
             },
-            thread = content.threadSummary?.let { summary ->
-                val latest = summary.latestEvent() as? EmbeddedEventDetails.Ready
-                MessageThread(summary.numReplies().coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
-                    latest?.let { it.senderProfile.nameOf(it.sender) },
-                    latest?.timestamp?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong(),
-                    (latest?.senderProfile as? ProfileDetails.Ready)?.avatarUrl)
-            },
-            replyTo = content.inReplyTo?.let { replyPreview(it, (event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId) },
+            replyTo = content.inReplyTo?.let { replyPreview(it, eventId) },
             repliedToThread = content.threadRoot == null && content.inReplyTo?.let { quotesOwnWords(event.sender, content.kind, it) } == true,
-            attachment = shown.attachment?.let { if (event.isOwn) it.copy(own = true) else it },
-            avatarUrl = (event.senderProfile as? ProfileDetails.Ready)?.avatarUrl,
         ).also { it.runs }
     }
 }
+
+/**
+ * The row a message shows as from its event alone, as a timeline maps it and as Threads maps a thread's root; a
+ * timeline's row adds its send state, receipts, reactions and the message it replies to.
+ */
+internal fun messageRow(id: String, eventId: String?, sender: String, profile: ProfileDetails, own: Boolean, timestamp: ULong,
+    content: MsgLikeContent): ConversationMessage {
+    val senderName = profile.nameOf(sender)
+    val shown = shown(content.kind)
+    return ConversationMessage(id, eventId, sender, senderName, shown.body, shown.html, timestamp.long, shown.kind,
+        MessageSendState.Sent, own, AvatarPlaceholder.initials(senderName), AvatarPlaceholder.colorIndex(senderName),
+        edited = (content.kind as? MsgLikeKind.Message)?.content?.isEdited == true,
+        thread = content.threadSummary?.let { summary ->
+            val latest = summary.latestEvent() as? EmbeddedEventDetails.Ready
+            MessageThread(summary.numReplies().int, latest?.let { it.senderProfile.nameOf(it.sender) }, latest?.timestamp?.long,
+                (latest?.senderProfile as? ProfileDetails.Ready)?.avatarUrl)
+        },
+        attachment = shown.attachment?.let { if (own) it.copy(own = true) else it },
+        avatarUrl = (profile as? ProfileDetails.Ready)?.avatarUrl)
+}
+
+private data class Shown(val kind: MessageKind, val body: String, val html: String? = null,
+    val attachment: MessageAttachment? = null)
+
+private fun shown(kind: MsgLikeKind): Shown = when (kind) {
+    is MsgLikeKind.Message -> {
+        fun html(formatted: FormattedBody?) = formatted?.takeIf { it.format is MessageFormat.Html }?.body
+        when (val type = kind.content.msgType) {
+            is MessageType.Text -> Shown(MessageKind.Text, kind.content.body, html(type.content.formatted))
+            is MessageType.Notice -> Shown(MessageKind.Notice, kind.content.body, html(type.content.formatted))
+            is MessageType.Emote -> Shown(MessageKind.Emote, kind.content.body, html(type.content.formatted))
+            // A caption is the attachment's text; without one the text is its name, which the row doesn't repeat.
+            is MessageType.Image -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                MessageAttachment.Kind.Image, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
+                source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long)) }
+            is MessageType.Video -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                MessageAttachment.Kind.Video, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
+                source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long, info?.duration?.toMillis())) }
+            is MessageType.Audio -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                MessageAttachment.Kind.Audio, filename, info?.mimetype, info?.size?.long, null, null, source)) }
+            is MessageType.File -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
+                MessageAttachment.Kind.File, filename, info?.mimetype, info?.size?.long, null, null, source)) }
+            is MessageType.Gallery -> Shown(MessageKind.Attachment, kind.content.body)
+            else -> Shown(MessageKind.Unsupported, kind.content.body)
+        }
+    }
+    is MsgLikeKind.UnableToDecrypt -> Shown(MessageKind.Encrypted, "Waiting for this message")
+    is MsgLikeKind.Redacted -> Shown(MessageKind.Deleted, "This message was deleted")
+    is MsgLikeKind.Sticker -> Shown(MessageKind.Attachment, kind.body)
+    is MsgLikeKind.Poll -> Shown(MessageKind.Unsupported, kind.question)
+    else -> Shown(MessageKind.Unsupported, "Unsupported message")
+}
+
+private fun attached(text: String, html: String?, attachment: MessageAttachment) =
+    Shown(MessageKind.Attachment, text, html, attachment)
+
+private val ULong.long get() = coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
+private val ULong.int get() = coerceAtMost(Int.MAX_VALUE.toULong()).toInt()

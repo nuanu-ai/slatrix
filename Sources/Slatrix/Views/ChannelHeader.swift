@@ -48,7 +48,8 @@ struct ChannelHeader: View {
         return Button {
             panel = shown ? nil : value
         } label: {
-            Image(systemName: shown ? symbol + ".fill" : symbol).font(m.font(.body))
+            // The fill where the symbol has one; paperclip has none, so it stays as it is.
+            Image(systemName: symbol).symbolVariant(shown ? .fill : .none).font(m.font(.body))
                 .foregroundStyle(shown ? appearance.colors.accent : appearance.colors.textSecondary)
                 .frame(width: m.iconButton, height: m.iconButton)
         }.buttonStyle(.icon).help(label)

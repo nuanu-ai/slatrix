@@ -34,7 +34,7 @@ import Foundation
     private var suspended: [String: Session] = [:]
     private var generation = UUID()
 
-    init(store: AttachmentDraftStore = .shared) { self.store = store }
+    init(store: AttachmentDraftStore) { self.store = store }
 
     func open(accountID: String?) async {
         let request = UUID()

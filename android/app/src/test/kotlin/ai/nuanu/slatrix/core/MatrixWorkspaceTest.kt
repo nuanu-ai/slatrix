@@ -208,6 +208,24 @@ class MatrixWorkspaceTest {
         workspace.close()
     }
 
+    // capability: thread.open
+    @Test fun aRootFromThreadsGivesWayToTheThreadsOwnOnceItLoads() = runTest {
+        val client = WorkspaceClient()
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val waiting = ConversationMessage("\$root", "\$root", "@mira:example.org", "Mira Chen", "Waiting for this message", null,
+            1_700_000_000_000L, MessageKind.Encrypted, MessageSendState.Sent, false, "MC", 0)
+        val item = ThreadFeedItem("!alpha:example.org", "Alpha", false, "\$root", ThreadFeedMessage("Mira Chen", "MC", 0, "", 1_000),
+            null, replies = 1, unread = false, rootRow = waiting)
+
+        workspace.open(workspaceRoom("!alpha:example.org", "Alpha"), item)
+        val conversation = requireNotNull(workspace.selected.first { it?.conversation != null }?.conversation)
+        client.emit(listOf(TimelineDiff.PushBack(conversationItem("root", "\$root", "Ship?")),
+            TimelineDiff.PushBack(conversationItem("reply", "\$reply", "Friday"))))
+        val opened = conversation.state.first { it.rows.any { row -> (row as? ConversationMessage)?.body == "Friday" } }
+        assertEquals("The thread decrypted its root since Threads listed it", "Ship?", (opened.rows.first() as ConversationMessage).body)
+        workspace.close()
+    }
+
     @Test fun retryingAThreadThatFailedToOpenKeepsTheRootAndCountItOpenedWith() = runTest {
         val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
         val root = ConversationMessage("channel-row", "\$root", "@sam:example.org", "Sam", "Ship?", null, 1_000, MessageKind.Text,

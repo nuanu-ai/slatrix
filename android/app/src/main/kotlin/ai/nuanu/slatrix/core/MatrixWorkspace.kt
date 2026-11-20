@@ -28,8 +28,10 @@ data class OpenChannel(
     val threadRoot: String? = null,
     /** The message it opens at, highlighted. */
     val at: String? = null,
-    /** A thread's root as the channel showed it, so it shows at once. */
+    /** A thread's root as the channel or Threads showed it, so it shows at once. */
     val root: ConversationMessage? = null,
+    /** [root] is Threads' row, which the thread's own replaces once it loads. */
+    val listedRoot: Boolean = false,
     /** [at] is where its unread messages start, which it opens at without a highlight. */
     val resume: Boolean = false,
     /** The reply count the thread's opener showed, such as a Threads item's. */
@@ -91,7 +93,8 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                     composerRoom = checkNotNull(client.getRoom(requested.room.id))
                     currentCoroutineContext().ensureActive()
                     val timeline = kept?.first?.also { it.revisit() } ?: MatrixConversation(session, checkNotNull(conversationRoom),
-                        requested.threadRoot, requested.at, requested.root, requested.resume, openedWith = requested.openedWith)
+                        requested.threadRoot, requested.at, requested.root, requested.resume, openedWith = requested.openedWith,
+                        listedRoot = requested.listedRoot)
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
                     if (generation.get() == token) {
@@ -120,17 +123,19 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
 
     /** Opens [room]; a channel opened without [at] opens where its unread messages start, as on the Mac. */
     fun open(room: RoomSummary, threadRoot: String? = null, at: String? = null, root: ConversationMessage? = null,
-        openedWith: Int? = null) {
+        openedWith: Int? = null, listedRoot: Boolean = false) {
         val resume = room.resumeAt?.takeIf { at == null && threadRoot == null }
-        select(OpenChannel(room, threadRoot = threadRoot, at = at ?: resume, root = root, resume = resume != null,
-            openedWith = openedWith))
+        select(OpenChannel(room, threadRoot = threadRoot, at = at ?: resume, root = root, listedRoot = listedRoot,
+            resume = resume != null, openedWith = openedWith))
     }
 
     /** Opens a thread from its Threads [thread] item. */
-    fun open(room: RoomSummary, thread: ThreadFeedItem) = open(room, thread.rootId, openedWith = thread.replies)
+    fun open(room: RoomSummary, thread: ThreadFeedItem) =
+        open(room, thread.rootId, root = thread.rootRow, openedWith = thread.replies, listedRoot = true)
 
     /** Opens [open] again, as it was asked for, after it failed to. */
-    fun retry(open: OpenChannel) = open(open.room, open.threadRoot, open.at.takeUnless { open.resume }, open.root, open.openedWith)
+    fun retry(open: OpenChannel) =
+        open(open.room, open.threadRoot, open.at.takeUnless { open.resume }, open.root, open.openedWith, open.listedRoot)
 
     /**
      * Opens [room] at [eventId], highlighted; a reply in the thread [threadRoot] opens the channel at the root, for the
