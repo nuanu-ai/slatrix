@@ -31,9 +31,13 @@ struct NotificationGateHostedTests {
         let transport = Transport()
         let window: NSWindow
         let hosting: NSHostingView<AnyView>
+        /// Drafts and attachment drafts of its own, away from the development build's.
+        private let local: TemporaryDirectory
 
-        init(_ cached: [TimelineItem]) {
+        init(_ cached: [TimelineItem]) throws {
             _ = NSApplication.shared
+            local = try TemporaryDirectory()
+            let key: @Sendable (String) async throws -> Data = { _ in Data(repeating: 0x5a, count: 32) }
             UserDefaults.standard.removeObject(forKey: "room.@me:example.org")
             room = FakeOpenRoom("!gate:example.org", cached: cached)
             matrix.configureRoomOpenForChecks(
@@ -45,7 +49,14 @@ struct NotificationGateHostedTests {
             delivery.useAccount("@me:example.org")
             hosting = NSHostingView(
                 rootView: AnyView(
-                    RootView(matrix: matrix, notifications: delivery).environmentObject(appearance)
+                    RootView(
+                        matrix: matrix,
+                        localStore: ProtectedLocalStateStore(
+                            directory: ProtectedLocalStateStore.directory(in: local.url), keyProvider: key),
+                        attachmentDrafts: AttachmentDraftStore(
+                            directory: AttachmentDraftStore.directory(in: local.url), keyProvider: key),
+                        notifications: delivery
+                    ).environmentObject(appearance)
                         .environment(\.metrics, Metrics(zoom: 1))))
             window = offscreenWindow(NSSize(width: 1_200, height: 800), key: true)
             window.contentView = hosting
@@ -122,7 +133,7 @@ struct NotificationGateHostedTests {
     // capability: notifications.alert
     @Test("A message that lands at the newest rows of a window the reader can read is never announced")
     func seenIsNotAnnounced() async throws {
-        let harness = Harness(Self.messages(5))
+        let harness = try Harness(Self.messages(5))
         defer { harness.close() }
         #expect(await harness.open(showing: "$m4"))
         try harness.alert("$new")
@@ -137,7 +148,7 @@ struct NotificationGateHostedTests {
     @Test("A message that lands below a reader scrolled up inside a message taller than the pane is announced at once")
     func belowTallMessageIsAnnounced() async throws {
         let tall = String(repeating: "A long line of words that wraps across the conversation pane. ", count: 200)
-        let harness = Harness([
+        let harness = try Harness([
             FakeTimelineItem(textEvent("$first", body: "First")), FakeTimelineItem(textEvent("$tall", body: tall)),
         ])
         defer { harness.close() }

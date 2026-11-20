@@ -152,14 +152,15 @@ actor ProtectedLocalStateStore {
         directory: URL? = nil,
         keyProvider: @escaping @Sendable (String) async throws -> Data = { account in
             try await Task.detached(priority: .userInitiated) {
-                try SecureSessionStore.localStateKey(accountID: account)
+                try SecureSessionStore.shared.localStateKey(accountID: account)
             }.value
         }
     ) {
-        self.directory =
-            directory ?? AppPaths.applicationSupport.appendingPathComponent("ProtectedLocalState", isDirectory: true)
+        self.directory = directory ?? Self.directory(in: AppPaths.applicationSupport)
         self.keyProvider = keyProvider
     }
+
+    static func directory(in root: URL) -> URL { root.appendingPathComponent("ProtectedLocalState", isDirectory: true) }
 
     func open(accountID: String) async throws -> ProtectedLocalStateAccess {
         guard SecureSessionStore.validAccountID(accountID) else { throw ProtectedLocalStateError.invalidData }
@@ -208,7 +209,9 @@ actor ProtectedLocalStateStore {
         records[access.accountID] = record
     }
 
-    func fileURL(_ accountID: String) -> URL {
+    func fileURL(_ accountID: String) -> URL { Self.fileURL(accountID, in: directory) }
+
+    static func fileURL(_ accountID: String, in directory: URL) -> URL {
         let digest = SHA256.hash(data: Data(accountID.utf8)).map { String(format: "%02x", $0) }.joined()
         return directory.appendingPathComponent(digest + ".vault", isDirectory: false)
     }
@@ -265,6 +268,35 @@ enum ProtectedLocalStateCodec {
             }
             return payload.state
         } catch { throw ProtectedLocalStateError.invalidData }
+    }
+
+    /// Whether `folder` exists, refusing anything there but this user's own folder reached without a link.
+    static func existingFolder(_ folder: URL) throws -> Bool {
+        var info = stat()
+        guard lstat(folder.path, &info) == 0 else {
+            if errno == ENOENT { return false }
+            throw ProtectedLocalStateError.unavailable
+        }
+        guard info.st_mode & S_IFMT == S_IFDIR, info.st_uid == geteuid() else {
+            throw ProtectedLocalStateError.invalidData
+        }
+        return true
+    }
+
+    /// Moves whatever is at `url`, a link included, to a name of its own beside it, and does nothing when nothing is
+    /// there. Callers check its folder with `existingFolder` first. Copies are kept, and nothing sweeps them.
+    static func setAside(_ url: URL) throws {
+        let parent = url.deletingLastPathComponent()
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else {
+            if errno == ENOENT { return }
+            throw ProtectedLocalStateError.unavailable
+        }
+        let folder = Darwin.open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard folder >= 0 else { throw ProtectedLocalStateError.unavailable }
+        defer { Darwin.close(folder) }
+        let aside = parent.appendingPathComponent(url.lastPathComponent + ".set-aside-" + UUID().uuidString)
+        guard rename(url.path, aside.path) == 0, fsync(folder) == 0 else { throw ProtectedLocalStateError.unavailable }
     }
 
     static func prepareDirectory(_ directory: URL) throws {

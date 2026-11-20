@@ -26,11 +26,14 @@ struct ActivityHostedTests {
             client: FakeClient(rooms: [room]), roomList: FakeRoomListService(),
             user: ChatUser(id: "@me:example.org", name: "Me"))
         matrix.status = .ready
-        let store = ProtectedLocalStateStore(
-            directory: local.url, keyProvider: { _ in Data(repeating: 0x5a, count: 32) })
+        let vaultKey: @Sendable (String) async throws -> Data = { _ in Data(repeating: 0x5a, count: 32) }
+        let store = ProtectedLocalStateStore(directory: local.url, keyProvider: vaultKey)
+        let files = AttachmentDraftStore(
+            directory: AttachmentDraftStore.directory(in: local.url), keyProvider: vaultKey)
         let hosting = NSHostingView(
             rootView: AnyView(
-                RootView(matrix: matrix, localStore: store).environmentObject(AppearanceStore())
+                RootView(matrix: matrix, localStore: store, attachmentDrafts: files)
+                    .environmentObject(AppearanceStore())
                     .environment(\.metrics, Metrics(zoom: 1))))
         let window = offscreenWindow(NSSize(width: 1_200, height: 800), key: key)
         window.contentView = hosting
