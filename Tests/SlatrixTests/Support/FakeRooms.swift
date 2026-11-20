@@ -128,6 +128,10 @@ final class FakeClient: Client, @unchecked Sendable {
     override func getRoom(roomId: String) throws -> Room? { roomList.first { $0.id() == roomId } }
     override func spaceService() async -> SpaceService { spaces }
     override func addRecentEmoji(emoji: String) async throws {}
+    private var serverLogout = false
+    /// Whether anything asked the server to end this session.
+    var loggedOut: Bool { lock.withLock { serverLogout } }
+    override func logout() async throws { lock.withLock { serverLogout = true } }
 
     private var downloadCount = 0
     var downloads: Int { lock.withLock { downloadCount } }

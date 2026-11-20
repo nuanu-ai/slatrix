@@ -1304,7 +1304,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         try beginLogout()
         let owner = logoutOwner
         defer { authOperation = nil }
-        if let originalClient = client {
+        // The sample workspace never signed in, so whatever client a failed start left belongs to no one here.
+        if !owner.isPreview, let originalClient = client {
             do { try await originalClient.logout() } catch {
                 try validateLogout(owner)
                 if error is CancellationError { throw error }
@@ -1333,11 +1334,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard client == nil else { throw CancellationError() }
         var deletionError: Error?
         let credentials = credentials
-        do { try await Task.detached(priority: .userInitiated) { try credentials.delete() }.value } catch {
-            deletionError = error
+        if !owner.isPreview {
+            do { try await Task.detached(priority: .userInitiated) { try credentials.delete() }.value } catch {
+                deletionError = error
+            }
+            // While Keychain still holds the session it can restore into this store, so keep it.
+            if deletionError == nil, let storeID { SessionStores.remove(storeID) }
         }
-        // While Keychain still holds the session it can restore into this store, so keep it.
-        if deletionError == nil, let storeID { SessionStores.remove(storeID) }
         try validateLogout(stoppedOwner)
         sessionCleanupPending = deletionError != nil
         // Keep the old account published through credential deletion; exposing
