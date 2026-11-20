@@ -192,8 +192,7 @@ struct TimelineView: View {
     private var entries: [TimelineEntry] {
         let rows = layout.rows(
             messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
-            groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil,
-            startsAtUnread: startsAtUnread)
+            groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil)
         let context = matrix.messageActionContext
         let offline = matrix.connectionState == .offline
         let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
@@ -429,12 +428,10 @@ struct TimelineView: View {
     }
 
     /// A cache serves one timeline, so `threadRootEventID` never changes under it.
-    func rows(
-        _ messages: [ChatMessage], firstUnreadEventID: String?, groups: Bool, threadRootEventID: String? = nil,
-        startsAtUnread: Bool = false
-    ) -> [TimelineLayout.Row] {
-        // An unread visit whose first rows came without the read marker takes its line from a later snapshot.
-        if !messages.isEmpty, !opened || startsAtUnread && unreadBoundary == nil {
+    func rows(_ messages: [ChatMessage], firstUnreadEventID: String?, groups: Bool, threadRootEventID: String? = nil)
+        -> [TimelineLayout.Row]
+    {
+        if !opened, !messages.isEmpty {
             opened = true
             if let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID }) {
                 unreadBoundary = firstUnreadEventID

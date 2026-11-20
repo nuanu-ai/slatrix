@@ -54,14 +54,12 @@ struct TimelineHostedTests {
         var threadRootID: String?
         /// A new timeline of the same conversation, as the app opens one at an older message and back.
         var timeline = 0
-        /// An unread conversation, opened to start at its New line.
-        var startsAtUnread = false
         var body: some View {
             TimelineView(
                 matrix: service, room: room, thread: thread, threadRootID: threadRootID, savedIDs: [],
                 onThread: { _ in },
                 onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onReport: onReport,
-                startsAtUnread: startsAtUnread, insets: TimelineHostedTests.insets
+                insets: TimelineHostedTests.insets
             )
             // As the app's room pane, a table per timeline the service opens.
             .id("\(room.id):\(timeline):\(service.shownTimelineID)")
@@ -1101,30 +1099,6 @@ struct TimelineHostedTests {
         harness.hosting.rootView = pane
         await settle(harness) { harness.rowCount > 0 }
         #expect(harness.firstVisibleBody == root.body)
-    }
-
-    @Test("An unread visit whose read marker comes after its first rows opens at the New line if the reader hasn't scrolled")
-    func lateMarkerPlacesLine() async throws {
-        let items = (0..<40).map {
-            FakeTimelineItem(textEvent("$late-\($0)", body: "Late \($0)", sender: "@other:example.org"))
-        }
-        let room = FakeOpenRoom(Self.room.id, cached: items)
-        let harness = Harness(opening: room)
-        defer { harness.close() }
-        var fixture = harness.fixture(Self.room)
-        fixture.startsAtUnread = true
-        harness.hosting.rootView = fixture
-        await harness.service.selectRoom(room.id())
-        await settle(harness) { harness.cell(showing: "$late-39") != nil }
-        func lineTop() -> CGFloat? {
-            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }
-                .first { $0.window != nil && $0.entry?.id == "unread" }.map { $0.convert($0.bounds, to: nil).maxY }
-        }
-        try #require(room.timelines.all.first).emit([
-            .insert(index: 10, value: FakeTimelineItem(virtual: .readMarker))
-        ])
-        await settle(harness) { lineTop() != nil }
-        #expect(lineTop().map { abs($0 - harness.headerBottom) < 1 } == true)
     }
 
     // capability: message.react.picker

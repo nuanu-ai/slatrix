@@ -309,11 +309,7 @@ struct TimelineTable: NSViewRepresentable {
                 }
                 return entry.message.senderID == me && entry.message.sendState != "sent"
             }
-        // A New line that comes after the rows opens an unread visit there, unless the reader has moved.
-        let line =
-            configuration.startsAtUnread && !scrolledByReader && index["unread"] == nil
-            && next.contains { $0.id == "unread" }
-        preservingPosition(keeping: sent ? .bottom : line ? .anchored(rowID: "unread", offset: 0) : nil) {
+        preservingPosition(keeping: sent ? .bottom : nil) {
             if !difference.isEmpty {
                 NSAnimationContext.beginGrouping()
                 NSAnimationContext.current.duration = 0
