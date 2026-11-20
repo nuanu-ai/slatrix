@@ -1,5 +1,5 @@
 {
-  "about": "How a conversation's row shows it is unread, as in Slack: a red count for mentions and for unread direct messages, a bold name for any other unread channel. A muted conversation shows only mentions, or a name marked unread by hand. Room fields default to false, 0 and \"join\": messages is the unread message count, notifications the server's notification count, mentions its highlight count, markedUnread m.marked_unread. A badge is \"none\", \"bold\" or the red count's label.",
+  "about": "How a conversation's row shows it is unread, as in Slack: a red count for mentions and for unread direct messages, a bold name for any other unread channel. A muted conversation shows only mentions, or a name marked unread by hand. Room fields default to false, 0 and \"join\": messages is the unread message count, notifications the server's notification count, mentions its highlight count, markedUnread m.marked_unread. A badge is \"none\", \"bold\" or the red count's label. A combined count is the red counts added up, which the Dock shows in full.",
   "badge": [
     { "name": "A read channel shows nothing", "room": {}, "badge": "none" },
     { "name": "Unread messages make a channel's name bold", "room": { "messages": 3 }, "badge": "bold" },
@@ -35,20 +35,28 @@
     {
       "name": "Nothing unread but a muted channel shows nothing",
       "rooms": [{}, { "messages": 7, "muted": true }],
-      "badge": "none"
+      "badge": "none",
+      "count": 0
     },
-    { "name": "Any bold row makes it bold", "rooms": [{}, { "messages": 3 }], "badge": "bold" },
+    { "name": "Any bold row makes it bold", "rooms": [{}, { "messages": 3 }], "badge": "bold", "count": 0 },
     {
       "name": "Counts add up",
       "rooms": [{ "messages": 3 }, { "mentions": 2 }, { "direct": true, "messages": 4 }],
-      "badge": "6"
+      "badge": "6",
+      "count": 6
     },
     {
       "name": "A direct conversation adds its row's count, and a channel's notifications add nothing",
       "rooms": [{ "direct": true, "messages": 4, "notifications": 2 }, { "notifications": 3 }],
-      "badge": "4"
+      "badge": "4",
+      "count": 4
     },
-    { "name": "A total above 99 reads 99+", "rooms": [{ "mentions": 60 }, { "direct": true, "messages": 60 }], "badge": "99+" },
+    {
+      "name": "A total above 99 reads 99+",
+      "rooms": [{ "mentions": 60 }, { "direct": true, "messages": 60 }],
+      "badge": "99+",
+      "count": 120
+    },
     {
       "name": "Left and invited conversations and workspaces add nothing",
       "rooms": [
@@ -56,7 +64,8 @@
         { "messages": 2, "membership": "invite" },
         { "mentions": 2, "space": true }
       ],
-      "badge": "none"
+      "badge": "none",
+      "count": 0
     }
   ]
 }

@@ -1093,7 +1093,8 @@ struct WindowHostedTests {
         harness.menu("preferences")
         #expect(await eventually { press("Account") })
         #expect(await eventually { press("Leave preview") })
-        #expect(await eventually { !harness.matrix.isPreview })
+        // The sign-in screen's own way back into the sample.
+        #expect(await eventually { !harness.accessible("Try it without signing in").isEmpty })
         #expect(harness.accessible("Sign out of Slatrix?").isEmpty)
     }
 }

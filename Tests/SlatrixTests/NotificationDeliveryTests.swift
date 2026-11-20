@@ -401,6 +401,7 @@ struct NotificationTextTests {
         var room: String
         var sender: String
         var direct: Bool
+        var reply: Bool?
         var body: String
         var title: String
         var text: String
@@ -411,12 +412,16 @@ struct NotificationTextTests {
 
     private static let spec = Result { try SharedSpec.decode("spec/notification-text.json", as: Spec.self) }
 
-    /// The body passes through Activity's preview first, as a synced notification's does.
-    @Test("A notification reads as in every shared case", arguments: try spec.get().cases)
+    /// A synced notification's body passes through Activity's preview first; a Later reminder's comes from its message.
+    @Test("A notification and a Later reminder read as in every shared case", arguments: try spec.get().cases)
     func text(spec: Case) {
-        let shown = DesktopMessageNotification.message(
+        let reply = spec.reply ?? false
+        let synced = DesktopMessageNotification.message(
             room: spec.room, sender: spec.sender, direct: spec.direct,
-            body: ActivityService.previewBody(spec.body, formatted: nil))
-        #expect(shown.title == spec.title && shown.text == spec.text)
+            body: ActivityService.previewBody(spec.body, formatted: nil, reply: reply))
+        let later = DesktopMessageNotification.message(
+            room: spec.room, sender: spec.sender, direct: spec.direct, body: spec.body, reply: reply)
+        #expect(synced.title == spec.title && synced.text == spec.text)
+        #expect(later.title == spec.title && later.text == spec.text)
     }
 }

@@ -76,13 +76,15 @@ enum ActivityBadge {
             if let content = try? event.content() {
                 guard case .messageLike(let like) = content else { return nil }
                 switch like {
-                case .roomMessage(let type, _):
+                case .roomMessage(let type, let inReplyTo):
+                    let reply = inReplyTo != nil
                     switch type {
-                    case .text(let value): body = Self.previewBody(value.body, formatted: value.formatted, names: names)
+                    case .text(let value):
+                        body = Self.previewBody(value.body, formatted: value.formatted, names: names, reply: reply)
                     case .notice(let value):
-                        body = Self.previewBody(value.body, formatted: value.formatted, names: names)
+                        body = Self.previewBody(value.body, formatted: value.formatted, names: names, reply: reply)
                     case .emote(let value):
-                        body = Self.previewBody(value.body, formatted: value.formatted, names: names)
+                        body = Self.previewBody(value.body, formatted: value.formatted, names: names, reply: reply)
                     default: body = "Shared an attachment"
                     }
                 case .poll(let question): body = "Poll: " + String(question.prefix(4096))
@@ -120,12 +122,15 @@ enum ActivityBadge {
         "\(roomID.utf8.count):\(roomID)\(eventID)"
     }
 
-    nonisolated static func previewBody(_ body: String, formatted: FormattedBody?, names: [String: String] = [:])
+    nonisolated static func previewBody(
+        _ body: String, formatted: FormattedBody?, names: [String: String] = [:], reply: Bool = false
+    )
         -> String
     {
         String(
             MatrixMapping.previewText(
-                DesktopMessageNotification.withoutReplyFallback(body), formatted: formatted, names: names
+                reply ? DesktopMessageNotification.withoutReplyFallback(body) : body, formatted: formatted,
+                names: names
             ).prefix(4096))
     }
 

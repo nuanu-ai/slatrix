@@ -34,6 +34,7 @@ struct UnreadBadgeTests {
         var name: String
         var rooms: [Room]
         var badge: String
+        var count: Int
         var testDescription: String { name }
     }
 
@@ -69,8 +70,7 @@ struct UnreadBadgeTests {
         arguments: try SharedSpec.decode("spec/unread-badge.json", as: Spec.self).combined)
     func dock(spec: Combined) {
         let rooms = spec.rooms.map(\.chatRoom)
-        let count = UnreadBadge.dock(rooms, notifications: true)
-        #expect((count > 0 ? UnreadBadge.label(count) : "none") == (spec.badge == "bold" ? "none" : spec.badge))
+        #expect(UnreadBadge.dock(rooms, notifications: true) == spec.count)
         #expect(UnreadBadge.dock(rooms, notifications: false) == 0)
     }
 }
