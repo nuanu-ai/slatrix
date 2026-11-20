@@ -51,7 +51,7 @@ class ThreadScreenshots(private val dark: Boolean) {
             message("b", "Mira", "Great, sending the invite now.", noon + 9 * 60_000L),
         )
         // The moment it opens: the channel's root, with the replies still on their way.
-        var state by mutableStateOf(ConversationState(rows.take(1), loading = false, hasMore = true))
+        var state by mutableStateOf(ConversationState(rows.take(1), loading = false, hasMore = true, replies = 2))
         var draft by mutableStateOf(ComposerState(loading = false))
         compose.setContent {
             SlatrixTheme(dark = dark) {
@@ -60,7 +60,7 @@ class ThreadScreenshots(private val dark: Boolean) {
             }
         }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/Thread-opening-${if (dark) "dark" else "light"}.png")
-        state = ConversationState(rows, loading = false, hasMore = false)
+        state = ConversationState(rows, loading = false, hasMore = false, replies = 2)
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/Thread-${if (dark) "dark" else "light"}.png")
         // Slack's Aa open over a draft with each kind of format.
         val text = "Agenda for the call\nreview the launch list\nsee docs"

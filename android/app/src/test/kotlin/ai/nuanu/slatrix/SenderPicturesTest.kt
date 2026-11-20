@@ -61,7 +61,7 @@ class SenderPicturesTest {
     @Test fun anActivityItemShowsItsSendersPicture() {
         show {
             ActivityScreen(listOf(ActivityItem("1", "!team:example.org", "\$1", "design", false, "Sam", "S", 0, "Can you review?", 0,
-                ActivityKind.Mention, null, avatarUrl = "mxc://example.org/sam")), {}, { _, _ -> })
+                ActivityKind.Mention, null, avatarUrl = "mxc://example.org/sam")), {}, {})
         }
         assertAsked("mxc://example.org/sam")
     }
@@ -71,7 +71,7 @@ class SenderPicturesTest {
         val thread = ThreadFeedItem("!design:example.org", "design", false, "\$root",
             ThreadFeedMessage("Sam", "S", 0, "Shall we ship?", 1_000, "mxc://example.org/sam"),
             ThreadFeedMessage("Mira", "M", 1, "Yes, Friday", 2_000, "mxc://example.org/mira"), replies = 3, unread = true)
-        show { ActivityScreen(emptyList(), {}, { _, _ -> }) { ThreadsFeed(ThreadFeedState(listOf(thread), loading = false), it) } }
+        show { ActivityScreen(emptyList(), {}, {}) { ThreadsFeed(ThreadFeedState(listOf(thread), loading = false), it) } }
         compose.onNodeWithText("Threads").performClick()
         assertAsked("mxc://example.org/sam")
     }

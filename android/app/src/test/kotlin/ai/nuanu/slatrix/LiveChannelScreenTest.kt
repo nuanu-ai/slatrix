@@ -567,16 +567,21 @@ class LiveChannelScreenTest {
     }
 
     // capability: thread.open
-    @Test fun tappingAMessagesRepliesOpensItsThread() {
+    @Test fun aMessagesRepliesBarOpensItsThreadWithTheCountItShowsAndItsMenuWithNone() {
+        var counted: Pair<String, Int>? = null
         var opened: String? = null
         compose.setContent {
             SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(listOf(message("Can we ship Friday?", 0).copy(thread = MessageThread(3, "Sam", null))),
-                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
-                    onOpenThread = { opened = it })
+                // The device counts no replies on it; the server's list of the room's threads counts five.
+                LiveChannelScreen(room, ConversationState(listOf(message("Can we ship Friday?", 0).copy(thread = MessageThread(0, null, null),
+                    listedThread = MessageThread(5, "Sam", null))), loading = false, hasMore = false), ComposerState(loading = false),
+                    {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread = { opened = it }, onOpenReplies = { root, replies -> counted = root to replies })
             }
         }
-        compose.onNodeWithText("3 replies", useUnmergedTree = true).performTouchInput { click() }
+        compose.onNodeWithText("5 replies", useUnmergedTree = true).performTouchInput { click() }
+        compose.runOnIdle { assertEquals("\$Can we ship Friday?" to 5, counted) }
+        compose.onNodeWithText("Can we ship Friday?").performTouchInput { longClick() }
+        compose.onNodeWithText("Reply in thread").performClick()
         compose.runOnIdle { assertEquals("\$Can we ship Friday?", opened) }
     }
 
@@ -606,6 +611,18 @@ class LiveChannelScreenTest {
             }
         }
         compose.onNodeWithText("2 replies", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun aMessageWhoseThreadCountsNoRepliesShowsNoRepliesBar() {
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(message("Review: two nits", 0).copy(thread = MessageThread(0, null, null),
+                    listedThread = MessageThread(0, null, null))),
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread = {})
+            }
+        }
+        compose.onNodeWithText("Review: two nits", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("0 replies", useUnmergedTree = true).assertDoesNotExist()
     }
 
     // capability: thread.send-to-channel

@@ -202,9 +202,9 @@ class MatrixConversationTest {
         room.threads = listOf(ThreadListItem(ThreadListItemEvent("\$root", 1_700_000_000_000u, "@mira:example.org",
             ProfileDetails.Unavailable, false, null), reply, 2u))
         val conversation = MatrixConversation(backgroundScope, room)
-        val rows = conversation.state.first { state -> state.rows.messages.any { it.thread != null } }.rows.messages
-        assertEquals(MessageThread(2, "Sam Okafor", 1_700_000_100_000L, "mxc://example.org/sam"), rows.single { it.body == "PR 417" }.thread)
-        assertNull(rows.single { it.body == "Hello" }.thread)
+        val rows = conversation.state.first { state -> state.rows.messages.any { it.shownThread != null } }.rows.messages
+        assertEquals(MessageThread(2, "Sam Okafor", 1_700_000_100_000L, "mxc://example.org/sam"), rows.single { it.body == "PR 417" }.shownThread)
+        assertNull(rows.single { it.body == "Hello" }.shownThread)
         conversation.close()
     }
 
@@ -1128,6 +1128,198 @@ class MatrixConversationTest {
         assertNull(root.attachment)
         conversation.close()
     }
+
+    // capability: thread.open
+    @Test fun aThreadOpenedWithACountSaysItUntilItLoadsToItsRootThenCountsWhatItLoaded() = runTest {
+        // Opened from Threads: no channel holds the root, and the thread's newest page has one reply.
+        val timeline = ConversationTimeline(listOf(conversationItem("reply-3", "\$reply3", "Third")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root", openedWith = 5)
+        assertEquals(5, conversation.state.value.replies)
+        assertEquals(5, conversation.state.first { it.rows.messages.any { row -> row.body == "Third" } }.replies)
+        // A change to a reply rebuilds the rows; the count stays the one it was opened with.
+        timeline.emit(listOf(TimelineDiff.Set(0u, conversationItem("reply-3", "\$reply3", "Third, edited"))))
+        assertEquals(5, conversation.state.first { it.rows.messages.any { row -> row.body == "Third, edited" } }.replies)
+
+        // The last page brings the root with the rest of the replies, which then decide the count.
+        timeline.onPage = {
+            timeline.emit(listOf(TimelineDiff.PushFront(conversationItem("reply-2", "\$reply2", "Second")),
+                TimelineDiff.PushFront(conversationItem("root", "\$root", "Plan?"))))
+        }
+        timeline.page.complete(true)
+        conversation.loadOlder()
+        assertEquals(2, conversation.state.first { !it.hasMore && it.rows.messages.any { row -> row.body == "Second" } }.replies)
+        conversation.close()
+    }
+
+    @Test fun beforeItLoadsAThreadSaysTheCountItsRootCarriesInTheChannelNow() = runTest {
+        fun channelRow(thread: MessageThread?) = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen",
+            "Plan?", null, 1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0, thread = thread)
+        fun replies(count: Int) = MessageThread(count, "Sam Okafor", 1_700_000_100_000L)
+        val channel = MutableStateFlow(ConversationState(rows = listOf(channelRow(replies(3)))))
+        val timeline = ConversationTimeline(listOf(conversationItem("reply", "\$reply", "Yes")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root",
+            root = channelRow(replies(3)), openedWith = 3)
+        backgroundScope.launch { conversation.followRoot(channel) }
+        assertEquals(3, conversation.state.first { it.rows.messages.any { row -> row.body == "Yes" } }.replies)
+        // A reply arrives live before the thread has loaded to its root: the channel's count says so.
+        channel.value = ConversationState(rows = listOf(channelRow(replies(4))))
+        conversation.state.first { it.replies == 4 }
+        // A copy of the root without a count falls back to the count the thread was opened with.
+        channel.value = ConversationState(rows = listOf(channelRow(null).copy(body = "Plan for Friday?")))
+        assertEquals(3, conversation.state.first { it.rows.messages.first().body == "Plan for Friday?" }.replies)
+        // Before the thread loads, a count of zero says nothing: the device may know the thread only from a read receipt.
+        channel.value = ConversationState(rows = listOf(channelRow(replies(0)).copy(body = "Plan for Monday?")))
+        assertEquals(3, conversation.state.first { it.rows.messages.first().body == "Plan for Monday?" }.replies)
+        conversation.close()
+    }
+
+    @Test fun aThreadLoadedToItsRootCountsItsRepliesAsTheyAreSentAndDeleted() = runTest {
+        val channelRow = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", "Plan?", null,
+            1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0, thread = MessageThread(1, null, null))
+        val channel = MutableStateFlow(ConversationState(rows = listOf(channelRow)))
+        val timeline = ConversationTimeline(listOf(conversationItem("one", "\$one", "Yes")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root",
+            root = channelRow, openedWith = 1)
+        backgroundScope.launch { conversation.followRoot(channel) }
+        conversation.state.first { it.rows.messages.any { row -> row.body == "Yes" } }
+        // The page ends before its rows arrive: the count waits for them rather than counting what came before.
+        timeline.page.complete(true)
+        conversation.loadOlder()
+        assertEquals(1, conversation.state.first { !it.hasMore }.replies)
+        timeline.emit(listOf(TimelineDiff.PushFront(conversationItem("root", "\$root", "Plan?")),
+            TimelineDiff.PushBack(conversationItem("two", "\$two", "Agreed"))))
+        assertEquals(2, conversation.state.first { it.rows.messages.any { row -> row.body == "Agreed" } }.replies)
+
+        // Deleted replies aren't replies, though the channel still counts them.
+        val deleted = TimelineItemContent.MsgLike(MsgLikeContent(MsgLikeKind.Redacted, null, null, null))
+        timeline.emit(listOf(TimelineDiff.Set(1u, conversationItem("one", "\$one", "", content = deleted)),
+            TimelineDiff.Set(2u, conversationItem("two", "\$two", "", content = deleted))))
+        assertNull(conversation.state.first { it.rows.messages.count { row -> row.kind == MessageKind.Deleted } == 2 }.replies)
+
+        // A reply of yours counts from its local echo on, through the server taking it before its remote echo arrives.
+        timeline.emit(listOf(TimelineDiff.PushBack(conversationItem("mine", "txn-1", "On it", local = true))))
+        assertEquals(1, conversation.state.first { it.rows.messages.any { row -> row.body == "On it" } }.replies)
+        timeline.emit(listOf(TimelineDiff.Set(3u, conversationItem("mine", "txn-1", "On it", local = true,
+            sendState = EventSendState.Sent("\$mine")))))
+        assertEquals(1, conversation.state.first { it.rows.messages.last().sendState == MessageSendState.Sent }.replies)
+        conversation.close()
+    }
+
+    // capability: message.thread-summary
+    @Test fun aRootTheDeviceCountsNoRepliesOnShowsTheServersCountInTheChannel() = runTest {
+        // A read receipt from another device leaves a summary of zero for a thread whose replies this device never saw.
+        val timeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 0u)),
+            conversationItem("other", "\$other", "Hello")))
+        val room = ConversationRoom(timeline)
+        room.threads = listOf(listed("\$root", 5u), listed("\$other", 2u))
+        val conversation = MatrixConversation(backgroundScope, room)
+        val rows = conversation.state.first { state -> state.rows.messages.any { it.body == "Hello" && it.shownThread != null } }.rows.messages
+        assertEquals(5, rows.single { it.body == "PR 417" }.shownThread?.replies)
+        conversation.close()
+    }
+
+    @Test fun theChannelShowsTheServersCountOverARootsOwnSmallerOne() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 2u)),
+            conversationItem("other", "\$other", "Hello")))
+        val room = ConversationRoom(timeline)
+        room.threads = listOf(listed("\$root", 5u), listed("\$other", 2u))
+        val conversation = MatrixConversation(backgroundScope, room)
+        val rows = conversation.state.first { state -> state.rows.messages.any { it.body == "Hello" && it.shownThread != null } }.rows.messages
+        assertEquals(5, rows.single { it.body == "PR 417" }.shownThread?.replies)
+        conversation.close()
+    }
+
+    @Test fun theChannelShowsARootsOwnCountOnceItOutgrowsTheServersList() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 7u)),
+            conversationItem("other", "\$other", "Hello")))
+        val room = ConversationRoom(timeline)
+        room.threads = listOf(listed("\$root", 5u), listed("\$other", 2u))
+        val conversation = MatrixConversation(backgroundScope, room)
+        val rows = conversation.state.first { state -> state.rows.messages.any { it.body == "Hello" && it.shownThread != null } }.rows.messages
+        val root = rows.single { it.body == "PR 417" }
+        assertEquals(7, root.shownThread?.replies)
+        assertEquals(root.thread, root.shownThread)
+        conversation.close()
+    }
+
+    @Test fun aThreadOpenedOnARootThatCountsRepliesSaysSoFromItsFirstFrame() = runTest {
+        val root = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", "Plan?", null, 1_700_000_000_000L,
+            MessageKind.Text, MessageSendState.Sent, false, "MC", 0, thread = MessageThread(4, null, null))
+        // Opened from Reply in thread, which shows no count.
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(ConversationTimeline(
+            listOf(conversationItem("reply", "\$reply", "Yes")))), threadRoot = "\$root", root = root)
+        assertEquals(4, conversation.state.value.replies)
+        assertEquals(4, opening(root).replies)
+        assertEquals(4, conversation.state.first { it.rows.messages.any { row -> row.body == "Yes" } }.replies)
+        conversation.close()
+    }
+
+    @Test fun aThreadLoadedToItsRootKeepsItsCountWhenTheTimelineStartsOverWithTheSameReplies() = runTest {
+        val thread = listOf(conversationItem("root", "\$root", "Plan?"), conversationItem("one", "\$one", "Yes"),
+            conversationItem("two", "\$two", "Agreed"))
+        val timeline = ConversationTimeline(thread)
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root")
+        conversation.state.first { it.rows.messages.any { row -> row.body == "Agreed" } }
+        timeline.page.complete(true)
+        conversation.loadOlder()
+        assertEquals(2, conversation.state.first { !it.hasMore }.replies)
+        // A reset with the same root and replies asks for older history again; the next page isn't asked for here.
+        timeline.emit(listOf(TimelineDiff.Reset(thread)))
+        assertEquals(2, conversation.state.first { it.hasMore }.replies)
+        conversation.close()
+    }
+
+    @Test fun aThreadsLineFollowsItsRootsOwnCountNeverTheServersListCount() = runTest {
+        val channelTimeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 0u)),
+            conversationItem("other", "\$other", "Hello")))
+        val channelRoom = ConversationRoom(channelTimeline)
+        channelRoom.threads = listOf(listed("\$root", 5u), listed("\$other", 2u))
+        val channel = MatrixConversation(backgroundScope, channelRoom)
+        val root = channel.state.first { state -> state.rows.messages.any { it.body == "Hello" && it.shownThread != null } }
+            .rows.messages.first()
+        // Opened from Activity, which showed no count, with the thread's older replies still to load.
+        val thread = MatrixConversation(backgroundScope, ConversationRoom(ConversationTimeline(
+            listOf(conversationItem("reply", "\$reply", "Yes")))), threadRoot = "\$root", root = root)
+        backgroundScope.launch { thread.followRoot(channel.state) }
+        assertNull(thread.state.first { it.rows.messages.any { row -> row.body == "Yes" } }.replies)
+        // The channel's root loses its count: the server's list, which still counts five, says nothing of the thread.
+        channelTimeline.emit(listOf(TimelineDiff.Set(0u, conversationItem("root", "\$root", "PR 417, edited"))))
+        assertNull(thread.state.first { it.rows.messages.first().body == "PR 417, edited" }.replies)
+        channel.close()
+        thread.close()
+    }
+
+    @Test fun aThreadOpenedFromABarShowingTheServersCountKeepsItThoughItsRootCountsZero() = runTest {
+        val channelTimeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 0u)),
+            conversationItem("other", "\$other", "Hello")))
+        val channelRoom = ConversationRoom(channelTimeline)
+        channelRoom.threads = listOf(listed("\$root", 5u), listed("\$other", 2u))
+        val channel = MatrixConversation(backgroundScope, channelRoom)
+        val root = channel.state.first { state -> state.rows.messages.any { it.body == "Hello" && it.shownThread != null } }
+            .rows.messages.first()
+        assertEquals(5, root.shownThread?.replies)
+        // Opened from the bar, with its five and the thread's older replies still to load.
+        val thread = MatrixConversation(backgroundScope, ConversationRoom(ConversationTimeline(
+            listOf(conversationItem("reply", "\$reply", "Yes")))), threadRoot = "\$root", root = root, openedWith = 5)
+        backgroundScope.launch { thread.followRoot(channel.state) }
+        // Once the channel's copy of the root, still counting zero, has reached the thread, the line says five.
+        channelTimeline.emit(listOf(TimelineDiff.Set(0u, conversationItem("root", "\$root", "PR 417, edited",
+            content = counted("PR 417, edited", 0u)))))
+        assertEquals(5, thread.state.first { it.rows.messages.first().body == "PR 417, edited" }.replies)
+        channel.close()
+        thread.close()
+    }
+
+    private fun counted(body: String, replies: ULong) = TimelineItemContent.MsgLike(MsgLikeContent(
+        MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)), null, null,
+        object : ThreadSummary(NoHandle) {
+            override fun numReplies(): ULong = replies
+            override fun latestEvent(): EmbeddedEventDetails = EmbeddedEventDetails.Unavailable
+        }))
+
+    /** A thread as the server's list of the room's threads has it. */
+    private fun listed(root: String, replies: UInt) = ThreadListItem(ThreadListItemEvent(root, 1_700_000_000_000u, "@mira:example.org",
+        ProfileDetails.Unavailable, false, null), null, replies)
 }
 
 private class JumpRoom(private val live: Timeline, private val around: Timeline,
