@@ -933,6 +933,36 @@ struct TimelineHostedTests {
         #expect(harness.top(of: "Message 10") != nil)
     }
 
+    /// The pane closed and opened again, as from the replies bar, or moved between the side and the overlay.
+    @Test("A thread opened again after landing on a jumped-to reply returns to where the reader was")
+    func threadJumpUsedOnce() async throws {
+        var root = Self.messages(0..<1, prefix: "Root")[0]
+        root.id = root.eventID
+        let harness = Harness(width: 400, height: 600)
+        defer { harness.close() }
+        let thread = HistoryTimeline(noHandle: .init())
+        thread.onPage = { true }
+        harness.service.configureMessageActionsForChecks(
+            client: harness.client, main: harness.timeline, thread: thread, rootID: root.eventID, sessionID: UUID(),
+            selectionID: UUID(), threadID: UUID())
+        harness.service.threadMessages = [root] + Self.messages(1..<60, prefix: "Reply")
+        harness.service.jump = MessageJump(roomID: Self.room.id, eventID: "Reply-10", threadRootID: root.eventID)
+        var pane = harness.fixture(Self.room)
+        pane.thread = true
+        pane.threadRootID = root.eventID
+        harness.hosting.rootView = pane
+        await settle(harness) { harness.top(of: "Reply 10") != nil }
+        harness.scroll(toTop: harness.clip.bounds.minY + 1_500)
+        let reading = try #require(harness.firstVisibleBody)
+        let before = try #require(harness.top(of: reading))
+        try #require(harness.top(of: "Reply 10") == nil)
+        // A pane of its own, as the app builds one each time.
+        pane.timeline = 1
+        harness.hosting.rootView = pane
+        await settle(harness) { harness.top(of: reading) != nil }
+        #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
+    }
+
     // capability: message.react.picker
     // capability: message.copy-text
     @Test("A message at rest offers its whole menu, its VoiceOver actions and the emoji picker")

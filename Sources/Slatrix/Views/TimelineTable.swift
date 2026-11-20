@@ -254,7 +254,11 @@ struct TimelineTable: NSViewRepresentable {
         configuration.scroller.bottom = { [weak self] in self?.scrollToBottom(animated: true) }
         configuration.scroller.anchor = { [weak self] in self?.screenAnchor() }
         if previous?.focusedEventID != configuration.focusedEventID || previous?.jumpID != configuration.jumpID {
-            pendingFocus = configuration.focusedEventID
+            // A live pane focuses only on a jump, which a pane on this timeline may already have landed on.
+            let used =
+                configuration.jumpID != nil
+                && configuration.memoryKey.flatMap { TimelineMemory.landedJumps[$0] } == configuration.jumpID
+            pendingFocus = configuration.live && used ? nil : configuration.focusedEventID
         }
         inset(configuration.insets)
         // As in Slack, what you send brings a live conversation to it, however soon the server confirms it.
@@ -697,7 +701,7 @@ struct TimelineTable: NSViewRepresentable {
         }
         opened = true
         let focused = pendingFocus.flatMap { focus in rows.first { $0.messageEventID == focus }?.id }
-        if focused != nil { pendingFocus = nil }
+        if focused != nil { landed() }
         let remembered = configuration.live || restoresReadingPosition ? rememberedPosition : nil
         let opening = Policy.opening(
             focusedRowID: restoresReadingPosition ? nil : focused, unreadRowID: index["unread"] == nil ? nil : "unread",
@@ -870,7 +874,7 @@ struct TimelineTable: NSViewRepresentable {
         guard let configuration else { return }
         closeGap()
         if let pendingFocus, let row = rows.first(where: { $0.messageEventID == pendingFocus }) {
-            self.pendingFocus = nil
+            landed()
             scrolledByReader = false
             applying = true
             scroll(to: .centered(rowID: row.id))
@@ -893,6 +897,13 @@ struct TimelineTable: NSViewRepresentable {
             DispatchQueue.main.async { configuration.onScroll(state.0, state.1, state.2, state.3) }
         }
         checkHistory()
+    }
+
+    /// The focus is on screen; a jump that put it there is used.
+    private func landed() {
+        pendingFocus = nil
+        guard let key = configuration?.memoryKey, let jump = configuration?.jumpID else { return }
+        TimelineMemory.landedJumps[key] = jump
     }
 
     /// Also before the table opens: history of only hidden events leaves nothing to open at until a page shows some.

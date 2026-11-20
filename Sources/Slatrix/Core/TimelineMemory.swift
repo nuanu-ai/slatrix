@@ -15,6 +15,9 @@ import Foundation
 
     static var positions: [Key: Anchor] = [:]
 
+    /// The jump each pane landed on, by jump ID; the pane opened again goes where its reader left it instead.
+    static var landedJumps: [Key: UUID] = [:]
+
     /// Row heights the last few timelines' tables measured, by row ID, each with a hash of the row and the table it
     /// was measured for, so the next table on a timeline measures none of the rows it shows the same way. Hashes, so
     /// no message outlives its table.
