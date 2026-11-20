@@ -17,18 +17,35 @@ struct SavedSessionTests {
         credentials = SecureSessionStore(file: folder.path("credentials.json"))
     }
 
+    private var storeRoots: [URL] { [folder.path("support"), folder.path("caches")] }
+
     @Test("Leaving the sample workspace runs none of sign-out, whatever a failed start left installed")
     func leavingPreview() async throws {
         try credentials.save(session)
+        let deviceKeys = try SessionStores.create(session.storeID, roots: storeRoots).data
+            .appendingPathComponent("device-keys")
+        try Data("device keys".utf8).write(to: deviceKeys)
         let client = FakeClient()
-        let matrix = MatrixService(credentials: credentials)
+        let matrix = MatrixService(credentials: credentials, storeRoots: storeRoots)
         matrix.configureRoomOpenForChecks(
-            client: client, roomList: FakeRoomListService(), user: ChatUser(id: session.userId, name: "Owner"))
+            client: client, roomList: FakeRoomListService(), user: ChatUser(id: session.userId, name: "Owner"),
+            storeID: session.storeID)
         matrix.enterPreview()
         try await matrix.logout()
         #expect(!client.loggedOut)
         #expect(try credentials.load() == session)
+        #expect(try Data(contentsOf: deviceKeys) == Data("device keys".utf8))
         #expect(matrix.status == .signedOut && matrix.user == nil && !matrix.isPreview)
+    }
+
+    @Test("Restoring over an empty saved record leaves SDK stores outside the service's own roots alone")
+    func restoreKeepsOtherRoots() async throws {
+        let planted = try SessionStores.create(
+            UUID().uuidString, roots: [folder.path("other-support"), folder.path("other-caches")])
+        let matrix = MatrixService(credentials: credentials, storeRoots: storeRoots)
+        await matrix.restore()
+        #expect(matrix.status == .signedOut)
+        #expect(FileManager.default.fileExists(atPath: planted.data.path))
     }
 
     struct Damaged: CustomTestStringConvertible, Sendable {

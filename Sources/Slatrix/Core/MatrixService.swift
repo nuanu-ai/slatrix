@@ -523,7 +523,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 @Observable final class MatrixService {
     /// Where the saved session and vault keys live.
     @ObservationIgnored let credentials: SecureSessionStore
-    init(credentials: SecureSessionStore = .shared) { self.credentials = credentials }
+    /// Where the SDK stores of the sessions those credentials name live.
+    @ObservationIgnored private let storeRoots: [URL]
+    convenience init() { self.init(credentials: .shared, storeRoots: SessionStores.roots) }
+    init(credentials: SecureSessionStore, storeRoots: [URL]) {
+        self.credentials = credentials
+        self.storeRoots = storeRoots
+    }
     let verification = VerificationService()
     let threadFeed = ThreadFeedService()
     let activity = ActivityService()
@@ -839,9 +845,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 storeID: "", storeKey: Data(), credentials: credentials, initialSession: nil, failure: {}))
     }
     func stopForChecks() async { await stop() }
-    func configureRoomOpenForChecks(client: Client, roomList: RoomListService, user: ChatUser) {
+    func configureRoomOpenForChecks(client: Client, roomList: RoomListService, user: ChatUser, storeID: String? = nil) {
         self.client = client
         self.user = user
+        persistence = storeID.map {
+            SessionPersistence(
+                storeID: $0, storeKey: Data(), credentials: credentials, initialSession: nil, failure: {})
+        }
         roomSubscriptions.attach(roomList)
     }
     #endif
@@ -935,7 +945,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func buildClient(homeserver: String, storeID: String, storeKey: Data, initialSession: StoredSession? = nil)
         async throws -> (Client, SessionPersistence)
     {
-        let folders = try SessionStores.create(storeID)
+        let folders = try SessionStores.create(storeID, roots: storeRoots)
         let delegate = SessionPersistence(
             storeID: storeID, storeKey: storeKey, credentials: credentials, initialSession: initialSession
         ) {
@@ -1003,7 +1013,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             try await start(newClient, delegate: delegate)
         } catch {
             // Once Keychain points at this store it holds the device's keys; only an unsaved one is disposable.
-            if !storeSaved { SessionStores.remove(storeID) }
+            if !storeSaved { SessionStores.remove(storeID, roots: storeRoots) }
             status = .error
             errorMessage = Self.safeError(error)
             throw MatrixServiceError.request(Self.safeError(error))
@@ -1020,7 +1030,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             let credentials = credentials
             let saved = try await Task.detached(priority: .userInitiated) { try credentials.load() }.value
             try validateAuthentication(account)
-            SessionStores.removeAll(except: saved?.storeID)
+            SessionStores.removeAll(except: saved?.storeID, roots: storeRoots)
             guard let stored = saved else {
                 status = .signedOut
                 return
@@ -1339,7 +1349,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 deletionError = error
             }
             // While Keychain still holds the session it can restore into this store, so keep it.
-            if deletionError == nil, let storeID { SessionStores.remove(storeID) }
+            if deletionError == nil, let storeID { SessionStores.remove(storeID, roots: storeRoots) }
         }
         try validateLogout(stoppedOwner)
         sessionCleanupPending = deletionError != nil

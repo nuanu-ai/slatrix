@@ -126,6 +126,8 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     /// Joined unless the test invites you.
     var joined = true
     override func membership() -> Membership { joined ? .joined : .invited }
+    /// A composer that works says when you stop typing; the server takes it.
+    override func typingNotice(isTyping: Bool) async throws {}
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
         focuses.append(configuration.focus)
         await buildGate.wait()

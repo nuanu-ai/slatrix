@@ -59,8 +59,15 @@ struct ConversationSwitchHostedTests {
             _ = NSApplication.shared
             folder = try TemporaryDirectory()
             let credentials = SecureSessionStore(file: folder.path("credentials.json"))
+            // Signed in as far as the drafts vault can tell, so it can make the account's key.
+            try credentials.save(
+                StoredSession(
+                    accessToken: "synthetic-token", userId: "@me:example.org", deviceId: "FIXTURE",
+                    homeserverUrl: "https://example.org", storeID: UUID().uuidString,
+                    storeKey: Data(repeating: 0x31, count: 32)))
             let key: @Sendable (String) async throws -> Data = { try credentials.localStateKey(accountID: $0) }
-            matrix = MatrixService(credentials: credentials)
+            matrix = MatrixService(
+                credentials: credentials, storeRoots: [folder.path("support"), folder.path("caches")])
             // Every window opens as it first would, on the first conversation.
             for key in ["layout.paneWidth", "layout.sidebarHidden", "room.@me:example.org"] {
                 UserDefaults.standard.removeObject(forKey: key)
@@ -89,8 +96,10 @@ struct ConversationSwitchHostedTests {
                 rootView: AnyView(
                     RootView(
                         matrix: matrix,
-                        localStore: ProtectedLocalStateStore(directory: folder.path("drafts"), keyProvider: key),
-                        attachmentDrafts: AttachmentDraftStore(directory: folder.path("files"), keyProvider: key)
+                        localStore: ProtectedLocalStateStore(
+                            directory: ProtectedLocalStateStore.directory(in: folder.url), keyProvider: key),
+                        attachmentDrafts: AttachmentDraftStore(
+                            directory: AttachmentDraftStore.directory(in: folder.url), keyProvider: key)
                     ).environmentObject(AppearanceStore())
                         .environment(\.metrics, Metrics(zoom: 1))))
             window = offscreenWindow(
@@ -287,6 +296,7 @@ struct ConversationSwitchHostedTests {
             let settled = await eventually(timeout: .seconds(20)) {
                 frame = sample()
                 return frame.rows[newest] != nil && frame.rooms.count == 1 && !frame.loading
+                    && Self.views(in: hosting).contains { ($0 as? NSTextView)?.isEditable == true }
             }
             headers[name(index)] = frame.headerPixels
             return settled
