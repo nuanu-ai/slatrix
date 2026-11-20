@@ -104,6 +104,7 @@ import Foundation
         messages[2].isEdited = true
     }
     func openPreviewThread(_ root: ChatMessage) {
+        threadOpening = (root.eventID, root.replyCount)
         threadMessages = [
             root,
             ChatMessage(
