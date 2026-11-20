@@ -140,9 +140,11 @@ enum TimelineScrollPolicy {
     static let historyLead: CGFloat = 3
 
     /// Older history loads before the reader reaches the top, so scrolling up never stops at a button. `above` is what
-    /// sits over the loading row, which no page fills.
+    /// sits over the loading row, which no page fills; the row asks while it is within the lead of the viewport, above
+    /// or below it.
     static func needsOlder(_ viewport: Viewport, above: CGFloat = 0) -> Bool {
-        viewport.top - above < viewport.height * historyLead
+        let lead = viewport.height * historyLead
+        return viewport.top - above < lead && above - viewport.top - viewport.height < lead
     }
 
     /// Newer history of a timeline opened at an older message loads before the reader reaches its end.

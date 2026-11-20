@@ -221,4 +221,15 @@ struct TimelineScrollPolicyTests {
         #expect(Policy.needsNewer(Viewport(top: 6_601, height: 600, contentHeight: 9_000)))
         #expect(!Policy.needsNewer(Viewport(top: 6_600, height: 600, contentHeight: 9_000)))
     }
+
+    @Test("A thread asks for older replies while its loading row, under a tall root, is three screens or less away")
+    func olderUnderTallRoot() {
+        // Reading a root eight screens tall, the loading row under it: from three screens under the screen's bottom.
+        #expect(!Policy.needsOlder(Viewport(top: 0, height: 600, contentHeight: 9_000), above: 4_800))
+        #expect(!Policy.needsOlder(Viewport(top: 2_400, height: 600, contentHeight: 9_000), above: 4_800))
+        #expect(Policy.needsOlder(Viewport(top: 2_401, height: 600, contentHeight: 9_000), above: 4_800))
+        // Among the replies under the row, as in a conversation: up to three screens over the screen's top.
+        #expect(Policy.needsOlder(Viewport(top: 6_599, height: 600, contentHeight: 9_000), above: 4_800))
+        #expect(!Policy.needsOlder(Viewport(top: 6_600, height: 600, contentHeight: 9_000), above: 4_800))
+    }
 }
