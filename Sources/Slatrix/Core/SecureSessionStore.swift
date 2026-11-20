@@ -114,6 +114,21 @@ final class SecureSessionStore: @unchecked Sendable {
         try readData().map(Self.decodeEnvelope) ?? CredentialEnvelope()
     }
 
+    /// The record as it reads or, when damaged, only the vault keys that still read on their own, so a damaged
+    /// record never stops anyone signing in or out. A record from a newer build is never rewritten.
+    private static func repairing(_ data: Data) throws -> CredentialEnvelope {
+        if let envelope = try? decodeEnvelope(data) { return envelope }
+        let record = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        if let version = record?["version"] as? Int, version != 1 { throw StoreError.invalidSession }
+        var envelope = CredentialEnvelope()
+        for case (let account, let text as String) in record?["vaultKeys"] as? [String: Any] ?? [:] {
+            if validAccountID(account), let key = Data(base64Encoded: text), key.count == 32 {
+                envelope.vaultKeys[account] = key
+            }
+        }
+        return envelope
+    }
+
     private func writeEnvelope(_ envelope: CredentialEnvelope) throws {
         try writeData(Self.encodeEnvelope(envelope))
     }
@@ -128,7 +143,7 @@ final class SecureSessionStore: @unchecked Sendable {
         try session.validate()
         lock.lock()
         defer { lock.unlock() }
-        var envelope = try readEnvelope()
+        var envelope = try readData().map(Self.repairing) ?? CredentialEnvelope()
         envelope.session = session
         try writeEnvelope(envelope)
     }
@@ -137,7 +152,7 @@ final class SecureSessionStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard let data = try readData() else { return }
-        var envelope = try Self.decodeEnvelope(data)
+        var envelope = try Self.repairing(data)
         envelope.session = nil
         // Keep the local-state keys so drafts saved by this account stay readable after a future sign-in.
         try writeEnvelope(envelope)
