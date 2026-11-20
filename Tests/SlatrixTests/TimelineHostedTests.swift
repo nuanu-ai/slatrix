@@ -740,10 +740,11 @@ struct TimelineHostedTests {
         short.formattedBody = nil
         short.reactions = []
         harness.service.messages[30] = short
-        _ = await eventually {
-            harness.layout()
-            return table.rect(ofRow: row).height < tall
-        }
+        #expect(
+            await eventually {
+                harness.layout()
+                return table.rect(ofRow: row).height < tall && harness.top(of: "Short") != nil
+            })
         #expect(abs(try #require(harness.top(of: "Message 31")) - before) < 0.5)
     }
 
@@ -777,10 +778,11 @@ struct TimelineHostedTests {
         let rows = harness.rowCount
         // In one update it is deleted and a page of older history lands above.
         harness.service.messages = Self.messages(0..<30, prefix: "Older") + current.filter { $0.id != gone.id }
-        _ = await eventually {
-            harness.layout()
-            return harness.rowCount > rows
-        }
+        #expect(
+            await eventually {
+                harness.layout()
+                return harness.rowCount > rows && harness.cell(showing: gone.eventID) == nil
+            })
         #expect(abs(try #require(harness.top(of: next.body)) - before) < 0.5)
     }
 
@@ -967,6 +969,56 @@ struct TimelineHostedTests {
         #expect(harness.service.focusedEventID == (turnsLive ? nil : "$m5"))
         #expect(harness.service.messages.first?.body == body(turnsLive ? cachedFrom : 0))
         #expect(zip(after, before).allSatisfy { abs($0 - $1) < 0.5 } && after.count == before.count)
+    }
+
+    @Test("A newer page that lands as the message you were reading shrinks shows its start, not its end")
+    func newerPageShowsItsStart() async throws {
+        // The last loaded message runs over many lines until the page arrives with it shortened.
+        func body(_ index: Int, long: Bool = true) -> String {
+            "Message \(index)" + String(repeating: " and more", count: index == 39 && long ? 150 : 0)
+        }
+        func item(_ index: Int, long: Bool = true) -> TimelineItem {
+            FakeTimelineItem(
+                textEvent(
+                    "$m\(index)", body: body(index, long: long),
+                    sender: index % 3 == 0 ? Self.user : "@other:example.org"),
+                uniqueID: "\(index)")
+        }
+        // The live timeline's cache starts after the message the reader jumps to.
+        let room = FakeOpenRoom(Self.room.id, cached: (20..<40).map { item($0) })
+        room.focusedItems = (0..<40).map { item($0) }
+        let harness = Harness(opening: room)
+        defer { harness.close() }
+        // Newer history waits, so its loading row stays under the last message.
+        room.forwardGate.arm()
+        await harness.service.jumpToMessage(roomID: Self.room.id, eventID: "$m5")
+        await settle(harness) { harness.top(of: body(5)) != nil }
+        #expect(
+            await eventually {
+                harness.scroll(toTop: harness.clip.bounds.minY + 10_000)
+                return room.forwardGate.isWaiting
+            })
+        // Only the end of the last message is on screen, above the loading row.
+        #expect(try #require(harness.top(of: body(39))) > harness.headerBottom)
+        let timeline = try #require(room.timelines.all.last)
+        timeline.emit([
+            .reset(values: (0..<39).map { item($0) } + [item(39, long: false)] + (40..<100).map { item($0) })
+        ])
+        // The first layout with the page shows messages near its start, not its end.
+        var shown: [Int] = []
+        #expect(
+            await eventually {
+                harness.layout()
+                guard harness.service.messages.count == 100, harness.top(of: body(39, long: false)) != nil else {
+                    return false
+                }
+                let screen = harness.clip.convert(harness.clip.bounds, to: nil)
+                shown = (40..<100).filter { index in
+                    harness.top(of: body(index)).map { $0 > screen.minY && $0 <= screen.maxY } ?? false
+                }
+                return true
+            })
+        #expect(!shown.isEmpty && shown.allSatisfy { $0 < 70 })
     }
 
     // capability: conversation.jump-to-message

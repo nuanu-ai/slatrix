@@ -74,11 +74,13 @@ struct TimelineScrollPolicyTests {
         #expect(Policy.jump(from: before, to: after) { $0 == row.id ? row : nil } == moved)
     }
 
-    /// The reader is 800 points into a 1,000-point message, with the next one 200 points below the top of the screen.
+    /// The reader is 800 points into a 1,000-point message, with the next two 200 and 250 points below the top of the
+    /// screen.
     private static let reading = Policy.position(
         of: Viewport(top: 2_800, height: 600, contentHeight: 10_000), live: true,
         visibleRows: [
             Policy.RowFrame(id: "long", top: 2_000, height: 1_000), Policy.RowFrame(id: "next", top: 3_000, height: 50),
+            Policy.RowFrame(id: "third", top: 3_050, height: 50),
         ])
 
     @Test(
@@ -92,7 +94,9 @@ struct TimelineScrollPolicyTests {
             // Deleted down to a short row ending above that point: the next message keeps its place.
             ([.init(id: "long", top: 2_000, height: 40), .init(id: "next", top: 2_040, height: 50)], 1_840),
             // Gone, with a page of older history arriving above the next message.
-            ([.init(id: "next", top: 3_640, height: 50)], 3_440),
+            ([.init(id: "next", top: 3_640, height: 50), .init(id: "third", top: 3_690, height: 50)], 3_440),
+            // Both gone: the third keeps its own place.
+            ([.init(id: "third", top: 3_700, height: 50)], 3_450),
         ])
     func survivingRowStaysStill(after: [Policy.RowFrame], top: CGFloat) {
         let restored = Policy.top(for: Self.reading, contentHeight: 10_000, viewportHeight: 600) { id in
@@ -114,6 +118,20 @@ struct TimelineScrollPolicyTests {
         // The view stayed where the long message's old offset put it.
         let viewport = Viewport(top: 2_800, height: 600, contentHeight: 10_000)
         #expect(Policy.jump(from: Self.reading, to: viewport) { id in after.first { $0.id == id } } == moved)
+    }
+
+    @Test("A row that would land below a shorter screen doesn't stand in, so the old offset holds")
+    func standInMustShow() {
+        // 970 points into a 1,600-point message, the next one 630 points down a 900-point screen.
+        let position = Policy.position(
+            of: Viewport(top: 2_970, height: 900, contentHeight: 10_000), live: true,
+            visibleRows: [.init(id: "long", top: 2_000, height: 1_600), .init(id: "next", top: 3_600, height: 200)])
+        // Wider and shorter: the message wraps to 870 points and the screen is 550 high.
+        let after = [Policy.RowFrame(id: "long", top: 2_000, height: 870), .init(id: "next", top: 2_870, height: 200)]
+        let top = Policy.top(for: position, contentHeight: 10_000, viewportHeight: 550) { id in
+            after.first { $0.id == id }
+        }
+        #expect(top == 2_970)
     }
 
     @Test("A position whose row is gone restores nothing")

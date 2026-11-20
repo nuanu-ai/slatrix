@@ -54,8 +54,9 @@ enum TimelineScrollPolicy {
 
     /// The position to keep across a change of rows or viewport size. A live timeline at its end follows new
     /// messages; anything else keeps the first of `visibleRows` in place, or failing that the next that survives.
-    static func position(of viewport: Viewport, live: Bool, visibleRows: [RowFrame]) -> Position {
+    static func position(of viewport: Viewport, live: Bool, visibleRows: @autoclosure () -> [RowFrame]) -> Position {
         if live && viewport.isAtBottom { return .bottom }
+        let visibleRows = visibleRows()
         guard let row = visibleRows.first else { return .bottom }
         return .anchored(
             rowID: row.id, offset: row.top - viewport.top,
@@ -70,7 +71,7 @@ enum TimelineScrollPolicy {
         switch position {
         case .bottom: target = contentHeight - viewportHeight
         case .anchored:
-            guard let held = held(position, frame: frame) else { return nil }
+            guard let held = held(position, viewportHeight: viewportHeight, frame: frame) else { return nil }
             target = held.row.top - held.offset
         case .centered(let id):
             guard let row = frame(id) else { return nil }
@@ -80,14 +81,19 @@ enum TimelineScrollPolicy {
     }
 
     /// The row that holds an anchored position and the offset it goes back to: the anchored row, or when it is gone or
-    /// now ends above its offset, the first row that was on screen below it and still reaches its own.
-    private static func held(_ position: Position, frame: (String) -> RowFrame?) -> (row: RowFrame, offset: CGFloat)? {
+    /// would no longer show at its offset, the first row that was on screen below it and still would at its own.
+    private static func held(_ position: Position, viewportHeight: CGFloat, frame: (String) -> RowFrame?) -> (
+        row: RowFrame, offset: CGFloat
+    )? {
         guard case .anchored(let id, let offset, let next) = position else { return nil }
-        let surviving = ([Anchor(rowID: id, offset: offset)] + next).compactMap { anchor in
-            frame(anchor.rowID).map { (row: $0, offset: anchor.offset) }
+        var survivor: (row: RowFrame, offset: CGFloat)?
+        for anchor in [Anchor(rowID: id, offset: offset)] + next {
+            guard let row = frame(anchor.rowID) else { continue }
+            if anchor.offset + row.height > 0 && anchor.offset < viewportHeight { return (row, anchor.offset) }
+            survivor = survivor ?? (row, anchor.offset)
         }
-        // With none in reach, the anchored row still marks the place better than leaving the view where it was.
-        return surviving.first { $0.offset + $0.row.height > 0 } ?? surviving.first
+        // With none on screen, the first that survives still marks the place better than leaving the view where it was.
+        return survivor
     }
 
     /// How far a change the reader didn't make moved what they were reading at `position`: their row, or the newest
@@ -97,7 +103,7 @@ enum TimelineScrollPolicy {
         switch position {
         case .bottom: moved = viewport.distanceFromBottom
         case .anchored:
-            guard let held = held(position, frame: frame) else { return nil }
+            guard let held = held(position, viewportHeight: viewport.height, frame: frame) else { return nil }
             moved = held.row.top - viewport.top - held.offset
         case .centered: return nil
         }
