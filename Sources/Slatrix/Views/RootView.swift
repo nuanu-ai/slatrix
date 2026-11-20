@@ -356,7 +356,7 @@ struct RootView: View {
                 matrix: matrix, onClose: closeModal,
                 onLogout: {
                     closeModal()
-                    logoutConfirmation = true
+                    signOut()
                 },
                 // Preferences sits above every other modal, so it steps aside for the one it opens.
                 onRecovery: {
@@ -1025,15 +1025,7 @@ struct RootView: View {
 
     /// An update waiting, or the preview's one way out: everything else in it is the real interface.
     private var sidebarAccessory: (title: String, action: () -> Void)? {
-        if matrix.isPreview {
-            return (
-                "Sign in",
-                {
-                    matrix.exitPreview()
-                    resetUI()
-                }
-            )
-        }
+        if matrix.isPreview { return ("Sign in", leavePreview) }
         return updater.updateAvailable ? ("Update", { updater.checkForUpdates() }) : nil
     }
 
@@ -1069,7 +1061,7 @@ struct RootView: View {
             onProfile: {
                 if let me = matrix.user { profilePane = ProfileSelection(id: me.id, fallback: me) }
             },
-            onSignOut: { logoutConfirmation = true },
+            onSignOut: signOut,
             onMarkUnread: { markReadState($0, unread: true) },
             onMarkRead: { markReadState($0, unread: false) },
             onInviteWorkspace: { id in
@@ -2622,6 +2614,14 @@ struct RootView: View {
     }
     private var logoutOwner: LogoutOwner {
         LogoutOwner(sessionID: matrix.notificationSessionID, userID: matrix.user?.id, isPreview: matrix.isPreview)
+    }
+    /// Signing out asks first. The sample workspace has nothing to lose, so leaving it goes straight to sign-in.
+    private func signOut() {
+        if matrix.isPreview { leavePreview() } else { logoutConfirmation = true }
+    }
+    private func leavePreview() {
+        matrix.exitPreview()
+        resetUI()
     }
     private func beginLogout() {
         let owner = logoutOwner
