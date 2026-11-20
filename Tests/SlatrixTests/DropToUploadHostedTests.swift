@@ -21,7 +21,7 @@ struct DropToUploadHostedTests {
         _ = NSApplication.shared
         let matrix = MatrixService.scratch()
         matrix.enterPreview()
-        let hosting = NSHostingView(rootView: AnyView(RootView(matrix: matrix).environmentObject(AppearanceStore())))
+        let hosting = NSHostingView(rootView: AnyView(RootView(scratch: matrix).environmentObject(AppearanceStore())))
         let window = offscreenWindow(NSSize(width: 1_200, height: 800))
         window.contentView = hosting
         window.orderFrontRegardless()
