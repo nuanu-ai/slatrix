@@ -194,13 +194,32 @@ class MatrixWorkspaceTest {
     }
 
     // capability: threads.feed
-    @Test fun aThreadOpenedFromThreadsSaysTheCountThreadsShowedFromItsFirstFrame() = runTest {
-        val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
+    @Test fun aThreadOpenedFromThreadsSaysTheCountThreadsShowedThoughItsFirstPageHasOneReply() = runTest {
+        val client = WorkspaceClient()
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val item = ThreadFeedItem("!alpha:example.org", "Alpha", false, "\$root", ThreadFeedMessage("Sam", "S", 0, "Ship?", 1_000),
+            ThreadFeedMessage("Mira", "M", 1, "Friday", 2_000), replies = 5, unread = false)
 
-        workspace.open(workspaceRoom("!alpha:example.org", "Alpha"), threadRoot = "\$root", openedWith = 5)
+        workspace.open(workspaceRoom("!alpha:example.org", "Alpha"), item)
         assertEquals(5, requireNotNull(workspace.selected.value).waiting().replies)
-        runCurrent()
-        assertEquals(5, requireNotNull(workspace.selected.value?.conversation).state.value.replies)
+        val conversation = requireNotNull(workspace.selected.first { it?.conversation != null }?.conversation)
+        client.emit(listOf(TimelineDiff.PushBack(conversationItem("latest", "\$latest", "Friday"))))
+        assertEquals(5, conversation.state.first { it.rows.any { row -> (row as? ConversationMessage)?.body == "Friday" } }.replies)
+        workspace.close()
+    }
+
+    @Test fun retryingAThreadThatFailedToOpenKeepsTheRootAndCountItOpenedWith() = runTest {
+        val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
+        val root = ConversationMessage("channel-row", "\$root", "@sam:example.org", "Sam", "Ship?", null, 1_000, MessageKind.Text,
+            MessageSendState.Sent, false, "S", 0, thread = MessageThread(3, null, null))
+        val failed = OpenChannel(workspaceRoom("!alpha:example.org", "Alpha"), threadRoot = "\$root", root = root, openedWith = 3,
+            error = "Couldn’t open this conversation.")
+
+        workspace.retry(failed)
+        val waiting = requireNotNull(workspace.selected.value).waiting()
+        assertEquals("Ship?", (waiting.rows.single() as ConversationMessage).body)
+        assertEquals(3, waiting.replies)
+        workspace.close()
     }
 
     @Test fun aThreadOpensOnItsRootWithADraftApartFromItsChannel() = runTest {

@@ -202,9 +202,9 @@ class MatrixConversationTest {
         room.threads = listOf(ThreadListItem(ThreadListItemEvent("\$root", 1_700_000_000_000u, "@mira:example.org",
             ProfileDetails.Unavailable, false, null), reply, 2u))
         val conversation = MatrixConversation(backgroundScope, room)
-        val rows = conversation.state.first { state -> state.rows.messages.any { it.thread != null } }.rows.messages
-        assertEquals(MessageThread(2, "Sam Okafor", 1_700_000_100_000L, "mxc://example.org/sam"), rows.single { it.body == "PR 417" }.thread)
-        assertNull(rows.single { it.body == "Hello" }.thread)
+        val rows = conversation.state.first { state -> state.rows.messages.any { it.shownThread != null } }.rows.messages
+        assertEquals(MessageThread(2, "Sam Okafor", 1_700_000_100_000L, "mxc://example.org/sam"), rows.single { it.body == "PR 417" }.shownThread)
+        assertNull(rows.single { it.body == "Hello" }.shownThread)
         conversation.close()
     }
 
@@ -1205,25 +1205,49 @@ class MatrixConversationTest {
         conversation.close()
     }
 
-    @Test fun aRootWhoseCountFellToZeroKeepsItThoughTheServersEarlierListCountedMore() = runTest {
-        fun counted(replies: ULong) = TimelineItemContent.MsgLike(MsgLikeContent(
-            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("PR 417", null)), "PR 417", false, null)), null, null,
-            object : ThreadSummary(NoHandle) {
-                override fun numReplies(): ULong = replies
-                override fun latestEvent(): EmbeddedEventDetails = EmbeddedEventDetails.Unavailable
-            }))
-        val timeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted(0u)),
+    // capability: message.thread-summary
+    @Test fun aRootTheDeviceCountsNoRepliesOnShowsTheServersCountInTheChannel() = runTest {
+        // A read receipt from another device leaves a summary of zero for a thread whose replies this device never saw.
+        val timeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 0u)),
             conversationItem("other", "\$other", "Hello")))
         val room = ConversationRoom(timeline)
-        fun server(root: String, replies: UInt) = ThreadListItem(ThreadListItemEvent(root, 1_700_000_000_000u, "@mira:example.org",
-            ProfileDetails.Unavailable, false, null), null, replies)
-        room.threads = listOf(server("\$root", 1u), server("\$other", 2u))
+        room.threads = listOf(listed("\$root", 5u), listed("\$other", 2u))
         val conversation = MatrixConversation(backgroundScope, room)
-        // The server's list fills in a root that carries no count, and leaves one that counts zero as it is.
-        val rows = conversation.state.first { state -> state.rows.messages.any { it.body == "Hello" && it.thread != null } }.rows.messages
-        assertEquals(0, rows.single { it.body == "PR 417" }.thread?.replies)
+        val rows = conversation.state.first { state -> state.rows.messages.any { it.body == "Hello" && it.shownThread != null } }.rows.messages
+        assertEquals(5, rows.single { it.body == "PR 417" }.shownThread?.replies)
         conversation.close()
     }
+
+    @Test fun aThreadsLineFollowsItsRootsOwnCountNeverTheServersListCount() = runTest {
+        val channelTimeline = ConversationTimeline(listOf(conversationItem("root", "\$root", "PR 417", content = counted("PR 417", 0u)),
+            conversationItem("other", "\$other", "Hello")))
+        val channelRoom = ConversationRoom(channelTimeline)
+        channelRoom.threads = listOf(listed("\$root", 5u), listed("\$other", 2u))
+        val channel = MatrixConversation(backgroundScope, channelRoom)
+        val root = channel.state.first { state -> state.rows.messages.any { it.body == "Hello" && it.shownThread != null } }
+            .rows.messages.first()
+        // Opened from Activity, which showed no count, with the thread's older replies still to load.
+        val thread = MatrixConversation(backgroundScope, ConversationRoom(ConversationTimeline(
+            listOf(conversationItem("reply", "\$reply", "Yes")))), threadRoot = "\$root", root = root)
+        backgroundScope.launch { thread.followRoot(channel.state) }
+        assertNull(thread.state.first { it.rows.messages.any { row -> row.body == "Yes" } }.replies)
+        // The channel's root loses its count: the server's list, which still counts five, says nothing of the thread.
+        channelTimeline.emit(listOf(TimelineDiff.Set(0u, conversationItem("root", "\$root", "PR 417, edited"))))
+        assertNull(thread.state.first { it.rows.messages.first().body == "PR 417, edited" }.replies)
+        channel.close()
+        thread.close()
+    }
+
+    private fun counted(body: String, replies: ULong) = TimelineItemContent.MsgLike(MsgLikeContent(
+        MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)), null, null,
+        object : ThreadSummary(NoHandle) {
+            override fun numReplies(): ULong = replies
+            override fun latestEvent(): EmbeddedEventDetails = EmbeddedEventDetails.Unavailable
+        }))
+
+    /** A thread as the server's list of the room's threads has it. */
+    private fun listed(root: String, replies: UInt) = ThreadListItem(ThreadListItemEvent(root, 1_700_000_000_000u, "@mira:example.org",
+        ProfileDetails.Unavailable, false, null), null, replies)
 }
 
 private class JumpRoom(private val live: Timeline, private val around: Timeline,

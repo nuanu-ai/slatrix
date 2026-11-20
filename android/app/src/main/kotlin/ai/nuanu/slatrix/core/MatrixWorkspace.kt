@@ -126,6 +126,12 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
             openedWith = openedWith))
     }
 
+    /** Opens a thread from its Threads [thread] item. */
+    fun open(room: RoomSummary, thread: ThreadFeedItem) = open(room, thread.rootId, openedWith = thread.replies)
+
+    /** Opens [open] again, as it was asked for, after it failed to. */
+    fun retry(open: OpenChannel) = open(open.room, open.threadRoot, open.at.takeUnless { open.resume }, open.root, open.openedWith)
+
     /**
      * Opens [room] at [eventId], highlighted; a reply in the thread [threadRoot] opens the channel at the root, for the
      * thread to open over it at the reply, as on the Mac.

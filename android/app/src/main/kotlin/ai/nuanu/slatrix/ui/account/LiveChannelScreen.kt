@@ -724,7 +724,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, nam
                 }
                 val root = message.eventId
                 // Inside a thread the root's replies bar says it instead.
-                val thread = message.thread?.takeIf { it.replies > 0 }
+                val thread = message.shownThread?.takeIf { it.replies > 0 }
                 if (thread != null && root != null && onOpenThread != null) {
                     Box(inset) { ThreadReplies(thread) { onOpenThread(root) } }
                 }

@@ -51,7 +51,7 @@ class ThreadScreenTest {
         var back = false
         compose.setContent {
             SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false, replies = 2), draft.value,
+                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false, replies = 5), draft.value,
                     { draft.value = draft.value.copy(text = it) }, { sent = draft.value.text }, { back = true },
                     {}, {}, {}, {}, {}, threadRoot = "\$root")
             }
@@ -59,7 +59,7 @@ class ThreadScreenTest {
 
         compose.onNodeWithText("Thread").assertExists()
         compose.onNodeWithText("#design").assertExists()
-        compose.onNodeWithText("2 replies").assertExists()
+        compose.onNodeWithText("5 replies").assertExists()
         compose.onNodeWithText("This is the very beginning", substring = true).assertDoesNotExist()
         val root = compose.onNodeWithText("Ship on Friday?").getUnclippedBoundsInRoot()
         val reply = compose.onNodeWithText("Yes, after QA").getUnclippedBoundsInRoot()

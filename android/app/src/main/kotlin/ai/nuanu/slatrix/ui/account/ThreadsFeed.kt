@@ -42,7 +42,7 @@ import kotlinx.coroutines.delay
 
 /** The threads you're in, newest activity first; one with replies you haven't read is bold and dotted. */
 @Composable
-fun ThreadsFeed(state: ThreadFeedState, onOpenThread: (roomId: String, root: String, replies: Int) -> Unit) {
+fun ThreadsFeed(state: ThreadFeedState, onOpenThread: (ThreadFeedItem) -> Unit) {
     val colors = SlatrixTheme.colors
     var waited by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(UiMetrics.ProgressDelayMillis); waited = true }
@@ -55,7 +55,7 @@ fun ThreadsFeed(state: ThreadFeedState, onOpenThread: (roomId: String, root: Str
         }
         items(state.items, key = { it.roomId + " " + it.rootId }) { thread ->
             HorizontalDivider(color = colors.border)
-            ThreadRow(thread) { onOpenThread(thread.roomId, thread.rootId, thread.replies) }
+            ThreadRow(thread) { onOpenThread(thread) }
         }
     }
 }

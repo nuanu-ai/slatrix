@@ -101,8 +101,10 @@ data class ConversationMessage(
     val editable: Boolean = false,
     val edited: Boolean = false,
     val reactions: List<MessageReaction> = emptyList(),
-    /** Set on a thread's root: the summary under it. */
+    /** Set on a thread's root: the summary it carries, zero included. */
     val thread: MessageThread? = null,
+    /** The thread the server's list has for this root, for a root whose own summary counts no replies. */
+    val listedThread: MessageThread? = null,
     /** The message this one replies to, quoted above it. */
     val replyTo: ReplyPreview? = null,
     /** A thread reply also sent to the channel: [replyTo] is the reply, in its thread. */
@@ -117,6 +119,8 @@ data class ConversationMessage(
     /** Your message, read by someone. */
     val seen: Boolean = false,
 ) : ConversationRow {
+    /** The thread the channel shows under it: its own summary while that counts replies, else the server's list. */
+    val shownThread: MessageThread? get() = thread?.takeIf { it.replies > 0 } ?: listedThread
     /** The text as styled runs; the mapping renders it off the main thread, so a row reads it at once. */
     val runs: List<MessageRun> by lazy(LazyThreadSafetyMode.PUBLICATION) { MessageBodyRenderer.render(body, formattedBody) }
 }
@@ -252,8 +256,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private var retryPage: () -> Unit = ::loadOlder
     @Volatile private var blankPages = 0
     /**
-     * The server's count for each recent thread, by its root, for a root that carries none. The SDK counts only replies
-     * it has seen, and a phone that slept through them has none, so their roots would show no replies at all.
+     * The server's count for each recent thread, by its root, for the channel to show on a root whose own summary counts
+     * none. The SDK counts only replies it has seen, and a phone that slept through them has none, so their roots would
+     * show no replies at all. A thread's own line never reads it.
      */
     @Volatile private var serverThreads = emptyMap<String, MessageThread>()
 
@@ -921,10 +926,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             divider = null
             val grouped = previous?.let { groupsUnder(it, row) } == true
             val seen = !readers[row.id].isNullOrEmpty()
-            val thread = row.thread ?: row.eventId?.let(serverThreads::get)
+            val listed = row.eventId?.let(serverThreads::get)
             // Stored back, so an unchanged row stays the same object in the next batch.
-            val current = if (row.grouped == grouped && row.seen == seen && row.thread == thread) row
-                else row.copy(grouped = grouped, seen = seen, thread = thread).also { items[index] = it }
+            val current = if (row.grouped == grouped && row.seen == seen && row.listedThread == listed) row
+                else row.copy(grouped = grouped, seen = seen, listedThread = listed).also { items[index] = it }
             rows.add(current)
             previous = current
         }
