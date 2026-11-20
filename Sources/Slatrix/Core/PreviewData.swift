@@ -120,6 +120,8 @@ import Foundation
         guard canChangeAuthentication else { return }
         isPreview = false
         user = nil
+        savedMessages.attach(nil, accountID: nil)
+        roomsLoaded = false
         rooms = []
         workspaces = []
         messages = []
@@ -127,6 +129,7 @@ import Foundation
         members = []
         people.preview = nil
         selectedRoomID = nil
+        errorMessage = nil
         status = .signedOut
     }
 }

@@ -1078,4 +1078,23 @@ struct WindowHostedTests {
         let hit = harness.hosting.hitTest(NSPoint(x: field.midX, y: field.midY))
         #expect(hit.map { $0 !== search && !$0.isDescendant(of: search) } ?? true)
     }
+
+    // capability: auth.sign-out
+    @Test("Leaving the sample workspace from Preferences asks nothing and goes straight to sign-in")
+    func leavePreview() async {
+        let harness = Harness()
+        defer { harness.close() }
+        #expect(await harness.settle())
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        func press(_ text: String) -> Bool {
+            harness.accessible(text).contains { $0.accessibilityPerformPress?() == true }
+        }
+        harness.menu("preferences")
+        #expect(await eventually { press("Account") })
+        #expect(await eventually { press("Leave preview") })
+        // The sign-in screen's own way back into the sample.
+        #expect(await eventually { !harness.accessible("Try it without signing in").isEmpty })
+        #expect(harness.accessible("Sign out of Slatrix?").isEmpty)
+    }
 }

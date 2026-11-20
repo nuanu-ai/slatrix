@@ -21,11 +21,19 @@ enum UnreadBadge: Equatable {
     /// Every joined conversation at once, for the collapsed sidebar's button: their counts added up, else bold while
     /// any row is.
     static func combined(_ rooms: [ChatRoom]) -> UnreadBadge {
-        let joined = rooms.filter { $0.membership == "join" && !$0.isSpace }
-        let total = joined.reduce(0) { $0 + count($1) }
-        if total > 0 { return .count(label(total)) }
-        return joined.contains { UnreadBadge($0) != .none } ? .bold : .none
+        let sum = total(rooms)
+        if sum > 0 { return .count(label(sum)) }
+        return joined(rooms).contains { UnreadBadge($0) != .none } ? .bold : .none
     }
+
+    /// The Dock's count: the same sum, and none while desktop notifications are off.
+    static func dock(_ rooms: [ChatRoom], notifications: Bool) -> Int { notifications ? total(rooms) : 0 }
+
+    private static func joined(_ rooms: [ChatRoom]) -> [ChatRoom] {
+        rooms.filter { $0.membership == "join" && !$0.isSpace }
+    }
+
+    private static func total(_ rooms: [ChatRoom]) -> Int { joined(rooms).reduce(0) { $0 + count($1) } }
 
     static func label(_ count: Int) -> String { count > 99 ? "99+" : "\(count)" }
 

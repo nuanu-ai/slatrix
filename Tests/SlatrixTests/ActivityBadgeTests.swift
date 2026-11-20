@@ -59,7 +59,7 @@ struct ActivityBadgeTests {
         #expect(ActivityBadge.count(rooms: [], items: activity.items) == 1)
     }
 
-    @Test("A mention shows unread until it's opened or its conversation is read")
+    @Test("A mention shows unread until it's opened or read, whatever chat comes after it")
     func mentionUnread() {
         var room = ChatRoom(id: "!room-0", name: "room")
         room.mentions = 1
@@ -67,6 +67,7 @@ struct ActivityBadgeTests {
         mention.threadRootID = nil
         #expect(ActivityBadge.isUnread(mention, room: room))
         room.mentions = 0
+        room.unreadMessages = 2
         #expect(!ActivityBadge.isUnread(mention, room: room))
         room.mentions = 1
         mention.opened = true
