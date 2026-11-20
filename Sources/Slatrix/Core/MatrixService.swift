@@ -610,7 +610,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             let locked = messages.contains { $0.kind == "m.room.encrypted" }
             if locked != hasLockedMessages { hasLockedMessages = locked }
             if messages.first?.id != oldValue.first?.id { blankPages = 0 }
-            if loadedThreadRootID != nil { showEditedThreadRoot() }
+            followThreadRoot()
             countThreadReplies()
         }
     }
@@ -653,11 +653,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var firstUnreadEventID: String?
     private var forwardLoadID: UUID?
     private(set) var hasMoreThreadHistory = true { didSet { countThreadReplies() } }
-    /// The SDK adds a thread's root only once it has every reply, and the pane opens on the root: nothing loads above
-    /// it, and a loading row there would only drop the thread when the first page ends.
-    func loadsMoreThreadHistory(rootID: String?) -> Bool {
-        hasMoreThreadHistory && threadMessages.first?.eventID != rootID
-    }
     var members: [ChatUser] = []
     /// Whether your power level lets you notify the whole selected room, read with its members.
     var canMentionRoom = false
@@ -2344,34 +2339,39 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     revision > self.threadRevision
                 else { return }
                 self.threadRevision = revision
-                var messages = Performance.measure(.timelineProject, ["items": items.count]) {
-                    self.project(items, roomID: root.roomID, inThread: true)
-                }
-                if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
-                    messages[index].id = root.eventID
-                }
-                self.threadHoldsRoot = messages.contains { $0.eventID == root.eventID }
-                self.threadMessages = messages
-                self.showEditedThreadRoot()
+                self.showThread(items, root: root)
             }
         }
     }
-    /// The SDK's thread timeline keeps its root as first sent: an edit or deletion of the root, or one the server
-    /// refused and the channel took back, arrives in the main timeline.
-    private func showEditedThreadRoot() {
-        guard let rootID = loadedThreadRootID,
-            let current = messages.first(where: { $0.eventID == rootID }),
-            let index = threadMessages.firstIndex(where: { $0.eventID == rootID })
-        else { return }
-        var root = threadMessages[index]
-        root.body = current.body
-        root.formattedBody = current.formattedBody
-        root.kind = current.kind
-        root.attachment = current.attachment
-        root.mediaCaption = current.mediaCaption
-        root.isEdited = current.isEdited
-        root.isRedacted = current.isRedacted
-        if root != threadMessages[index] { threadMessages[index] = root }
+    /// The pane's rows: its root, then the replies the thread's own timeline holds.
+    private func showThread(_ items: [TimelineItem], root: ChatMessage) {
+        var replies = Performance.measure(.timelineProject, ["items": items.count]) {
+            project(items, roomID: root.roomID, inThread: true)
+        }
+        let own = replies.firstIndex { $0.eventID == root.eventID }.map { replies.remove(at: $0) }
+        threadHoldsRoot = own != nil
+        threadMessages = [threadRoot(own: own) ?? own ?? root] + replies
+    }
+    /// Whether the conversation has shown the open thread's root since its pane opened.
+    private var threadRootFromConversation = false
+    /// The open thread's root, from the newest copy: the conversation's, whenever it holds the root; the thread
+    /// timeline's own (`own`) when it is deleted, or while the conversation has shown none since the pane opened, as
+    /// the SDK keeps it as first sent; otherwise the copy shown last. Nil while no thread pane shows.
+    private func threadRoot(own: ChatMessage? = nil) -> ChatMessage? {
+        guard let rootID = threadOpening?.rootID, var root = threadMessages.first, root.eventID == rootID else {
+            return nil
+        }
+        if let current = messages.last(where: { $0.eventID == rootID && $0.roomID == root.roomID }) {
+            root = current
+            threadRootFromConversation = true
+        } else if let own, own.isRedacted || !threadRootFromConversation {
+            root = own
+        }
+        root.id = rootID
+        return root
+    }
+    private func followThreadRoot() {
+        if let root = threadRoot(), root != threadMessages.first { threadMessages[0] = root }
     }
 
     func loadMoreThread(rootID: String) async throws -> Bool {
@@ -2402,8 +2402,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         var opening = root
         opening.id = root.eventID
         threadHoldsRoot = false
+        threadRootFromConversation = false
         threadOpening = (root.eventID, openedWith)
         threadMessages = [opening]
+        followThreadRoot()
         threadRevision = 0
         threadTimeline = nil
         threadSnapshot = nil
@@ -2433,15 +2435,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             // Updates that came before the pane opened were dropped; its snapshot holds them.
             let snapshot = ready.observer.snapshot
             threadRevision = snapshot.revision
-            var messages = project(snapshot.items, roomID: root.roomID, inThread: true)
-            if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
-                messages[index].id = root.eventID
-            }
-            if !messages.isEmpty {
-                threadHoldsRoot = messages.contains { $0.eventID == root.eventID }
-                threadMessages = messages
-            }
-            showEditedThreadRoot()
+            showThread(snapshot.items, root: root)
             return
         }
         let next = try await requireRoom(root.roomID).timelineWithConfiguration(
