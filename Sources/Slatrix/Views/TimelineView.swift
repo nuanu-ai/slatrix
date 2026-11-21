@@ -27,7 +27,8 @@ struct TimelineView: View {
     /// What the read checks take the report for; when it changes, the pane reports again.
     var readKey: AnyHashable? = nil
     var onJumpToLatest: (() -> Void)? = nil
-    var startsAtUnread = false
+    /// The fully-read event of a conversation opened at its unread line.
+    var unreadAnchor: String? = nil
     /// Whether an edit to a message in this conversation is open.
     var editing = false
     var onForward: ((MessageActionTarget) -> Void)? = nil
@@ -80,7 +81,7 @@ struct TimelineView: View {
             focusedEventID: thread ? jumpTarget : jumpTarget ?? matrix.focusedEventID,
             jumpID: jumpTarget == nil ? nil : matrix.jump?.id,
             sends: matrix.sends[Conversation(roomID: room.id, threadRootID: thread ? threadRootID : nil)] ?? 0,
-            startsAtUnread: startsAtUnread,
+            startsAtUnread: unreadAnchor != nil,
             memoryKey: TimelineMemory.Key(
                 sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
             timelineID: thread ? nil : matrix.shownTimelineID,
@@ -203,7 +204,8 @@ struct TimelineView: View {
     /// messages.
     private var entries: [TimelineEntry] {
         let rows = layout.rows(
-            messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID, unread: startsAtUnread,
+            messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
+            unreadAnchor: unreadAnchor, me: matrix.user?.id,
             groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil,
             repliesLine: thread ? matrix.threadRepliesLine : nil)
         let context = matrix.messageActionContext
@@ -410,14 +412,14 @@ struct TimelineView: View {
 
 /// Lays the messages out once per change, and pins the "New messages" line to the first unread event as the
 /// conversation opens, so reading does not move the line and nothing arriving while it's open adds one. In an unread
-/// conversation whose read marker lands after its messages, the line still goes above one it opened with.
+/// conversation whose read marker lands after its messages, the line still goes where its fully-read anchor puts it.
 @MainActor final class TimelineLayoutCache {
     private var input: (messages: [ChatMessage], unread: String?, groups: Bool, repliesLine: Int?)?
     private var rows: [TimelineLayout.Row] = []
     private var unreadBoundary: String?
     private var opened = false
-    /// The messages an unread conversation opened with, which the line can still go above.
-    private var openedWith: Set<String> = []
+    /// The one message the line can still go above, in an unread conversation that opened without its read marker.
+    private var lateBoundary: String?
     /// Everything a timeline's entries show besides the rows; the timeline redraws for many changes that touch none.
     struct EntryInputs: Equatable {
         var rows: [TimelineLayout.Row]
@@ -451,17 +453,19 @@ struct TimelineView: View {
 
     /// A cache serves one timeline, so `threadRootEventID` never changes under it.
     func rows(
-        _ messages: [ChatMessage], firstUnreadEventID: String?, unread: Bool = false, groups: Bool,
-        threadRootEventID: String? = nil, repliesLine: Int? = nil
+        _ messages: [ChatMessage], firstUnreadEventID: String?, unreadAnchor: String? = nil, me: String? = nil,
+        groups: Bool, threadRootEventID: String? = nil, repliesLine: Int? = nil
     ) -> [TimelineLayout.Row] {
         if !opened, !messages.isEmpty {
             opened = true
-            openedWith = Set(messages.map(\.eventID))
+            if let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID }) {
+                unreadBoundary = firstUnreadEventID
+            } else if let anchor = messages.firstIndex(where: { $0.eventID == unreadAnchor }) {
+                // Where the read marker goes: before the next message someone else sent.
+                lateBoundary = messages[(anchor + 1)...].first { $0.senderID != me }?.eventID
+            }
         }
-        if unreadBoundary == nil, let firstUnreadEventID, openedWith.contains(firstUnreadEventID) {
-            unreadBoundary = firstUnreadEventID
-        }
-        if !unread { openedWith = [] }
+        if let lateBoundary, firstUnreadEventID == lateBoundary { unreadBoundary = lateBoundary }
         if let input, input.groups == groups, input.unread == unreadBoundary, input.repliesLine == repliesLine,
             input.messages == messages
         {

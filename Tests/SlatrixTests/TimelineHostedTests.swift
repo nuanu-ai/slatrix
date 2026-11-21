@@ -54,13 +54,13 @@ struct TimelineHostedTests {
         var threadRootID: String?
         /// A new timeline of the same conversation, as the app opens one at an older message and back.
         var timeline = 0
-        var startsAtUnread = false
+        var unreadAnchor: String?
         var body: some View {
             TimelineView(
                 matrix: service, room: room, thread: thread, threadRootID: threadRootID, savedIDs: [],
                 onThread: { _ in },
                 onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onReport: onReport,
-                startsAtUnread: startsAtUnread, insets: TimelineHostedTests.insets
+                unreadAnchor: unreadAnchor, insets: TimelineHostedTests.insets
             )
             // As the app's room pane, a table per timeline the service opens.
             .id("\(room.id):\(timeline):\(service.shownTimelineID)")
@@ -989,7 +989,7 @@ struct TimelineHostedTests {
         let harness = Harness(opening: room)
         defer { harness.close() }
         var fixture = harness.fixture(Self.room)
-        fixture.startsAtUnread = true
+        fixture.unreadAnchor = "$late-10"
         harness.hosting.rootView = fixture
         await harness.service.resumeRoom(Self.room.id, at: "$late-10")
         // The messages came without the marker: the conversation opens at its newest.
@@ -1036,7 +1036,7 @@ struct TimelineHostedTests {
         let harness = Harness(opening: room)
         defer { harness.close() }
         var fixture = harness.fixture(Self.room)
-        fixture.startsAtUnread = true
+        fixture.unreadAnchor = "$Old-37"
         harness.hosting.rootView = fixture
         await harness.service.resumeRoom(Self.room.id, at: "$Old-37")
         await settle(harness) { harness.top(of: "Old 39") != nil }
