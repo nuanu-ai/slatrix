@@ -17,6 +17,7 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/Slatrix", swiftSettings: [.swiftLanguageMode(.v5)]),
-        .testTarget(name: "SlatrixTests", dependencies: ["Slatrix"]),
+        .target(name: "DefaultSettings", path: "Tests/DefaultSettings", publicHeadersPath: "."),
+        .testTarget(name: "SlatrixTests", dependencies: ["Slatrix", "DefaultSettings"]),
     ]
 )
