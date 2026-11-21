@@ -68,7 +68,7 @@ struct ConversationSwitchHostedTests {
             let key: @Sendable (String) async throws -> Data = { try credentials.localStateKey(accountID: $0) }
             matrix = MatrixService(
                 credentials: credentials, storeRoots: [folder.path("support"), folder.path("caches")])
-            // Every window opens as it first would, on the first conversation.
+            // Every window opens as it first would, on the first conversation, whatever an earlier test chose.
             for key in ["layout.paneWidth", "layout.sidebarHidden", "room.@me:example.org"] {
                 UserDefaults.standard.removeObject(forKey: key)
             }
