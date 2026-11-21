@@ -610,7 +610,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             let locked = messages.contains { $0.kind == "m.room.encrypted" }
             if locked != hasLockedMessages { hasLockedMessages = locked }
             if messages.first?.id != oldValue.first?.id { blankPages = 0 }
-            if loadedThreadRootID != nil { showEditedThreadRoot() }
+            if let root = conversationRoot(), root != threadMessages.first { threadMessages[0] = root }
             countThreadReplies()
         }
     }
@@ -626,7 +626,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var threadMessages: [ChatMessage] = [] { didSet { countThreadReplies() } }
     /// The open thread's root, and the reply count its opener showed, which stays while the thread shows; nil while no
     /// thread pane shows.
-    var threadOpening: (rootID: String, openedWith: Int?)? { didSet { countThreadReplies() } }
+    var threadOpening: (rootID: String, openedWith: Int?)? {
+        didSet {
+            countThreadReplies()
+            threadPageError = nil
+        }
+    }
     /// Whether the open thread's own timeline holds its root, which the SDK adds only with the thread's start.
     private var threadHoldsRoot = false
     /// The line under the open thread's root that counts its replies; nil for none.
@@ -653,11 +658,19 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var firstUnreadEventID: String?
     private var forwardLoadID: UUID?
     private(set) var hasMoreThreadHistory = true { didSet { countThreadReplies() } }
-    /// The SDK adds a thread's root only once it has every reply, and the pane opens on the root: nothing loads above
-    /// it, and a loading row there would only drop the thread when the first page ends.
-    func loadsMoreThreadHistory(rootID: String?) -> Bool {
-        hasMoreThreadHistory && threadMessages.first?.eventID != rootID
+    /// Why the open thread's last page failed, nil once one loads, and gone with the pane. The pane says so, and asks
+    /// again only after the reader retries or the connection comes back.
+    private(set) var threadPageError: String?
+    /// The reader, or the connection coming back, asks for the thread's failed page again, wherever the pane is.
+    func retryThreadPage() {
+        guard let rootID = threadOpening?.rootID else { return }
+        threadPageError = nil
+        Task { _ = try? await loadMoreThread(rootID: rootID) }
     }
+    /// Whether the open thread's pane is loading a page, whoever asked for it.
+    var isLoadingThreadPage: Bool { threadPage?.selection == threadSelection }
+    /// The open thread's pages that landed, whoever asked for them; the pane looks for the next as each lands.
+    private(set) var threadPagesLanded = 0
     var members: [ChatUser] = []
     /// Whether your power level lets you notify the whole selected room, read with its members.
     var canMentionRoom = false
@@ -722,9 +735,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private typealias PreparedRoom = (
         timeline: Timeline, observer: TimelineObserver, listener: TaskHandle, firstPage: Task<Bool, Error>
     )
-    /// `endReached` is nil when the first page failed, so the thread isn't ready to read until a later page loads.
+    /// `page` is how the thread's first page went: whether it reached the start, or why it failed.
     private typealias PreparedTimeline = (
-        timeline: Timeline, observer: TimelineObserver, listener: TaskHandle, endReached: Bool?
+        timeline: Timeline, observer: TimelineObserver, listener: TaskHandle, page: Result<Bool, Error>
     )
     /// The open whose conversation is on screen, which can trail `selection` while the next one reads its cache.
     private var shownSelection: UUID?
@@ -816,9 +829,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             joined: selectedRoom?.membership == "join", preview: isPreview)
     }
     func captureMessageAction(message: ChatMessage, surface: MessageActionTarget.Surface) -> MessageActionTarget? {
-        guard let target = MessageActionTarget(message: message, surface: surface, context: messageActionContext),
+        guard var target = MessageActionTarget(message: message, surface: surface, context: messageActionContext),
             let current = currentActionMessage(target), !current.isRedacted, current.sendState == "sent"
         else { return nil }
+        if case .thread(let rootID) = surface, message.eventID == rootID {
+            target.inConversation = messages.contains { $0.eventID == rootID && $0.roomID == message.roomID }
+        }
         return target
     }
     func isCurrentMessageAction(_ target: MessageActionTarget) -> Bool { target.isCurrent(in: messageActionContext) }
@@ -895,6 +911,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         switch target.surface {
         case .conversation: return (try requireTimeline(), current)
         case .thread(let rootID):
+            if target.inConversation { return (try requireTimeline(), current) }
             guard loadedThreadRootID == rootID, let threadTimeline else { throw CancellationError() }
             return (threadTimeline, current)
         }
@@ -2318,12 +2335,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     configuration: Self.timelineConfiguration(.thread(rootEventId: root.eventID)))
             else { return nil }
             let listener = await timeline.addListener(listener: observer)
-            let endReached = try? await timeline.paginateBackwards(numEvents: 50)
+            let page: Result<Bool, Error>
+            do { page = .success(try await timeline.paginateBackwards(numEvents: 50)) } catch { page = .failure(error) }
             guard !Task.isCancelled else {
                 listener.cancel()
                 return nil
             }
-            return (timeline, observer, listener, endReached)
+            return (timeline, observer, listener, page)
         }
         preparedThread = (root.eventID, token, threadToken, task)
     }
@@ -2344,49 +2362,53 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     revision > self.threadRevision
                 else { return }
                 self.threadRevision = revision
-                var messages = Performance.measure(.timelineProject, ["items": items.count]) {
-                    self.project(items, roomID: root.roomID, inThread: true)
-                }
-                if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
-                    messages[index].id = root.eventID
-                }
-                self.threadHoldsRoot = messages.contains { $0.eventID == root.eventID }
-                self.threadMessages = messages
-                self.showEditedThreadRoot()
+                self.showThread(items, root: root)
             }
         }
     }
-    /// The SDK's thread timeline keeps its root as first sent: an edit or deletion of the root, or one the server
-    /// refused and the channel took back, arrives in the main timeline.
-    private func showEditedThreadRoot() {
-        guard let rootID = loadedThreadRootID,
-            let current = messages.first(where: { $0.eventID == rootID }),
-            let index = threadMessages.firstIndex(where: { $0.eventID == rootID })
-        else { return }
-        var root = threadMessages[index]
-        root.body = current.body
-        root.formattedBody = current.formattedBody
-        root.kind = current.kind
-        root.attachment = current.attachment
-        root.mediaCaption = current.mediaCaption
-        root.isEdited = current.isEdited
-        root.isRedacted = current.isRedacted
-        if root != threadMessages[index] { threadMessages[index] = root }
+    /// The pane's rows: its root, then the replies the thread's own timeline holds. The root shows the conversation's
+    /// row while the conversation holds it, else the thread's own while the thread holds it, else stays as it is.
+    private func showThread(_ items: [TimelineItem], root: ChatMessage) {
+        var replies = Performance.measure(.timelineProject, ["items": items.count]) {
+            project(items, roomID: root.roomID, inThread: true)
+        }
+        var own = replies.last { $0.eventID == root.eventID }
+        own?.id = root.eventID
+        replies.removeAll { $0.eventID == root.eventID }
+        threadHoldsRoot = own != nil
+        let shown = threadMessages.first { $0.eventID == root.eventID } ?? root
+        threadMessages = [conversationRoot() ?? own ?? shown] + replies
+    }
+    /// The open thread's root as the conversation shows it, while the conversation holds it.
+    private func conversationRoot() -> ChatMessage? {
+        guard let rootID = threadOpening?.rootID, let shown = threadMessages.first,
+            var root = messages.last(where: { $0.eventID == rootID && $0.roomID == shown.roomID })
+        else { return nil }
+        root.id = rootID
+        return root
     }
 
     func loadMoreThread(rootID: String) async throws -> Bool {
         // The pane asks as soon as it shows, often before its thread has opened; the opening loads the first page.
         guard loadedThreadRootID == rootID, let threadTimeline else { return false }
         let token = threadSelection
-        let page =
-            threadPage?.selection == token
-            ? threadPage!.task : Task { try await threadTimeline.paginateBackwards(numEvents: 50) }
+        let asked = threadPage?.selection != token
+        let page = asked ? Task { try await threadTimeline.paginateBackwards(numEvents: 50) } : threadPage!.task
         threadPage = (token, page)
         defer { if threadPage?.task == page { threadPage = nil } }
-        let endReached = try await page.value
-        if threadSelection == token, loadedThreadRootID == rootID {
+        let current = { self.threadSelection == token && self.loadedThreadRootID == rootID }
+        let endReached: Bool
+        do {
+            endReached = try await page.value
+        } catch {
+            if current(), !(error is CancellationError) { threadPageError = Self.safeError(error) }
+            throw error
+        }
+        if current() {
             hasMoreThreadHistory = !endReached
+            threadPageError = nil
             readyThreadReadSelection = token
+            if asked { threadPagesLanded += 1 }
         }
         return endReached
     }
@@ -2403,7 +2425,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         opening.id = root.eventID
         threadHoldsRoot = false
         threadOpening = (root.eventID, openedWith)
-        threadMessages = [opening]
+        threadMessages = [conversationRoot() ?? opening]
         threadRevision = 0
         threadTimeline = nil
         threadSnapshot = nil
@@ -2428,20 +2450,16 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             loadedThreadRootID = root.eventID
             threadHandle = ready.listener
             threadSnapshot = ready.observer
-            hasMoreThreadHistory = ready.endReached != true
-            if ready.endReached != nil { readyThreadReadSelection = threadToken }
+            switch ready.page {
+            case .success(let endReached):
+                hasMoreThreadHistory = !endReached
+                readyThreadReadSelection = threadToken
+            case .failure(let error): threadPageError = Self.safeError(error)
+            }
             // Updates that came before the pane opened were dropped; its snapshot holds them.
             let snapshot = ready.observer.snapshot
             threadRevision = snapshot.revision
-            var messages = project(snapshot.items, roomID: root.roomID, inThread: true)
-            if let index = messages.firstIndex(where: { $0.eventID == root.eventID }) {
-                messages[index].id = root.eventID
-            }
-            if !messages.isEmpty {
-                threadHoldsRoot = messages.contains { $0.eventID == root.eventID }
-                threadMessages = messages
-            }
-            showEditedThreadRoot()
+            showThread(snapshot.items, root: root)
             return
         }
         let next = try await requireRoom(root.roomID).timelineWithConfiguration(
@@ -2488,7 +2506,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     private func actionMedia(_ target: MessageActionTarget) throws -> ShownMedia {
         let (_, message) = try actionTimeline(target)
-        let shown = target.surface == .conversation ? mainMedia[message.eventID] : threadMedia[message.eventID]
+        let shown = target.inConversation ? mainMedia[message.eventID] : threadMedia[message.eventID]
         guard let shown, shown.attachment == message.attachment else {
             throw MatrixServiceError.request("This attachment is updating. Reload the message and try again.")
         }
@@ -2573,7 +2591,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         return ForwardMessageSourceRevision(
             kind: current.kind, body: current.body, formattedBody: current.formattedBody,
             redacted: current.isRedacted, sendState: current.sendState,
-            media: target.surface == .conversation
+            media: target.inConversation
                 ? mainForwardMedia[current.eventID] : threadForwardMedia[current.eventID])
     }
     func loadForwardMessage(_ target: MessageActionTarget) async throws -> ForwardMessageReview {
@@ -2602,7 +2620,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 guard message.attachment == shown.attachment,
                     try MediaCaptionContent(content).source.toJson() == shown.identity,
                     mediaRevision
-                        == (target.surface == .conversation
+                        == (target.inConversation
                             ? mainForwardMedia[message.eventID] : threadForwardMedia[message.eventID])
                 else { throw ForwardMessageError.sourceUpdating }
             }
@@ -2689,15 +2707,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             current.replyToID == preview.eventID,
             current.replyToID == target.message.replyToID, current.replyPreview?.state != .ready
         else { return }
-        switch target.surface {
-        case .conversation:
+        if target.inConversation {
             guard
                 let index = messages.firstIndex(where: { $0.eventID == current.eventID && $0.roomID == current.roomID })
             else {
                 return
             }
             messages[index].replyPreview = preview
-        case .thread:
+        } else {
             guard
                 let index = threadMessages.firstIndex(where: {
                     $0.eventID == current.eventID && $0.roomID == current.roomID
@@ -2896,8 +2913,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         } catch { threadFeed.unavailable(Self.safeError(error)) }
     }
 
-    /// The thread pane closed: nothing counts its replies until another opens.
-    func closeThread() { threadOpening = nil }
+    /// The thread pane closed: nothing counts its replies, and nothing started for it lands, until another opens.
+    func closeThread() {
+        threadOpening = nil
+        threadSelection = UUID()
+    }
 
     func checkMoreThreads() async { await threadFeed.checkMore() }
     func loadOlderThreads(roomID: String) async { await threadFeed.loadOlder(roomID: roomID) }
@@ -3398,6 +3418,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
     func applyConnection(_ feedback: MatrixConnectionFeedback) {
         connectionErrorMessage = feedback.errorMessage
+        let returned = connectionState != .running
         connectionState = feedback.state
         isRetryingConnection = feedback.isRetrying
         canRetryConnection = feedback.canRetry
@@ -3406,6 +3427,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             status = .ready
             savedMessages.resume()
             watchPresence()
+            // A thread page that failed while the connection was down is asked for again as it comes back.
+            if returned, threadPageError != nil { retryThreadPage() }
         case .failed: status = .error
         case .idle, .connecting, .offline, .stopped: status = .syncing
         }

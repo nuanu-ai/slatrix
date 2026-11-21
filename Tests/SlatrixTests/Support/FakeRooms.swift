@@ -130,6 +130,8 @@ final class FakeClient: Client, @unchecked Sendable {
     override func addRecentEmoji(emoji: String) async throws {}
     /// Coming back to the app asks for your profile; the server doesn't answer.
     override func getProfile(userId: String) async throws -> UserProfile { throw URLError(.timedOut) }
+    /// A connection that comes back asks after presence with the session's server; there is none.
+    override func session() throws -> Session { throw URLError(.userAuthenticationRequired) }
     private var serverLogout = false
     /// Whether anything asked the server to end this session.
     var loggedOut: Bool { lock.withLock { serverLogout } }

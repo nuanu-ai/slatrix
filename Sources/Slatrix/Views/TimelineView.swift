@@ -58,8 +58,10 @@ struct TimelineView: View {
     private var messages: [ChatMessage] { thread ? matrix.threadMessages : matrix.messages }
     /// A conversation loaded around an older message does not follow new messages.
     private var live: Bool { thread || matrix.focusedEventID == nil }
+    /// A thread's page loads for whoever asked for it: its loading row, Retry, or a jump reading back.
+    private var loadingOlder: Bool { thread ? matrix.isLoadingThreadPage : loadingHistory }
     private var hasOlder: Bool {
-        !matrix.isPreview && (thread ? matrix.loadsMoreThreadHistory(rootID: threadRootID) : matrix.loadsMoreHistory)
+        !matrix.isPreview && (thread ? matrix.hasMoreThreadHistory : matrix.loadsMoreHistory)
     }
     /// The intro tops a conversation loaded back to its start, or one with nothing else to show.
     private var reachedStart: Bool { matrix.isPreview || !matrix.hasMoreHistory }
@@ -82,7 +84,9 @@ struct TimelineView: View {
             memoryKey: TimelineMemory.Key(
                 sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
             timelineID: thread ? nil : matrix.shownTimelineID,
-            canLoadOlder: hasOlder && !loadingHistory,
+            pagesLanded: thread ? matrix.threadPagesLanded : 0,
+            // A thread whose page failed asks again when the reader retries or the connection returns.
+            canLoadOlder: hasOlder && !loadingOlder && !(thread && matrix.threadPageError != nil),
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
             onLand: { jump in
@@ -208,7 +212,7 @@ struct TimelineView: View {
         let inputs = TimelineLayoutCache.EntryInputs(
             rows: rows, hasOlder: hasOlder, reachedStart: reachedStart, reading: !thread && matrix.timelineLoading,
             hasNewer: hasNewer,
-            loadingHistory: loadingHistory, welcome: welcome,
+            loadingHistory: loadingOlder, welcome: welcome,
             pinned: room.pinnedEventIDs,
             canPin: canPinMessages, savedIDs: savedIDs, highlighted: highlighted,
             sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
@@ -228,9 +232,9 @@ struct TimelineView: View {
     ) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
         entries.reserveCapacity(rows.count + 2)
-        if hasOlder {
-            entries.append(TimelineEntry(id: "older", kind: .loading(loadingHistory)))
-        } else if !thread && (reachedStart || rows.isEmpty && !matrix.timelineLoading) {
+        // A thread's older replies load under its root and the line counting them.
+        var olderAt = 0
+        if !hasOlder && !thread && (reachedStart || rows.isEmpty && !matrix.timelineLoading) {
             entries.append(
                 TimelineEntry(
                     id: "welcome",
@@ -245,8 +249,11 @@ struct TimelineView: View {
             switch row.kind {
             case .day(let label): entries.append(TimelineEntry(id: row.id, kind: .day(label)))
             case .unread: entries.append(TimelineEntry(id: row.id, kind: .unread))
-            case .replies(let count): entries.append(TimelineEntry(id: row.id, kind: .replies(count)))
+            case .replies(let count):
+                entries.append(TimelineEntry(id: row.id, kind: .replies(count)))
+                olderAt = entries.count
             case .message(let message, let grouped, let time):
+                if message.eventID == threadRootID { olderAt = entries.count + 1 }
                 let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
                 entries.append(
                     TimelineEntry(
@@ -266,6 +273,7 @@ struct TimelineView: View {
                                 context: context))))
             }
         }
+        if hasOlder { entries.insert(TimelineEntry(id: "older", kind: .loading(loadingOlder)), at: olderAt) }
         if hasNewer { entries.append(TimelineEntry(id: "newer", kind: .loading(loadingHistory))) }
         return entries
     }
@@ -391,7 +399,8 @@ struct TimelineView: View {
                     _ = try await matrix.loadMore()
                 }
             } catch is CancellationError {} catch {
-                if matrix.notificationSessionID == session, matrix.timelineSelectionID == selection {
+                // A thread says so in its own banner.
+                if !thread, matrix.notificationSessionID == session, matrix.timelineSelectionID == selection {
                     matrix.errorMessage = MatrixService.safeError(error)
                 }
             }

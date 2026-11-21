@@ -159,10 +159,13 @@ struct RootView: View {
     private var threadCovers: Bool { paneCovers && profilePane == nil && threadRoot != nil }
     /// The open thread couldn't load.
     @ViewBuilder private var threadNotice: some View {
-        if let threadLoadError, let root = threadRoot {
+        if let text = threadLoadError ?? matrix.threadPageError, let root = threadRoot {
             let openedWith = matrix.threadOpening?.openedWith
-            Banner(text: threadLoadError, symbol: "exclamationmark.triangle.fill") {
-                Button("Retry") { [open = threadAction { _ in openedWith }] in open(root) }
+            Banner(text: text, symbol: "exclamationmark.triangle.fill") {
+                Button("Retry") { [open = threadAction { _ in openedWith }, opened = threadLoadError == nil] in
+                    // A thread that opened and then failed a page asks for that page again.
+                    if opened { matrix.retryThreadPage() } else { open(root) }
+                }
             }
         }
     }
@@ -1325,11 +1328,8 @@ struct RootView: View {
                 inlineVideo: viewer.inlineVideo, contentAbove: $threadContentAbove, insets: insets
             ).id(root.eventID)
         } header: {
-            VStack(spacing: 0) {
-                PaneHeader(
-                    title: "Thread", subtitle: room.writtenName, closeLabel: "Close thread", onClose: closeThread)
-                if !threadCovers { threadNotice }
-            }.scrollEdge(.top, colors.canvas)
+            PaneHeader(title: "Thread", subtitle: room.writtenName, closeLabel: "Close thread", onClose: closeThread)
+                .scrollEdge(.top, colors.canvas)
         } footer: {
             VStack(spacing: 0) {
                 if room.canPostMessages == false {
@@ -1419,7 +1419,10 @@ struct RootView: View {
                 ).alignmentGuide(.top) { $0[.bottom] }
             }
             .conversationColumn(m, isThread: true).scrollEdge(.bottom, colors.canvas)
-        }.background(colors.canvas).dropToUpload("Upload to thread")
+        }
+        // Its notice floats under its header, as the conversation's banners do, so showing it moves no row.
+        .overlay(alignment: .top) { if !threadCovers { threadNotice.padding(.top, m.paneHeader) } }
+        .background(colors.canvas).dropToUpload("Upload to thread")
     }
     private var browsedWorkspace: Workspace? { matrix.workspaces.first { $0.id == workspaceID } }
     private func collectionContent(_ route: AppRoute) -> some View {

@@ -4,23 +4,6 @@ import Testing
 
 @testable import Slatrix
 
-private final class ReplyDetails: InReplyToDetails, @unchecked Sendable {
-    let identifier: String
-    let details: EmbeddedEventDetails
-    let reads = Recorder<Void>()
-    init(id: String, details: EmbeddedEventDetails) {
-        identifier = id
-        self.details = details
-        super.init(noHandle: .init())
-    }
-    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
-    override func eventId() -> String { identifier }
-    override func event() -> EmbeddedEventDetails {
-        reads.append(())
-        return details
-    }
-}
-
 private func content(
     _ body: String = "Hello", formatted: FormattedBody? = nil, edited: Bool = false, threadRoot: String? = nil,
     replyTo: InReplyToDetails? = nil

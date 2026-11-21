@@ -657,37 +657,111 @@ struct TimelineHostedTests {
     // capability: conversation.history
     @Test("A thread opens with its root under the header and keeps it there as its first page ends")
     func threadRootStaysPut() async throws {
-        var root = Self.messages(0..<1, prefix: "Root")[0]
-        root.id = root.eventID
-        root.body = String(repeating: "Words that wrap across the pane. ", count: 6)
-        root.replyCount = 1
-        var reply = Self.messages(1..<2, prefix: "Reply")[0]
-        reply.reactions = [MessageReaction(key: "❤️", count: 1, mine: false, senders: ["@other:example.org"])]
-        let harness = Harness(width: 400, height: 600)
+        let words = String(repeating: "Words that wrap across the pane. ", count: 6)
+        let root = FakeTimelineItem(textEvent("$root", body: words), uniqueID: "root")
+        let room = FakeOpenRoom(Self.room.id, cached: [root])
+        // The SDK adds the root to its thread's timeline only with the thread's start, which the first page reaches.
+        room.threadItems = [FakeTimelineItem(textEvent("$reply", body: "Reply 1"), uniqueID: "reply")]
+        room.threadPages = [[FakeTimelineItem(textEvent("$root", body: words), uniqueID: "thread-root")]]
+        room.threadStartReached = true
+        let harness = Harness(width: 400, height: 600, opening: room)
         defer { harness.close() }
+        var fixture = harness.fixture(Self.room)
+        fixture.thread = true
+        fixture.threadRootID = "$root"
+        harness.hosting.rootView = fixture
+        await harness.service.selectRoom(Self.room.id)
+        try #require(await eventually { harness.service.messages.first?.eventID == "$root" })
+        room.pageGate.arm()
+        defer { room.pageGate.release() }
+        try await harness.service.loadThread(harness.service.messages[0])
+        func loadingRow() -> Bool {
+            harness.layout()
+            return Harness.views(in: harness.hosting).contains { view in
+                (view as? TimelineCell)?.entry?.id == "older" && view.window != nil
+            }
+        }
+        try #require(
+            await eventually {
+                harness.layout()
+                return harness.top(of: words) != nil && harness.cell(showing: "$reply") != nil
+            })
+        #expect(loadingRow())
+        let opened = try #require(harness.top(of: words))
+
+        // The opening's own first page ends at the thread's start.
+        #expect(await eventually { room.pageGate.isWaiting })
+        room.pageGate.release()
+        #expect(await eventually { !loadingRow() })
+        #expect(abs(try #require(harness.top(of: words)) - opened) < 0.5)
+    }
+
+    /// A thread pane showing `root` and `replies`, more of them older, each older page landing as `onPage` says.
+    private func threadPane(
+        _ harness: Harness, root: ChatMessage, replies: [ChatMessage], onPage: @escaping @MainActor () -> Bool
+    ) -> HistoryTimeline {
         let thread = HistoryTimeline(noHandle: .init())
         thread.gate.arm()
-        defer { thread.gate.release() }
-        thread.onPage = { true }
+        thread.onPage = onPage
         harness.service.configureMessageActionsForChecks(
             client: harness.client, main: harness.timeline, thread: thread, rootID: root.eventID, sessionID: UUID(),
             selectionID: UUID(), threadID: UUID())
-        // As a thread opened ahead of the click shows it: the SDK adds the root only with the thread's start.
-        harness.service.threadMessages = [root, reply]
+        harness.service.threadMessages = [root] + replies
         var fixture = harness.fixture(Self.room)
         fixture.thread = true
         fixture.threadRootID = root.eventID
         harness.hosting.rootView = fixture
-        await settle(harness) { harness.top(of: root.body) != nil }
-        let opened = try #require(harness.top(of: root.body))
+        return thread
+    }
 
-        // The opening's own first page, as `loadThread` asks for it, ends at the thread's start.
-        let page = Task { try await harness.service.loadMoreThread(rootID: root.eventID) }
+    @Test("Older replies landing under a thread's root leave the reply you were reading where it was")
+    func olderRepliesKeepReplyStill() async throws {
+        var root = Self.messages(0..<1, prefix: "Root")[0]
+        root.id = root.eventID
+        let replies = Self.messages(1..<121, prefix: "Reply")
+        let harness = Harness(width: 400, height: 600)
+        defer { harness.close() }
+        let thread = threadPane(harness, root: root, replies: Array(replies.suffix(50))) {
+            harness.service.threadMessages = [root] + replies.suffix(100)
+            return false
+        }
+        defer { thread.gate.release() }
+        await settle(harness) { harness.top(of: "Reply 120") != nil }
+        // At the top, the root and the oldest loaded reply both show, its older replies on their way.
+        harness.scroll(toTop: 0)
         #expect(await eventually { thread.gate.isWaiting })
+        let reading = try #require(harness.top(of: "Reply 71"))
+        try #require(harness.top(of: root.body) != nil)
         thread.gate.release()
-        _ = try await page.value
-        harness.layout()
-        #expect(abs(try #require(harness.top(of: root.body)) - opened) < 0.5)
+        var after: CGFloat?
+        _ = await eventually {
+            harness.layout()
+            guard harness.service.threadMessages.count == 101 else { return false }
+            after = harness.top(of: "Reply 71")
+            return true
+        }
+        #expect(abs(try #require(after) - reading) < 0.5)
+    }
+
+    @Test("A thread asks for older replies as its reader nears them, not counting its root above them")
+    func rootDoesNotDelayOlder() async throws {
+        var root = Self.messages(0..<1, prefix: "Root")[0]
+        root.id = root.eventID
+        let harness = Harness(width: 400, height: 600)
+        defer { harness.close() }
+        let thread = threadPane(harness, root: root, replies: Self.messages(1..<35, prefix: "Reply")) { false }
+        defer { thread.gate.release() }
+        await settle(harness) { harness.top(of: "Reply 34") != nil }
+        // The replies alone sit within the three screens history loads ahead; with the root above them they don't.
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        let screen = 600 - Self.insets.top - Self.insets.bottom
+        let top = harness.clip.bounds.minY + Self.insets.top
+        // Under the top spacer, the day, the root, then the loading row.
+        let loadingRow = table.rect(ofRow: 3)
+        try #require(loadingRow.height == 40)
+        try #require(top >= screen * TimelineScrollPolicy.historyLead)
+        try #require(top - loadingRow.minY < screen * TimelineScrollPolicy.historyLead)
+        #expect(await eventually { thread.gate.isWaiting })
     }
 
     @Test("Older history arrives without moving a pixel of what you are reading")
@@ -1492,6 +1566,47 @@ extension TimelineHostedTests {
         scrollView.contentView.scroll(to: .zero)
         scrollView.reflectScrolledClipView(scrollView.contentView)
         #expect(await eventually { above == false })
+    }
+
+    @Test("A page that lands with nothing to show leads to the next, though the rows and the loading row stay the same")
+    func blankPageLeadsOn() async throws {
+        let context = TimelineRowContext()
+        context.matrix = MatrixService.scratch()
+        context.appearance = AppearanceStore()
+        let entries =
+            [TimelineEntry(id: "older", kind: .loading(false))]
+            + Self.actionable(0..<3).map { message in
+                TimelineEntry(
+                    id: message.id,
+                    kind: .message(
+                        TimelineMessageEntry(
+                            message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false,
+                            canPin: false, highlighted: false, sendBusy: false)))
+            }
+        var asked = 0
+        func table(landed: Int, canLoadOlder: Bool) -> TimelineTable {
+            TimelineTable(
+                entries: entries, context: context, live: true, bottomAligned: true, focusedEventID: nil, jumpID: nil,
+                startsAtUnread: false, memoryKey: nil, pagesLanded: landed, canLoadOlder: canLoadOlder,
+                canLoadNewer: false, scroller: TimelineScroller(), onLoadOlder: { asked += 1 }, onLoadNewer: {},
+                onScroll: { _, _, _, _ in })
+        }
+        let window = offscreenWindow(NSSize(width: 620, height: 400))
+        // A failed page shows its error, so the table doesn't ask.
+        let hosting = NSHostingView(rootView: table(landed: 0, canLoadOlder: false))
+        window.contentView = hosting
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        try #require(
+            await eventually {
+                hosting.layoutSubtreeIfNeeded()
+                return Harness.views(in: hosting).contains { ($0 as? TimelineCell)?.entry?.id == entries[3].id }
+            })
+        // Retry's page came back blank before the table saw it loading: only the count of pages changed.
+        hosting.rootView = table(landed: 1, canLoadOlder: true)
+        #expect(await eventually { asked > 0 })
     }
 }
 

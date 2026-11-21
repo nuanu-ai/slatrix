@@ -29,6 +29,12 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         set { lock.withLock { pages = newValue } }
     }
     private var pages: [[TimelineItem]] = []
+    /// Why the next older page fails, as a lost connection would make it; it fails once.
+    var pageFailure: Error? {
+        get { lock.withLock { failure } }
+        set { lock.withLock { failure = newValue } }
+    }
+    private var failure: Error?
     /// Read receipts sent through this timeline, as "read:" or "fully:" and the event.
     let receipts = Recorder<String>()
     /// False until a listener is added: a timeline still being set up is not closed.
@@ -58,6 +64,12 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         }
         defer { lock.withLock { paging = false } }
         await pageGate.wait()
+        if let failure = lock.withLock({ () -> Error? in
+            defer { self.failure = nil }
+            return self.failure
+        }) {
+            throw failure
+        }
         if let page = lock.withLock({ pages.isEmpty ? nil : pages.removeFirst() }) {
             emit(page.reversed().map { .pushFront(value: $0) })
         }
@@ -77,8 +89,9 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         try await sendReadReceipt(receiptType: receiptType, eventId: latest ?? "")
     }
     private lazy var newest: String? = cached.compactMap(Self.eventID).last
-    private static func eventID(_ item: TimelineItem) -> String? {
-        item.asEvent().map { MatrixMapping.identifier($0.eventOrTransactionId) }
+    private static func eventID(_ item: TimelineItem) -> String? { item.asEvent().map(eventID) }
+    private static func eventID(_ event: EventTimelineItem) -> String {
+        MatrixMapping.identifier(event.eventOrTransactionId)
     }
     /// Messages sent through this timeline into the room's send queue.
     let sent = Recorder<Void>()
@@ -100,9 +113,48 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         }
         let callbacks = lock.withLock {
             if let last = added.compactMap(Self.eventID).last { newest = last }
+            for change in diff {
+                switch change {
+                case .append(let values): items += values
+                case .clear: items = []
+                case .pushFront(let value): items.insert(value, at: 0)
+                case .pushBack(let value): items.append(value)
+                case .popFront: items.removeFirst()
+                case .popBack: items.removeLast()
+                case .insert(let index, let value): items.insert(value, at: Int(index))
+                case .set(let index, let value): items[Int(index)] = value
+                case .remove(let index): items.remove(at: Int(index))
+                case .truncate(let length): items.removeSubrange(Int(length)...)
+                case .reset(let values): items = values
+                }
+            }
             return listeners
         }
         for listener in callbacks { listener.onUpdate(diff: diff) }
+    }
+    /// What this timeline holds, as its listeners last heard it; like the SDK, it acts only on those events.
+    private lazy var items = cached
+    /// Reactions toggled through this timeline, as the key and the event.
+    let reactions = Recorder<String>()
+    override func toggleReaction(itemId: EventOrTransactionId, key: String) async throws -> Bool {
+        let id = MatrixMapping.identifier(itemId)
+        try hold(id)
+        reactions.append("\(key) \(id)")
+        return true
+    }
+    /// Why the next details fetch fails, as a lost connection would make it.
+    var detailsFailure: Error?
+    override func fetchDetailsForEvent(eventId: String) async throws {
+        try hold(eventId)
+        if let detailsFailure { throw detailsFailure }
+    }
+    override func getEventTimelineItemByEventId(eventId: String) async throws -> EventTimelineItem {
+        try hold(eventId)
+    }
+    @discardableResult private func hold(_ id: String) throws -> EventTimelineItem {
+        let event = lock.withLock { items.lazy.compactMap { $0.asEvent() }.first { Self.eventID($0) == id } }
+        guard let event else { throw URLError(.resourceUnavailable) }
+        return event
     }
 }
 

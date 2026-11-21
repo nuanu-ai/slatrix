@@ -106,9 +106,27 @@ func imageEvent(
         lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
 }
 
+/// The message a reply quotes, as the SDK details it.
+final class ReplyDetails: InReplyToDetails, @unchecked Sendable {
+    let identifier: String
+    let details: EmbeddedEventDetails
+    let reads = Recorder<Void>()
+    init(id: String, details: EmbeddedEventDetails) {
+        identifier = id
+        self.details = details
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func eventId() -> String { identifier }
+    override func event() -> EmbeddedEventDetails {
+        reads.append(())
+        return details
+    }
+}
+
 func textEvent(
     _ id: String, body: String, formatted: String? = nil, sender: String = "@alice:example.org", edited: Bool = false,
-    redacted: Bool = false, timestamp: UInt64 = 1_000
+    redacted: Bool = false, timestamp: UInt64 = 1_000, replyTo: InReplyToDetails? = nil
 ) -> EventTimelineItem {
     let kind: MsgLikeKind =
         redacted
@@ -123,7 +141,7 @@ func textEvent(
     return EventTimelineItem(
         isRemote: true, eventOrTransactionId: .eventId(eventId: id), sender: sender, senderProfile: .unavailable,
         forwarder: nil, forwarderProfile: nil, isOwn: false, isEditable: false,
-        content: .msgLike(content: MsgLikeContent(kind: kind, inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
+        content: .msgLike(content: MsgLikeContent(kind: kind, inReplyTo: replyTo, threadRoot: nil, threadSummary: nil)),
         reactions: [], eventTypeRaw: "m.room.message", timestamp: timestamp, localSendState: nil, editSendState: nil,
         redactionSendState: nil, localCreatedAt: nil, readReceipts: [:], origin: nil, canBeRepliedTo: true,
         lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
