@@ -89,8 +89,9 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         try await sendReadReceipt(receiptType: receiptType, eventId: latest ?? "")
     }
     private lazy var newest: String? = cached.compactMap(Self.eventID).last
-    private static func eventID(_ item: TimelineItem) -> String? {
-        item.asEvent().map { MatrixMapping.identifier($0.eventOrTransactionId) }
+    private static func eventID(_ item: TimelineItem) -> String? { item.asEvent().map(eventID) }
+    private static func eventID(_ event: EventTimelineItem) -> String {
+        MatrixMapping.identifier(event.eventOrTransactionId)
     }
     /// Messages sent through this timeline into the room's send queue.
     let sent = Recorder<Void>()
@@ -147,8 +148,13 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         try hold(eventId)
         details.append(eventId)
     }
-    private func hold(_ id: String) throws {
-        guard lock.withLock({ items.contains { Self.eventID($0) == id } }) else { throw URLError(.resourceUnavailable) }
+    override func getEventTimelineItemByEventId(eventId: String) async throws -> EventTimelineItem {
+        try hold(eventId)
+    }
+    @discardableResult private func hold(_ id: String) throws -> EventTimelineItem {
+        let event = lock.withLock { items.lazy.compactMap { $0.asEvent() }.first { Self.eventID($0) == id } }
+        guard let event else { throw URLError(.resourceUnavailable) }
+        return event
     }
 }
 
