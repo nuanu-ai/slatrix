@@ -54,12 +54,13 @@ struct TimelineHostedTests {
         var threadRootID: String?
         /// A new timeline of the same conversation, as the app opens one at an older message and back.
         var timeline = 0
+        var unreadAnchor: String?
         var body: some View {
             TimelineView(
                 matrix: service, room: room, thread: thread, threadRootID: threadRootID, savedIDs: [],
                 onThread: { _ in },
                 onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onReport: onReport,
-                insets: TimelineHostedTests.insets
+                unreadAnchor: unreadAnchor, insets: TimelineHostedTests.insets
             )
             // As the app's room pane, a table per timeline the service opens.
             .id("\(room.id):\(timeline):\(service.shownTimelineID)")
@@ -973,6 +974,32 @@ struct TimelineHostedTests {
         await settle(harness) { harness.top(of: reading) != nil }
         #expect(harness.service.messages.contains { $0.body == reading })
         #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
+    }
+
+    // capability: conversation.unread-line
+    @Test("An unread conversation whose messages come before its read marker opens at its New line")
+    func opensAtLineWithoutMarker() async throws {
+        let room = FakeOpenRoom(
+            Self.room.id,
+            cached: (0..<40).map { index in
+                FakeTimelineItem(textEvent("$early-\(index)", body: "Early \(index)", sender: "@other:example.org"))
+            })
+        let harness = Harness(opening: room)
+        defer { harness.close() }
+        var fixture = harness.fixture(Self.room)
+        fixture.unreadAnchor = "$early-10"
+        harness.hosting.rootView = fixture
+        await harness.service.resumeRoom(Self.room.id, at: "$early-10")
+        let line = {
+            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }.first {
+                $0.window != nil && $0.entry?.id == "unread"
+            }.map { $0.convert($0.bounds, to: nil).maxY }
+        }
+        #expect(
+            await eventually {
+                harness.layout()
+                return line().map { abs($0 - harness.headerBottom) < 0.5 } == true
+            }, "The line sits under the header, not past it at the newest message")
     }
 
     @Test("Leaving an older message for the newest ones lands at the newest, wherever the reader had been")

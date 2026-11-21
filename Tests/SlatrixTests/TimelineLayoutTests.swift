@@ -134,16 +134,56 @@ struct TimelineLayoutTests {
                 == ["day Today", "a 11:58 AM", "b grouped 11:59 AM"])
     }
 
-    @MainActor @Test("A message that arrives while the conversation is open adds no unread line")
-    func noLineForLiveArrivals() {
+    // capability: conversation.unread-line
+    @MainActor
+    @Test(
+        "A message that arrives while the conversation is open adds no unread line, unread conversation or not",
+        arguments: [nil, "$a"])
+    func noLineForLiveArrivals(anchor: String?) {
         let cache = TimelineLayoutCache()
         var first = message("a", "@alice", at: 2)
         first.timelineEventID = "$a"
         var later = message("b", "@bob", at: 1)
         later.timelineEventID = "$b"
-        _ = cache.rows([first], firstUnreadEventID: nil, groups: true)
-        let rows = cache.rows([first, later], firstUnreadEventID: "$b", groups: true)
+        _ = cache.rows([first], firstUnreadEventID: nil, unreadAnchor: anchor, groups: true)
+        let rows = cache.rows([first, later], firstUnreadEventID: "$b", unreadAnchor: anchor, groups: true)
         #expect(!rows.contains { if case .unread = $0.kind { true } else { false } })
+    }
+
+    /// The message the unread line sits above, if there is a line.
+    private func belowLine(_ rows: [TimelineLayout.Row]) -> String? {
+        guard let line = rows.firstIndex(where: { if case .unread = $0.kind { true } else { false } }),
+            rows.indices.contains(line + 1), case .message(let message, _, _) = rows[line + 1].kind
+        else { return nil }
+        return message.eventID
+    }
+
+    // capability: conversation.unread-line
+    @MainActor
+    @Test(
+        "An unread conversation that opens before its read marker has its line at once, where its fully-read event says",
+        arguments: [
+            // Above the first message someone else sent after it, past your own.
+            ("$a", "$c"),
+            // A conversation that didn't open as unread.
+            (nil, nil),
+            // Only your own message follows it.
+            ("$d", nil),
+        ] as [(String?, String?)])
+    func lineFromAnchor(anchor: String?, line: String?) {
+        let cache = TimelineLayoutCache()
+        let messages = [("a", "@alice"), ("b", "@me"), ("c", "@alice"), ("d", "@alice"), ("e", "@me")].enumerated()
+            .map { index, sent in
+                var message = message(sent.0, sent.1, at: Double(5 - index))
+                message.timelineEventID = "$\(sent.0)"
+                return message
+            }
+        func rows(_ marker: String?) -> [TimelineLayout.Row] {
+            cache.rows(messages, firstUnreadEventID: marker, unreadAnchor: anchor, me: "@me", groups: true)
+        }
+        #expect(belowLine(rows(nil)) == line)
+        // A marker that lands later, wherever, changes nothing.
+        #expect(belowLine(rows("$d")) == line)
     }
 
     // capability: conversation.day-dividers

@@ -226,9 +226,9 @@ struct RootView: View {
         ConversationNavigation.shown(
             Screen(route: route), from: pickedFrom, showing: room?.id, opening: pendingRoomID)
     }
-    /// Opened at its unread line, from the cache or at the line from the server.
-    private var isResumingUnread: Bool {
-        unreadResumeEventID != nil && (matrix.focusedEventID == nil || unreadResumeEventID == matrix.focusedEventID)
+    /// The fully-read event of a conversation opened at its unread line, from the cache or at the line from the server.
+    private var unreadAnchor: String? {
+        matrix.focusedEventID == nil || unreadResumeEventID == matrix.focusedEventID ? unreadResumeEventID : nil
     }
     private var draftAddresses: Set<AttachmentDraftAddress> {
         guard localReady, composerStateIdentity == composerIdentity else { return [] }
@@ -1163,7 +1163,7 @@ struct RootView: View {
                         onShowReply: { selectRoom(room.id, record: true, eventID: $0) }, onOpenProfile: openProfile,
                         canPinMessages: canPin(room), onTogglePin: togglePin,
                         onReport: { [timeline = matrix.shownTimelineID] in matrix.record($0, timeline: timeline) },
-                        onJumpToLatest: { selectRoom(room.id) }, startsAtUnread: isResumingUnread,
+                        onJumpToLatest: { selectRoom(room.id) }, unreadAnchor: unreadAnchor,
                         editing: editTarget?.surface == .conversation, onForward: startForward,
                         onEditCaption: startCaption,
                         onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
