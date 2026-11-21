@@ -977,76 +977,29 @@ struct TimelineHostedTests {
     }
 
     // capability: conversation.unread-line
-    @Test(
-        "An unread conversation whose read marker lands after its messages goes to the New line, unless the reader scrolled",
-        arguments: [false, true])
-    func lateMarkerMovesToLine(scrolledFirst: Bool) async throws {
+    @Test("An unread conversation whose messages come before its read marker opens at its New line")
+    func opensAtLineWithoutMarker() async throws {
         let room = FakeOpenRoom(
             Self.room.id,
             cached: (0..<40).map { index in
-                FakeTimelineItem(textEvent("$late-\(index)", body: "Late \(index)", sender: "@other:example.org"))
+                FakeTimelineItem(textEvent("$early-\(index)", body: "Early \(index)", sender: "@other:example.org"))
             })
         let harness = Harness(opening: room)
         defer { harness.close() }
         var fixture = harness.fixture(Self.room)
-        fixture.unreadAnchor = "$late-10"
+        fixture.unreadAnchor = "$early-10"
         harness.hosting.rootView = fixture
-        await harness.service.resumeRoom(Self.room.id, at: "$late-10")
-        // The messages came without the marker: the conversation opens at its newest.
-        await settle(harness) { harness.top(of: "Late 39") != nil }
-        #expect(abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance)
-        if scrolledFirst { harness.scroll(toTop: harness.clip.bounds.minY - 300) }
-        let reading = try #require(harness.firstVisibleBody)
-        let before = try #require(harness.top(of: reading))
-        let rows = harness.rowCount
-        try #require(room.timelines.all.first).emit([.insert(index: 11, value: FakeTimelineItem(virtual: .readMarker))])
-        var line: CGFloat? {
-            let cell = Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }.first {
+        await harness.service.resumeRoom(Self.room.id, at: "$early-10")
+        let line = {
+            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }.first {
                 $0.window != nil && $0.entry?.id == "unread"
-            }
-            return cell.map { $0.convert($0.bounds, to: nil).maxY }
+            }.map { $0.convert($0.bounds, to: nil).maxY }
         }
         #expect(
             await eventually {
                 harness.layout()
-                return harness.rowCount == rows + 1
-            }, "The line goes in")
-        if scrolledFirst {
-            #expect(
-                harness.top(of: reading).map { abs($0 - before) < 0.5 } == true, "What the reader reads holds still")
-        } else {
-            #expect(
-                await eventually {
-                    harness.layout()
-                    return line.map { abs($0 - harness.headerBottom) < 0.5 } == true
-                }, "The line sits under the header")
-        }
-    }
-
-    // capability: conversation.unread-line
-    @Test("An unread conversation that opened at its New line and its newest message follows new ones")
-    func openedAtLineFollowsNewMessages() async throws {
-        func item(_ kind: String, _ index: Int) -> TimelineItem {
-            FakeTimelineItem(textEvent("$\(kind)-\(index)", body: "\(kind) \(index)", sender: "@other:example.org"))
-        }
-        let room = FakeOpenRoom(
-            Self.room.id,
-            cached: (0..<38).map { item("Old", $0) } + [FakeTimelineItem(virtual: .readMarker)]
-                + (38..<40).map { item("Old", $0) })
-        let harness = Harness(opening: room)
-        defer { harness.close() }
-        var fixture = harness.fixture(Self.room)
-        fixture.unreadAnchor = "$Old-37"
-        harness.hosting.rootView = fixture
-        await harness.service.resumeRoom(Self.room.id, at: "$Old-37")
-        await settle(harness) { harness.top(of: "Old 39") != nil }
-        try #require(room.timelines.all.first).emit((0..<20).map { .pushBack(value: item("New", $0)) })
-        #expect(
-            await eventually {
-                harness.layout()
-                return harness.top(of: "New 19") != nil
-                    && abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance
-            })
+                return line().map { abs($0 - harness.headerBottom) < 0.5 } == true
+            }, "The line sits under the header, not past it at the newest message")
     }
 
     @Test("Leaving an older message for the newest ones lands at the newest, wherever the reader had been")

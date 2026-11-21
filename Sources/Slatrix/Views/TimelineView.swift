@@ -411,15 +411,13 @@ struct TimelineView: View {
 }
 
 /// Lays the messages out once per change, and pins the "New messages" line to the first unread event as the
-/// conversation opens, so reading does not move the line and nothing arriving while it's open adds one. In an unread
-/// conversation whose read marker lands after its messages, the line still goes where its fully-read anchor puts it.
+/// conversation opens, so reading does not move the line and nothing arriving while it's open adds one. An unread
+/// conversation that opens before its read marker takes the line from the fully-read event it opened at.
 @MainActor final class TimelineLayoutCache {
     private var input: (messages: [ChatMessage], unread: String?, groups: Bool, repliesLine: Int?)?
     private var rows: [TimelineLayout.Row] = []
     private var unreadBoundary: String?
     private var opened = false
-    /// The one message the line can still go above, in an unread conversation that opened without its read marker.
-    private var lateBoundary: String?
     /// Everything a timeline's entries show besides the rows; the timeline redraws for many changes that touch none.
     struct EntryInputs: Equatable {
         var rows: [TimelineLayout.Row]
@@ -461,11 +459,10 @@ struct TimelineView: View {
             if let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID }) {
                 unreadBoundary = firstUnreadEventID
             } else if let anchor = messages.firstIndex(where: { $0.eventID == unreadAnchor }) {
-                // Where the read marker goes: before the next message someone else sent.
-                lateBoundary = messages[(anchor + 1)...].first { $0.senderID != me }?.eventID
+                // The read marker can land after the messages; it would go before the next one someone else sent.
+                unreadBoundary = messages[(anchor + 1)...].first { $0.senderID != me }?.eventID
             }
         }
-        if let lateBoundary, firstUnreadEventID == lateBoundary { unreadBoundary = lateBoundary }
         if let input, input.groups == groups, input.unread == unreadBoundary, input.repliesLine == repliesLine,
             input.messages == messages
         {

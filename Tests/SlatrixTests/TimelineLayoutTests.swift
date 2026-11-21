@@ -161,29 +161,28 @@ struct TimelineLayoutTests {
     // capability: conversation.unread-line
     @MainActor
     @Test(
-        "In an unread conversation, a read marker that lands after its messages puts the line where the conversation's anchor said, once",
+        "An unread conversation that opens before its read marker has its line at once, where its fully-read event says",
         arguments: [
-            // After the anchor, past your own message, as the marker goes.
-            ("$a", "$c", "$c"),
+            // Above the first message someone else sent after it, past your own.
+            ("$a", "$c"),
             // A conversation that didn't open as unread.
-            (nil, "$c", nil),
-            // The reader read further elsewhere, which moved the marker past the anchor.
-            ("$a", "$d", nil),
-        ] as [(String?, String, String?)])
-    func lateMarkerPlacesLine(anchor: String?, marker: String, line: String?) {
+            (nil, nil),
+            // Only your own message follows it.
+            ("$d", nil),
+        ] as [(String?, String?)])
+    func lineFromAnchor(anchor: String?, line: String?) {
         let cache = TimelineLayoutCache()
-        let messages = [("a", "@alice"), ("b", "@me"), ("c", "@alice"), ("d", "@alice")].enumerated().map {
-            index, sent in
-            var message = message(sent.0, sent.1, at: Double(4 - index))
-            message.timelineEventID = "$\(sent.0)"
-            return message
-        }
+        let messages = [("a", "@alice"), ("b", "@me"), ("c", "@alice"), ("d", "@alice"), ("e", "@me")].enumerated()
+            .map { index, sent in
+                var message = message(sent.0, sent.1, at: Double(5 - index))
+                message.timelineEventID = "$\(sent.0)"
+                return message
+            }
         func rows(_ marker: String?) -> [TimelineLayout.Row] {
             cache.rows(messages, firstUnreadEventID: marker, unreadAnchor: anchor, me: "@me", groups: true)
         }
-        _ = rows(nil)
-        #expect(belowLine(rows(marker)) == line)
-        // It stays for the visit.
+        #expect(belowLine(rows(nil)) == line)
+        // A marker that lands later, wherever, changes nothing.
         #expect(belowLine(rows("$d")) == line)
     }
 

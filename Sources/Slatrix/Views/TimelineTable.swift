@@ -314,9 +314,7 @@ struct TimelineTable: NSViewRepresentable {
                 }
                 return entry.message.senderID == me && entry.message.sendState != "sent"
             }
-        // A New line whose marker came after the messages takes the reader to it, unless they have scrolled since.
-        let late = !scrolledByReader && index["unread"] == nil && next.contains { $0.id == "unread" }
-        preservingPosition(keeping: sent ? .bottom : late ? .anchored(rowID: "unread", offset: 0) : nil) {
+        preservingPosition(keeping: sent ? .bottom : nil) {
             if !difference.isEmpty {
                 NSAnimationContext.beginGrouping()
                 NSAnimationContext.current.duration = 0
