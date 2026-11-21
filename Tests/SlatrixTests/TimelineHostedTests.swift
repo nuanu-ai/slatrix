@@ -1567,6 +1567,47 @@ extension TimelineHostedTests {
         scrollView.reflectScrolledClipView(scrollView.contentView)
         #expect(await eventually { above == false })
     }
+
+    @Test("A page that lands with nothing to show leads to the next, though the rows and the loading row stay the same")
+    func blankPageLeadsOn() async throws {
+        let context = TimelineRowContext()
+        context.matrix = MatrixService.scratch()
+        context.appearance = AppearanceStore()
+        let entries =
+            [TimelineEntry(id: "older", kind: .loading(false))]
+            + Self.actionable(0..<3).map { message in
+                TimelineEntry(
+                    id: message.id,
+                    kind: .message(
+                        TimelineMessageEntry(
+                            message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false,
+                            canPin: false, highlighted: false, sendBusy: false)))
+            }
+        var asked = 0
+        func table(landed: Int, canLoadOlder: Bool) -> TimelineTable {
+            TimelineTable(
+                entries: entries, context: context, live: true, bottomAligned: true, focusedEventID: nil, jumpID: nil,
+                startsAtUnread: false, memoryKey: nil, pagesLanded: landed, canLoadOlder: canLoadOlder,
+                canLoadNewer: false, scroller: TimelineScroller(), onLoadOlder: { asked += 1 }, onLoadNewer: {},
+                onScroll: { _, _, _, _ in })
+        }
+        let window = offscreenWindow(NSSize(width: 620, height: 400))
+        // A failed page shows its error, so the table doesn't ask.
+        let hosting = NSHostingView(rootView: table(landed: 0, canLoadOlder: false))
+        window.contentView = hosting
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        try #require(
+            await eventually {
+                hosting.layoutSubtreeIfNeeded()
+                return Harness.views(in: hosting).contains { ($0 as? TimelineCell)?.entry?.id == entries[3].id }
+            })
+        // Retry's page came back blank before the table saw it loading: only the count of pages changed.
+        hosting.rootView = table(landed: 1, canLoadOlder: true)
+        #expect(await eventually { asked > 0 })
+    }
 }
 
 /// Budgets for the table at the scale of a busy room; see `PerformanceBudgetTests`.

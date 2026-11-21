@@ -142,11 +142,11 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         reactions.append("\(key) \(id)")
         return true
     }
-    /// Events whose quoted message this timeline was asked to fetch.
-    let details = Recorder<String>()
+    /// Why the next details fetch fails, as a lost connection would make it.
+    var detailsFailure: Error?
     override func fetchDetailsForEvent(eventId: String) async throws {
         try hold(eventId)
-        details.append(eventId)
+        if let detailsFailure { throw detailsFailure }
     }
     override func getEventTimelineItemByEventId(eventId: String) async throws -> EventTimelineItem {
         try hold(eventId)
