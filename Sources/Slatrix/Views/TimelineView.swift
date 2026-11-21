@@ -58,6 +58,8 @@ struct TimelineView: View {
     private var messages: [ChatMessage] { thread ? matrix.threadMessages : matrix.messages }
     /// A conversation loaded around an older message does not follow new messages.
     private var live: Bool { thread || matrix.focusedEventID == nil }
+    /// A thread's page loads for whoever asked for it: its loading row, Retry, or an action reading back.
+    private var loadingOlder: Bool { thread ? matrix.isLoadingThreadPage : loadingHistory }
     private var hasOlder: Bool {
         !matrix.isPreview && (thread ? matrix.hasMoreThreadHistory : matrix.loadsMoreHistory)
     }
@@ -83,7 +85,7 @@ struct TimelineView: View {
                 sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
             timelineID: thread ? nil : matrix.shownTimelineID,
             // A thread whose page failed asks again when the reader retries or the connection returns.
-            canLoadOlder: hasOlder && !loadingHistory && !(thread && matrix.threadPageError != nil),
+            canLoadOlder: hasOlder && !loadingOlder && !(thread && matrix.threadPageError != nil),
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
             onLand: { jump in
@@ -209,7 +211,7 @@ struct TimelineView: View {
         let inputs = TimelineLayoutCache.EntryInputs(
             rows: rows, hasOlder: hasOlder, reachedStart: reachedStart, reading: !thread && matrix.timelineLoading,
             hasNewer: hasNewer,
-            loadingHistory: loadingHistory, welcome: welcome,
+            loadingHistory: loadingOlder, welcome: welcome,
             pinned: room.pinnedEventIDs,
             canPin: canPinMessages, savedIDs: savedIDs, highlighted: highlighted,
             sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
@@ -270,7 +272,7 @@ struct TimelineView: View {
                                 context: context))))
             }
         }
-        if hasOlder { entries.insert(TimelineEntry(id: "older", kind: .loading(loadingHistory)), at: olderAt) }
+        if hasOlder { entries.insert(TimelineEntry(id: "older", kind: .loading(loadingOlder)), at: olderAt) }
         if hasNewer { entries.append(TimelineEntry(id: "newer", kind: .loading(loadingHistory))) }
         return entries
     }
