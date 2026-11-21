@@ -134,16 +134,50 @@ struct TimelineLayoutTests {
                 == ["day Today", "a 11:58 AM", "b grouped 11:59 AM"])
     }
 
-    @MainActor @Test("A message that arrives while the conversation is open adds no unread line")
-    func noLineForLiveArrivals() {
+    // capability: conversation.unread-line
+    @MainActor
+    @Test(
+        "A message that arrives while the conversation is open adds no unread line, unread conversation or not",
+        arguments: [false, true])
+    func noLineForLiveArrivals(unread: Bool) {
         let cache = TimelineLayoutCache()
         var first = message("a", "@alice", at: 2)
         first.timelineEventID = "$a"
         var later = message("b", "@bob", at: 1)
         later.timelineEventID = "$b"
-        _ = cache.rows([first], firstUnreadEventID: nil, groups: true)
-        let rows = cache.rows([first, later], firstUnreadEventID: "$b", groups: true)
+        _ = cache.rows([first], firstUnreadEventID: nil, unread: unread, groups: true)
+        let rows = cache.rows([first, later], firstUnreadEventID: "$b", unread: unread, groups: true)
         #expect(!rows.contains { if case .unread = $0.kind { true } else { false } })
+    }
+
+    /// The message the unread line sits above, if there is a line.
+    private func belowLine(_ rows: [TimelineLayout.Row]) -> String? {
+        guard let line = rows.firstIndex(where: { if case .unread = $0.kind { true } else { false } }),
+            rows.indices.contains(line + 1), case .message(let message, _, _) = rows[line + 1].kind
+        else { return nil }
+        return message.eventID
+    }
+
+    // capability: conversation.unread-line
+    @MainActor
+    @Test(
+        "In an unread conversation, a read marker that lands after its messages still puts the line above its message, once",
+        arguments: [true, false])
+    func lateMarkerPlacesLine(unread: Bool) {
+        let cache = TimelineLayoutCache()
+        let messages = ["a", "b", "c"].enumerated().map { index, id in
+            var message = message(id, "@alice", at: Double(3 - index))
+            message.timelineEventID = "$\(id)"
+            return message
+        }
+        _ = cache.rows(messages, firstUnreadEventID: nil, unread: unread, groups: true)
+        #expect(
+            belowLine(cache.rows(messages, firstUnreadEventID: "$b", unread: unread, groups: true))
+                == (unread ? "$b" : nil))
+        // Placed, it stays for the visit.
+        #expect(
+            belowLine(cache.rows(messages, firstUnreadEventID: "$c", unread: unread, groups: true))
+                == (unread ? "$b" : nil))
     }
 
     // capability: conversation.day-dividers

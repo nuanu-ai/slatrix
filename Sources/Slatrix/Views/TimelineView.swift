@@ -203,7 +203,7 @@ struct TimelineView: View {
     /// messages.
     private var entries: [TimelineEntry] {
         let rows = layout.rows(
-            messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
+            messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID, unread: startsAtUnread,
             groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil,
             repliesLine: thread ? matrix.threadRepliesLine : nil)
         let context = matrix.messageActionContext
@@ -409,12 +409,15 @@ struct TimelineView: View {
 }
 
 /// Lays the messages out once per change, and pins the "New messages" line to the first unread event as the
-/// conversation opens, so reading does not move the line and nothing arriving while it's open adds one.
+/// conversation opens, so reading does not move the line and nothing arriving while it's open adds one. In an unread
+/// conversation whose read marker lands after its messages, the line still goes above one it opened with.
 @MainActor final class TimelineLayoutCache {
     private var input: (messages: [ChatMessage], unread: String?, groups: Bool, repliesLine: Int?)?
     private var rows: [TimelineLayout.Row] = []
     private var unreadBoundary: String?
     private var opened = false
+    /// The messages an unread conversation opened with, which the line can still go above.
+    private var openedWith: Set<String> = []
     /// Everything a timeline's entries show besides the rows; the timeline redraws for many changes that touch none.
     struct EntryInputs: Equatable {
         var rows: [TimelineLayout.Row]
@@ -448,15 +451,17 @@ struct TimelineView: View {
 
     /// A cache serves one timeline, so `threadRootEventID` never changes under it.
     func rows(
-        _ messages: [ChatMessage], firstUnreadEventID: String?, groups: Bool, threadRootEventID: String? = nil,
-        repliesLine: Int? = nil
+        _ messages: [ChatMessage], firstUnreadEventID: String?, unread: Bool = false, groups: Bool,
+        threadRootEventID: String? = nil, repliesLine: Int? = nil
     ) -> [TimelineLayout.Row] {
         if !opened, !messages.isEmpty {
             opened = true
-            if let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID }) {
-                unreadBoundary = firstUnreadEventID
-            }
+            openedWith = Set(messages.map(\.eventID))
         }
+        if unreadBoundary == nil, let firstUnreadEventID, openedWith.contains(firstUnreadEventID) {
+            unreadBoundary = firstUnreadEventID
+        }
+        if !unread { openedWith = [] }
         if let input, input.groups == groups, input.unread == unreadBoundary, input.repliesLine == repliesLine,
             input.messages == messages
         {
