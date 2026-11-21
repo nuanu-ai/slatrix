@@ -109,6 +109,8 @@ struct TimelineTable: NSViewRepresentable {
     var memoryKey: TimelineMemory.Key?
     /// The timeline the rows come from, when the table shows one only.
     var timelineID: UUID? = nil
+    /// Counts the older pages that landed, whoever asked for them: as each lands, the table looks for the next.
+    var pagesLanded = 0
     var canLoadOlder: Bool
     var canLoadNewer: Bool
     var scroller: TimelineScroller
@@ -268,6 +270,7 @@ struct TimelineTable: NSViewRepresentable {
             preservingPosition(keeping: .bottom) {}
         }
         apply(configuration.entries)
+        if opened, let previous, previous.pagesLanded != configuration.pagesLanded { checkHistory() }
         if let previous, previous.readKey != configuration.readKey { reported = nil }
         // A jump within rows already shown changes none of them.
         if opened, pendingFocus != nil || reported == nil { afterScroll() }

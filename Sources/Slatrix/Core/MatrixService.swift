@@ -610,7 +610,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             let locked = messages.contains { $0.kind == "m.room.encrypted" }
             if locked != hasLockedMessages { hasLockedMessages = locked }
             if messages.first?.id != oldValue.first?.id { blankPages = 0 }
-            followThreadRoot()
+            if let root = conversationRoot(), root != threadMessages.first { threadMessages[0] = root }
             countThreadReplies()
         }
     }
@@ -632,15 +632,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             threadPageError = nil
         }
     }
-    /// The open thread's root as its own timeline holds it, which the SDK adds only with the thread's start.
-    private var threadOwnRoot: ChatMessage?
+    /// Whether the open thread's own timeline holds its root, which the SDK adds only with the thread's start.
+    private var threadHoldsRoot = false
     /// The line under the open thread's root that counts its replies; nil for none.
     private(set) var threadRepliesLine: Int?
     /// Nothing but the shared rule decides the line, from what the thread and its conversation hold now.
     private func countThreadReplies() {
         let line = threadOpening.flatMap { opening in
             ThreadRepliesLine.count(
-                loadedToRoot: isPreview || (threadOwnRoot != nil && !hasMoreThreadHistory),
+                loadedToRoot: isPreview || (threadHoldsRoot && !hasMoreThreadHistory),
                 replies: threadMessages.lazy.filter { $0.eventID != opening.rootID },
                 rootSummary: messages.first { $0.eventID == opening.rootID }?.replyCount,
                 openedWith: opening.openedWith)
@@ -669,6 +669,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
     /// Whether the open thread's pane is loading a page, whoever asked for it.
     var isLoadingThreadPage: Bool { threadPage?.selection == threadSelection }
+    /// The open thread's pages that landed, whoever asked for them; the pane looks for the next as each lands.
+    private(set) var threadPagesLanded = 0
     var members: [ChatUser] = []
     /// Whether your power level lets you notify the whole selected room, read with its members.
     var canMentionRoom = false
@@ -827,9 +829,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             joined: selectedRoom?.membership == "join", preview: isPreview)
     }
     func captureMessageAction(message: ChatMessage, surface: MessageActionTarget.Surface) -> MessageActionTarget? {
-        guard let target = MessageActionTarget(message: message, surface: surface, context: messageActionContext),
+        guard var target = MessageActionTarget(message: message, surface: surface, context: messageActionContext),
             let current = currentActionMessage(target), !current.isRedacted, current.sendState == "sent"
         else { return nil }
+        if case .thread(let rootID) = surface, message.eventID == rootID {
+            target.inConversation = messages.contains { $0.eventID == rootID && $0.roomID == message.roomID }
+        }
         return target
     }
     func isCurrentMessageAction(_ target: MessageActionTarget) -> Bool { target.isCurrent(in: messageActionContext) }
@@ -898,70 +903,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             throw CancellationError()
         }
     }
-    /// The message an action targets as its pane shows it now, while the action still applies.
-    private func actionMessage(_ target: MessageActionTarget) throws -> ChatMessage {
+    private func actionTimeline(_ target: MessageActionTarget) throws -> (Timeline, ChatMessage) {
         try validateMessageAction(target)
         guard let current = currentActionMessage(target), !current.isRedacted, current.sendState == "sent" else {
             throw CancellationError()
         }
-        return current
-    }
-    /// The timeline that holds the message an action targets, which the SDK needs to act on it, and the message.
-    private func actionTimeline(_ target: MessageActionTarget) async throws -> (Timeline, ChatMessage) {
-        if case .thread(let rootID) = target.surface, target.message.eventID == rootID, !actsInConversation(target) {
-            try await reachThreadRoot(rootID)
+        switch target.surface {
+        case .conversation: return (try requireTimeline(), current)
+        case .thread(let rootID):
+            if target.inConversation { return (try requireTimeline(), current) }
+            guard loadedThreadRootID == rootID, let threadTimeline else { throw CancellationError() }
+            return (threadTimeline, current)
         }
-        let current = try actionMessage(target)
-        if actsInConversation(target) { return (try requireTimeline(), current) }
-        guard case .thread(let rootID) = target.surface, loadedThreadRootID == rootID, let threadTimeline else {
-            throw CancellationError()
-        }
-        return (threadTimeline, current)
-    }
-    /// Whether an action goes through the conversation's timeline: one on its rows, or on a thread's root while the
-    /// pane shows the root from there.
-    private func actsInConversation(_ target: MessageActionTarget) -> Bool {
-        guard case .thread(let rootID) = target.surface else { return true }
-        return target.message.eventID == rootID && conversationRow(rootID, roomID: target.message.roomID) != nil
-    }
-    private func conversationRow(_ eventID: String, roomID: String) -> ChatMessage? {
-        messages.last { $0.eventID == eventID && $0.roomID == roomID }
-    }
-    /// The pane whose root an action read its thread back to; an action reads back once per pane.
-    private var rootReadBack: UUID?
-    /// The SDK acts only on an event its timeline holds, and a thread's timeline holds its root only from the thread's
-    /// start: the first action on a root no timeline holds reads the thread back until the pane shows the root from
-    /// it. It ends with the pane; past ten pages, actions go ahead and fail as the SDK says.
-    private func reachThreadRoot(_ rootID: String) async throws {
-        guard loadedThreadRootID == rootID, threadSnapshot != nil, rootReadBack != threadSelection else { return }
-        let token = threadSelection
-        let reached = await readThreadBack(rootID: rootID, until: { self.threadOwnRoot != nil })
-        rootReadBack = token
-        guard reached != nil else { throw CancellationError() }
-    }
-    /// Reads the thread on screen back until `reached`, ten pages past the first at most. Nil once its pane closes or
-    /// shows another thread, or `current` fails; otherwise whether `reached`.
-    private func readThreadBack(rootID: String, until reached: () -> Bool, while current: () -> Bool = { true }) async
-        -> Bool?
-    {
-        guard loadedThreadRootID == rootID, let observer = threadSnapshot else { return nil }
-        let token = threadSelection
-        func shown() -> Bool { !Task.isCancelled && threadSelection == token && current() }
-        // The pane catches up with what its timeline holds, ahead of the update queued for it.
-        func holds() -> Bool {
-            let snapshot = observer.snapshot
-            if shown(), snapshot.revision > threadRevision, let root = threadMessages.first {
-                threadRevision = snapshot.revision
-                showThread(snapshot.items, root: root)
-            }
-            return reached()
-        }
-        // The first page, which the thread asks for as it opens.
-        if !holds(), readyThreadReadSelection != token { _ = try? await loadMoreThread(rootID: rootID) }
-        for _ in 0..<10 where shown() && !holds() && hasMoreThreadHistory {
-            guard (try? await loadMoreThread(rootID: rootID)) == false else { break }
-        }
-        return shown() ? holds() : nil
     }
     #if DEBUG
     func configureMessageActionsForChecks(
@@ -2413,36 +2366,34 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
         }
     }
-    /// The pane's rows: its root, then the replies the thread's own timeline holds.
+    /// The pane's rows: its root, then the replies the thread's own timeline holds. The root shows the conversation's
+    /// row while the conversation holds it, else the thread's own while the thread holds it, else stays as it is.
     private func showThread(_ items: [TimelineItem], root: ChatMessage) {
         var replies = Performance.measure(.timelineProject, ["items": items.count]) {
             project(items, roomID: root.roomID, inThread: true)
         }
-        threadOwnRoot = replies.last { $0.eventID == root.eventID }
+        var own = replies.last { $0.eventID == root.eventID }
+        own?.id = root.eventID
         replies.removeAll { $0.eventID == root.eventID }
-        threadMessages = [threadRoot() ?? threadOwnRoot ?? root] + replies
+        threadHoldsRoot = own != nil
+        let shown = threadMessages.first { $0.eventID == root.eventID } ?? root
+        threadMessages = [conversationRoot() ?? own ?? shown] + replies
     }
-    /// The open thread's root, shown from one source at a time: the conversation's row while it holds the root, else
-    /// the thread's own while it holds it, else the row on screen as it is. Nil while no thread pane shows.
-    private func threadRoot() -> ChatMessage? {
-        guard let rootID = threadOpening?.rootID, let shown = threadMessages.first, shown.eventID == rootID else {
-            return nil
-        }
-        var root = conversationRow(rootID, roomID: shown.roomID) ?? threadOwnRoot ?? shown
+    /// The open thread's root as the conversation shows it, while the conversation holds it.
+    private func conversationRoot() -> ChatMessage? {
+        guard let rootID = threadOpening?.rootID, let shown = threadMessages.first,
+            var root = messages.last(where: { $0.eventID == rootID && $0.roomID == shown.roomID })
+        else { return nil }
         root.id = rootID
         return root
-    }
-    private func followThreadRoot() {
-        if let root = threadRoot(), root != threadMessages.first { threadMessages[0] = root }
     }
 
     func loadMoreThread(rootID: String) async throws -> Bool {
         // The pane asks as soon as it shows, often before its thread has opened; the opening loads the first page.
         guard loadedThreadRootID == rootID, let threadTimeline else { return false }
         let token = threadSelection
-        let page =
-            threadPage?.selection == token
-            ? threadPage!.task : Task { try await threadTimeline.paginateBackwards(numEvents: 50) }
+        let asked = threadPage?.selection != token
+        let page = asked ? Task { try await threadTimeline.paginateBackwards(numEvents: 50) } : threadPage!.task
         threadPage = (token, page)
         defer { if threadPage?.task == page { threadPage = nil } }
         let current = { self.threadSelection == token && self.loadedThreadRootID == rootID }
@@ -2457,6 +2408,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             hasMoreThreadHistory = !endReached
             threadPageError = nil
             readyThreadReadSelection = token
+            if asked { threadPagesLanded += 1 }
         }
         return endReached
     }
@@ -2471,10 +2423,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         // The root keeps one identity in the pane from the moment it opens, whichever timeline it came from.
         var opening = root
         opening.id = root.eventID
-        threadOwnRoot = nil
+        threadHoldsRoot = false
         threadOpening = (root.eventID, openedWith)
-        threadMessages = [opening]
-        followThreadRoot()
+        threadMessages = [conversationRoot() ?? opening]
         threadRevision = 0
         threadTimeline = nil
         threadSnapshot = nil
@@ -2531,11 +2482,19 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// A jump to a reply beyond its thread's first page reads back to it while the thread's pane shows, ten pages past
     /// the first at most. Out of reach, the thread opens as it would, with nothing highlighted.
     private func reachJump(inThread rootID: String) async {
-        guard let jumpID = jump?.id, let target = jump?.eventID(inThread: rootID),
-            await readThreadBack(
-                rootID: rootID, until: { self.threadMessages.contains { $0.eventID == target } },
-                while: { self.jump?.id == jumpID }) == false
+        guard let jumpID = jump?.id, let target = jump?.eventID(inThread: rootID), loadedThreadRootID == rootID,
+            let observer = threadSnapshot
         else { return }
+        let token = threadSelection
+        func current() -> Bool { !Task.isCancelled && threadSelection == token && jump?.id == jumpID }
+        // What the timeline holds, whether or not the pane has shown it yet.
+        func holds() -> Bool { Self.contains(observer.snapshot.items, target) }
+        // The first page, which the thread asks for as it opens.
+        if readyThreadReadSelection != token { _ = try? await loadMoreThread(rootID: rootID) }
+        for _ in 0..<10 where current() && !holds() && hasMoreThreadHistory {
+            guard (try? await loadMoreThread(rootID: rootID)) == false else { break }
+        }
+        guard current(), !holds() else { return }
         jump?.landed.insert(rootID)
     }
 
@@ -2546,15 +2505,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     private func actionMedia(_ target: MessageActionTarget) throws -> ShownMedia {
-        let message = try actionMessage(target)
-        let shown = actsInConversation(target) ? mainMedia[message.eventID] : threadMedia[message.eventID]
+        let (_, message) = try actionTimeline(target)
+        let shown = target.inConversation ? mainMedia[message.eventID] : threadMedia[message.eventID]
         guard let shown, shown.attachment == message.attachment else {
-            throw Self.attachmentUpdating
+            throw MatrixServiceError.request("This attachment is updating. Reload the message and try again.")
         }
         return shown
     }
-    private static let attachmentUpdating = MatrixServiceError.request(
-        "This attachment is updating. Reload the message and try again.")
     func mediaCaptionSourceRevision(_ target: MessageActionTarget) -> MediaCaptionRevision? {
         guard let media = try? actionMedia(target), let current = currentActionMessage(target) else {
             return nil
@@ -2564,11 +2521,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             formattedCaption: current.formattedBody.map { FormattedBody(format: .html, body: $0) })
     }
     func loadMediaCaption(_ target: MessageActionTarget) async throws -> MediaCaptionSnapshot {
-        let (timeline, _) = try await actionTimeline(target)
+        let (timeline, _) = try actionTimeline(target)
         _ = try actionMedia(target)
         do {
             let event = try await timeline.getEventTimelineItemByEventId(eventId: target.message.eventID)
-            _ = try await actionTimeline(target)
+            _ = try actionTimeline(target)
             guard event.isRemote, event.isEditable, event.isOwn, event.sender == user?.id,
                 event.sender == target.message.senderID,
                 MatrixMapping.identifier(event.eventOrTransactionId) == target.message.eventID,
@@ -2590,7 +2547,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     attachment: shown.attachment, source: shown.identity, kind: mapped.kind, caption: media.caption,
                     formattedCaption: media.formattedCaption))
         } catch {
-            _ = try await actionTimeline(target)
+            _ = try actionTimeline(target)
             throw error
         }
     }
@@ -2604,7 +2561,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             guard caption != current.caption else {
                 return MediaCaptionSavedResult(snapshotID: snapshot.id, queued: false)
             }
-            let (timeline, _) = try await actionTimeline(snapshot.target)
+            let (timeline, _) = try actionTimeline(snapshot.target)
             _ = try actionMedia(snapshot.target)
             let payload = try current.media.payload(caption: caption)
             try await timeline.edit(
@@ -2634,15 +2591,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         return ForwardMessageSourceRevision(
             kind: current.kind, body: current.body, formattedBody: current.formattedBody,
             redacted: current.isRedacted, sendState: current.sendState,
-            media: actsInConversation(target)
+            media: target.inConversation
                 ? mainForwardMedia[current.eventID] : threadForwardMedia[current.eventID])
     }
     func loadForwardMessage(_ target: MessageActionTarget) async throws -> ForwardMessageReview {
-        let (source, mapped) = try await actionTimeline(target)
+        let (source, mapped) = try actionTimeline(target)
         if mapped.supportsCaptionEditing { _ = try actionMedia(target) }
         do {
             let event = try await source.getEventTimelineItemByEventId(eventId: target.message.eventID)
-            _ = try await actionTimeline(target)
+            _ = try actionTimeline(target)
             guard event.isRemote, MatrixMapping.identifier(event.eventOrTransactionId) == target.message.eventID,
                 event.sender == target.message.senderID,
                 case .msgLike(let value) = event.content, case .message(let content) = value.kind
@@ -2663,13 +2620,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 guard message.attachment == shown.attachment,
                     try MediaCaptionContent(content).source.toJson() == shown.identity,
                     mediaRevision
-                        == (actsInConversation(target)
+                        == (target.inConversation
                             ? mainForwardMedia[message.eventID] : threadForwardMedia[message.eventID])
                 else { throw ForwardMessageError.sourceUpdating }
             }
             return ForwardMessageReview(target: target, message: message, value: copied, content: content)
         } catch {
-            _ = try await actionTimeline(target)
+            _ = try actionTimeline(target)
             throw error
         }
     }
@@ -2725,14 +2682,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     func loadReplyPreview(for target: MessageActionTarget) async {
         guard let request = target.replyPreviewIdentity else { return }
         do {
-            let (timeline, current) = try await actionTimeline(target)
+            let (timeline, current) = try actionTimeline(target)
             guard current.replyToID == request.replyID, current.replyPreview?.state != .ready,
                 replyPreviewLoads.insert(request).inserted
             else { return }
             defer { replyPreviewLoads.remove(request) }
             try await timeline.fetchDetailsForEvent(eventId: current.eventID)
             // The fetched details arrive through each timeline's own listener.
-            let (_, latest) = try await actionTimeline(target)
+            let (_, latest) = try actionTimeline(target)
             guard latest.replyToID == request.replyID else { return }
         } catch {
             guard !Task.isCancelled, isCurrentMessageAction(target) else { return }
@@ -2750,7 +2707,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             current.replyToID == preview.eventID,
             current.replyToID == target.message.replyToID, current.replyPreview?.state != .ready
         else { return }
-        if actsInConversation(target) {
+        if target.inConversation {
             guard
                 let index = messages.firstIndex(where: { $0.eventID == current.eventID && $0.roomID == current.roomID })
             else {
@@ -2768,7 +2725,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     func editMessage(_ target: MessageActionTarget, body: String) async throws {
-        let (timeline, current) = try await actionTimeline(target)
+        let (timeline, current) = try actionTimeline(target)
         guard current.supportsTextEditing, current.senderID == user?.id else {
             throw MatrixServiceError.request("This message can’t be edited.")
         }
@@ -2783,7 +2740,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func deleteMessage(_ target: MessageActionTarget) async throws {
-        let (timeline, current) = try await actionTimeline(target)
+        let (timeline, current) = try actionTimeline(target)
         guard current.senderID == user?.id else {
             throw MatrixServiceError.request("You can only delete your own messages.")
         }
@@ -2796,7 +2753,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func toggleReaction(_ target: MessageActionTarget, key: String) async throws {
-        let (timeline, current) = try await actionTimeline(target)
+        let (timeline, current) = try actionTimeline(target)
         do {
             _ = try await timeline.toggleReaction(itemId: .eventId(eventId: target.message.eventID), key: key)
             try validateMessageAction(target)
@@ -2908,13 +2865,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         // A file opened from Files, whose conversation may be closed, comes through Files' own timeline.
         if shownMedia(message) == nil, let item = sharedFiles.item(for: message) {
             return try await sharedFiles.preparePreview(item)
-        }
-        // A thread's root that only its pane shows.
-        if shownMedia(message) == nil, let rootID = threadOpening?.rootID, message.eventID == rootID,
-            let target = captureMessageAction(message: message, surface: .thread(rootID: rootID))
-        {
-            _ = try await actionTimeline(target)
-            guard shownMedia(message) != nil else { throw Self.attachmentUpdating }
         }
         let client = try requireClient()
         guard connectionStopTask == nil, let shown = shownMedia(message),
@@ -3467,8 +3417,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         return destination
     }
     func applyConnection(_ feedback: MatrixConnectionFeedback) {
-        let returned = connectionState != .running
         connectionErrorMessage = feedback.errorMessage
+        let returned = connectionState != .running
         connectionState = feedback.state
         isRetryingConnection = feedback.isRetrying
         canRetryConnection = feedback.canRetry

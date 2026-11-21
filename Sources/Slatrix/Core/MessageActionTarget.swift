@@ -19,6 +19,9 @@ struct MessageActionTarget: Identifiable {
     let id = UUID()
     let message: ChatMessage
     let surface: Surface
+    /// Whether the SDK acts through the conversation's timeline: on its rows, and on a thread's root the conversation
+    /// held as the action was taken, where the root's edits and reactions land.
+    var inConversation: Bool
     private let owner: Context
 
     init?(message: ChatMessage, surface: Surface, context: Context) {
@@ -33,6 +36,7 @@ struct MessageActionTarget: Identifiable {
         }
         self.message = message
         self.surface = surface
+        inConversation = surface == .conversation
         owner = context
     }
 

@@ -58,7 +58,7 @@ struct TimelineView: View {
     private var messages: [ChatMessage] { thread ? matrix.threadMessages : matrix.messages }
     /// A conversation loaded around an older message does not follow new messages.
     private var live: Bool { thread || matrix.focusedEventID == nil }
-    /// A thread's page loads for whoever asked for it: its loading row, Retry, or an action reading back.
+    /// A thread's page loads for whoever asked for it: its loading row, Retry, or a jump reading back.
     private var loadingOlder: Bool { thread ? matrix.isLoadingThreadPage : loadingHistory }
     private var hasOlder: Bool {
         !matrix.isPreview && (thread ? matrix.hasMoreThreadHistory : matrix.loadsMoreHistory)
@@ -84,6 +84,7 @@ struct TimelineView: View {
             memoryKey: TimelineMemory.Key(
                 sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
             timelineID: thread ? nil : matrix.shownTimelineID,
+            pagesLanded: thread ? matrix.threadPagesLanded : 0,
             // A thread whose page failed asks again when the reader retries or the connection returns.
             canLoadOlder: hasOlder && !loadingOlder && !(thread && matrix.threadPageError != nil),
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
