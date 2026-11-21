@@ -657,37 +657,43 @@ struct TimelineHostedTests {
     // capability: conversation.history
     @Test("A thread opens with its root under the header and keeps it there as its first page ends")
     func threadRootStaysPut() async throws {
-        var root = Self.messages(0..<1, prefix: "Root")[0]
-        root.id = root.eventID
-        root.body = String(repeating: "Words that wrap across the pane. ", count: 6)
-        root.replyCount = 1
-        var reply = Self.messages(1..<2, prefix: "Reply")[0]
-        reply.reactions = [MessageReaction(key: "❤️", count: 1, mine: false, senders: ["@other:example.org"])]
-        let harness = Harness(width: 400, height: 600)
+        let words = String(repeating: "Words that wrap across the pane. ", count: 6)
+        let root = FakeTimelineItem(textEvent("$root", body: words), uniqueID: "root")
+        let room = FakeOpenRoom(Self.room.id, cached: [root])
+        // The SDK adds the root to its thread's timeline only with the thread's start, which the first page reaches.
+        room.threadItems = [FakeTimelineItem(textEvent("$reply", body: "Reply 1"), uniqueID: "reply")]
+        room.threadPages = [[FakeTimelineItem(textEvent("$root", body: words), uniqueID: "thread-root")]]
+        room.threadStartReached = true
+        let harness = Harness(width: 400, height: 600, opening: room)
         defer { harness.close() }
-        let thread = HistoryTimeline(noHandle: .init())
-        thread.gate.arm()
-        defer { thread.gate.release() }
-        thread.onPage = { true }
-        harness.service.configureMessageActionsForChecks(
-            client: harness.client, main: harness.timeline, thread: thread, rootID: root.eventID, sessionID: UUID(),
-            selectionID: UUID(), threadID: UUID())
-        // As a thread opened ahead of the click shows it: the SDK adds the root only with the thread's start.
-        harness.service.threadMessages = [root, reply]
         var fixture = harness.fixture(Self.room)
         fixture.thread = true
-        fixture.threadRootID = root.eventID
+        fixture.threadRootID = "$root"
         harness.hosting.rootView = fixture
-        await settle(harness) { harness.top(of: root.body) != nil }
-        let opened = try #require(harness.top(of: root.body))
+        await harness.service.selectRoom(Self.room.id)
+        try #require(await eventually { harness.service.messages.first?.eventID == "$root" })
+        room.pageGate.arm()
+        defer { room.pageGate.release() }
+        try await harness.service.loadThread(harness.service.messages[0])
+        func loadingRow() -> Bool {
+            harness.layout()
+            return Harness.views(in: harness.hosting).contains { view in
+                (view as? TimelineCell)?.entry?.id == "older" && view.window != nil
+            }
+        }
+        try #require(
+            await eventually {
+                harness.layout()
+                return harness.top(of: words) != nil && harness.cell(showing: "$reply") != nil
+            })
+        #expect(loadingRow())
+        let opened = try #require(harness.top(of: words))
 
-        // The opening's own first page, as `loadThread` asks for it, ends at the thread's start.
-        let page = Task { try await harness.service.loadMoreThread(rootID: root.eventID) }
-        #expect(await eventually { thread.gate.isWaiting })
-        thread.gate.release()
-        _ = try await page.value
-        harness.layout()
-        #expect(abs(try #require(harness.top(of: root.body)) - opened) < 0.5)
+        // The opening's own first page ends at the thread's start.
+        #expect(await eventually { room.pageGate.isWaiting })
+        room.pageGate.release()
+        #expect(await eventually { !loadingRow() })
+        #expect(abs(try #require(harness.top(of: words)) - opened) < 0.5)
     }
 
     /// A thread pane showing `root` and `replies`, more of them older, each older page landing as `onPage` says.
