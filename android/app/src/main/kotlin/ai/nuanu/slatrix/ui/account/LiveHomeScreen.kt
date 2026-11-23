@@ -124,15 +124,18 @@ fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
     // Pushed when the page that was on top stays, under it.
     val pushed = shown.top != top && pages.any { it.key == shown.top }
     val keys = pages.map { it.key }.toSet()
-    (shown.keys - keys).forEach { saved.removeState(it.toString()) }
-    shown.top = top
-    shown.keys = keys
+    val removed = shown.keys - keys
+    SideEffect {
+        removed.forEach { saved.removeState(it.toString()) }
+        shown.top = top
+        shown.keys = keys
+    }
     val slide = remember(top) { Animatable(if (pushed) 0f else 1f) }
+    val settled by remember(slide) { derivedStateOf { slide.value == 1f } }
     LaunchedEffect(slide) { slide.animateTo(1f, Motion.pane()) }
     Box(Modifier.fillMaxSize()) {
         pages.forEachIndexed { index, page -> key(page.key) {
             val depth = pages.lastIndex - index
-            val settled = slide.value == 1f
             Box(Modifier.fillMaxSize().then(when {
                 depth == 0 -> Modifier.graphicsLayer {
                     alpha = slide.value

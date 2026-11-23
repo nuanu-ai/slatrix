@@ -34,6 +34,7 @@ import ai.nuanu.slatrix.ui.account.WorkspaceCover
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import org.junit.Assert.assertFalse
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshots.Snapshot
@@ -174,5 +175,28 @@ class LiveWorkspaceTest {
         compose.runOnIdle { owner.lifecycle.currentState = Lifecycle.State.RESUMED }
         compose.waitForIdle()
         compose.waitUntil { read == "\$Next" }
+    }
+
+    @Test fun leavingAPageDiscardsItsSavedStateSoReopeningStartsFresh() {
+        val open = mutableStateOf(true)
+        var mutate: (() -> Unit)? = null
+        compose.setContent {
+            SlatrixTheme {
+                LiveWorkspace(listOfNotNull(
+                    WorkspaceCover("channel-a") {
+                        var marker by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("fresh") }
+                        mutate = { marker = "scrolled" }
+                        Text("Marker: $marker")
+                    }.takeIf { open.value },
+                )) { Text("Home") }
+            }
+        }
+        compose.onNodeWithText("Marker: fresh").assertIsDisplayed()
+        compose.runOnIdle { mutate?.invoke() }
+        compose.onNodeWithText("Marker: scrolled").assertIsDisplayed()
+        compose.runOnIdle { open.value = false }
+        compose.onNodeWithText("Home").assertIsDisplayed()
+        compose.runOnIdle { open.value = true }
+        compose.onNodeWithText("Marker: fresh").assertIsDisplayed()
     }
 }

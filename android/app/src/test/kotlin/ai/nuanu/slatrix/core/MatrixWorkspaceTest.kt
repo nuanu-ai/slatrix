@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -389,6 +390,57 @@ class MatrixWorkspaceTest {
         assertNotSame("So does one marked unread", reopened, visit(rooms[5].copy(unread = UnreadBadge.Bold)))
         workspace.close()
     }
+
+    @Test fun leavingBeforeDraftLoadsNeverFlashesPreviousChannelOverTheNextOne() = runTest {
+        val client = WorkspaceClient().also { it.failLoads = true }
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+        val beta = workspaceRoom("!beta:example.org", "Beta")
+
+        workspace.open(alpha)
+        runCurrent()
+        assertEquals(alpha.id, workspace.selected.value?.room?.id)
+
+        val seenAfterBack = mutableListOf<String?>()
+        val collector = backgroundScope.launch { workspace.selected.collect { seenAfterBack += it?.room?.id } }
+        workspace.back()
+        workspace.open(beta)
+        runCurrent()
+        collector.cancel()
+
+        assertFalse("Alpha must never flash back once the user went back and opened Beta: $seenAfterBack",
+            alpha.id in seenAfterBack.drop(1))
+        assertEquals(beta.id, workspace.selected.value?.room?.id)
+        assertNotNull(workspace.selected.value?.conversation)
+        workspace.close()
+    }
+
+    @Test fun reopeningRecentChannelOrThreadShowsItsKeptTimelineOnTheFirstFrame() = runTest {
+        val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+
+        workspace.open(alpha)
+        val firstChannel = workspace.selected.first { it?.room?.id == alpha.id && it.conversation != null }?.conversation
+        workspace.back()
+        runCurrent()
+
+        // Synchronously before the worker even resumes, the warm channel already carries its timeline (no blank frame).
+        workspace.open(alpha)
+        assertSame(firstChannel, workspace.selected.value?.conversation)
+        runCurrent()
+        assertSame(firstChannel, workspace.selected.value?.conversation)
+
+        workspace.open(alpha, threadRoot = "\$root")
+        val firstThread = workspace.selected.first { it?.threadRoot == "\$root" && it.conversation != null }?.conversation
+        workspace.back()
+        runCurrent()
+
+        workspace.open(alpha, threadRoot = "\$root")
+        assertSame("A recently opened thread also stays warm for instant reopen", firstThread, workspace.selected.value?.conversation)
+        runCurrent()
+        assertSame(firstThread, workspace.selected.value?.conversation)
+        workspace.close()
+    }
 }
 
 private class WorkspaceClient(private val threadRoots: Map<String, String> = emptyMap(),
@@ -397,6 +449,7 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
     val handles = mutableListOf<Room>()
     val focuses = mutableListOf<TimelineFocus>()
     var failSaves = false
+    var failLoads = false
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<TimelineListener>()
     fun emit(diff: List<TimelineDiff>) = listeners.forEach { it.onUpdate(diff) }
     private val queueListeners =java.util.concurrent.CopyOnWriteArrayList<SendQueueListener>()
@@ -424,7 +477,10 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
                     override fun transactionId(): String = "txn"
                 }
             } }
-        override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = drafts["$roomId $threadRoot"]
+        override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? {
+            check(!failLoads) { "Draft store busy" }
+            return drafts["$roomId $threadRoot"]
+        }
         override suspend fun saveComposerDraft(draft: ComposerDraft, threadRoot: String?) {
             beforeSave()
             check(!failSaves) { "Storage is unavailable" }

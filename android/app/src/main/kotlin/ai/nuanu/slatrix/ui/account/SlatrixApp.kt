@@ -261,7 +261,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     onBack = { you = false }, avatarUrl = userAvatarUrl)
                             }.takeIf { you },
                             channels?.let { page -> WorkspaceCover("channels") {
-                                val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
+                                val openChannel: (RoomSummary) -> Unit = { room -> channels = null; threads?.back(); workspace?.open(room) }
                                 if (page == ChannelPage.Browse) LiveBrowseChannels(rooms, selectedSpaceId, openChannel) { channels = null }
                                 else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
                                     openChannel, { notice = it }) { channels = null }
@@ -276,13 +276,13 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 }, onEdit = { editingProfile = true }, knownAvatarUrl = userAvatarUrl.takeIf { id == userId }) { person = null }
                             } },
                             WorkspaceCover("new message") {
-                                LiveNewMessage(userId, people, rooms, { room -> newMessage = false; workspace?.open(room) }) { newMessage = false }
+                                LiveNewMessage(userId, people, rooms, { room -> newMessage = false; threads?.back(); workspace?.open(room) }) { newMessage = false }
                             }.takeIf { newMessage },
                             WorkspaceCover("edit profile") {
                                 LiveEditProfile((state as? AccountState.Connected)?.client, userId, people?.known(userId)?.takeIf { it.name != it.id }) { editingProfile = false }
                             }.takeIf { editingProfile },
                             invitation?.let { id -> WorkspaceCover("invitation") {
-                                LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
+                                LiveInvitation(id, rooms, { room -> invitation = null; threads?.back(); workspace?.open(room) },
                                     { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
                             } },
                             WorkspaceCover("preferences") {

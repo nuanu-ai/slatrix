@@ -63,10 +63,11 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
     private var composer: MatrixComposer? = null
     private var current: OpenChannel? = null
     /**
-     * The channels left most recently, oldest first, still open with their rooms, so coming back is instant and finds
-     * the rows the reader left, as the Mac's RecentTimelines keeps them. With the open one, five: what a reader flips between.
+     * The channels and threads left most recently, oldest first, still open with their rooms, so coming back is instant
+     * and finds the rows the reader left, as the Mac's RecentTimelines keeps them. With the open one, five each.
      */
     private val recent = LinkedHashMap<String, Pair<MatrixConversation, Room>>()
+    private val recentThreads = LinkedHashMap<String, Pair<MatrixConversation, Room>>()
     private val worker = scope.launch {
         try {
             for ((token, requested) in requests) {
@@ -76,18 +77,24 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                     continue
                 }
                 if (generation.get() != token) continue
-                mutableSelected.value = requested
+                if (requested == null) mutableSelected.value = null
+                else if (mutableSelected.value?.room?.id != requested.room.id ||
+                    mutableSelected.value?.threadRoot != requested.threadRoot) {
+                    mutableSelected.value = attachKept(requested)
+                }
                 release()
                 currentCoroutineContext().ensureActive()
                 if (requested == null || generation.get() != token) continue
                 try {
-                    // Kept only while nothing is new: a conversation opened somewhere in particular, or unread, opens fresh,
-                    // and one marked unread on its last visit holds its reads back.
-                    val kept = recent.remove(requested.room.id)?.let { (conversation, room) ->
-                        val state = conversation.state.value
-                        if (requested.at == null && requested.threadRoot == null && requested.room.unread == UnreadBadge.None &&
-                            !state.focused && state.error == null) conversation to room
+                    // Kept only while nothing is new: a conversation opened somewhere in particular, or an unread channel,
+                    // opens fresh, and one marked unread on its last visit holds its reads back.
+                    val cache = cacheFor(requested.threadRoot)
+                    val kept = cache.remove(cacheKey(requested.room.id, requested.threadRoot))?.let { (conversation, room) ->
+                        if (canReuse(requested, conversation)) conversation to room
                         else { closeKept(conversation); null }
+                    }
+                    if (kept == null && generation.get() == token && mutableSelected.value?.conversation != null) {
+                        mutableSelected.value = requested
                     }
                     // Held at once, so a failure below closes a kept timeline along with the rest.
                     conversation = kept?.first
@@ -116,8 +123,12 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
             }
         } finally {
             release()
-            withContext(NonCancellable) { recent.values.forEach { (conversation) -> closeKept(conversation) } }
+            withContext(NonCancellable) {
+                recent.values.forEach { (conversation) -> closeKept(conversation) }
+                recentThreads.values.forEach { (conversation) -> closeKept(conversation) }
+            }
             recent.clear()
+            recentThreads.clear()
             mutableSelected.value = null
             requests.close()
         }
@@ -168,9 +179,25 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
             mutableSelected.value === here && here.threadRoot == null && here.room.id == requested.room.id &&
             here.conversation?.show(requested.at) == true) return
         val token = generation.incrementAndGet()
-        // Shown at once, so the room left never shows again while its draft saves; a failed save brings it back.
-        mutableSelected.value = requested
+        // Shown at once, with any kept timeline already attached so warm channels and threads never flash blank.
+        mutableSelected.value = requested?.let(::attachKept)
         requests.trySend(token to requested)
+    }
+
+    private fun cacheFor(threadRoot: String?) = if (threadRoot == null) recent else recentThreads
+
+    private fun cacheKey(roomId: String, threadRoot: String?) = threadRoot?.let { "$roomId $it" } ?: roomId
+
+    private fun canReuse(requested: OpenChannel, conversation: MatrixConversation): Boolean {
+        val state = conversation.state.value
+        if (requested.at != null || state.focused || state.error != null) return false
+        return requested.threadRoot != null || requested.room.unread == UnreadBadge.None
+    }
+
+    private fun attachKept(requested: OpenChannel): OpenChannel {
+        val kept = cacheFor(requested.threadRoot)[cacheKey(requested.room.id, requested.threadRoot)]?.first
+            ?.takeIf { canReuse(requested, it) }
+        return if (kept != null) requested.copy(conversation = kept) else requested
     }
 
     suspend fun close() = withContext(NonCancellable) {
@@ -191,15 +218,21 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
         val room = conversationRoom
         conversation = null
         conversationRoom = null
-        val channel = current?.takeIf { it.threadRoot == null }?.room?.id
+        val open = current
         current = null
         if (left == null || room == null) {
             runCatching { left?.close() }
             // A cancelled constructor task may never enter the conversation's cleanup.
             runCatching { room?.close() }
-        } else if (channel != null && !left.state.value.focused && left.state.value.error == null) {
-            recent[channel] = left to room
-            while (recent.size > RECENT) recent.remove(recent.keys.first())?.let { (conversation) -> closeKept(conversation) }
+        } else if (open != null && !left.state.value.focused && left.state.value.error == null) {
+            val cache = cacheFor(open.threadRoot)
+            cache[cacheKey(open.room.id, open.threadRoot)] = left to room
+            val active = mutableSelected.value?.takeIf { (it.threadRoot == null) == (open.threadRoot == null) }
+                ?.let { cacheKey(it.room.id, it.threadRoot) }
+            while (cache.size > RECENT) {
+                val victim = cache.keys.firstOrNull { it != active } ?: break
+                cache.remove(victim)?.let { (conversation) -> closeKept(conversation) }
+            }
         } else closeKept(left)
     }
 
