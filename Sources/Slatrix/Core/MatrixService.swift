@@ -776,12 +776,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var loadedThreadRootID: String?
     /// True while the open thread is still building its SDK timeline before reading cached replies.
     var isBuildingThreadTimeline: Bool {
-        guard let opening = threadOpening else { return false }
+        guard !isPreview, let opening = threadOpening else { return false }
         return threadTimeline == nil || loadedThreadRootID != opening.rootID
     }
     /// True while the open thread is building its timeline or awaiting its first page with no replies shown yet.
     var isOpeningThread: Bool {
-        guard let opening = threadOpening else { return false }
+        guard !isPreview, let opening = threadOpening else { return false }
         if isBuildingThreadTimeline { return true }
         let hasReplies = threadMessages.contains { $0.eventID != opening.rootID }
         return !hasReplies && readyThreadReadSelection != threadSelection && threadPageError == nil
