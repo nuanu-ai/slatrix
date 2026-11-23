@@ -284,8 +284,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         val items = mutableListOf<Any?>()
         var handle: TaskHandle? = null
         /**
-         * Replies whose parent this timeline is being asked for, and those the SDK stopped loading without saying so.
-         * Only the update loop touches either, mapping included, so a reply built again is never missed.
+         * Replies whose parent this timeline is being asked for, and those the SDK stopped loading without saying so,
+         * which keep saying it is unavailable until a parent arrives, also while asked again. Only the update loop
+         * touches either, mapping included, so a reply built again is never missed.
          */
         val asking = mutableSetOf<String>()
         val unanswered = mutableSetOf<String>()
@@ -1001,7 +1002,6 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     private fun Source.ask(replyId: String, attempt: Int = 1) {
         if (!asking.add(replyId)) return
-        unanswered.remove(replyId)
         operations.launch {
             // The SDK answers with the parent or an error in an update of the reply.
             try { quietly { timeline.fetchDetailsForEvent(replyId) } } finally { updates.trySend(Update.Asked(this@ask, replyId, attempt)) }

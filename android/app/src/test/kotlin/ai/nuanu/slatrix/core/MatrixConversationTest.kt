@@ -378,10 +378,20 @@ class MatrixConversationTest {
         // The SDK finds the reply in the timeline and fetches what it quotes, so it is asked by each reply's own ID.
         assertEquals(setOf("\$b", "\$c"), setOf(timeline.fetched.receive(), timeline.fetched.receive()))
         // This SDK never answers, so asking stops and both quotes say so.
-        val unanswered = withContext(Dispatchers.Default) {
-            withTimeout(2_000) { conversation.state.first { state -> state.rows.messages.drop(1).all { it.replyTo?.state == ReplyPreview.State.Unavailable } } }
+        val settled = listOf(ReplyPreview.State.Ready, ReplyPreview.State.Unavailable, ReplyPreview.State.Unavailable)
+        suspend fun settles(seenBy: List<String>) = withContext(Dispatchers.Default) {
+            withTimeout(2_000) {
+                conversation.state.first { state -> state.rows.messages.map { it.replyTo?.state } == settled && state.rows.messages[1].readBy == seenBy }
+            }
         }
-        assertEquals(ReplyPreview.State.Ready, unanswered.rows.messages.first().replyTo?.state)
+        settles(emptyList())
+        // The reply changes, here by being read, with its parent still missing: the quote keeps saying so, never blank again.
+        val asked = CompletableDeferred<Unit>()
+        timeline.onFetch = { asked.complete(Unit); kotlinx.coroutines.awaitCancellation() }
+        timeline.emit(listOf(TimelineDiff.Set(1u, conversationItem("b", "\$b", "Yes", content = reply("\$old", EmbeddedEventDetails.Unavailable),
+            readBy = listOf("@sam:example.org")))))
+        asked.await()
+        settles(listOf("@sam:example.org"))
         conversation.close()
     }
 
