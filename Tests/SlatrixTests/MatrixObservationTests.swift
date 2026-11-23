@@ -67,4 +67,27 @@ struct MatrixObservationTests {
         service.messages.append(locked)
         #expect(service.hasLockedMessages)
     }
+
+    @Test("hasLockedMessages checks thread messages too and ignores permanent non-unlockable UTDs")
+    func lockedMessagesIncludeThreadsAndRespectUnlockability() {
+        let service = MatrixService.scratch()
+        var permanent = ChatMessage(
+            id: "$prejoin", roomID: "!open:example.org", senderID: "@ana:example.org", senderName: "Ana",
+            body: "Sent before you joined", timestamp: .now)
+        permanent.kind = "m.room.encrypted"
+        permanent.isUnlockable = false
+        service.messages = [permanent]
+        #expect(!service.hasLockedMessages)
+
+        var threadLocked = ChatMessage(
+            id: "$reply", roomID: "!open:example.org", senderID: "@ana:example.org", senderName: "Ana",
+            body: "Verify this device to read", timestamp: .now)
+        threadLocked.kind = "m.room.encrypted"
+        threadLocked.isUnlockable = true
+        service.threadMessages = [threadLocked]
+        #expect(service.hasLockedMessages)
+
+        service.threadMessages = []
+        #expect(!service.hasLockedMessages)
+    }
 }

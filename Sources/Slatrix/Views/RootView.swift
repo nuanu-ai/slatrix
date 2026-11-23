@@ -777,6 +777,7 @@ struct RootView: View {
             } else {
                 IdentityGate(
                     verification: matrix.verification, accountID: matrix.isPreview ? nil : matrix.user?.id,
+                    isOnline: matrix.connectionState == .running, retryToken: matrix.reconnectCount,
                     hasIdentity: { await matrix.accountHasIdentity() }, onRecovery: { showRecovery = true },
                     onPrompting: { identityPrompt = $0 }
                 ) {
@@ -1282,8 +1283,17 @@ struct RootView: View {
         } trailing: {
             // In the toolbar, so it never covers or moves a message.
             if matrix.hasLockedMessages {
-                Button("Unlock messages") { showRecovery = true }.buttonStyle(.secondary).controlSize(.small)
+                if matrix.verification.deviceStatus == .unverified {
+                    Menu("Verify device") {
+                        Button("Use another device") { Task { await matrix.verification.requestVerification() } }
+                        Button("Use recovery key…") { showRecovery = true }
+                    }
+                    .menuStyle(.button).buttonStyle(.secondary).controlSize(.small)
                     .disabled(matrix.isPreview)
+                } else {
+                    Button("Unlock messages") { showRecovery = true }.buttonStyle(.secondary).controlSize(.small)
+                        .disabled(matrix.isPreview)
+                }
             }
             ChannelHeader(
                 matrix: matrix, room: room, panel: Binding(get: { channelPanel }, set: openChannelPanel)

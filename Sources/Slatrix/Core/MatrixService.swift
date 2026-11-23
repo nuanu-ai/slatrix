@@ -367,7 +367,7 @@ enum MatrixMapping {
             case .sticker(let text, _, _): body = text
             case .poll(let question, _, _, _, _, _, _): body = question
             case .redacted: body = ChatMessage.deletedBody
-            case .unableToDecrypt: body = "Waiting for this message"
+            case .unableToDecrypt(let encrypted): body = unableToDecrypt(encrypted).body
             case .liveLocation, .other: body = nil
             }
         }
@@ -412,8 +412,8 @@ enum MatrixMapping {
                 preview.body = ChatMessage.deletedBody
                 preview.kind = "m.room.message"
                 preview.isRedacted = true
-            case .unableToDecrypt:
-                preview.body = "Waiting for this message"
+            case .unableToDecrypt(let encrypted):
+                preview.body = unableToDecrypt(encrypted).body
                 preview.kind = "m.room.encrypted"
             case .sticker(let body, _, _):
                 preview.body = body
@@ -502,9 +502,11 @@ enum MatrixMapping {
         case .redacted:
             message.body = ChatMessage.deletedBody
             message.isRedacted = true
-        case .unableToDecrypt:
-            message.body = "Waiting for this message"
+        case .unableToDecrypt(let encrypted):
+            let mapped = unableToDecrypt(encrypted)
+            message.body = mapped.body
             message.kind = "m.room.encrypted"
+            message.isUnlockable = mapped.unlockable
         case .sticker(let body, _, _):
             message.body = body
             message.kind = "m.sticker"
@@ -563,6 +565,32 @@ enum MatrixMapping {
     private static func isSent(_ state: EventSendState) -> Bool {
         if case .sent = state { return true }
         return false
+    }
+
+    static func unableToDecrypt(_ encrypted: EncryptedMessage) -> (body: String, unlockable: Bool) {
+        switch encrypted {
+        case .megolmV1AesSha2(_, let cause):
+            switch cause {
+            case .sentBeforeWeJoined:
+                return ("Sent before you joined", false)
+            case .historicalMessageAndBackupIsDisabled:
+                return ("History isn’t available on this device", false)
+            case .historicalMessageAndDeviceIsUnverified, .withheldForUnverifiedOrInsecureDevice:
+                return ("Verify this device to read", true)
+            case .withheldBySender:
+                return ("The sender didn’t share this message with this device", false)
+            case .verificationViolation:
+                return ("Sent by an unverified session", false)
+            case .unsignedDevice:
+                return ("Sent by an unverified device", false)
+            case .unknownDevice:
+                return ("Sent by an unknown device", false)
+            case .unknown:
+                return ("Waiting for keys…", true)
+            }
+        case .olmV1Curve25519AesSha2, .unknown:
+            return ("Waiting for keys…", true)
+        }
     }
 
     static func searchMessages(_ results: [SearchServiceResult], roomID: String?) -> [ChatMessage] {
@@ -828,16 +856,21 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var roomsLoaded = false
     var messages: [ChatMessage] = [] {
         didSet {
-            let locked = messages.contains { $0.kind == "m.room.encrypted" }
-            if locked != hasLockedMessages { hasLockedMessages = locked }
+            updateLockedMessages()
             if messages.first?.id != oldValue.first?.id { blankPages = 0 }
             if let root = conversationRoot(), root != threadMessages.first { threadMessages[0] = root }
             countThreadReplies()
         }
     }
-    /// Whether the open conversation shows messages this device can't decrypt yet; apart from `messages`, so its
-    /// readers aren't redrawn by every message.
+    /// Whether the open conversation or open thread shows undecryptable messages this device can unlock; apart from
+    /// `messages`, so its readers aren't redrawn by every message.
     private(set) var hasLockedMessages = false
+    private func updateLockedMessages() {
+        let locked =
+            messages.contains { $0.kind == "m.room.encrypted" && $0.isUnlockable }
+            || threadMessages.contains { $0.kind == "m.room.encrypted" && $0.isUnlockable }
+        if locked != hasLockedMessages { hasLockedMessages = locked }
+    }
     private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:] {
         didSet { publishGlobalSendQueue() }
     }
@@ -851,7 +884,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var mainSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private var threadSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private var globalSendQueue = SendQueueTracker()
-    var threadMessages: [ChatMessage] = [] { didSet { countThreadReplies() } }
+    var threadMessages: [ChatMessage] = [] {
+        didSet {
+            updateLockedMessages()
+            countThreadReplies()
+        }
+    }
     /// The open thread's root, and the reply count its opener showed, which stays while the thread shows; nil while no
     /// thread pane shows.
     var threadOpening: (rootID: String, openedWith: Int?)? {

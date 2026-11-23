@@ -147,6 +147,53 @@ struct MatrixMappingTests {
             roomID: "!r", ownUserID: "@alice:example.org")
         #expect(deleting?.pendingChange == .deleting)
     }
+
+    @Test("Undecryptable messages map UtdCause truthfully and only mark unlockable causes as unlockable")
+    func unableToDecryptMapsCause() {
+        func utd(_ encrypted: EncryptedMessage) -> ChatMessage {
+            project(
+                MsgLikeContent(
+                    kind: .unableToDecrypt(msg: encrypted), inReplyTo: nil, threadRoot: nil, threadSummary: nil))
+        }
+        let cases: [(EncryptedMessage, String, Bool)] = [
+            (.megolmV1AesSha2(sessionId: "s", cause: .sentBeforeWeJoined), "Sent before you joined", false),
+            (
+                .megolmV1AesSha2(sessionId: "s", cause: .historicalMessageAndBackupIsDisabled),
+                "History isn’t available on this device", false
+            ),
+            (
+                .megolmV1AesSha2(sessionId: "s", cause: .historicalMessageAndDeviceIsUnverified),
+                "Verify this device to read", true
+            ),
+            (
+                .megolmV1AesSha2(sessionId: "s", cause: .withheldForUnverifiedOrInsecureDevice),
+                "Verify this device to read", true
+            ),
+            (
+                .megolmV1AesSha2(sessionId: "s", cause: .withheldBySender),
+                "The sender didn’t share this message with this device", false
+            ),
+            (.megolmV1AesSha2(sessionId: "s", cause: .verificationViolation), "Sent by an unverified session", false),
+            (.megolmV1AesSha2(sessionId: "s", cause: .unsignedDevice), "Sent by an unverified device", false),
+            (.megolmV1AesSha2(sessionId: "s", cause: .unknownDevice), "Sent by an unknown device", false),
+            (.megolmV1AesSha2(sessionId: "s", cause: .unknown), "Waiting for keys…", true),
+            (.olmV1Curve25519AesSha2(senderKey: "k"), "Waiting for keys…", true),
+            (.unknown, "Waiting for keys…", true),
+        ]
+        for (encrypted, expectedBody, unlockable) in cases {
+            let mapped = utd(encrypted)
+            #expect(mapped.kind == "m.room.encrypted")
+            #expect(mapped.body == expectedBody)
+            #expect(mapped.isUnlockable == unlockable)
+        }
+        let reply = MatrixMapping.replyPreview(
+            eventID: "$quoted",
+            details: ready(
+                MsgLikeContent(
+                    kind: .unableToDecrypt(msg: .megolmV1AesSha2(sessionId: "s", cause: .sentBeforeWeJoined)),
+                    inReplyTo: nil, threadRoot: nil, threadSummary: nil)))
+        #expect(reply.body == "Sent before you joined")
+    }
 }
 
 struct ReplyPreviewMappingTests {
