@@ -484,4 +484,96 @@ struct ComposerHostedTests {
         }
         return false
     }
+
+    @Test("The composer matches the timeline's line spacing and text ink color")
+    func matchesTimelineTypography() throws {
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        let savedTheme = UserDefaults.standard.object(forKey: "appearance.theme")
+        defer {
+            UserDefaults.standard.set(savedMode, forKey: "appearance.mode")
+            UserDefaults.standard.set(savedTheme, forKey: "appearance.theme")
+        }
+        let appearance = AppearanceStore()
+        appearance.mode = .light
+        appearance.theme = .sand
+        let draft = Draft("First line<br>Second line")
+        let hosting = NSHostingView(
+            rootView: AnyView(
+                MessageComposer(
+                    text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #team",
+                    members: [], onSend: { _, _ in }, onTyping: { _ in }
+                ).frame(width: 360).environmentObject(appearance)))
+        let window = offscreenWindow(NSSize(width: 400, height: 400))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        window.contentView = hosting
+        hosting.layoutSubtreeIfNeeded()
+        let view = try editor(in: hosting)
+        let attrs = try #require(view.textStorage?.attributes(at: 0, effectiveRange: nil))
+        let paragraph = try #require(attrs[.paragraphStyle] as? NSParagraphStyle)
+        let font = try #require(attrs[.font] as? NSFont)
+        #expect(abs(paragraph.lineSpacing - font.pointSize / 5) < 0.1, "got \(paragraph.lineSpacing)")
+        let ink = try #require((attrs[.foregroundColor] as? NSColor)?.usingColorSpace(.sRGB))
+        let expected = try #require(NSColor(appearance.colors.textBody).usingColorSpace(.sRGB))
+        #expect(
+            abs(ink.redComponent - expected.redComponent) < 0.02
+                && abs(ink.greenComponent - expected.greenComponent) < 0.02
+                && abs(ink.blueComponent - expected.blueComponent) < 0.02,
+            "Expected theme textBody ink, got \(ink) vs \(expected)")
+    }
+
+    @Test("The formatting toggle opens the formatting bar without requiring a text selection")
+    func persistentFormattingToggle() async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        let (hosting, window) = host(Fixture())
+        defer { close(window) }
+        #expect(await eventually { !accessible("Formatting", in: hosting).isEmpty })
+        let toggle = try #require(accessible("Formatting", in: hosting).first)
+        #expect(accessible("Bold", in: hosting).isEmpty)
+        _ = toggle.accessibilityPerformPress?()
+        #expect(await eventually { !accessible("Bold", in: hosting).isEmpty })
+    }
+
+    @Test("Mention suggestions stack cleanly above composer accessories without overlapping")
+    func overlaysNeverCollide() async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        let draft = Draft()
+        let members = [
+            ChatUser(id: "@alice:example.org", name: "Alice"),
+            ChatUser(id: "@alex:example.org", name: "Alex"),
+        ]
+        let (hosting, window) = host(
+            VStack {
+                Spacer()
+                MessageComposer(
+                    text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #team",
+                    members: members, onSend: { _, _ in }, onTyping: { _ in },
+                    accessories: AnyView(
+                        HStack {
+                            Text("Replying to Alice")
+                            Spacer()
+                            Button("Cancel reply") {}.buttonStyle(.row)
+                        }.frame(maxWidth: .infinity, minHeight: 40))
+                )
+            }.frame(width: 360, height: 360))
+        defer { close(window) }
+        let view = try editor(in: hosting)
+        window.makeFirstResponder(view)
+        type(view, "@Al")
+        #expect(await eventually { !accessible("Alice", in: hosting).isEmpty })
+        let banner = try #require(accessible("Cancel reply", in: hosting).first)
+        let suggestion = try #require(accessible("Alice", in: hosting).first)
+        let bannerFrame = banner.accessibilityFrame?() ?? .zero
+        let suggestionFrame = suggestion.accessibilityFrame?() ?? .zero
+        #expect(!bannerFrame.isEmpty && !suggestionFrame.isEmpty)
+        #expect(
+            !bannerFrame.intersects(suggestionFrame), "banner=\(bannerFrame) overlaps suggestion=\(suggestionFrame)")
+        #expect(suggestionFrame.minY >= bannerFrame.maxY - 1, "suggestion=\(suggestionFrame) banner=\(bannerFrame)")
+    }
 }
