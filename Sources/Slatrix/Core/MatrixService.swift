@@ -48,6 +48,79 @@ struct SendQueueMessageKey: Hashable {
     let messageID: String
 }
 
+/// Tracks queued and failed local echoes across all rooms so background rooms and the offline banner stay truthful.
+private struct SendQueueTracker {
+    private var pending: [String: Set<String>] = [:]
+    /// Failed transactions by room, storing whether the failure is recoverable.
+    private var failures: [String: [String: Bool]] = [:]
+
+    mutating func apply(roomID: String, update: RoomSendQueueUpdate) {
+        switch update {
+        case .newLocalEvent(let id):
+            pending[roomID, default: []].insert(id)
+            removeFailure(roomID: roomID, transactionID: id)
+        case .replacedLocalEvent(let id):
+            if failures[roomID]?[id] != false { pending[roomID, default: []].insert(id) }
+        case .retryEvent(let id):
+            pending[roomID, default: []].insert(id)
+            removeFailure(roomID: roomID, transactionID: id)
+        case .sendError(let id, _, let isRecoverable):
+            failures[roomID, default: [:]][id] = isRecoverable
+            if isRecoverable {
+                pending[roomID, default: []].insert(id)
+            } else {
+                removePending(roomID: roomID, transactionID: id)
+            }
+        case .sentEvent(let id, _), .cancelledLocalEvent(let id):
+            removePending(roomID: roomID, transactionID: id)
+            removeFailure(roomID: roomID, transactionID: id)
+        case .mediaUpload:
+            break
+        }
+    }
+
+    mutating func remove(roomID: String, transactionID: String) {
+        removePending(roomID: roomID, transactionID: transactionID)
+        removeFailure(roomID: roomID, transactionID: transactionID)
+    }
+
+    mutating func reset() {
+        pending = [:]
+        failures = [:]
+    }
+
+    var queuedCount: Int { pending.values.reduce(0) { $0 + $1.count } }
+
+    func failedRoomIDs(suppressingRecoverable: Bool) -> Set<String> {
+        var rooms = Set<String>()
+        for (roomID, roomFailures) in failures {
+            if roomFailures.values.contains(where: { !suppressingRecoverable || !$0 }) {
+                rooms.insert(roomID)
+            }
+        }
+        return rooms
+    }
+
+    func hasFailure(in roomID: String, excluding excludedID: String? = nil, suppressingRecoverable: Bool) -> Bool {
+        guard let roomFailures = failures[roomID] else { return false }
+        return roomFailures.contains { id, isRecoverable in
+            id != excludedID && (!suppressingRecoverable || !isRecoverable)
+        }
+    }
+
+    private mutating func removePending(roomID: String, transactionID: String) {
+        guard var set = pending[roomID] else { return }
+        set.remove(transactionID)
+        pending[roomID] = set.isEmpty ? nil : set
+    }
+
+    private mutating func removeFailure(roomID: String, transactionID: String) {
+        guard var map = failures[roomID] else { return }
+        map.removeValue(forKey: transactionID)
+        failures[roomID] = map.isEmpty ? nil : map
+    }
+}
+
 struct MessageSendFailure: Hashable {
     enum Kind: Hashable { case recoverable, verification, session, missingMedia, invalidMedia, rejected }
     let kind: Kind
@@ -595,8 +668,39 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var status: ConnectionStatus = .signedOut
     private(set) var connectionErrorMessage: String?
     private(set) var connectionState = MatrixConnectionState.idle
-    /// Your own dot goes hollow: the connection dropped, as opposed to still being made.
-    var connectionLost: Bool { [.offline, .stopped, .failed].contains(connectionState) }
+    /// Your own dot goes hollow: the connection dropped or is reconnecting, as opposed to first connecting.
+    var connectionLost: Bool {
+        sessionExpired || [.offline, .stopped, .failed].contains(connectionState)
+            || (connectionState == .connecting && connectionErrorMessage == ConnectionHealth.reconnecting.label)
+    }
+    /// Your own presence dot on the sidebar avatar: green only when live (or in preview), hollow once lost or stuck
+    /// connecting, and absent during the brief initial handshake so it never claims Connected before sync is live.
+    func ownPresence(downLongEnough: Bool = false) -> Presence? {
+        if isPreview || connectionState == .running { return .active }
+        if connectionLost || downLongEnough { return .away }
+        return nil
+    }
+    /// Human-readable channel state shown in the profile menu and avatar tooltip.
+    var connectionStatusLabel: String {
+        if isPreview { return "Preview" }
+        if sessionExpired { return "Session expired" }
+        if connectionState == .running { return ConnectionHealth.connected.label }
+        if let notice = connectionErrorMessage { return notice }
+        switch connectionState {
+        case .idle, .connecting: return ConnectionHealth.connecting.label
+        case .offline: return ConnectionHealth.offline.label
+        case .stopped: return ConnectionHealth.paused.label
+        case .failed: return ConnectionHealth.reconnecting.label
+        case .running: return ConnectionHealth.connected.label
+        }
+    }
+    /// The homeserver host for inspection in the profile menu.
+    var homeserverHost: String? {
+        guard let raw = homeserverURL, !raw.isEmpty else { return nil }
+        return URL(string: raw)?.host ?? raw
+    }
+    /// Suppress red recoverable failures while offline or reconnecting, since those messages will retry automatically.
+    var suppressesRecoverableSendFailures: Bool { !sessionExpired && connectionState != .running }
     /// A crossed-out Wi-Fi only when the network itself is gone; reaching the server again turns an arrow.
     var connectionSymbol: String {
         connectionErrorMessage == ConnectionHealth.offline.label ? "wifi.slash" : "arrow.clockwise"
@@ -644,12 +748,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Whether the open conversation shows messages this device can't decrypt yet; apart from `messages`, so its
     /// readers aren't redrawn by every message.
     private(set) var hasLockedMessages = false
-    private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
+    private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:] {
+        didSet { publishGlobalSendQueue() }
+    }
+    private(set) var failedSendRoomIDs = Set<String>()
+    private(set) var queuedSendCount = 0
     private(set) var pendingSendActions = Set<SendQueueMessageKey>()
     /// Messages and files sent from this device so far, by the room and the thread they went to.
     private(set) var sends: [Conversation: Int] = [:]
     private var mainSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private var threadSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
+    private var globalSendQueue = SendQueueTracker()
     var threadMessages: [ChatMessage] = [] { didSet { countThreadReplies() } }
     /// The open thread's root, and the reply count its opener showed, which stays while the thread shows; nil while no
     /// thread pane shows.
@@ -1261,6 +1370,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         try await connectionRecovery.attach(
             service, client: newClient, homeserverURL: homeserverURL,
             onSendingResumed: { [weak self] in self?.refusedChanges?.cancel() },
+            onSendQueueUpdate: { [weak self] roomID, update in
+                guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
+                self.handleSendQueueUpdate(roomID: roomID, update: update)
+            },
             onUpdate: { [weak self] feedback in
                 guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
                 self.applyConnection(feedback)
@@ -1418,9 +1531,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         await connectionRecovery.stop()
         refusedChanges?.stop()
         refusedChanges = nil
+        globalSendQueue.reset()
         mainSendFailures = [:]
         threadSendFailures = [:]
         sendFailures = [:]
+        failedSendRoomIDs = []
+        queuedSendCount = 0
         pendingSendActions = []
         let oldPersistence = persistence
         persistence = nil
@@ -3511,10 +3627,25 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         isRetryingConnection = false
         canRetryConnection = false
         status = .error
+        publishGlobalSendQueue()
         Task { @MainActor [weak self] in
             guard let self, self.sessionGeneration == generation else { return }
             await self.connectionRecovery.stop()
         }
+    }
+    func handleSendQueueUpdate(roomID: String, update: RoomSendQueueUpdate) {
+        globalSendQueue.apply(roomID: roomID, update: update)
+        publishGlobalSendQueue()
+    }
+    private func publishGlobalSendQueue() {
+        let suppressing = suppressesRecoverableSendFailures
+        var failed = globalSendQueue.failedRoomIDs(suppressingRecoverable: suppressing)
+        for (key, failure) in sendFailures where !suppressing || failure.kind != .recoverable {
+            failed.insert(key.roomID)
+        }
+        if failed != failedSendRoomIDs { failedSendRoomIDs = failed }
+        let queued = globalSendQueue.queuedCount
+        if queued != queuedSendCount { queuedSendCount = queued }
     }
     func applyConnection(_ feedback: MatrixConnectionFeedback) {
         guard !sessionExpired else { return }
@@ -3523,6 +3654,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         connectionState = feedback.state
         isRetryingConnection = feedback.isRetrying
         canRetryConnection = feedback.canRetry
+        publishGlobalSendQueue()
         switch feedback.state {
         case .running:
             status = .ready
@@ -3836,6 +3968,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         if cancelled {
             connectionRecovery.cancelRoomResume(roomID: message.roomID)
+            if case .transactionId(let id) = context.itemID {
+                globalSendQueue.remove(roomID: message.roomID, transactionID: id)
+                publishGlobalSendQueue()
+            }
         }
         return cancelled
     }

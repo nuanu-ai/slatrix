@@ -1093,6 +1093,7 @@ struct RootView: View {
                 if let me = matrix.user { profilePane = ProfileSelection(id: me.id, fallback: me) }
             },
             onSignOut: signOut,
+            onReconnect: retryConnection,
             onMarkUnread: { markReadState($0, unread: true) },
             onMarkRead: { markReadState($0, unread: false) },
             onInviteWorkspace: { id in
@@ -2666,7 +2667,13 @@ struct RootView: View {
     }
     /// Signing out asks first. The sample workspace has nothing to lose, so leaving it goes straight to sign-in.
     private func signOut() {
-        if matrix.isPreview { leavePreview() } else { logoutConfirmation = true }
+        if matrix.isPreview {
+            leavePreview()
+        } else if matrix.sessionExpired {
+            beginLogout()
+        } else {
+            logoutConfirmation = true
+        }
     }
     private func leavePreview() {
         matrix.exitPreview()
@@ -3206,24 +3213,29 @@ private struct ToolbarGrid: Layout {
 private struct ConnectionBanner: View {
     let matrix: MatrixService
     let onRetry: () -> Void
+    @EnvironmentObject private var appearance: AppearanceStore
     @State private var shown = false
     var body: some View {
-        let message = matrix.connectionErrorMessage
+        let notice = matrix.connectionErrorMessage
+        let text = ConnectionHealth.bannerText(notice: notice, queuedCount: matrix.queuedSendCount)
         ZStack {
-            if shown, let message {
-                // While a retry runs the notice itself says so, so the button steps aside.
+            if shown, let text {
                 Banner(
-                    text: message,
-                    symbol: matrix.connectionSymbol
+                    text: text,
+                    symbol: matrix.isRetryingConnection ? nil : matrix.connectionSymbol
                 ) {
-                    if matrix.canRetryConnection { Button("Retry", action: onRetry) }
+                    if matrix.isRetryingConnection {
+                        Text("Retrying…").foregroundStyle(appearance.colors.textSecondary)
+                    } else if matrix.canRetryConnection {
+                        Button("Retry", action: onRetry)
+                    }
                 }.transition(.opacity)
             }
         }
         .animation(Motion.overlay, value: shown)
-        .task(id: message != nil) {
+        .task(id: notice != nil) {
             shown = false
-            guard message != nil else { return }
+            guard notice != nil else { return }
             let start = ContinuousClock.now
             try? await Task.sleep(for: LoadingPresentation.connectionNoticeDelay)
             guard !Task.isCancelled else { return }

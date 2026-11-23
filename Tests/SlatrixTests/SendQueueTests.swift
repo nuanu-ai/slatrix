@@ -217,4 +217,39 @@ struct SendQueueStaleMessageTests {
         }
         #expect(service.pendingSendActions.isEmpty && service.sendFailures.isEmpty)
     }
+
+    @Test("Global send-queue tracking surfaces failed background rooms and counts messages queued for reconnect")
+    func globalSendQueueVisibility() {
+        let service = MatrixService.scratch()
+        service.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
+
+        service.handleSendQueueUpdate(roomID: "!bg:example.org", update: .newLocalEvent(transactionId: "t1"))
+        service.handleSendQueueUpdate(roomID: "!other:example.org", update: .newLocalEvent(transactionId: "t2"))
+        #expect(service.queuedSendCount == 2 && service.failedSendRoomIDs.isEmpty)
+
+        // Recoverable failure while connected flags the background room.
+        service.handleSendQueueUpdate(
+            roomID: "!bg:example.org",
+            update: .sendError(transactionId: "t1", error: .genericApiError(msg: "502"), isRecoverable: true))
+        #expect(service.failedSendRoomIDs == ["!bg:example.org"] && service.queuedSendCount == 2)
+
+        // Going offline suppresses the recoverable failure indicator while keeping queued count accurate.
+        service.applyConnection(
+            MatrixConnectionFeedback(
+                state: .offline, isRetrying: false, canRetry: false, errorMessage: ConnectionHealth.offline.label))
+        #expect(service.failedSendRoomIDs.isEmpty && service.queuedSendCount == 2)
+
+        // An unrecoverable failure still flags its room even while offline and does not count as auto-sending on reconnect.
+        service.handleSendQueueUpdate(
+            roomID: "!other:example.org",
+            update: .sendError(transactionId: "t2", error: .invalidMimeType(mimeType: "x"), isRecoverable: false))
+        #expect(service.failedSendRoomIDs == ["!other:example.org"] && service.queuedSendCount == 1)
+
+        // Cancelling or sending clears both pending count and room warning.
+        service.handleSendQueueUpdate(roomID: "!other:example.org", update: .cancelledLocalEvent(transactionId: "t2"))
+        service.handleSendQueueUpdate(
+            roomID: "!bg:example.org", update: .sentEvent(transactionId: "t1", eventId: "$sent"))
+        #expect(service.failedSendRoomIDs.isEmpty && service.queuedSendCount == 0)
+    }
 }
