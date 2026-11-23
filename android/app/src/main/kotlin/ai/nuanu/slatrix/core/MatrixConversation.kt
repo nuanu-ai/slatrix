@@ -279,6 +279,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         /** The read marker sits among the rows, since where it falls is where the New line goes. */
         val items = mutableListOf<Any?>()
         var handle: TaskHandle? = null
+        /** Replies whose parent this timeline is being asked for. */
+        val asking: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+        /** Replies whose request ended with the SDK still holding no parent, so nothing more comes for them. */
+        val unanswered: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
         fun holds(eventId: String?) = eventId != null && items.any { (it as? ConversationMessage)?.eventId == eventId }
 
@@ -889,7 +893,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     suspend fun close() { lifetime.cancelAndJoin() }
 
-    private fun Source.apply(diff: TimelineDiff) = items.applyDiff(diff, ::row)
+    private fun Source.apply(diff: TimelineDiff) = items.applyDiff(diff) { row(it) }
 
     private suspend fun countThreads() {
         val list = quietly { room.threadListService() } ?: return
@@ -935,9 +939,12 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             val grouped = previous?.let { groupsUnder(it, row) } == true
             val seen = !readers[row.id].isNullOrEmpty()
             val listed = row.eventId?.let(serverThreads::get)
+            // A quote never stays blank: one the SDK stopped loading says it is unavailable, as on the Mac.
+            val quote = row.replyTo?.takeIf { it.state == ReplyPreview.State.Loading && row.eventId in unanswered }
+                ?.copy(state = ReplyPreview.State.Unavailable) ?: row.replyTo
             // Stored back, so an unchanged row stays the same object in the next batch.
-            val current = if (row.grouped == grouped && row.seen == seen && row.listedThread == listed) row
-                else row.copy(grouped = grouped, seen = seen, listedThread = listed).also { items[index] = it }
+            val current = if (row.grouped == grouped && row.seen == seen && row.listedThread == listed && row.replyTo == quote) row
+                else row.copy(grouped = grouped, seen = seen, listedThread = listed, replyTo = quote).also { items[index] = it }
             rows.add(current)
             previous = current
         }
@@ -954,9 +961,6 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     private object ReadMarker
 
-    /** Replies whose parent was asked for, once each. */
-    private val askedFor = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-
     /** A message's text on one line, as a quote shows it. */
     private fun oneLine(shown: Shown): String {
         val text = if (shown.kind in setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Emote)) {
@@ -966,7 +970,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     }
 
     /** [replyId] is the reply's own event: the SDK finds it in the timeline and fetches what it quotes. */
-    private fun replyPreview(reply: InReplyToDetails, replyId: String?): ReplyPreview {
+    private fun Source.replyPreview(reply: InReplyToDetails, replyId: String?): ReplyPreview {
         val id = reply.eventId()
         return when (val parent = reply.event()) {
             is EmbeddedEventDetails.Ready -> {
@@ -977,12 +981,27 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             is EmbeddedEventDetails.Error -> ReplyPreview(id, ReplyPreview.State.Unavailable)
             is EmbeddedEventDetails.Pending -> ReplyPreview(id, ReplyPreview.State.Loading)
             is EmbeddedEventDetails.Unavailable -> {
-                // The SDK answers with the parent or an error in a later update of the reply. A request that failed, say
-                // offline, is made again the next time the reply updates.
-                if (replyId != null && askedFor.add(replyId)) operations.launch {
-                    runCatching { timeline().fetchDetailsForEvent(replyId) }.onFailure {
-                        if (it is CancellationException) throw it
-                        askedFor.remove(replyId)
+                // The SDK holds no parent each time it builds the reply again, after a reset or a late decryption, so it
+                // is asked each time, in the timeline that holds this copy of the reply.
+                if (replyId != null && asking.add(replyId)) {
+                    unanswered.remove(replyId)
+                    operations.launch {
+                        try {
+                            // It answers with the parent or an error in an update of the reply, before this returns.
+                            quietly { timeline.fetchDetailsForEvent(replyId) }
+                            // It can also give up with the reply still waiting, and then says nothing more.
+                            val details = withContext(Dispatchers.Default) {
+                                quietly { timeline.getEventTimelineItemByEventId(replyId) }
+                                    ?.let { (it.content as? TimelineItemContent.MsgLike)?.content?.inReplyTo?.event() }
+                            }
+                            if (details !is EmbeddedEventDetails.Ready && details !is EmbeddedEventDetails.Error) {
+                                unanswered.add(replyId)
+                                // An empty batch maps the rows again, now with the quote marked.
+                                updates.trySend(Update.Batch(this@replyPreview, emptyList()))
+                            }
+                        } finally {
+                            asking.remove(replyId)
+                        }
                     }
                 }
                 ReplyPreview(id, ReplyPreview.State.Loading)
@@ -997,7 +1016,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return quoted.sender == sender && (kind as? MsgLikeKind.Message)?.content?.body == original.content.body
     }
 
-    private fun row(item: TimelineItem): Any? {
+    private fun Source.row(item: TimelineItem): Any? {
         val event = item.asEvent() ?: return when (val virtual = item.asVirtual()) {
             is VirtualTimelineItem.DateDivider -> DayDivider(item.uniqueId().id, virtual.ts.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())
             VirtualTimelineItem.ReadMarker -> ReadMarker
