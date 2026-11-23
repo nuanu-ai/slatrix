@@ -64,6 +64,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
@@ -97,6 +99,8 @@ data class ComposerActions(
 @Composable
 fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (String) -> Unit, onSend: () -> Unit,
     actions: ComposerActions, recentSenders: List<String> = emptyList(),
+    /** Takes the keyboard as it opens. */
+    takesFocus: Boolean = false,
     /** Over the field while the composer is open, as Slack's thread puts "Also send to #channel" there. */
     aboveField: (@Composable () -> Unit)? = null) {
     val colors = SlatrixTheme.colors
@@ -141,6 +145,13 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
     // The selection a link goes on, while its sheet asks for the address; at the caret, the link there.
     var linking by remember { mutableStateOf<TextRange?>(null) }
     val focus = LocalFocusManager.current
+    val fieldFocus = remember { FocusRequester() }
+    // Once, when the field can take it: the draft loads first, and a keyboard put away afterwards stays away.
+    var tookFocus by remember { mutableStateOf(false) }
+    if (takesFocus && !tookFocus && !composer.loading) LaunchedEffect(Unit) {
+        fieldFocus.requestFocus()
+        tookFocus = true
+    }
     val onFormat = actions.onFormat
     val range = linking
     if (range != null && onFormat != null) {
@@ -203,7 +214,7 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                     if (changed) onDraft(next.text)
                 }, enabled = !composer.loading,
                     modifier = Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapLarge)
-                        .onFocusChanged { focused = it.isFocused }.semantics { contentDescription = placeholder },
+                        .focusRequester(fieldFocus).onFocusChanged { focused = it.isFocused }.semantics { contentDescription = placeholder },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textBody),
                     visualTransformation = remember(composer.styles, composer.mentions, composer.typing, colors) {
                         ComposerVisual(composer.styles, composer.mentions, composer.typing?.takeIf { it.position == 0 }?.kinds?.firstOrNull { it.block }, colors)

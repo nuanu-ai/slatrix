@@ -19,6 +19,7 @@ import android.app.Application
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -148,6 +149,24 @@ class ThreadScreenTest {
         } finally {
             scope.cancel()
         }
+    }
+
+    // capability: thread.reply
+    @Test fun aThreadOpenedToReplyIsReadyToTypeOnceItsDraftLoads() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        val root = ConversationMessage("root", "\$root", "@sam:example.org", "Sam", "Ship on Friday?", null, 0L, MessageKind.Text,
+            MessageSendState.Sent, false, "S", 0)
+        val draft = mutableStateOf(ComposerState(loading = true))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(root), loading = false, hasMore = false), draft.value,
+                    {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root", replying = true)
+            }
+        }
+        // The field can't take the keyboard until the draft is in.
+        compose.waitForIdle()
+        draft.value = ComposerState(loading = false)
+        compose.onNode(hasContentDescription("Add a reply") and hasSetTextAction()).assertIsFocused()
     }
 
     // capability: thread.send-to-channel

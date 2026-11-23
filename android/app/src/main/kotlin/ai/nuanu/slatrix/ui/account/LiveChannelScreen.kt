@@ -136,7 +136,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Told once what the reader sent is in view. */
     onSendShown: () -> Unit = {},
     /** Opens a thread from its replies bar, with the count the bar shows. */
-    onOpenReplies: (rootEventId: String, replies: Int) -> Unit = { _, _ -> }) {
+    onOpenReplies: (rootEventId: String, replies: Int) -> Unit = { _, _ -> },
+    /** Opened to reply, so the field takes the keyboard, as Slack's thread does after Reply in thread. */
+    replying: Boolean = false) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val videos = rememberVideoPlayback(loadFile)
@@ -336,7 +338,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     else -> "Message #${room.name}"
                 }
                 val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
-                if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders,
+                if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders, replying,
                     aboveField = if (threadRoot != null && composer.target !is ComposerTarget.Edit) {
                         { AlsoSendTo(room, composer.alsoToChannel, composerActions.onAlsoToChannel) }
                     } else null) else CannotPost()

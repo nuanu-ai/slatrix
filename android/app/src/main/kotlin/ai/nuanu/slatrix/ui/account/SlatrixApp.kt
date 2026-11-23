@@ -249,7 +249,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         LiveWorkspace(listOfNotNull(
                             selected?.let { WorkspaceCover(it.room.id) {
                                 LiveConversation(it, workspace, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name }) { root, row, openedWith ->
-                                    threads?.open(it.room, root, root = row, openedWith = openedWith)
+                                    // Only Reply in thread opens one without a count, ready to type, as in Slack.
+                                    threads?.open(it.room, root, root = row, openedWith = openedWith, replying = openedWith == null)
                                 }
                             } },
                             thread?.let { WorkspaceCover("${it.room.id} ${it.threadRoot}") {
@@ -442,7 +443,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { openAttachment(context, media, it) }, { media.file(it) }, { counterpart?.let { onPerson(it.id, it.name) } ?: run { details = true } },
             typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty(), onPerson = profile,
             loadThreadOrigin = { conversation?.threadOrigin(it) }, onSendShown = { conversation?.sendShown() },
-            onOpenReplies = { root, replies -> onOpenThread(root, row(root), replies) })
+            onOpenReplies = { root, replies -> onOpenThread(root, row(root), replies) }, replying = open.replying)
         }
         }
         forwarding?.let { (message, content) ->
