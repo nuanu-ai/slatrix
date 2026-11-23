@@ -11,9 +11,10 @@ final class FakeHomeserver: @unchecked Sendable {
     /// Answers deletions as if the access token had expired.
     private let rejectsTokenOnDeletions: Bool
     /// Answers sync and authenticated endpoints as if the session had been revoked.
-    private let rejectsToken: Bool
+    private var rejectsToken: Bool
     private var syncCount = 0
     var syncRequests: Int { queue.sync { syncCount } }
+    func revokeToken() { queue.sync { rejectsToken = true } }
     /// Deletions whose response waits for `releaseDeletions()`.
     private var heldDeletions: [() -> Void] = []
     private var holdsDeletions: Bool

@@ -341,4 +341,40 @@ struct SendQueueStaleMessageTests {
                 pendingSend: false, sendFailure: nil, pendingChange: .deleting,
                 waitingToReconnect: false, blockedByEarlierFailure: false) == .deleting)
     }
+
+    @Test("Expired sessions refuse sends and uploads, preserve soft-logout state, and warn before clearing unsent data")
+    func expiredSessionRefusesSendsAndWarns() async throws {
+        let f = ActionFixture()
+        let service = f.service
+        service.expireSessionForChecks(isSoftLogout: true)
+        #expect(service.sessionExpired && service.sessionExpiredIsSoftLogout)
+
+        await #expect(throws: MatrixServiceError.self) {
+            try await service.sendMessage("Keep my draft safe", roomID: f.roomID)
+        }
+        #expect(f.main.writes.all.isEmpty)
+
+        let dir = try TemporaryDirectory()
+        let file = dir.url.appendingPathComponent("note.txt")
+        try Data("hello".utf8).write(to: file)
+        do {
+            try await service.uploadFile(file, roomID: f.roomID)
+            Issue.record("Expected expired session to refuse file upload")
+        } catch let error as MatrixServiceError {
+            #expect(error.localizedDescription.contains("expired"))
+        } catch {
+            Issue.record("Expected MatrixServiceError, got \(error)")
+        }
+
+        #expect(SignOutWarning.forExpiredSession(queuedCount: 0, hasFailedSends: false, isSoftLogout: false) == nil)
+        let softOnly = try #require(
+            SignOutWarning.forExpiredSession(queuedCount: 0, hasFailedSends: false, isSoftLogout: true))
+        #expect(softOnly.message.contains("recovery key"))
+        let unsent = try #require(
+            SignOutWarning.forExpiredSession(queuedCount: 2, hasFailedSends: false, isSoftLogout: false))
+        #expect(unsent.message.contains("2 unsent messages"))
+        let both = try #require(
+            SignOutWarning.forExpiredSession(queuedCount: 1, hasFailedSends: true, isSoftLogout: true))
+        #expect(both.message.contains("unsent") && both.message.contains("recovery key"))
+    }
 }

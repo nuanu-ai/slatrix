@@ -131,6 +131,32 @@ private struct SendQueueTracker {
     }
 }
 
+struct SignOutWarning: Equatable {
+    let title: String
+    let message: String
+    let action: String
+
+    static func forExpiredSession(queuedCount: Int, hasFailedSends: Bool, isSoftLogout: Bool) -> Self? {
+        let hasUnsent = queuedCount > 0 || hasFailedSends
+        guard hasUnsent || isSoftLogout else { return nil }
+        let unsentText: String =
+            if queuedCount > 0 {
+                "\(queuedCount) unsent \(queuedCount == 1 ? "message" : "messages")"
+            } else {
+                "unsent messages"
+            }
+        let message: String =
+            if hasUnsent && isSoftLogout {
+                "Signing in again clears this device’s local session and \(unsentText). Copy anything unsent first, and have another device or your recovery key ready."
+            } else if hasUnsent {
+                "Signing in again clears \(unsentText) that haven’t reached the server. Copy anything you want to keep first."
+            } else {
+                "Your server ended this session softly. Signing in again starts a fresh device session; you’ll need another device or your recovery key to read encrypted history."
+            }
+        return Self(title: "Sign in again?", message: message, action: "Sign in again")
+    }
+}
+
 struct SendCancelPrompt: Equatable {
     let title: String
     let message: String
@@ -756,9 +782,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Where the SDK stores of the sessions those credentials name live.
     @ObservationIgnored private let storeRoots: [URL]
     convenience init() { self.init(credentials: .shared, storeRoots: SessionStores.roots) }
-    init(credentials: SecureSessionStore, storeRoots: [URL]) {
+    init(
+        credentials: SecureSessionStore, storeRoots: [URL],
+        connectionRecovery: ConnectionRecovery? = nil
+    ) {
         self.credentials = credentials
         self.storeRoots = storeRoots
+        self.connectionRecovery = connectionRecovery ?? ConnectionRecovery()
     }
     let verification = VerificationService()
     let threadFeed = ThreadFeedService()
@@ -826,10 +856,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var isRetryingConnection = false
     private(set) var canRetryConnection = false
     private(set) var sessionExpired = false
+    private(set) var sessionExpiredIsSoftLogout = false
     /// Increments each time sync transitions back to `.running`, so views can retry failed reads and gates.
     private(set) var reconnectCount = 0
     private var clientDelegateHandle: TaskHandle?
-    private let connectionRecovery = ConnectionRecovery()
+    private let connectionRecovery: ConnectionRecovery
+    private static let sessionExpiredError = MatrixServiceError.request("Your session expired. Sign in again.")
+    private func assertActiveSession() throws {
+        if sessionExpired { throw Self.sessionExpiredError }
+    }
     private var refusedChanges: RefusedChanges?
     private var profileLoadTask: Task<Void, Never>?
     private var needsInitialProfileLoad = false
@@ -1495,8 +1530,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 }
             })
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        guard !sessionExpired else { return }
         let service = try await newClient.syncService().withOfflineMode().finish()
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        guard !sessionExpired else { return }
         roomSubscriptions.attach(service.roomListService())
         try await connectionRecovery.attach(
             service, client: newClient, homeserverURL: homeserverURL,
@@ -1510,10 +1547,22 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 self.applyConnection(feedback)
             })
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        if sessionExpired {
+            await connectionRecovery.stop()
+            return
+        }
         try await watchRefusedChanges(newClient)
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        if sessionExpired {
+            await connectionRecovery.stop()
+            return
+        }
         let allRooms = try await service.roomListService().allRooms()
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        if sessionExpired {
+            await connectionRecovery.stop()
+            return
+        }
         roomList = Self.observeAllRooms(
             allRooms,
             listener: RoomsObserver { [weak self] updates in
@@ -1526,15 +1575,24 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard roomList != nil else {
             throw MatrixServiceError.request("Couldn’t load your conversations. Sign in again.")
         }
-        guard !sessionExpired else { return }
+        if sessionExpired {
+            await connectionRecovery.stop()
+            return
+        }
         do {
             try await connectionRecovery.retry()
         } catch {
-            if sessionExpired { return }
+            if sessionExpired {
+                await connectionRecovery.stop()
+                return
+            }
             throw error
         }
         guard sessionGeneration == generation else { throw CancellationError() }
-        guard !sessionExpired else { return }
+        if sessionExpired {
+            await connectionRecovery.stop()
+            return
+        }
         requestRefresh()
         // Cached rooms and sync can become usable without waiting on profile
         // HTTP requests. A late profile response belongs only to this account.
@@ -1644,6 +1702,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         isRetryingConnection = false
         canRetryConnection = false
         sessionExpired = false
+        sessionExpiredIsSoftLogout = false
         clientDelegateHandle?.cancel()
         clientDelegateHandle = nil
         readDelivery.reset()
@@ -2486,6 +2545,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         _ draft: String, threadRootID: String? = nil, replyToID: String? = nil, roomID: String? = nil,
         alsoToChannel: Bool = false
     ) async throws {
+        try assertActiveSession()
         try assertDestination(roomID)
         let destination = roomID ?? selectedRoomID
         let message = ComposerFormat.message(draft: draft)
@@ -2890,6 +2950,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func saveMediaCaption(_ snapshot: MediaCaptionSnapshot, caption: String?) async throws -> MediaCaptionSavedResult {
+        try assertActiveSession()
         try validateMessageAction(snapshot.target)
         guard captionSaves.insert(snapshot.id).inserted else { throw MediaCaptionError.busy }
         defer { captionSaves.remove(snapshot.id) }
@@ -2969,6 +3030,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func forwardMessage(_ review: ForwardMessageReview, to roomID: String) async throws -> ForwardMessageQueuedResult {
+        try assertActiveSession()
         try validateMessageAction(review.target)
         guard forwardingReviews.insert(review.id).inserted else { throw ForwardMessageError.busy }
         defer { forwardingReviews.remove(review.id) }
@@ -3063,6 +3125,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     func editMessage(_ target: MessageActionTarget, body: String) async throws {
+        try assertActiveSession()
         let (timeline, current) = try actionTimeline(target)
         guard current.supportsTextEditing, current.senderID == user?.id else {
             throw MatrixServiceError.request("This message can’t be edited.")
@@ -3078,6 +3141,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func deleteMessage(_ target: MessageActionTarget) async throws {
+        try assertActiveSession()
         let (timeline, current) = try actionTimeline(target)
         guard current.senderID == user?.id else {
             throw MatrixServiceError.request("You can only delete your own messages.")
@@ -3091,6 +3155,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func toggleReaction(_ target: MessageActionTarget, key: String) async throws {
+        try assertActiveSession()
         let (timeline, current) = try actionTimeline(target)
         do {
             _ = try await timeline.toggleReaction(itemId: .eventId(eventId: target.message.eventID), key: key)
@@ -3118,6 +3183,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     func uploadFile(_ url: URL, threadRootID: String? = nil, roomID: String? = nil) async throws {
+        try assertActiveSession()
         try assertDestination(roomID)
         let destination = roomID ?? selectedRoomID
         let token = selection
@@ -3761,6 +3827,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func handleAuthError(isSoftLogout: Bool, generation: UUID) {
         guard sessionGeneration == generation, connectionStopTask == nil, !sessionExpired else { return }
         sessionExpired = true
+        sessionExpiredIsSoftLogout = isSoftLogout
         connectionErrorMessage = nil
         connectionState = .stopped
         isRetryingConnection = false
@@ -3772,6 +3839,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             await self.connectionRecovery.stop()
         }
     }
+    #if DEBUG
+    func expireSessionForChecks(isSoftLogout: Bool = false) {
+        handleAuthError(isSoftLogout: isSoftLogout, generation: sessionGeneration)
+    }
+    #endif
     func handleSendQueueUpdate(roomID: String, update: RoomSendQueueUpdate) {
         globalSendQueue.apply(roomID: roomID, update: update)
         switch update {
@@ -4118,6 +4190,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     func retryMessage(_ message: ChatMessage) async throws {
+        try assertActiveSession()
         guard let context = try pendingSendContext(message) else { return }
         guard let failure = sendFailure(for: message) else {
             throw MatrixServiceError.request("This message is not waiting for a manual retry.")

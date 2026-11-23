@@ -713,10 +713,17 @@ struct RootView: View {
                     onCancel: logoutRecovery.cancel)
             }
             .modal(isPresented: $logoutConfirmation) {
+                let expiredWarning =
+                    matrix.sessionExpired
+                    ? SignOutWarning.forExpiredSession(
+                        queuedCount: matrix.queuedSendCount, hasFailedSends: !matrix.failedSendRoomIDs.isEmpty,
+                        isSoftLogout: matrix.sessionExpiredIsSoftLogout)
+                    : nil
                 ConfirmModal(
-                    title: "Sign out of Slatrix?",
-                    message: "You’ll need your recovery key to read encrypted messages when you sign back in.",
-                    action: "Sign out",
+                    title: expiredWarning?.title ?? "Sign out of Slatrix?",
+                    message: expiredWarning?.message
+                        ?? "You’ll need your recovery key to read encrypted messages when you sign back in.",
+                    action: expiredWarning?.action ?? "Sign out",
                     onConfirm: {
                         logoutConfirmation = false
                         if !logoutRecovery.isBusy { beginLogout() }
@@ -881,7 +888,7 @@ struct RootView: View {
                     text: "Your session expired. Sign in again.", symbol: "exclamationmark.circle.fill",
                     tone: .destructive
                 ) {
-                    Button("Sign in again", action: beginLogout)
+                    Button("Sign in again", action: signOut)
                 }
             }
             ConnectionBanner(matrix: matrix, onRetry: retryConnection)
@@ -1235,7 +1242,8 @@ struct RootView: View {
                                         guard isCurrentComposer(context) else { return }
                                         matrix.errorMessage = error
                                     },
-                                    allowsSend: attachmentDrafts.canSend(AttachmentDraftAddress(roomID: room.id))
+                                    allowsSend: !matrix.sessionExpired
+                                        && attachmentDrafts.canSend(AttachmentDraftAddress(roomID: room.id))
                                         && replyAllowsSend(roomID: room.id),
                                     onDiscardAttachments: attachmentDrafts.discard,
                                     requiresTextForSend: scopedReply(roomID: room.id) != nil,
@@ -1406,8 +1414,9 @@ struct RootView: View {
                                 guard isCurrentComposer(context) else { return }
                                 matrix.errorMessage = error
                             },
-                            allowsSend: attachmentDrafts.canSend(
-                                AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID))
+                            allowsSend: !matrix.sessionExpired
+                                && attachmentDrafts.canSend(
+                                    AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID))
                                 && replyAllowsSend(roomID: room.id, threadID: root.eventID),
                             onDiscardAttachments: attachmentDrafts.discard,
                             requiresTextForSend: scopedReply(roomID: room.id, threadID: root.eventID) != nil,
@@ -2364,7 +2373,7 @@ struct RootView: View {
                 onError: { error in
                     guard isCurrentEdit(target, context: context) else { return }
                     matrix.errorMessage = error
-                }, allowsSend: isCurrentEdit(target, context: context), isThread: isThread
+                }, allowsSend: !matrix.sessionExpired && isCurrentEdit(target, context: context), isThread: isThread
             )
         }
         .id("edit-\(composerGeneration)-\(target.id)").disabled(!isCurrentEdit(target, context: context))
@@ -2680,7 +2689,14 @@ struct RootView: View {
         if matrix.isPreview {
             leavePreview()
         } else if matrix.sessionExpired {
-            beginLogout()
+            if SignOutWarning.forExpiredSession(
+                queuedCount: matrix.queuedSendCount, hasFailedSends: !matrix.failedSendRoomIDs.isEmpty,
+                isSoftLogout: matrix.sessionExpiredIsSoftLogout) != nil
+            {
+                logoutConfirmation = true
+            } else {
+                beginLogout()
+            }
         } else {
             logoutConfirmation = true
         }

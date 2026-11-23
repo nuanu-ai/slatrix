@@ -100,12 +100,13 @@ final class ConnectionRecovery {
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
     private var sleeping = false
-    private var sleepStopTask: Task<Void, Never>?
+    private var sleepStopTask: (id: UUID, task: Task<Void, Never>)?
     private var sendQueueHandle: TaskHandle?
     private var sendQueueResumes: [String: Task<Void, Never>] = [:]
     private var sendQueueFailures: [String: Int] = [:]
     private var healthCheckTask: Task<Void, Never>?
     private var lastHealthCheck: ContinuousClock.Instant?
+    var isAttached: Bool { service != nil }
     private(set) var feedback = MatrixConnectionFeedback(
         state: .idle, isRetrying: false, canRetry: false, errorMessage: nil)
 
@@ -212,13 +213,18 @@ final class ConnectionRecovery {
         stopObservingResponses()
         publish()
         let pendingAttempt = attempt?.task
-        let previousSleepStop = sleepStopTask
-        sleepStopTask = Task { @MainActor [weak self] in
-            await previousSleepStop?.value
-            if let pendingAttempt { _ = await pendingAttempt.result }
-            guard let self, self.generation == account, self.sleeping else { return }
-            await activeService.stop()
-        }
+        let previousSleepStop = sleepStopTask?.task
+        let stopID = UUID()
+        sleepStopTask = (
+            stopID,
+            Task { @MainActor [weak self] in
+                defer { if let self, self.sleepStopTask?.id == stopID { self.sleepStopTask = nil } }
+                await previousSleepStop?.value
+                if let pendingAttempt { _ = await pendingAttempt.result }
+                guard let self, self.generation == account, self.sleeping else { return }
+                await activeService.stop()
+            }
+        )
     }
 
     private func observeRoomSync(_ service: SyncService, acceptSnapshot: Bool) {
@@ -366,6 +372,9 @@ final class ConnectionRecovery {
         guard restartRequested || sdkState != .running || responseHandle == nil else { return }
         let account = generation
         let id = UUID()
+        // Capture any in-flight sleep stop before publishing `attempt`, so a sleep arriving before this task starts
+        // waits on `attempt` while this task does not wait back on the newer sleep stop (no circular await).
+        let pendingSleepStop = sleepStopTask?.task
         // UniFFI start is not cancellable. Keep its actual await alive even if
         // a caller leaves; teardown must wait for it before stopping this SDK.
         let task = Task { @MainActor [weak self] in
@@ -377,10 +386,7 @@ final class ConnectionRecovery {
                     self.publish()
                 }
             }
-            if let sleepStop = self.sleepStopTask {
-                await sleepStop.value
-                if self.generation == account { self.sleepStopTask = nil }
-            }
+            await pendingSleepStop?.value
             repeat {
                 guard self.generation == account, !self.sleeping else { throw CancellationError() }
                 let shouldStop = self.restartRequested
@@ -416,7 +422,7 @@ final class ConnectionRecovery {
     private func stopCurrent() async {
         let previous = service
         let pending = attempt?.task
-        let pendingSleepStop = sleepStopTask
+        let pendingSleepStop = sleepStopTask?.task
         generation = UUID()
         handle?.cancel()
         handle = nil

@@ -447,6 +447,34 @@ struct ConnectionRecoveryTests {
         await recovery.stop()
     }
 
+    @Test("System sleep firing right after retry() starts never deadlocks recovery or teardown")
+    func sleepImmediatelyAfterRetryDoesNotDeadlock() async throws {
+        let notifications = NotificationCenter()
+        let recovery = onlineRecovery(wakeNotifications: notifications)
+        let service = FakeSyncService(state: .offline)
+        try await recovery.attach(service) { _ in }
+
+        // Queue retry() #1 and willSleep #2 on MainActor so pauseForSleep runs in the exact gap between
+        // retry() publishing `attempt` and its inner Task body starting (#3).
+        let retrying = Task { @MainActor in try? await recovery.retry() }
+        let sleeper = Task { @MainActor in
+            notifications.post(name: NSWorkspace.willSleepNotification, object: nil)
+        }
+        await sleeper.value
+
+        var stopped = false
+        let stopping = Task {
+            await recovery.stop()
+            stopped = true
+        }
+        let finished = await eventually(timeout: .seconds(2)) { stopped }
+        #expect(finished, "retry() and pauseForSleep() deadlocked waiting on each other")
+        if finished {
+            await retrying.value
+            await stopping.value
+        }
+    }
+
     @Test("A brief offline blip during SDK start never leaves room sync responses unobserved")
     func offlineDuringStartKeepsResponseObserver() async throws {
         let network = AsyncStream<NetworkRoute>.makeStream()
