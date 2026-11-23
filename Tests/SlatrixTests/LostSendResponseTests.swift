@@ -240,6 +240,20 @@ struct LostSendResponseTests {
         await app.stopForChecks()
     }
 
+    @Test("A revoked session stops sync cleanly, marks the session expired, and keeps user state for drafts")
+    func revokedSessionStopsSync() async throws {
+        let server = try await FakeHomeserver(room: "!room:localhost", messages: [], rejectsToken: true)
+        let scratch = try TemporaryDirectory()
+        let client = try await signIn("me", to: server, in: scratch)
+        let app = MatrixService.scratch()
+        try await app.startForChecks(client)
+        #expect(await eventually(timeout: .seconds(15)) { app.sessionExpired })
+        #expect(app.connectionState == .stopped && !app.canRetryConnection && !app.isRetryingConnection)
+        #expect(app.user?.id == "@me:localhost")
+        await #expect(throws: MatrixServiceError.self) { try await app.retryConnection() }
+        await app.stopForChecks()
+    }
+
     /// The live timeline with thread replies in it.
     private static let everything = TimelineConfiguration(
         focus: .live(hideThreadedEvents: false), filter: .all, internalIdPrefix: nil, dateDividerMode: .daily,

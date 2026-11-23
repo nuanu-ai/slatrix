@@ -507,6 +507,13 @@ private final class NotificationsObserver: SyncNotificationListener, @unchecked 
     func onNotification(notification: NotificationItem, roomId: String) { callback(notification, roomId) }
 }
 
+private final class SessionAuthObserver: ClientDelegate, @unchecked Sendable {
+    let onAuthError: @Sendable (Bool) -> Void
+    init(_ onAuthError: @escaping @Sendable (Bool) -> Void) { self.onAuthError = onAuthError }
+    func didReceiveAuthError(isSoftLogout: Bool) { onAuthError(isSoftLogout) }
+    func onBackgroundTaskErrorReport(taskName: String, error: BackgroundTaskFailureReason) {}
+}
+
 private final class SearchResultsObserver: SearchServiceResultsListener, @unchecked Sendable {
     private let lock = NSLock()
     private var results: [SearchServiceResult] = []
@@ -583,6 +590,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
     private(set) var isRetryingConnection = false
     private(set) var canRetryConnection = false
+    private(set) var sessionExpired = false
+    private var clientDelegateHandle: TaskHandle?
     private let connectionRecovery = ConnectionRecovery()
     private var refusedChanges: RefusedChanges?
     private var profileLoadTask: Task<Void, Never>?
@@ -1186,6 +1195,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         sharedFiles.attach(newClient)
         homeserverURL = try newClient.session().homeserverUrl
         let generation = sessionGeneration
+        clientDelegateHandle = try? newClient.setDelegate(
+            delegate: SessionAuthObserver { [weak self] isSoftLogout in
+                Task { @MainActor [weak self] in
+                    self?.handleAuthError(isSoftLogout: isSoftLogout, generation: generation)
+                }
+            })
         let id = try newClient.userId()
         user = ChatUser(id: id, name: id)
         savedMessages.attach(newClient, accountID: id)
@@ -1249,8 +1264,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard roomList != nil else {
             throw MatrixServiceError.request("Couldn’t load your conversations. Sign in again.")
         }
-        try await connectionRecovery.retry()
+        guard !sessionExpired else { return }
+        do {
+            try await connectionRecovery.retry()
+        } catch {
+            if sessionExpired { return }
+            throw error
+        }
         guard sessionGeneration == generation else { throw CancellationError() }
+        guard !sessionExpired else { return }
         requestRefresh()
         // Cached rooms and sync can become usable without waiting on profile
         // HTTP requests. A late profile response belongs only to this account.
@@ -1275,6 +1297,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     func retryConnection() async throws {
         guard connectionStopTask == nil else { throw CancellationError() }
+        if sessionExpired { throw MatrixServiceError.request("Your session expired. Sign in again.") }
         _ = try requireClient()
         let generation = sessionGeneration
         do {
@@ -1345,6 +1368,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         connectionState = .idle
         isRetryingConnection = false
         canRetryConnection = false
+        sessionExpired = false
+        clientDelegateHandle?.cancel()
+        clientDelegateHandle = nil
         readDelivery.reset()
         lastAutomaticReceipt = nil
         readyThreadReadSelection = nil
@@ -1412,7 +1438,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let owner = logoutOwner
         defer { authOperation = nil }
         // The sample workspace never signed in, so whatever client a failed start left belongs to no one here.
-        if !owner.isPreview, let originalClient = client {
+        if !owner.isPreview, !sessionExpired, let originalClient = client {
             do { try await originalClient.logout() } catch {
                 try validateLogout(owner)
                 if error is CancellationError { throw error }
@@ -3416,7 +3442,21 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         requestRefresh()
         return destination
     }
+    private func handleAuthError(isSoftLogout: Bool, generation: UUID) {
+        guard sessionGeneration == generation, connectionStopTask == nil, !sessionExpired else { return }
+        sessionExpired = true
+        connectionErrorMessage = nil
+        connectionState = .stopped
+        isRetryingConnection = false
+        canRetryConnection = false
+        status = .error
+        Task { @MainActor [weak self] in
+            guard let self, self.sessionGeneration == generation else { return }
+            await self.connectionRecovery.stop()
+        }
+    }
     func applyConnection(_ feedback: MatrixConnectionFeedback) {
+        guard !sessionExpired else { return }
         connectionErrorMessage = feedback.errorMessage
         let returned = connectionState != .running
         connectionState = feedback.state

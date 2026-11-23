@@ -868,6 +868,14 @@ struct RootView: View {
     /// cancelled, and errors.
     private var banners: some View {
         VStack(spacing: 0) {
+            if matrix.sessionExpired {
+                Banner(
+                    text: "Your session expired. Sign in again.", symbol: "exclamationmark.circle.fill",
+                    tone: .destructive
+                ) {
+                    Button("Sign in again", action: beginLogout)
+                }
+            }
             ConnectionBanner(matrix: matrix, onRetry: retryConnection)
             if pendingMatrixLink != nil {
                 Banner(text: "Opening…", tone: .neutral) {

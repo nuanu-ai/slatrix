@@ -10,6 +10,10 @@ final class FakeHomeserver: @unchecked Sendable {
     private let refusesEdits: Bool
     /// Answers deletions as if the access token had expired.
     private let rejectsTokenOnDeletions: Bool
+    /// Answers sync and authenticated endpoints as if the session had been revoked.
+    private let rejectsToken: Bool
+    private var syncCount = 0
+    var syncRequests: Int { queue.sync { syncCount } }
     /// Deletions whose response waits for `releaseDeletions()`.
     private var heldDeletions: [() -> Void] = []
     private var holdsDeletions: Bool
@@ -31,9 +35,11 @@ final class FakeHomeserver: @unchecked Sendable {
 
     init(
         room: String, messages: [[String: Any]], dropFirstSendResponse: Bool = false, refusesDeletions: Bool = false,
-        holdsDeletions: Bool = false, refusesEdits: Bool = false, rejectsTokenOnDeletions: Bool = false
+        holdsDeletions: Bool = false, refusesEdits: Bool = false, rejectsTokenOnDeletions: Bool = false,
+        rejectsToken: Bool = false
     ) async throws {
         self.rejectsTokenOnDeletions = rejectsTokenOnDeletions
+        self.rejectsToken = rejectsToken
         self.dropFirstSendResponse = dropFirstSendResponse
         self.refusesDeletions = refusesDeletions
         self.holdsDeletions = holdsDeletions
@@ -108,6 +114,11 @@ final class FakeHomeserver: @unchecked Sendable {
         let path = target.split(separator: "?", maxSplits: 1).first.map(String.init) ?? ""
         let segments = path.split(separator: "/").map { $0.removingPercentEncoding ?? String($0) }
         if path == "/_matrix/client/versions" { return (200, ["versions": ["v1.11"]]) }
+        if path.hasSuffix("/sync") {
+            syncCount += 1
+            if rejectsToken { return (401, ["errcode": "M_UNKNOWN_TOKEN", "error": "Revoked"]) }
+        }
+        if rejectsToken { return (401, ["errcode": "M_UNKNOWN_TOKEN", "error": "Revoked"]) }
         // GET /_matrix/client/v3/profile/{user}[/{field}], which the app reads once signed in.
         if method == "GET", segments.count >= 5, segments[3] == "profile" { return (200, ["displayname": "Me"]) }
         // POST /_matrix/client/v3/rooms/{room}/join
