@@ -4403,6 +4403,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         if let encoded = try? JSONEncoder().encode(all) { try? encoded.write(to: url, options: .atomic) }
     }
     func handleSendQueueUpdate(roomID: String, update: RoomSendQueueUpdate) {
+        if case .mediaUpload(let relatedTo, _, _, let progress) = update {
+            if progress.total > 0 {
+                uploadProgress.set(
+                    Double(progress.current) / Double(progress.total), roomID: roomID, messageID: relatedTo)
+            }
+            return
+        }
         let previousFailures = globalSendQueue.failures
         globalSendQueue.apply(roomID: roomID, update: update)
         switch update {
@@ -4416,12 +4423,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             threadSendFailures.removeValue(forKey: key)
             sendFailures.removeValue(forKey: key)
             uploadProgress.clear(roomID: roomID, messageID: id)
-        case .mediaUpload(let relatedTo, _, _, let progress):
-            if progress.total > 0 {
-                uploadProgress.set(
-                    Double(progress.current) / Double(progress.total), roomID: roomID, messageID: relatedTo)
-            }
-        case .newLocalEvent, .replacedLocalEvent, .retryEvent:
+        case .newLocalEvent, .replacedLocalEvent, .retryEvent, .mediaUpload:
             break
         }
         if globalSendQueue.failures != previousFailures { persistSendQueueFailures() }
@@ -4441,6 +4443,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
     /// Whether `roomID` has a displayed send failure outside `visibleIDs` (e.g., scrolled away or on the other surface).
     func hasExternalSendFailure(in roomID: String, visibleIDs: Set<String>) -> Bool {
+        guard failedSendRoomIDs.contains(roomID) else { return false }
         let suppressing = suppressesRecoverableSendFailures
         if globalSendQueue.hasFailure(
             in: roomID, excluding: visibleIDs, retryingKeys: retryingSendKeys, suppressingRecoverable: suppressing)

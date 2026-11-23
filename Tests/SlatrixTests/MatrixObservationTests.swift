@@ -146,16 +146,27 @@ struct MatrixObservationTests {
         service.messages = [pending]
 
         let messageChanges = Recorder<Void>()
+        let failureChanges = Recorder<Void>()
         withObservationTracking {
             _ = service.messages
         } onChange: {
             messageChanges.append(())
         }
+        withObservationTracking {
+            _ = service.hasExternalSendFailure(in: "!open:example.org", visibleIDs: ["tx-1"])
+        } onChange: {
+            failureChanges.append(())
+        }
         service.handleSendQueueUpdate(
             roomID: "!open:example.org",
             update: .mediaUpload(
                 relatedTo: "tx-1", file: nil, index: 0, progress: AbstractProgress(current: 40, total: 100)))
+        service.handleSendQueueUpdate(
+            roomID: "!other:example.org",
+            update: .mediaUpload(
+                relatedTo: "tx-other", file: nil, index: 0, progress: AbstractProgress(current: 60, total: 100)))
         #expect(messageChanges.all.isEmpty)
+        #expect(failureChanges.all.isEmpty)
         #expect(service.uploadProgress.progress(roomID: "!open:example.org", messageID: "tx-1") == 0.4)
 
         service.handleSendQueueUpdate(

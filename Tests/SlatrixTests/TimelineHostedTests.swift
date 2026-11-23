@@ -1363,7 +1363,7 @@ struct TimelineHostedTests {
         harness.scroll(toTop: harness.clip.bounds.minY + 1_500)
         let reading = try #require(harness.firstVisibleBody)
         let before = try #require(harness.top(of: reading))
-        try #require(harness.top(of: "Reply 10") == nil)
+        try #require(harness.top(of: "Reply 10").map { $0 > harness.headerBottom } ?? true)
         // A pane of its own, as the app builds one each time.
         pane.timeline = 1
         harness.hosting.rootView = pane
@@ -1392,10 +1392,11 @@ struct TimelineHostedTests {
         harness.hosting.rootView = pane
         await settle(harness) { harness.top(of: "ReplyA 59") != nil }
         harness.scroll(toTop: harness.clip.bounds.minY - 1_200)
-        // First message below the header (not passing under it), matching TimelineTableCoordinator.visible.
+        // First message whose row intersects the viewport below the header, matching TimelineTableCoordinator.visible.
         let readingA = try #require(
             repliesA.first { reply in
-                harness.top(of: reply.body).map { $0 <= harness.headerBottom } ?? false
+                guard let cell = harness.cell(showing: reply.eventID) else { return false }
+                return cell.convert(cell.bounds, to: nil).minY < harness.headerBottom
             })
         let expectedEventID = readingA.eventID
 

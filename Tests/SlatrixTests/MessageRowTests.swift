@@ -168,6 +168,32 @@ struct MessageRowTests {
                 .environmentObject(AppearanceStore()).environment(\.metrics, m)
         ).fittingSize.height
         #expect(editingHeight == sentHeight)
+
+        // Compact density also keeps row height invariant across wait statuses, even near a wrap boundary.
+        let saved = UserDefaults.standard.object(forKey: "appearance.density")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.density") }
+        let compactAppearance = AppearanceStore()
+        compactAppearance.density = .compact
+        let compactSent = ChatMessage(
+            id: "$compact-wait", roomID: "!room:example.org", senderID: "@me:example.org", senderName: "Anna",
+            body: "Checking whether a compact sending indicator ever narrows this text enough to wrap a word",
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000))
+        let compactSentHeight = NSHostingView(
+            rootView: MessageRow(message: compactSent, own: true, timeLabel: "10:00").frame(width: 340)
+                .environmentObject(compactAppearance).environment(\.metrics, m)
+        ).fittingSize.height
+        var compactPending = compactSent
+        compactPending.sendState = "sending"
+        for status: SendWaitStatus in [.sending, .waitingToReconnect, .blockedByEarlierFailure, .savingEdit] {
+            let h = NSHostingView(
+                rootView: MessageRow(
+                    message: compactPending, own: true, sendWaitStatus: status, timeLabel: "10:00"
+                ).frame(width: 340).environmentObject(compactAppearance).environment(\.metrics, m)
+            ).fittingSize.height
+            #expect(
+                abs(h - compactSentHeight) < 0.5,
+                "Compact height shifted for \(status): \(h) vs \(compactSentHeight)")
+        }
     }
 
     @Test("Compact density takes less vertical space than comfortable for both grouped bursts and distinct senders")

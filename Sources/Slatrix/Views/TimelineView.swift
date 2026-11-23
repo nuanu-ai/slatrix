@@ -184,33 +184,35 @@ struct TimelineView: View {
             if let scrollEdge { ScrollEdgeHairline(state: scrollEdge, top: insets.top) }
         }
         .overlay(alignment: .bottom) {
-            if jumpVisible && !messages.isEmpty {
-                HStack {
-                    Spacer(minLength: 0)
-                    Button {
-                        if matrix.focusedEventID != nil {
-                            if let onJumpToLatest {
-                                onJumpToLatest()
+            ZStack {
+                if jumpVisible && !messages.isEmpty {
+                    HStack {
+                        Spacer(minLength: 0)
+                        Button {
+                            if matrix.focusedEventID != nil {
+                                if let onJumpToLatest {
+                                    onJumpToLatest()
+                                } else {
+                                    Task { await matrix.selectRoom(room.id) }
+                                }
                             } else {
-                                Task { await matrix.selectRoom(room.id) }
+                                scroller.scrollToBottom()
                             }
-                        } else {
-                            scroller.scrollToBottom()
-                        }
-                    } label: {
-                        Label("Jump to recent", systemImage: "arrow.down").font(m.font(.subheadline, .semibold))
-                            .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
-                            .background(colors.raised, in: Capsule())
-                            .elevation(.e2, cornerRadius: m.sp20)
-                    }.buttonStyle(.row)
+                        } label: {
+                            Label("Jump to recent", systemImage: "arrow.down").font(m.font(.subheadline, .semibold))
+                                .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
+                                .background(colors.raised, in: Capsule())
+                                .elevation(.e2, cornerRadius: m.sp20)
+                        }.buttonStyle(.row)
+                    }
+                    .padding(.horizontal, m.conversationInset(thread: thread))
+                    .padding(.bottom, m.sp16 + insets.bottom + accessoryHeight)
+                    .animation(Motion.overlay, value: accessoryHeight)
+                    .conversationRow(m, isThread: thread).transition(.opacity)
                 }
-                .padding(.horizontal, m.conversationInset(thread: thread))
-                .padding(.bottom, m.sp16 + insets.bottom + accessoryHeight)
-                .animation(Motion.overlay, value: accessoryHeight)
-                .conversationRow(m, isThread: thread).transition(.opacity)
             }
+            .animation(Motion.overlay, value: jumpVisible)
         }
-        .animation(Motion.overlay, value: jumpVisible)
         .task(id: turnsLive) {
             guard turnsLive else { return }
             await matrix.goLive { scroller.screenAnchorEventID }
@@ -735,9 +737,6 @@ struct MessageRow: View {
                             Text(message.senderName).font(m.font(.reading, .semibold))
                                 .foregroundStyle(colors.textPrimary).lineLimit(1).truncationMode(.tail)
                         }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
-                        if let status = effectiveWaitStatus {
-                            SendingClock(since: message.timestamp, status: status)
-                        }
                         if let seen, !pendingSend {
                             ReadTicks(read: seen.read).help(seen.tooltip ?? "")
                         }
@@ -747,9 +746,19 @@ struct MessageRow: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .overlay(alignment: .topLeading) {
-                    if isSaved {
-                        Image(systemName: "bookmark.fill").font(m.font(.subheadline)).foregroundStyle(colors.accent)
-                            .offset(x: -m(14), y: m.sp2)
+                    if isSaved || effectiveWaitStatus != nil {
+                        HStack(spacing: m.sp2) {
+                            if let status = effectiveWaitStatus {
+                                SendingClock(since: message.timestamp, status: status)
+                            }
+                            if isSaved {
+                                Image(systemName: "bookmark.fill").font(m.font(.subheadline))
+                                    .foregroundStyle(colors.accent)
+                            }
+                        }
+                        .fixedSize()
+                        .frame(width: 0, alignment: .trailing)
+                        .offset(x: -m(4), y: m.sp2)
                     }
                 }
                 if !message.isRedacted { messageExtras }
