@@ -441,6 +441,50 @@ class MatrixWorkspaceTest {
         assertSame(firstThread, workspace.selected.value?.conversation)
         workspace.close()
     }
+
+    @Test fun warmThreadReopenClearsOldJumpTargetUpdatesRootAndPreservesFourRecentTimelines() = runTest {
+        val client = WorkspaceClient()
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val room = workspaceRoom("!review:example.org", "Review")
+        val initialRoot = ConversationMessage("ch-root", "\$root", "@mira:example.org", "Mira Chen", "Plan?", null,
+            1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0)
+        assertFalse("Waiting placeholder must not trigger pagination before a conversation attaches",
+            OpenChannel(room, threadRoot = "\$root", root = initialRoot).waiting().hasMore)
+
+        // Open thread at an old target $old, receive it, go back, then reopen normally.
+        workspace.open(room, threadRoot = "\$root", at = "\$old", root = initialRoot, openedWith = 3)
+        val conv = workspace.selected.first { it?.threadRoot == "\$root" && it.conversation != null }!!.conversation!!
+        client.emit(listOf(TimelineDiff.PushBack(conversationItem("r-old", "\$old", "Old reply"))))
+        conv.state.first { it.highlight == "\$old" }
+        workspace.back()
+        runCurrent()
+
+        val editedRoot = initialRoot.copy(body = "Plan for Monday?", edited = true)
+        workspace.open(room, threadRoot = "\$root", root = editedRoot, openedWith = 5, listedRoot = true)
+        assertNull("Frame 1 of warm reopen must not flash the previous jump highlight",
+            workspace.selected.value?.conversation?.state?.value?.highlight)
+        runCurrent()
+        client.emit(listOf(TimelineDiff.PushBack(conversationItem("r-new", "\$new", "New reply"))))
+        val afterReply = conv.state.first { it.rows.filterIsInstance<ConversationMessage>().any { m -> m.eventId == "\$new" } }
+        assertNull("A subsequent reply must never restore the old jump highlight", afterReply.highlight)
+        assertEquals("Warm reopen updates the root preview and reply count", "Plan for Monday?",
+            afterReply.rows.filterIsInstance<ConversationMessage>().first().body)
+        assertEquals(5, afterReply.replies)
+
+        // Switching directly to a warm thread keeps all four other recent timelines instead of evicting an extra one.
+        val threads = listOf("\$b", "\$c", "\$d", "\$e", "\$a")
+        val kept = mutableMapOf<String, MatrixConversation>()
+        for (id in threads) {
+            workspace.open(room, threadRoot = id)
+            kept[id] = workspace.selected.first { it?.threadRoot == id && it.composer != null }!!.conversation!!
+        }
+        workspace.open(room, threadRoot = "\$b")
+        assertSame(kept["\$b"], workspace.selected.first { it?.threadRoot == "\$b" && it.composer != null }!!.conversation)
+        workspace.open(room, threadRoot = "\$c")
+        assertSame("Switching to B must not have evicted C from the 4-slot cache",
+            kept["\$c"], workspace.selected.first { it?.threadRoot == "\$c" && it.composer != null }!!.conversation)
+        workspace.close()
+    }
 }
 
 private class WorkspaceClient(private val threadRoots: Map<String, String> = emptyMap(),

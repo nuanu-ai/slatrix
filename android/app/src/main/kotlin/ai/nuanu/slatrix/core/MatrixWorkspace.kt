@@ -43,7 +43,7 @@ data class OpenChannel(
 )
 
 /** What shows while the conversation opens: a thread's root, as its channel showed it. */
-fun OpenChannel.waiting(): ConversationState = opening(root, error, openedWith)
+fun OpenChannel.waiting(): ConversationState = opening(root, error, openedWith).copy(hasMore = false)
 
 private const val RECENT = 4
 
@@ -101,9 +101,10 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                     conversationRoom = kept?.second ?: checkNotNull(client.getRoom(requested.room.id))
                     composerRoom = checkNotNull(client.getRoom(requested.room.id))
                     currentCoroutineContext().ensureActive()
-                    val timeline = kept?.first?.also { it.revisit() } ?: MatrixConversation(session, checkNotNull(conversationRoom),
-                        requested.threadRoot, requested.at, requested.root, requested.resume, openedWith = requested.openedWith,
-                        listedRoot = requested.listedRoot)
+                    val timeline = kept?.first?.also { it.revisit(requested.root, requested.openedWith, requested.listedRoot) }
+                        ?: MatrixConversation(session, checkNotNull(conversationRoom),
+                            requested.threadRoot, requested.at, requested.root, requested.resume, openedWith = requested.openedWith,
+                            listedRoot = requested.listedRoot)
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
                     if (generation.get() == token) {
@@ -225,11 +226,13 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
             // A cancelled constructor task may never enter the conversation's cleanup.
             runCatching { room?.close() }
         } else if (open != null && !left.state.value.focused && left.state.value.error == null) {
+            left.revisit()
             val cache = cacheFor(open.threadRoot)
             cache[cacheKey(open.room.id, open.threadRoot)] = left to room
             val active = mutableSelected.value?.takeIf { (it.threadRoot == null) == (open.threadRoot == null) }
                 ?.let { cacheKey(it.room.id, it.threadRoot) }
-            while (cache.size > RECENT) {
+            val limit = if (active != null && active in cache) RECENT + 1 else RECENT
+            while (cache.size > limit) {
                 val victim = cache.keys.firstOrNull { it != active } ?: break
                 cache.remove(victim)?.let { (conversation) -> closeKept(conversation) }
             }

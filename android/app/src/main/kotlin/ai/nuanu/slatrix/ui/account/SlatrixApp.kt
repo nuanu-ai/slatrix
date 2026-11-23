@@ -477,8 +477,12 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var pendingJump by remember(workspace) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val open: (String) -> Unit = remember(rooms, workspace) {
-        { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
+        { id ->
+            pendingJump?.cancel()
+            rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) }
+        }
     }
     val preferences = remember(userId, context) { WorkspacePreferences(context, userId) }
     var collapsed by remember(preferences) { mutableStateOf(preferences.collapsedSections) }
@@ -513,7 +517,8 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
                 { search?.loadMore() }, { hit ->
                     // A hit doesn't know its thread, so it is looked up first: a reply opens in its thread.
                     state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
-                        scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
+                        pendingJump?.cancel()
+                        pendingJump = scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
                 }, recents, { recents = recentStore.add(it) }, people?.results?.collectAsState()?.value ?: PeopleSearchState(),
                 { people?.search(it) }, { onPerson(it.id, it.name) }, onClose, open)

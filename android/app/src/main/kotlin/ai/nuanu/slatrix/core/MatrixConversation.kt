@@ -215,16 +215,18 @@ internal suspend fun <T> quietly(block: suspend () -> T): T? = try { block() } c
  * the newest message and it turns live, as on the Mac.
  */
 class MatrixConversation(scope: CoroutineScope, private val room: Room, private val threadRoot: String? = null,
-    private val at: String? = null,
+    at: String? = null,
     /** The thread's root as its channel shows it, on screen at once while the thread loads, as on the Mac. */
     root: ConversationMessage? = null,
     /** [at] is where the unread messages start, so it opens there without a highlight. */
     private val resume: Boolean = false,
     private val view: ConversationView = ConversationView.Timeline,
     /** The reply count whoever opened this thread was showing; it stays while the thread shows. */
-    private val openedWith: Int? = null,
+    openedWith: Int? = null,
     /** [root] is Threads' row rather than the channel's, so it shows only until the thread's own loads. */
     listedRoot: Boolean = false) {
+    @Volatile private var target = at
+    @Volatile private var openedCount = openedWith
     @Volatile private var root = root?.asThreadRoot()
     /** The root's row as the channel holds it now; while the channel holds none, the thread's own row stands. */
     @Volatile private var mirror = this.root.takeUnless { listedRoot }
@@ -338,11 +340,12 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     swapped = true
                 } else if (deciding) {
                     deciding = false
+                    val jumpTarget = target
                     // Around a thread reply the SDK shows only its thread, so a read marker on one opens live, as on the Mac.
-                    val around = !source.holds(at) &&
-                        !(resume && quietly { room.loadOrFetchEvent(checkNotNull(at)).use { it.threadRootEventId() } } != null)
+                    val around = jumpTarget != null && !source.holds(jumpTarget) &&
+                        !(resume && quietly { room.loadOrFetchEvent(jumpTarget).use { it.threadRootEventId() } } != null)
                     if (around) try {
-                        open(TimelineFocus.Event(checkNotNull(at), 30u, TimelineEventFocusThreadMode.Automatic(true))) {
+                        open(TimelineFocus.Event(checkNotNull(jumpTarget), 30u, TimelineEventFocusThreadMode.Automatic(true))) {
                             pending = it
                             pendingAnchor = null
                         }
@@ -358,11 +361,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 // A cleared or reset timeline starts over from the live end.
                 val reset = batch.any { it is TimelineDiff.Clear || it is TimelineDiff.Reset }
                 val first = rows.firstOrNull { it is ConversationMessage }?.id
-                if (first != oldest) { oldest = first; blankPages = 0 }
+                if (reset || swapped || first != oldest) { oldest = first; blankPages = 0 }
                 holdsRoot = source.holds(threadRoot)
                 mutableState.update {
                     it.copy(rows = withRoot(rows), loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
-                        highlight = it.highlight ?: at?.takeIf { id -> !resume && source.holds(id) }, firstUnread = unread).counted()
+                        highlight = it.highlight ?: target?.takeIf { id -> !resume && source.holds(id) }, firstUnread = unread).counted()
                 }
                 if (threadRoot != null && view == ConversationView.Timeline && !initialThreadPaged &&
                     mutableState.value.hasMore && rows.none { it is ConversationMessage && it.eventId != threadRoot }) {
@@ -440,6 +443,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         operations.launch {
             if (!pageLock.tryLock()) return@launch
             try {
+                caughtUp()
                 if (!mutableState.value.hasMore || blankPages >= MAX_BLANK_PAGES) return@launch
                 retryPage = ::loadOlder
                 mutableState.update { it.copy(loadingHistory = true, error = null) }
@@ -577,7 +581,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     /** A thread's state with the line under its root, from what it holds now; nothing else decides that line. */
     private fun ConversationState.counted() = if (threadRoot == null) this else copy(replies = ThreadRepliesLine.count(
-        holdsRoot, rows.filterIsInstance<ConversationMessage>().filter { it.eventId != threadRoot }, rootSummary, openedWith))
+        holdsRoot, rows.filterIsInstance<ConversationMessage>().filter { it.eventId != threadRoot }, rootSummary, openedCount))
 
     /** It as the channel shows it, deleted, or with an edit the server refused and the channel took back. */
     private fun ConversationMessage.withEdit(channel: ConversationMessage) = copy(kind = channel.kind, body = channel.body,
@@ -887,8 +891,29 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      * Coming back to this conversation kept open: last visit's jump, its start at the New line and any Mark unread hold
      * stay behind, so it opens where the reader left it and reads as usual.
      */
-    fun revisit() {
-        mutableState.update { it.copy(highlight = null, startsAtUnread = false) }
+    fun revisit(root: ConversationMessage? = null, openedWith: Int? = null, listedRoot: Boolean = false) {
+        target = null
+        val nextRoot = root?.asThreadRoot()
+        if (threadRoot != null) {
+            if (nextRoot != null) {
+                this.root = nextRoot
+                mirror = nextRoot.takeUnless { listedRoot }
+                rootSummary = root.thread?.replies
+            } else if (listedRoot) {
+                mirror = null
+            }
+            if (openedWith != null) openedCount = openedWith
+        }
+        mutableState.update { state ->
+            val updatedRows = if (threadRoot != null && nextRoot != null) {
+                val rootIndex = state.rows.indexOfFirst { it is ConversationMessage && it.id == ROOT_KEY }
+                val current = state.rows.getOrNull(rootIndex) as? ConversationMessage
+                val merged = current?.withEdit(nextRoot)
+                if (current != null && merged != current) state.rows.toMutableList().apply { this[rootIndex] = merged!! }
+                else state.rows
+            } else state.rows
+            state.copy(rows = updatedRows, highlight = null, startsAtUnread = false).counted()
+        }
         operations.launch { readLock.withLock { heldUnread = false } }
     }
 
