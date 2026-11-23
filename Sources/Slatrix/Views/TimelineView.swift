@@ -43,6 +43,9 @@ struct TimelineView: View {
     /// The header's and the composer's heights, which float over the timeline's ends.
     var insets = EdgeInsets()
     @State private var loadingHistory = false
+    /// In a thread, the loading row sits between the root and replies; show it only after the loading delay so short
+    /// threads never open with a 40 pt blank gap that snaps replies up when history ends.
+    @State private var showThreadOlder = false
     @State private var deleting: MessageActionTarget?
     @State private var cancelling: ChatMessage?
     /// Retries and cancellations started here and not yet finished, by message ID.
@@ -63,7 +66,23 @@ struct TimelineView: View {
     /// A thread's page loads for whoever asked for it: its loading row, Retry, or a jump reading back.
     private var loadingOlder: Bool { thread ? matrix.isLoadingThreadPage : loadingHistory }
     private var hasOlder: Bool {
-        !matrix.isPreview && (thread ? matrix.hasMoreThreadHistory : matrix.loadsMoreHistory)
+        !matrix.isPreview && (thread ? matrix.loadsMoreThreadHistory : matrix.loadsMoreHistory)
+    }
+    private var memoryKey: TimelineMemory.Key {
+        TimelineMemory.Key(
+            sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil)
+    }
+    /// True while a cold thread open is still awaiting its timeline or first page with only its root present.
+    private var awaitingThreadReplies: Bool {
+        guard thread, let rootID = threadRootID, matrix.threadOpening?.rootID == rootID else { return false }
+        return matrix.isOpeningThread
+    }
+    /// Holds back the synthetic `[root]` row while replies or a remembered/jumped position are still arriving so a
+    /// tall thread never flashes its root and teleports off-screen.
+    private var holdsThreadEntries: Bool {
+        guard awaitingThreadReplies else { return false }
+        return matrix.isBuildingThreadTimeline || matrix.threadExpectsReplies
+            || TimelineMemory.positions[memoryKey] != nil || jumpTarget != nil
     }
     /// The intro tops a conversation loaded back to its start, or one with nothing else to show.
     private var reachedStart: Bool { matrix.isPreview || !matrix.hasMoreHistory }
@@ -79,13 +98,13 @@ struct TimelineView: View {
     var body: some View {
         TimelineTable(
             entries: entries, context: updatedContext, live: live, bottomAligned: !thread,
+            canOpen: !awaitingThreadReplies,
             focusedEventID: thread ? jumpTarget : jumpTarget ?? matrix.focusedEventID,
             jumpID: jumpTarget == nil ? nil : matrix.jump?.id,
             sends: matrix.sends[Conversation(roomID: room.id, threadRootID: thread ? threadRootID : nil)] ?? 0,
             startsAtUnread: unreadAnchor != nil,
-            memoryKey: TimelineMemory.Key(
-                sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
-            timelineID: thread ? nil : matrix.shownTimelineID,
+            memoryKey: memoryKey,
+            timelineID: thread ? matrix.threadSelection : matrix.shownTimelineID,
             pagesLanded: thread ? matrix.threadPagesLanded : 0,
             // A thread whose page failed asks again when the reader retries or the connection returns.
             canLoadOlder: hasOlder && !loadingOlder && !(thread && matrix.threadPageError != nil),
@@ -109,6 +128,12 @@ struct TimelineView: View {
             if !thread && messages.isEmpty && matrix.timelineLoading {
                 SkeletonRows(count: 8).fixedSize(horizontal: false, vertical: true)
                     .conversationRow(m, isThread: false).padding(.bottom, insets.bottom)
+            }
+        }
+        .overlay(alignment: .top) {
+            if thread && holdsThreadEntries {
+                SkeletonRows(count: 6).fixedSize(horizontal: false, vertical: true)
+                    .conversationRow(m, isThread: true).padding(.top, insets.top)
             }
         }
         .overlay(alignment: .top) {
@@ -141,6 +166,13 @@ struct TimelineView: View {
             guard turnsLive else { return }
             await matrix.goLive { scroller.screenAnchorEventID }
         }
+        .task(id: thread && hasOlder && loadingOlder && matrix.connectionState != .offline) {
+            showThreadOlder = false
+            guard thread, hasOlder, loadingOlder, matrix.connectionState != .offline else { return }
+            try? await Task.sleep(for: LoadingPresentation.indicatorDelay)
+            if !Task.isCancelled { showThreadOlder = true }
+        }
+        .loadingInterval(.historyLoading, while: thread && hasOlder && loadingOlder)
         .task(id: landing) {
             // Held long enough to find, then faded by the row.
             guard landing != nil, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
@@ -204,6 +236,7 @@ struct TimelineView: View {
     /// One row per layout row, plus what the row shows from the session; the layout itself changes only with the
     /// messages.
     private var entries: [TimelineEntry] {
+        if holdsThreadEntries { return [] }
         let rows = layout.rows(
             messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
             unreadAnchor: unreadAnchor, me: matrix.user?.id,
@@ -212,15 +245,18 @@ struct TimelineView: View {
         let context = matrix.messageActionContext
         let offline = matrix.connectionState == .offline
         let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
+        let showOlder = thread ? (hasOlder && showThreadOlder) : hasOlder
         let inputs = TimelineLayoutCache.EntryInputs(
-            rows: rows, hasOlder: hasOlder, reachedStart: reachedStart, reading: !thread && matrix.timelineLoading,
+            rows: rows, hasOlder: showOlder, reachedStart: reachedStart, reading: !thread && matrix.timelineLoading,
             hasNewer: hasNewer,
             loadingHistory: loadingOlder, welcome: welcome,
             pinned: room.pinnedEventIDs,
             canPin: canPinMessages, savedIDs: savedIDs, highlighted: highlighted,
             sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
             context: context, collapsedMedia: matrix.collapsedMedia)
-        return layout.entries(for: inputs) { buildEntries(rows, context: context, failures: failures) }
+        return layout.entries(for: inputs) {
+            buildEntries(rows, showOlder: showOlder, context: context, failures: failures)
+        }
     }
 
     private var welcome: TimelineWelcome {
@@ -230,14 +266,14 @@ struct TimelineView: View {
     }
 
     private func buildEntries(
-        _ rows: [TimelineLayout.Row], context: MessageActionTarget.Context,
+        _ rows: [TimelineLayout.Row], showOlder: Bool, context: MessageActionTarget.Context,
         failures: [SendQueueMessageKey: MessageSendFailure]
     ) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
         entries.reserveCapacity(rows.count + 2)
         // A thread's older replies load under its root and the line counting them.
         var olderAt = 0
-        if !hasOlder && !thread && (reachedStart || rows.isEmpty && !matrix.timelineLoading) {
+        if !showOlder && !thread && (reachedStart || rows.isEmpty && !matrix.timelineLoading) {
             entries.append(
                 TimelineEntry(
                     id: "welcome",
@@ -276,7 +312,9 @@ struct TimelineView: View {
                                 context: context))))
             }
         }
-        if hasOlder { entries.insert(TimelineEntry(id: "older", kind: .loading(loadingOlder)), at: olderAt) }
+        if showOlder {
+            entries.insert(TimelineEntry(id: "older", kind: .loading(loadingOlder, immediate: thread)), at: olderAt)
+        }
         if hasNewer { entries.append(TimelineEntry(id: "newer", kind: .loading(loadingHistory))) }
         return entries
     }

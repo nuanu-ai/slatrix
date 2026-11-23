@@ -658,6 +658,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var firstUnreadEventID: String?
     private var forwardLoadID: UUID?
     private(set) var hasMoreThreadHistory = true { didSet { countThreadReplies() } }
+    /// False until the thread's timeline opens, so the pane never asks for older replies before it can load them.
+    var loadsMoreThreadHistory: Bool { threadTimeline != nil && loadedThreadRootID != nil && hasMoreThreadHistory }
     /// Why the open thread's last page failed, nil once one loads, and gone with the pane. The pane says so, and asks
     /// again only after the reader retries or the connection comes back.
     private(set) var threadPageError: String?
@@ -763,8 +765,29 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var threadHandle: TaskHandle?
     private var timelineRevision = 0
     private var threadRevision = 0
-    private var threadSelection = UUID()
+    private(set) var threadSelection = UUID()
     private var loadedThreadRootID: String?
+    /// True while the open thread is still building its SDK timeline before reading cached replies.
+    var isBuildingThreadTimeline: Bool {
+        guard let opening = threadOpening else { return false }
+        return threadTimeline == nil || loadedThreadRootID != opening.rootID
+    }
+    /// True while the open thread is building its timeline or awaiting its first page with no replies shown yet.
+    var isOpeningThread: Bool {
+        guard let opening = threadOpening else { return false }
+        if isBuildingThreadTimeline { return true }
+        let hasReplies = threadMessages.contains { $0.eventID != opening.rootID }
+        return !hasReplies && readyThreadReadSelection != threadSelection && threadPageError == nil
+    }
+    /// True when the open thread is already known to have replies before its own timeline loads them.
+    var threadExpectsReplies: Bool {
+        guard let opening = threadOpening else { return false }
+        if let openedWith = opening.openedWith, openedWith > 0 { return true }
+        if let summary = messages.first(where: { $0.eventID == opening.rootID })?.replyCount, summary > 0 {
+            return true
+        }
+        return false
+    }
     /// The open thread's listener, whose snapshot holds what its timeline does, shown or not.
     private var threadSnapshot: TimelineObserver?
     private(set) var reach: Task<Void, Never>?
@@ -2405,6 +2428,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             throw error
         }
         if current() {
+            if let snapshot = threadSnapshot?.snapshot, snapshot.revision > threadRevision,
+                let root = threadMessages.first
+            {
+                threadRevision = snapshot.revision
+                showThread(snapshot.items, root: root)
+            }
             hasMoreThreadHistory = !endReached
             threadPageError = nil
             readyThreadReadSelection = token
@@ -2475,6 +2504,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             return
         }
         threadHandle = listenerHandle
+        let snapshot = observer.snapshot
+        if snapshot.revision > threadRevision {
+            threadRevision = snapshot.revision
+            showThread(snapshot.items, root: root)
+        }
         // The pane shows what the SDK has cached now; the first page arrives whenever the network allows.
         Task { _ = try? await loadMoreThread(rootID: root.eventID) }
     }
@@ -2915,6 +2949,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// The thread pane closed: nothing counts its replies, and nothing started for it lands, until another opens.
     func closeThread() {
+        guard threadOpening != nil || threadTimeline != nil || loadedThreadRootID != nil || threadPage != nil else {
+            return
+        }
         threadOpening = nil
         threadSelection = UUID()
     }

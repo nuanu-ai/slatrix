@@ -7,7 +7,7 @@ struct TimelineEntry: Identifiable, Hashable {
         /// Fills a short conversation from the top, so its messages sit on the composer like Slack's.
         case spacer
         /// Room for a spinner while history beyond this end exists.
-        case loading(Bool)
+        case loading(Bool, immediate: Bool = false)
         case welcome(TimelineWelcome)
         case day(String)
         case unread
@@ -99,6 +99,8 @@ struct TimelineTable: NSViewRepresentable {
     var context: TimelineRowContext
     var live: Bool
     var bottomAligned: Bool
+    /// False while a cold thread holds only its root awaiting replies, so `open()` waits before locking position.
+    var canOpen = true
     var focusedEventID: String?
     /// New with each jump, so jumping to the message already focused scrolls back to it.
     var jumpID: UUID?
@@ -294,11 +296,12 @@ struct TimelineTable: NSViewRepresentable {
         let settingsChanged = settings != self.settings
         self.settings = settings
         // The timeline hands back the same array while nothing in it changed, which makes this check instant.
-        guard entries != applied || settingsChanged else { return }
+        let needsOpen = !opened && configuration.canOpen
+        guard entries != applied || settingsChanged || needsOpen else { return }
         applied = entries
         let next =
             [TimelineEntry(id: "spacer", kind: .spacer)] + entries + [TimelineEntry(id: "end", kind: .end)]
-        guard next != rows || settingsChanged else { return }
+        guard next != rows || settingsChanged || needsOpen else { return }
         let interval = Performance.begin(.timelineApply)
         defer { Performance.end(interval, ["rows": next.count]) }
         // Until rows with content open the table, there is nothing on screen to keep in place.
@@ -657,10 +660,19 @@ struct TimelineTable: NSViewRepresentable {
         guard let first = messages.first ?? candidates.first else { return [] }
         let held = [first] + messages.drop { $0 <= first }
         // A thread's older replies land under its root and line: the first reply on screen holds still, not the root.
-        guard let older = index["older"], held.contains(where: { $0 > older && rows[$0].messageEventID != nil }) else {
+        let boundary: Int? =
+            if let older = index["older"] {
+                older
+            } else if let context = configuration?.context, context.isThread {
+                index["replies"]
+                    ?? context.threadRootID.flatMap { rootID in
+                        rows.firstIndex { $0.messageEventID == rootID }
+                    }
+            } else { nil }
+        guard let boundary, held.contains(where: { $0 > boundary && rows[$0].messageEventID != nil }) else {
             return held
         }
-        return held.filter { $0 > older }
+        return held.filter { $0 > boundary }
     }
 
     private func screenAnchor() -> String? {
@@ -714,7 +726,7 @@ struct TimelineTable: NSViewRepresentable {
             applying = false
             afterScroll()
         }
-        guard hasContent else {
+        guard hasContent && configuration.canOpen else {
             scroll(to: .bottom)
             return settle(keeping: .bottom)
         }
@@ -941,8 +953,18 @@ struct TimelineTable: NSViewRepresentable {
     private func checkHistory() {
         guard let configuration else { return }
         let viewport = viewport
-        // A thread's root and line sit over its loading row; only the replies under it count toward the distance.
-        let above = index["older"].map { table.rect(ofRow: $0).minY - table.rect(ofRow: 1).minY } ?? 0
+        // A thread's root and line sit over its older replies; only the replies under them count toward the distance.
+        let above: CGFloat =
+            if let older = index["older"] {
+                table.rect(ofRow: older).minY - table.rect(ofRow: 1).minY
+            } else if configuration.context.isThread,
+                let boundary = index["replies"]
+                    ?? configuration.context.threadRootID.flatMap({ rootID in
+                        rows.firstIndex { $0.messageEventID == rootID }
+                    })
+            {
+                table.rect(ofRow: boundary).maxY - table.rect(ofRow: 1).minY
+            } else { 0 }
         if configuration.canLoadOlder && Policy.needsOlder(viewport, above: above) {
             DispatchQueue.main.async { configuration.onLoadOlder() }
         } else if configuration.canLoadNewer && Policy.needsNewer(viewport) {
@@ -970,9 +992,11 @@ struct TimelineTable: NSViewRepresentable {
     /// The pane is moving on to another timeline, or has, so this table has nothing left to scroll to.
     private var leaving: Bool {
         guard let configuration else { return true }
-        return scrollView.window == nil
-            || configuration.timelineID != nil
-                && configuration.timelineID != configuration.context.matrix?.shownTimelineID
+        let current =
+            configuration.context.isThread
+            ? configuration.context.matrix?.threadSelection
+            : configuration.context.matrix?.shownTimelineID
+        return scrollView.window == nil || configuration.timelineID != nil && configuration.timelineID != current
     }
 
     /// Keeps what this table measured for the next table on the same timeline.
@@ -1277,8 +1301,9 @@ struct TimelineRow: View, Equatable {
     @ViewBuilder private var content: some View {
         switch entry.kind {
         case .spacer, .end: Color.clear
-        case .loading(let loading):
-            TimelineLoadingRow(loading: loading, offline: context.matrix?.connectionState == .offline)
+        case .loading(let loading, let immediate):
+            TimelineLoadingRow(
+                loading: loading, offline: context.matrix?.connectionState == .offline, immediate: immediate)
         case .welcome(let welcome):
             TimelineWelcomeRow(welcome: welcome).conversationRow(metrics, isThread: context.isThread)
         case .day(let label):
@@ -1342,9 +1367,10 @@ private struct TimelineLoadingRow: View {
     @Environment(\.metrics) private var m
     let loading: Bool
     let offline: Bool
+    var immediate = false
     var body: some View {
-        DelayedProgress(active: loading, offline: offline, interval: .historyLoading).frame(maxWidth: .infinity).frame(
-            height: m.sp40)
+        DelayedProgress(active: loading, offline: offline, interval: .historyLoading, immediate: immediate)
+            .frame(maxWidth: .infinity).frame(height: m.sp40)
     }
 }
 

@@ -888,9 +888,11 @@ struct RootView: View {
                         Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
                     }
                 } else {
-                    Banner(text: "Opening thread…", tone: .neutral) {
-                        Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
-                    }.loadingInterval(.threadLoading)
+                    AfterLoadingDelay(active: true, hasContent: false, offline: false, interval: .threadLoading) {
+                        Banner(text: "Opening thread…", tone: .neutral) {
+                            Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
+                        }
+                    }
                 }
             }
             ErrorBanner(matrix: matrix)
@@ -1326,7 +1328,7 @@ struct RootView: View {
                 readKey: matrix.threadReadIdentity, onForward: startForward, onEditCaption: startCaption,
                 onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) },
                 inlineVideo: viewer.inlineVideo, contentAbove: $threadContentAbove, insets: insets
-            ).id(root.eventID)
+            ).id("\(root.eventID):\(matrix.threadSelection)")
         } header: {
             PaneHeader(title: "Thread", subtitle: room.writtenName, closeLabel: "Close thread", onClose: closeThread)
                 .scrollEdge(.top, colors.canvas)
@@ -2027,6 +2029,10 @@ struct RootView: View {
         Performance.start(.threadOpen)
         cancelThreadOpen()
         cancelReply()
+        if let root = ThreadRootResolver.cached(roomID: message.roomID, rootID: rootID, candidates: candidates) {
+            openThread(root, room: root.roomID, openedWith: openedWith)
+            return
+        }
         navigationGeneration = UUID()
         let request = ThreadOpenRequest(
             message: message, owner: composerIdentity,

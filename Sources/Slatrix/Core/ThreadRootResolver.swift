@@ -9,6 +9,15 @@ enum ThreadRootResolver {
         }
     }
 
+    /// Returns the validated thread root already in `candidates`, or `nil` when it must be fetched or rejected.
+    static func cached(roomID: String, rootID: String, candidates: [ChatMessage]) -> ChatMessage? {
+        guard !roomID.isEmpty, rootID.hasPrefix("$"), rootID.count > 1,
+            let root = candidates.first(where: { $0.roomID == roomID && $0.eventID == rootID }),
+            root.roomID == roomID, root.eventID == rootID, root.threadRootID == nil, root.sendState == "sent"
+        else { return nil }
+        return root
+    }
+
     /// `validate` throws CancellationError when the original account,
     /// navigation or room context is no longer current.
     static func resolve(

@@ -102,4 +102,111 @@ struct ThreadPaneHostedTests {
         #expect(await eventually { harness.matrix.threadMessages.contains { $0.eventID == "$t0" } })
         #expect(threadRows(harness)["$r149"] == before)
     }
+
+    @Test("Opening a thread whose root is in the conversation never flashes an Opening thread banner")
+    func cachedRootNeverFlashesOpeningBanner() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        try #require(await harness.settled(on: 0))
+        harness.rooms[0].threadItems = [
+            FakeTimelineItem(textEvent("$r1", body: "Reply 1"), uniqueID: "thread-r1")
+        ]
+        harness.rooms[0].threadStartReached = true
+        var sawOpeningBanner = false
+        let observer = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max
+        ) { _, _ in
+            MainActor.assumeIsolated {
+                if !accessible("Opening thread…", in: harness.hosting).isEmpty { sawOpeningBanner = true }
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        defer { CFRunLoopObserverInvalidate(observer) }
+
+        let message = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? MessageTextView }
+                .last { $0.window != nil && !$0.isEditable && !$0.string.isEmpty })
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let item = try #require(message.menu(for: event)?.items.first { $0.identifier?.rawValue == "thread" })
+        _ = item.target?.perform(item.action, with: item)
+        harness.hosting.layoutSubtreeIfNeeded()
+        if !accessible("Opening thread…", in: harness.hosting).isEmpty { sawOpeningBanner = true }
+        #expect(await eventually { threadRows(harness)["$r1"] != nil })
+        #expect(!sawOpeningBanner)
+    }
+
+    private func openThreadMenu(for eventID: String, in harness: Harness) throws {
+        let cell = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }.first { cell in
+                guard cell.window != nil, case .message(let entry) = cell.entry?.kind else { return false }
+                return entry.message.eventID == eventID
+            })
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let item = try #require(cell.menu(for: event)?.items.first { $0.identifier?.rawValue == "thread" })
+        _ = item.target?.perform(item.action, with: item)
+    }
+
+    @Test("A cold tall thread with known replies waits for its first page instead of flashing the root and teleporting")
+    func coldTallThreadDoesNotFlashRootThenTeleport() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        try #require(await harness.settled(on: 0))
+        let room = harness.rooms[0]
+        let rootID = "$s0-39"
+        let replies = (0..<60).map {
+            FakeTimelineItem(textEvent("$tall-\($0)", body: "Tall reply \($0)"), uniqueID: "tall-\($0)")
+        }
+        room.threadItems = []
+        room.threadPages = [replies]
+        room.threadStartReached = true
+        // Give the root message a known reply count, as a message with a replies bar has.
+        if let index = harness.matrix.messages.firstIndex(where: { $0.eventID == rootID }) {
+            harness.matrix.messages[index].replyCount = 60
+        }
+        try openThreadMenu(for: rootID, in: harness)
+        try #require(await eventually { room.timelines.all.count == 2 && room.pageGate.isWaiting })
+        await harness.idle()
+        #expect(threadRows(harness)[rootID] == nil)
+        room.pageGate.release()
+        #expect(await eventually { threadRows(harness)["$tall-59"] != nil })
+        #expect(threadRows(harness)[rootID] == nil)
+    }
+
+    @Test("Reopening a tall thread cold restores the remembered reply instead of locking on the root alone")
+    func coldThreadRestoresRememberedPosition() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        try #require(await harness.settled(on: 0))
+        let room = harness.rooms[0]
+        let rootID = "$s0-39"
+        let replies = (0..<60).map {
+            FakeTimelineItem(textEvent("$mem-\($0)", body: "Memory reply \($0)"), uniqueID: "mem-\($0)")
+        }
+        room.threadItems = []
+        room.threadPages = [replies]
+        room.threadStartReached = true
+
+        // Seed a remembered reading position mid-thread, as leaving the thread would save.
+        let key = TimelineMemory.Key(
+            sessionID: harness.matrix.notificationSessionID, roomID: room.id(), threadRootID: rootID)
+        TimelineMemory.positions[key] = TimelineMemory.Anchor(eventID: "$mem-20", offset: 0)
+        defer { TimelineMemory.positions[key] = nil }
+
+        try openThreadMenu(for: rootID, in: harness)
+        try #require(await eventually { room.timelines.all.count == 2 && room.pageGate.isWaiting })
+        // Let the window draw while the first page is still in flight.
+        await harness.idle()
+        room.pageGate.release()
+        try #require(await eventually { harness.matrix.threadMessages.contains { $0.eventID == "$mem-20" } })
+        #expect(await eventually { threadRows(harness)["$mem-20"] != nil })
+        #expect(threadRows(harness)["$mem-59"] == nil)
+    }
 }

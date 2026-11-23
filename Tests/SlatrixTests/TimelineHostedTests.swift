@@ -63,7 +63,7 @@ struct TimelineHostedTests {
                 unreadAnchor: unreadAnchor, insets: TimelineHostedTests.insets
             )
             // As the app's room pane, a table per timeline the service opens.
-            .id("\(room.id):\(timeline):\(service.shownTimelineID)")
+            .id("\(room.id):\(timeline):\(thread ? service.threadSelection : service.shownTimelineID)")
             .environmentObject(appearance).environment(\.metrics, Metrics(zoom: zoom)).environment(popovers)
         }
     }
@@ -859,7 +859,7 @@ struct TimelineHostedTests {
         try #require(await eventually { harness.service.messages.first?.eventID == "$root" })
         room.pageGate.arm()
         defer { room.pageGate.release() }
-        try await harness.service.loadThread(harness.service.messages[0])
+        try await harness.service.loadThread(harness.service.messages[0], openedWith: 1)
         func loadingRow() -> Bool {
             harness.layout()
             return Harness.views(in: harness.hosting).contains { view in
@@ -871,14 +871,16 @@ struct TimelineHostedTests {
                 harness.layout()
                 return harness.top(of: words) != nil && harness.cell(showing: "$reply") != nil
             })
-        #expect(loadingRow())
         let opened = try #require(harness.top(of: words))
+        let replyOpened = try #require(harness.top(of: "Reply 1"))
 
         // The opening's own first page ends at the thread's start.
         #expect(await eventually { room.pageGate.isWaiting })
         room.pageGate.release()
-        #expect(await eventually { !loadingRow() })
+        #expect(await eventually { !harness.service.hasMoreThreadHistory })
+        harness.layout()
         #expect(abs(try #require(harness.top(of: words)) - opened) < 0.5)
+        #expect(abs(try #require(harness.top(of: "Reply 1")) - replyOpened) < 0.5)
     }
 
     /// A thread pane showing `root` and `replies`, more of them older, each older page landing as `onPage` says.
@@ -934,18 +936,17 @@ struct TimelineHostedTests {
         root.id = root.eventID
         let harness = Harness(width: 400, height: 600)
         defer { harness.close() }
-        let thread = threadPane(harness, root: root, replies: Self.messages(1..<35, prefix: "Reply")) { false }
+        let thread = threadPane(harness, root: root, replies: Self.messages(1..<36, prefix: "Reply")) { false }
         defer { thread.gate.release() }
-        await settle(harness) { harness.top(of: "Reply 34") != nil }
+        await settle(harness) { harness.top(of: "Reply 35") != nil }
         // The replies alone sit within the three screens history loads ahead; with the root above them they don't.
         let table = try #require(harness.scrollView?.documentView as? NSTableView)
         let screen = 600 - Self.insets.top - Self.insets.bottom
         let top = harness.clip.bounds.minY + Self.insets.top
-        // Under the top spacer, the day, the root, then the loading row.
-        let loadingRow = table.rect(ofRow: 3)
-        try #require(loadingRow.height == 40)
+        // Under the top spacer, the day, and the root, replies begin right below row 2.
+        let repliesStart = table.rect(ofRow: 2).maxY
         try #require(top >= screen * TimelineScrollPolicy.historyLead)
-        try #require(top - loadingRow.minY < screen * TimelineScrollPolicy.historyLead)
+        try #require(top - repliesStart < screen * TimelineScrollPolicy.historyLead)
         #expect(await eventually { thread.gate.isWaiting })
     }
 
@@ -1365,6 +1366,52 @@ struct TimelineHostedTests {
         harness.hosting.rootView = pane
         await settle(harness) { harness.top(of: reading) != nil }
         #expect(abs(try #require(harness.top(of: reading)) - before) < 0.5)
+    }
+
+    @Test("Switching from Thread A to Thread B keeps Thread A's remembered position intact")
+    func threadSwitchPreservesRememberedPosition() async throws {
+        var rootA = Self.messages(0..<1, prefix: "RootA")[0]
+        rootA.id = "$rootA"
+        var rootB = Self.messages(0..<1, prefix: "RootB")[0]
+        rootB.id = "$rootB"
+        let harness = Harness(width: 400, height: 600)
+        defer { harness.close() }
+        let threadA = HistoryTimeline(noHandle: .init())
+        threadA.onPage = { true }
+        harness.service.configureMessageActionsForChecks(
+            client: harness.client, main: harness.timeline, thread: threadA, rootID: rootA.eventID, sessionID: UUID(),
+            selectionID: UUID(), threadID: UUID())
+        let repliesA = Self.messages(1..<60, prefix: "ReplyA")
+        harness.service.threadMessages = [rootA] + repliesA
+        var pane = harness.fixture(Self.room)
+        pane.thread = true
+        pane.threadRootID = rootA.eventID
+        harness.hosting.rootView = pane
+        await settle(harness) { harness.top(of: "ReplyA 59") != nil }
+        harness.scroll(toTop: harness.clip.bounds.minY - 1_200)
+        // First message below the header (not passing under it), matching TimelineTableCoordinator.visible.
+        let readingA = try #require(
+            repliesA.first { reply in
+                harness.top(of: reply.body).map { $0 <= harness.headerBottom } ?? false
+            })
+        let expectedEventID = readingA.eventID
+
+        // Switch service to Thread B before SwiftUI dismantles Thread A's table.
+        let threadB = HistoryTimeline(noHandle: .init())
+        threadB.onPage = { true }
+        harness.service.configureMessageActionsForChecks(
+            client: harness.client, main: harness.timeline, thread: threadB, rootID: rootB.eventID,
+            sessionID: harness.service.notificationSessionID, selectionID: harness.service.timelineSelectionID,
+            threadID: UUID())
+        harness.service.threadMessages = [rootB] + Self.messages(1..<60, prefix: "ReplyB")
+        pane.threadRootID = rootB.eventID
+        harness.hosting.rootView = pane
+        await settle(harness) { harness.top(of: "ReplyB 59") != nil }
+
+        let keyA = TimelineMemory.Key(
+            sessionID: harness.service.notificationSessionID, roomID: Self.room.id, threadRootID: rootA.eventID)
+        defer { TimelineMemory.positions[keyA] = nil }
+        #expect(TimelineMemory.positions[keyA]?.eventID == expectedEventID)
     }
 
     @Test("A jumped-to reply that arrives late lands as it arrives: centred, highlighted then, and the jump used")
