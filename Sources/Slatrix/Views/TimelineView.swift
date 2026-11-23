@@ -785,8 +785,9 @@ private struct SendingClock: View {
     }
 
     var body: some View {
+        let visible = status.showsImmediately || shown
         Image(systemName: "clock").font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary)
-            .opacity(shown ? 1 : 0).help(status.label).accessibilityHidden(!shown).accessibilityLabel(status.label)
+            .opacity(visible ? 1 : 0).help(status.label).accessibilityHidden(!visible).accessibilityLabel(status.label)
             .task(id: "\(since.timeIntervalSinceReferenceDate)|\(status.showsImmediately)") {
                 shown = status.showsImmediately || Self.shows(since)
                 guard !shown else { return }

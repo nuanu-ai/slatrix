@@ -14,7 +14,7 @@ struct MediaViewer: View {
     var body: some View {
         ZStack {
             if let message = viewer.message {
-                MediaViewerPage(matrix: matrix, viewer: viewer, message: message, onForward: onForward)
+                MediaViewerPage(matrix: matrix, viewer: viewer, opened: message, onForward: onForward)
                     .transition(.opacity)
             }
         }
@@ -28,11 +28,14 @@ private struct MediaViewerPage: View {
     @EnvironmentObject private var appearance: AppearanceStore
     let matrix: MatrixService
     let viewer: MediaViewerState
-    let message: ChatMessage
+    let opened: ChatMessage
     let onForward: (MessageActionTarget) -> Void
     @State private var loaded: Loaded?
     @State private var downloading = false
     private var colors: AppColors { appearance.colors }
+    private var message: ChatMessage {
+        viewer.files == nil ? (messages.first { $0.id == opened.id } ?? opened) : opened
+    }
     private var attachment: MessageAttachment { message.attachment ?? MessageAttachment(name: "", url: "") }
     private var messages: [ChatMessage] {
         viewer.surface == .conversation ? matrix.messages : matrix.threadMessages
