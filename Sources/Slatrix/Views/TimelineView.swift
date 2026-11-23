@@ -130,7 +130,7 @@ struct TimelineView: View {
                 } label: {
                     Label("Jump to recent", systemImage: "arrow.down").font(m.font(.subheadline, .semibold))
                         .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
-                        .background(colors.raised, in: Capsule()).overlay(Capsule().stroke(colors.border))
+                        .background(colors.raised, in: Capsule())
                         .elevation(.e2, cornerRadius: m.sp20)
                 }.buttonStyle(.row).padding(m.sp20).padding(.bottom, insets.bottom).transition(.opacity)
             }

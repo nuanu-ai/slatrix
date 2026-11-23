@@ -1498,7 +1498,7 @@ private struct StagedAttachmentTile: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, m.sp12).frame(width: m(Self.fileWidth), height: m(Self.side))
-                .background(colors.canvas, in: shape)
+                .background(colors.raised, in: shape)
             }
         }
         .overlay(shape.strokeBorder(colors.border))

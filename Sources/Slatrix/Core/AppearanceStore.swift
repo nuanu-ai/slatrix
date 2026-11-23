@@ -26,7 +26,8 @@ enum MessageDensity: String, CaseIterable, Identifiable {
 }
 
 @MainActor final class AppearanceStore: ObservableObject {
-    @Published var mode = AppTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.mode") ?? "dark") ?? .dark
+    @Published var mode =
+        AppTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.mode") ?? "system") ?? .system
     { didSet { save(mode.rawValue, "mode") } }
     @Published var theme =
         ColorTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.theme") ?? "") ?? .standard

@@ -80,7 +80,6 @@ struct FileRow<Menu: View>: View {
                 .focused($focus, equals: .menu)
         }.padding(.horizontal, m.sp2).frame(height: m(side))
             .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radius))
-            .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border))
             .elevation(.e1, cornerRadius: m.radius)
     }
 }

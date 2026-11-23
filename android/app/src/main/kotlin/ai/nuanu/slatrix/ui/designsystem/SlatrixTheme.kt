@@ -8,6 +8,7 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -119,8 +120,8 @@ private val LocalColors = staticCompositionLocalOf { AppColors(DesignTokens.colo
 private fun wallpaperRoles(dark: Boolean, scheme: ColorScheme): Map<String, Color> {
     return DesignTokens.colors(dark) + mapOf(
         "textPrimary" to scheme.onSurface, "textBody" to scheme.onSurface, "textSecondary" to scheme.onSurfaceVariant,
-        "canvas" to scheme.surface, "raised" to scheme.surfaceContainerHigh, "sunken" to scheme.surfaceContainerHighest,
-        "overlay" to scheme.surfaceContainerLow, "border" to scheme.outlineVariant, "borderStrong" to scheme.outline,
+        "canvas" to scheme.surface, "raised" to scheme.surfaceContainerHigh, "sunken" to scheme.surfaceContainerLow,
+        "overlay" to scheme.surfaceContainerHighest, "border" to scheme.outlineVariant, "borderStrong" to scheme.outline,
         "accent" to scheme.primary, "accentTint" to scheme.primary.copy(alpha = 0.12f), "accentFill" to scheme.primary,
         "onAccent" to scheme.onPrimary, "mention" to scheme.primary, "mentionText" to scheme.primary,
         "mentionFill" to scheme.primary.copy(alpha = 0.12f), "wallpaper" to lerp(scheme.surfaceContainer, scheme.primary, WashAccent),
@@ -160,8 +161,9 @@ fun SlatrixTheme(
         AppColors(if (wallpaperColors) wallpaperRoles(dark, if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context))
             else DesignTokens.colors(dark), dark)
     }
-    val scheme = remember(colors) {
-        lightColorScheme(
+    val scheme = remember(colors, dark) {
+        val base = if (dark) darkColorScheme() else lightColorScheme()
+        base.copy(
             primary = colors.accentFill,
             onPrimary = colors.onAccent,
             primaryContainer = colors.accentTint,
@@ -191,12 +193,12 @@ fun SlatrixTheme(
             outline = colors.borderStrong,
             outlineVariant = colors.border,
             scrim = colors.scrim,
-            surfaceBright = colors.canvas,
+            surfaceBright = colors.overlay,
             surfaceContainer = colors.canvas,
-            surfaceContainerHigh = colors.overlay,
-            surfaceContainerHighest = colors.raised,
-            surfaceContainerLow = colors.canvas,
-            surfaceContainerLowest = colors.canvas,
+            surfaceContainerHigh = colors.raised,
+            surfaceContainerHighest = colors.overlay,
+            surfaceContainerLow = colors.sunken,
+            surfaceContainerLowest = colors.sunken,
             surfaceDim = colors.sunken,
         )
     }

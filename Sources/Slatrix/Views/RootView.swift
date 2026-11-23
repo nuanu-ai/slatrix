@@ -3260,7 +3260,6 @@ private struct ComposerCard: ViewModifier {
     let colors: AppColors
     func body(content: Content) -> some View {
         content.background(colors.raised).clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
-            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
             .elevation(.e2, cornerRadius: m.radiusLarge)
     }
 }

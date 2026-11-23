@@ -328,7 +328,6 @@ private struct MediaActionsToolbar: View {
             }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m(side)).help("More actions")
         }.padding(.horizontal, m.sp2).frame(height: m(side))
             .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radius))
-            .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border))
             .elevation(.e1, cornerRadius: m.radius)
     }
 }
@@ -373,7 +372,7 @@ private struct FileCard: View {
                 Spacer(minLength: m.sp8)
             }
             .padding(m.sp12).frame(maxWidth: m(Self.maxWidth), alignment: .leading)
-            .background(colors.canvas, in: shape).overlay(shape.strokeBorder(colors.border))
+            .background(colors.raised, in: shape).overlay(shape.strokeBorder(colors.border))
         }
         .buttonStyle(.row).help("Open \(attachment.name)")
         .overlay(alignment: .topTrailing) {

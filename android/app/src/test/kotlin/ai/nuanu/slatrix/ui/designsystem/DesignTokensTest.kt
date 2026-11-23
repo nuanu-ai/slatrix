@@ -33,6 +33,25 @@ class DesignTokensTest {
         }
     }
 
+    @Test fun `text and filled buttons meet WCAG AA contrast and dark surfaces step upward`() {
+        fun contrast(first: Color, second: Color): Float {
+            val (dark, light) = listOf(first.luminance(), second.luminance()).sorted()
+            return (light + 0.05f) / (dark + 0.05f)
+        }
+        for (dark in listOf(false, true)) {
+            val colors = DesignTokens.colors(dark)
+            for (surface in listOf("canvas", "raised", "bubbleIn")) {
+                assertTrue("dark=$dark textTertiary/$surface", contrast(colors.getValue("textTertiary"), colors.getValue(surface)) >= 4.5f)
+            }
+            assertTrue("dark=$dark onAccent/accentFill", contrast(colors.getValue("onAccent"), colors.getValue("accentFill")) >= 4.5f)
+            assertTrue("dark=$dark onAccent/destructive", contrast(colors.getValue("onAccent"), colors.getValue("destructive")) >= 4.5f)
+            assertTrue("dark=$dark warning/canvas", contrast(colors.getValue("warning"), colors.getValue("canvas")) >= 4.5f)
+        }
+        val dark = DesignTokens.colors(true)
+        val elevation = listOf("sunken", "canvas", "raised", "overlay").map { dark.getValue(it).luminance() }
+        assertTrue("dark surfaces step upward: $elevation", elevation.zipWithNext().all { (a, b) -> a < b })
+    }
+
     private fun color(value: JsonElement): Color {
         val parts = value.asString.removePrefix("#").split('/')
         return Color(0xff000000 or parts[0].toLong(16)).copy(alpha = parts.getOrNull(1)?.toFloat() ?: 1f)

@@ -48,21 +48,21 @@ struct AppColors {
             }
             switch (theme, dark) {
             case (.standard, false):
-                (text, secondary, tertiary) = (0x1d1d1f, 0x636368, 0x86868b)
+                (text, secondary, tertiary) = (0x1d1d1f, 0x58585e, 0x6c6c72)
                 (canvas, sidebar, overlay, control, ink) = (0xffffff, 0xf3f3f5, 0xfbfbfd, 0xffffff, 0x000000)
             case (.standard, true):
                 (text, secondary, tertiary) = (0xf5f5f7, 0x9e9ea5, 0x8e8e94)
                 (canvas, sidebar, overlay, control, ink) = (0x141416, 0x1d1d20, 0x252528, 0x1f1f22, 0xffffff)
             // Cool blue-gray, like a slate.
             case (.slate, false):
-                (text, secondary, tertiary) = (0x111827, 0x556070, 0x667085)
+                (text, secondary, tertiary) = (0x111827, 0x556070, 0x616b7f)
                 (canvas, sidebar, overlay, control, ink) = (0xffffff, 0xeef1f7, 0xfafbfd, 0xffffff, 0x101828)
             case (.slate, true):
                 (text, secondary, tertiary) = (0xe8ecf4, 0x9aa3b5, 0x8b94a7)
                 (canvas, sidebar, overlay, control, ink) = (0x0d1017, 0x151a26, 0x1e2536, 0x1a2030, 0xffffff)
             // Warm paper.
             case (.sand, false):
-                (text, secondary, tertiary) = (0x231f1a, 0x655c51, 0x756c61)
+                (text, secondary, tertiary) = (0x231f1a, 0x60574c, 0x6e655a)
                 (canvas, sidebar, overlay, control, ink) = (0xfdfbf7, 0xf2ece2, 0xfffdfa, 0xffffff, 0x3c2814)
             case (.sand, true):
                 (text, secondary, tertiary) = (0xf2ede6, 0xaaa195, 0x9b9286)
@@ -92,16 +92,16 @@ struct AppColors {
 
         init(_ theme: ColorTheme, dark: Bool) {
             switch (theme, dark) {
-            case (.aubergine, false): (start, end, secondary, tertiary) = (0x4a1f4f, 0x231b6f, 0xd4c9d5, 0xa48fa7)
+            case (.aubergine, false): (start, end, secondary, tertiary) = (0x4a1f4f, 0x231b6f, 0xd4c9d5, 0xae99b1)
             case (.aubergine, true): (start, end, secondary, tertiary) = (0x2b1530, 0x0f1252, 0xc8c2c9, 0x958a98)
-            case (.jade, false): (start, end, secondary, tertiary) = (0x1c4a3e, 0x17394f, 0xd6dedc, 0x8ea49e)
+            case (.jade, false): (start, end, secondary, tertiary) = (0x1c4a3e, 0x17394f, 0xd6dedc, 0x9eb4ae)
             case (.jade, true): (start, end, secondary, tertiary) = (0x122e28, 0x081e3a, 0xc1c9c7, 0x889694)
-            case (.lagoon, false): (start, end, secondary, tertiary) = (0x1c3d61, 0x054040, 0xd6dce3, 0x8e9eb0)
-            case (.lagoon, true): (start, end, secondary, tertiary) = (0x13263c, 0x003b33, 0xc2c7cc, 0x89929e)
-            case (.midnight, false): (start, end, secondary, tertiary) = (0x141c3a, 0x401656, 0xc2c4cc, 0x8a8e9c)
+            case (.lagoon, false): (start, end, secondary, tertiary) = (0x1c3d61, 0x054040, 0xd6dce3, 0x9eb0c2)
+            case (.lagoon, true): (start, end, secondary, tertiary) = (0x13263c, 0x003b33, 0xc2c7cc, 0x9aa4b0)
+            case (.midnight, false): (start, end, secondary, tertiary) = (0x141c3a, 0x401656, 0xc2c4cc, 0x989caa)
             case (.midnight, true): (start, end, secondary, tertiary) = (0x0c1126, 0x2d083f, 0xc0c1c7, 0x868892)
-            case (_, false): (start, end, secondary, tertiary, opacity) = (0xf3f3f5, 0xf3f3f5, 0x46464b, 0x6e6e73, 0.85)
-            case (_, true): (start, end, secondary, tertiary, opacity) = (0x1d1d20, 0x1d1d20, 0xc4c4ca, 0x98989e, 0.88)
+            case (_, false): (start, end, secondary, tertiary, opacity) = (0xf3f3f5, 0xf3f3f5, 0x46464b, 0x58585d, 0.85)
+            case (_, true): (start, end, secondary, tertiary, opacity) = (0x1d1d20, 0x1d1d20, 0xc4c4ca, 0xa8a8ae, 0.88)
             }
         }
     }
@@ -199,8 +199,12 @@ struct AppColors {
 
     // MARK: Accent and status
 
-    /// The system accent as a fill: the one main button, the send button, badges, the highlighted menu row.
-    var accentFill: Color { Color(nsColor: accentBase) }
+    /// The system accent as a fill: the one main button, the send button, badges, the highlighted menu row. Deepened
+    /// slightly under white text so filled buttons meet WCAG AA contrast.
+    var accentFill: Color {
+        guard neutrals.onAccent == 0xffffff else { return Color(nsColor: accentBase) }
+        return Color(nsColor: accentBase.blended(withFraction: dark ? 0.24 : 0.16, of: .black) ?? accentBase)
+    }
     /// The accent as text and icons: links, the open conversation's icon, a mention. Deepened in light mode, more so
     /// over a frame theme's doodles, and lifted in dark mode, so it reads as text on the canvas.
     var accent: Color {
@@ -214,10 +218,10 @@ struct AppColors {
     /// Text and icons on an accent fill.
     var onAccent: Color { Color(hex: neutrals.onAccent) }
     /// Done and verified marks.
-    var success: Color { Color(hex: dark ? 0x30d158 : 0x248a3d) }
-    var destructive: Color { Color(hex: dark ? 0xff453a : 0xd70015) }
+    var success: Color { Color(hex: dark ? 0x30d158 : 0x1e7a34) }
+    var destructive: Color { Color(hex: dark ? 0xde2c2c : 0xd70015) }
     /// Connection trouble and recoverable failures.
-    var warning: Color { Color(hex: dark ? 0xff9f0a : 0xc46800) }
+    var warning: Color { Color(hex: dark ? 0xff9f0a : 0x9a4f00) }
     /// An @Name pill in a message or the composer. Deeper than the accent in light mode, so it reads on its tint.
     var mentionText: Color { dark ? accent : deepAccent }
     var mentionFill: Color { accentTint }
