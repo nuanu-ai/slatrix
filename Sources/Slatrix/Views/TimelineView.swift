@@ -457,6 +457,9 @@ struct TimelineView: View {
     private var rows: [TimelineLayout.Row] = []
     private var unreadBoundary: String?
     private var opened = false
+    /// The newest event present when partial cached rows first arrived without their unread anchor; live arrivals
+    /// appended after it never create an unread line.
+    private var openedNewestEventID: String?
     /// Everything a timeline's entries show besides the rows; the timeline redraws for many changes that touch none.
     struct EntryInputs: Equatable {
         var rows: [TimelineLayout.Row]
@@ -494,12 +497,27 @@ struct TimelineView: View {
         groups: Bool, threadRootEventID: String? = nil, repliesLine: Int? = nil
     ) -> [TimelineLayout.Row] {
         if !opened, !messages.isEmpty {
-            opened = true
-            if let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID }) {
+            if openedNewestEventID == nil { openedNewestEventID = messages.last?.eventID }
+            let ceiling =
+                openedNewestEventID.flatMap { id in messages.lastIndex { $0.eventID == id } }
+                ?? (messages.count - 1)
+            if let firstUnreadEventID,
+                let unreadIndex = messages.firstIndex(where: { $0.eventID == firstUnreadEventID }),
+                unreadIndex <= ceiling
+            {
+                opened = true
                 unreadBoundary = firstUnreadEventID
-            } else if let anchor = messages.firstIndex(where: { $0.eventID == unreadAnchor }) {
-                // The read marker can land after the messages; it would go before the next one someone else sent.
-                unreadBoundary = messages[(anchor + 1)...].first { $0.senderID != me }?.eventID
+            } else if let unreadAnchor {
+                if let anchor = messages.firstIndex(where: { $0.eventID == unreadAnchor }) {
+                    opened = true
+                    // The read marker can land after the messages; it would go before the next one someone else sent.
+                    let afterAnchor = anchor + 1
+                    if afterAnchor <= ceiling {
+                        unreadBoundary = messages[afterAnchor...ceiling].first { $0.senderID != me }?.eventID
+                    }
+                }
+            } else {
+                opened = true
             }
         }
         if let input, input.groups == groups, input.unread == unreadBoundary, input.repliesLine == repliesLine,

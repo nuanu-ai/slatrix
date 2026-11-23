@@ -1966,6 +1966,43 @@ extension TimelineHostedTests {
         #expect(!harness.service.hasMoreHistory)
     }
 
+    @Test("An empty-cache room whose first page brings messages and reaches the start never flashes welcome alone")
+    func emptyCacheWithMessagesNeverFlashesWelcomeAlone() async throws {
+        let room = FakeOpenRoom(Self.room.id, cached: [])
+        let harness = Harness(opening: room)
+        defer { harness.close() }
+        room.pageGate.arm()
+        defer { room.pageGate.release() }
+        let opening = Task { await harness.service.selectRoom(Self.room.id) }
+        #expect(await eventually { room.pageGate.isWaiting })
+        let timeline = try #require(room.timelines.all.first)
+        timeline.olderPages = [
+            [
+                FakeTimelineItem(textEvent("$w0", body: "Hello")),
+                FakeTimelineItem(textEvent("$w1", body: "World")),
+            ]
+        ]
+        timeline.startReached = true
+        var sawWelcomeWithoutMessages = false
+        let observer = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max
+        ) { _, _ in
+            MainActor.assumeIsolated {
+                let cells = Harness.views(in: harness.hosting).compactMap { $0 as? TimelineCell }
+                    .filter { $0.window != nil }
+                let hasWelcome = cells.contains { if case .welcome = $0.entry?.kind { true } else { false } }
+                let hasMessage = cells.contains { if case .message = $0.entry?.kind { true } else { false } }
+                if hasWelcome && !hasMessage { sawWelcomeWithoutMessages = true }
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        defer { CFRunLoopObserverInvalidate(observer) }
+        room.pageGate.release()
+        await opening.value
+        await settle(harness) { harness.top(of: "World") != nil && harness.showsWelcome }
+        #expect(!sawWelcomeWithoutMessages)
+    }
+
     @Test("A conversation whose older pages never show anything stops loading them and shows its intro")
     func hiddenHistoryShowsIntro() async throws {
         let harness = Harness(messages: [])

@@ -725,6 +725,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var roomList: RoomListEntriesWithDynamicAdaptersResult?
     private var handles: [TaskHandle] = []
     private var timeline: Timeline?
+    private var timelineObserver: TimelineObserver?
     private var timelineHandle: TaskHandle?
     /// The open conversation's live timeline; nil while it shows one opened at an older message.
     private var liveTimeline: KeptTimeline?
@@ -1678,6 +1679,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         showConversation(id, eventID: nil, token: kept.token)
         liveTimeline = kept
         timeline = kept.timeline
+        timelineObserver = kept.observer
         timelineHandle = kept.listener
         openState = .ready
         messages = kept.messages
@@ -1841,6 +1843,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let id = room.id()
         showConversation(id, eventID: eventID, token: token)
         timeline = next
+        timelineObserver = observer
         timelineHandle = listener
         openState = .ready
         hasMoreForwardHistory = eventID != nil
@@ -1861,6 +1864,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         Task { [weak self] in
             do {
                 let endReached = try await page.value
+                // Project any items the page just delivered before flipping hasMoreHistory so the timeline never
+                // flashes TimelineWelcomeRow alone for a frame while messages are still queued on the main actor.
+                if let self, self.timeline === next { self.showTimeline(observer.snapshot, roomID: id) }
                 self?.reached(endReached, in: next, roomID: id)
             } catch {
                 guard let self, self.timeline === next else { return }
@@ -1919,6 +1925,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         timelineHandle?.cancel()
         focusedEventID = nil
         timeline = next
+        timelineObserver = observer
         timelineHandle = listener
         liveTimeline = KeptTimeline(roomID: id, token: token, timeline: next, observer: observer, listener: listener)
         timelineRevision = 0
@@ -2025,6 +2032,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         typingHandle?.cancel()
         threadHandle?.cancel()
         timeline = nil
+        timelineObserver = nil
         threadTimeline = nil
         loadedThreadRootID = nil
     }
@@ -2267,6 +2275,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let target = try requireTimeline()
         let id = selectedRoomID
         let endReached = try await readOlder(target).value
+        if timeline === target, let id, let observer = timelineObserver { showTimeline(observer.snapshot, roomID: id) }
         reached(endReached, in: target, roomID: id)
         return endReached
     }

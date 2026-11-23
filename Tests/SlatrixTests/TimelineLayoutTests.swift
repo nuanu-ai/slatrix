@@ -186,6 +186,40 @@ struct TimelineLayoutTests {
         #expect(belowLine(rows("$d")) == line)
     }
 
+    // capability: conversation.unread-line
+    @MainActor
+    @Test(
+        "A partial sliding-sync cache waits for older history to bring the unread anchor without marking live arrivals")
+    func partialCacheWaitsForUnreadAnchor() {
+        let cache = TimelineLayoutCache()
+        func make(_ id: String, _ sender: String, at minutes: Double) -> ChatMessage {
+            var item = message(id, sender, at: minutes)
+            item.timelineEventID = "$\(id)"
+            return item
+        }
+        let a = make("a", "@alice", at: 6)
+        let b = make("b", "@alice", at: 5)
+        let c = make("c", "@me", at: 4)
+        let d = make("d", "@alice", at: 3)
+        let e = make("e", "@bob", at: 2)
+        let f = make("f", "@bob", at: 1)
+
+        // Initial partial cache holds only the newest two messages, not yet reaching the anchor "$b".
+        let initial = cache.rows([d, e], firstUnreadEventID: nil, unreadAnchor: "$b", me: "@me", groups: true)
+        #expect(belowLine(initial) == nil)
+        // A live arrival while older history is still loading must not get an unread line.
+        let withLive = cache.rows([d, e, f], firstUnreadEventID: "$f", unreadAnchor: "$b", me: "@me", groups: true)
+        #expect(belowLine(withLive) == nil)
+        // Once readOlder prepends history reaching "$b", the unread line lands above "$d" (skipping own "$c").
+        let loaded = cache.rows(
+            [a, b, c, d, e, f], firstUnreadEventID: nil, unreadAnchor: "$b", me: "@me", groups: true)
+        #expect(belowLine(loaded) == "$d")
+        // Once resolved, later markers cannot move it.
+        let later = cache.rows(
+            [a, b, c, d, e, f], firstUnreadEventID: "$e", unreadAnchor: "$b", me: "@me", groups: true)
+        #expect(belowLine(later) == "$d")
+    }
+
     // capability: conversation.day-dividers
     @Test("Day dividers stay distinct when server timestamps return to an earlier day")
     func repeatedDayIdentities() {
