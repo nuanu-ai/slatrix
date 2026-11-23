@@ -42,13 +42,22 @@ struct TimelineMessageEntry: Hashable {
     var mediaCollapsed = false
 }
 
+/// Isolated pin-permission state read only by the active hover toolbar and menus, never by resting rows.
+@Observable @MainActor final class PinPermissionState {
+    var allowed = false
+}
+
 /// What every row of one timeline shares: the session and the actions rows call back into.
 @MainActor final class TimelineRowContext {
     var matrix = MatrixService?.none
     var isThread = false
     var threadRootID: String?
-    /// Live pin permission, read lazily when a row's menu opens so async permission loads never invalidate row heights.
-    var canPin = false
+    /// Live pin permission, read lazily when a row's menu opens or the hover toolbar updates, never by resting rows.
+    let pinPermission = PinPermissionState()
+    var canPin: Bool {
+        get { pinPermission.allowed }
+        set { if pinPermission.allowed != newValue { pinPermission.allowed = newValue } }
+    }
     /// Session-level action eligibility, read by resting rows without observing messages or action context.
     var canAct = false
     var metrics = Metrics()

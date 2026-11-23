@@ -66,16 +66,42 @@ struct TimelineView: View {
     /// A thread's page loads for whoever asked for it: its loading row, Retry, or a jump reading back.
     private var loadingOlder: Bool { thread ? matrix.isLoadingThreadPage : loadingHistory }
     private var hasOlder: Bool {
-        !matrix.isPreview && (thread ? matrix.loadsMoreThreadHistory : matrix.loadsMoreHistory)
+        !matrix.isPreview
+            && (thread ? matrix.loadsMoreThreadHistory : (matrix.loadsMoreHistory || matrix.settlingEndReached))
     }
     private var memoryKey: TimelineMemory.Key {
         TimelineMemory.Key(
             sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil)
     }
-    /// True while a cold thread open is still awaiting its timeline or first page with only its root present.
+    private var rememberedThreadEventID: String? {
+        guard thread, jumpTarget == nil else { return nil }
+        return TimelineMemory.positions[memoryKey]?.eventID
+    }
+    /// True while reopening a thread with a remembered or jumped reply beyond page 1 and older pages are still being
+    /// fetched before locking the opening position.
+    private var awaitingThreadTarget: Bool {
+        guard thread, !matrix.isPreview, let rootID = threadRootID, matrix.threadOpening?.rootID == rootID,
+            !matrix.isBuildingThreadTimeline, matrix.loadsMoreThreadHistory, matrix.threadPageError == nil
+        else { return false }
+        if let target = jumpTarget {
+            guard !messages.contains(where: { $0.eventID == target }) else { return false }
+            return matrix.jump?.landed.contains(rootID) != true
+        }
+        guard let target = rememberedThreadEventID, !messages.contains(where: { $0.eventID == target }) else {
+            return false
+        }
+        return matrix.threadAnchorSearchDoneSelection != matrix.threadSelection
+    }
+    /// True while a cold thread open is still awaiting its timeline, first page, or a target reply beyond page 1.
     private var awaitingThreadReplies: Bool {
         guard thread, let rootID = threadRootID, matrix.threadOpening?.rootID == rootID else { return false }
-        return matrix.isOpeningThread
+        return matrix.isOpeningThread || awaitingThreadTarget
+    }
+    private var threadAnchorSearchKey: String? {
+        guard thread, !matrix.isPreview, let rootID = threadRootID, let target = rememberedThreadEventID,
+            matrix.loadsMoreThreadHistory, matrix.threadOpening?.rootID == rootID
+        else { return nil }
+        return "\(rootID):\(matrix.threadSelection):\(target)"
     }
     /// Holds back the synthetic `[root]` row while replies or a remembered/jumped position are still arriving so a
     /// tall thread never flashes its root and teleports off-screen.
@@ -106,8 +132,10 @@ struct TimelineView: View {
             memoryKey: memoryKey,
             timelineID: thread ? matrix.threadSelection : matrix.shownTimelineID,
             pagesLanded: thread ? matrix.threadPagesLanded : 0,
-            // A thread whose page failed asks again when the reader retries or the connection returns.
-            canLoadOlder: hasOlder && !loadingOlder && !(thread && matrix.threadPageError != nil),
+            // A thread whose page failed asks again when the reader retries or the connection returns; a main timeline
+            // settling an empty `endReached` does not trigger redundant older pages.
+            canLoadOlder: hasOlder && !loadingOlder
+                && !(thread ? matrix.threadPageError != nil : matrix.settlingEndReached),
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
             onLand: { jump in
@@ -165,6 +193,10 @@ struct TimelineView: View {
         .task(id: turnsLive) {
             guard turnsLive else { return }
             await matrix.goLive { scroller.screenAnchorEventID }
+        }
+        .task(id: threadAnchorSearchKey) {
+            guard let rootID = threadRootID, let target = rememberedThreadEventID else { return }
+            matrix.reachThreadAnchor(target, inThread: rootID)
         }
         .task(id: thread && hasOlder && loadingOlder && matrix.connectionState != .offline) {
             showThreadOlder = false
@@ -457,9 +489,10 @@ struct TimelineView: View {
     private var rows: [TimelineLayout.Row] = []
     private var unreadBoundary: String?
     private var opened = false
-    /// The newest event present when partial cached rows first arrived without their unread anchor; live arrivals
-    /// appended after it never create an unread line.
+    /// The newest confirmed (or only) event present when partial cached rows first arrived without their unread anchor,
+    /// plus its timestamp cutoff in case an opening local echo is later cancelled before backfill lands.
     private var openedNewestEventID: String?
+    private var openedCutoff: Date?
     /// Everything a timeline's entries show besides the rows; the timeline redraws for many changes that touch none.
     struct EntryInputs: Equatable {
         var rows: [TimelineLayout.Row]
@@ -495,13 +528,17 @@ struct TimelineView: View {
         groups: Bool, threadRootEventID: String? = nil, repliesLine: Int? = nil
     ) -> [TimelineLayout.Row] {
         if !opened, !messages.isEmpty {
-            if openedNewestEventID == nil { openedNewestEventID = messages.last?.eventID }
-            let ceiling =
+            if openedNewestEventID == nil {
+                let confirmed = messages.last { $0.eventID.hasPrefix("$") }
+                openedNewestEventID = confirmed?.eventID ?? messages.last?.eventID
+                openedCutoff = confirmed?.timestamp ?? messages.last?.timestamp
+            }
+            let ceiling: Int? =
                 openedNewestEventID.flatMap { id in messages.lastIndex { $0.eventID == id } }
-                ?? (messages.count - 1)
+                ?? openedCutoff.flatMap { cutoff in messages.lastIndex { $0.timestamp <= cutoff } }
             if let firstUnreadEventID,
                 let unreadIndex = messages.firstIndex(where: { $0.eventID == firstUnreadEventID }),
-                unreadIndex <= ceiling
+                let ceiling, unreadIndex <= ceiling
             {
                 opened = true
                 unreadBoundary = firstUnreadEventID
@@ -510,7 +547,7 @@ struct TimelineView: View {
                     opened = true
                     // The read marker can land after the messages; it would go before the next one someone else sent.
                     let afterAnchor = anchor + 1
-                    if afterAnchor <= ceiling {
+                    if let ceiling, afterAnchor <= ceiling {
                         unreadBoundary = messages[afterAnchor...ceiling].first { $0.senderID != me }?.eventID
                     }
                 }
@@ -950,6 +987,8 @@ struct HoveredMessageToolbar: View {
     let context: TimelineRowContext
     var body: some View {
         if let matrix = context.matrix, let appearance = context.appearance {
+            // Observe async pin-permission updates only in the active hover toolbar so resting rows never redraw.
+            let _ = context.pinPermission.allowed
             let message = entry.message
             MessageToolbar(
                 quick: EmojiRecents.quick(matrix.recentEmoji), isThread: context.isThread, isSaved: entry.saved,

@@ -248,4 +248,32 @@ struct TimelineLayoutTests {
             calendar: Self.calendar, locale: Self.locale)
         #expect(Set(before.map(\.id)).isSubset(of: Set(after.map(\.id))))
     }
+
+    @MainActor
+    @Test("Cancelling an opening local echo before backfill arrives never marks live arrivals as unread")
+    func cancelledLocalEchoNeverMarksLiveArrivalsUnread() {
+        let cache = TimelineLayoutCache()
+        var pending = message("txn-1", "@me", at: 10)
+        pending.sendState = "sending"
+        let anchor = message("$m8", "@me", at: 30)
+        let unreadOld = message("$m9", "@alice", at: 20)
+        let live = message("$live", "@bob", at: 0)
+
+        // Room opens with only a pending local echo; unreadAnchor ($m8) is not in the cache yet.
+        _ = cache.rows(
+            [pending], firstUnreadEventID: nil, unreadAnchor: "$m8", me: "@me", groups: true)
+        // Local echo is cancelled, backfill brings only the read anchor ($m8), and a live message arrives after open.
+        let rows = cache.rows(
+            [anchor, live], firstUnreadEventID: nil, unreadAnchor: "$m8", me: "@me", groups: true)
+        #expect(!rows.contains { $0.id == "unread" })
+
+        // When an older unread message ($m9) also arrives before the opening cutoff, only $m9 gets the unread line.
+        let cache2 = TimelineLayoutCache()
+        _ = cache2.rows(
+            [pending], firstUnreadEventID: nil, unreadAnchor: "$m8", me: "@me", groups: true)
+        let rows2 = cache2.rows(
+            [anchor, unreadOld, live], firstUnreadEventID: nil, unreadAnchor: "$m8", me: "@me", groups: true)
+        let unreadIndex = rows2.firstIndex { $0.id == "unread" }
+        #expect(unreadIndex.map { rows2[$0 + 1].id == unreadOld.id } == true)
+    }
 }

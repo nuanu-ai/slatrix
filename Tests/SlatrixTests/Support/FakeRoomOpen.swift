@@ -11,6 +11,9 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     private var handles: [FakeCancellableHandle] = []
     let pageGate: Gate
     let forwardGate: Gate
+    /// When armed, `paginateBackwards` returns before emitting the page's diff so tests can exercise the SDK FFI race
+    /// where `endReached` resolves before the timeline listener delivers items.
+    let pageDiffGate = Gate()
     /// Whether the next older page reaches the start of the room.
     var startReached: Bool {
         get { lock.withLock { reachedStart } }
@@ -70,10 +73,19 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
         }) {
             throw failure
         }
-        if let page = lock.withLock({ pages.isEmpty ? nil : pages.removeFirst() }) {
-            emit(page.reversed().map { .pushFront(value: $0) })
+        let page = lock.withLock { pages.isEmpty ? nil : pages.removeFirst() }
+        let answer = lock.withLock { answers.isEmpty ? reachedStart : answers.removeFirst() }
+        if let page {
+            if pageDiffGate.isArmed {
+                Task { [weak self] in
+                    await self?.pageDiffGate.wait()
+                    self?.emit(page.reversed().map { .pushFront(value: $0) })
+                }
+            } else {
+                emit(page.reversed().map { .pushFront(value: $0) })
+            }
         }
-        return lock.withLock { answers.isEmpty ? reachedStart : answers.removeFirst() }
+        return answer
     }
     /// Loaded around an older message, it already reaches the newest one.
     override func paginateForwards(numEvents: UInt16) async throws -> Bool {
@@ -178,8 +190,12 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     var focusedError: Error?
     /// What a thread's timeline loads; the cache when nil.
     var threadItems: [TimelineItem]?
+    /// Why building a thread's timeline fails, as a lost connection would make it.
+    var threadError: Error?
     /// The older pages of a thread's replies, newest page first.
     var threadPages: [[TimelineItem]] = []
+    /// Per-page `endReached` answers for a thread's older pages before `threadStartReached` applies.
+    var threadPageAnswers: [Bool] = []
     /// Whether the thread's first older page reaches its start.
     var threadStartReached = false
     /// Thread replies the room can load, by event ID, with their thread's root.
@@ -207,10 +223,14 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
         }
         var items = cached
         if case .event = configuration.focus, let focusedItems { items = focusedItems }
-        if case .thread = configuration.focus, let threadItems { items = threadItems }
+        if case .thread = configuration.focus {
+            if let threadError { throw threadError }
+            if let threadItems { items = threadItems }
+        }
         let timeline = FakeLiveTimeline(items, pageGate: pageGate, forwardGate: forwardGate)
         if case .thread = configuration.focus {
             timeline.olderPages = threadPages
+            timeline.pageAnswers = threadPageAnswers
             timeline.startReached = threadStartReached
         }
         timelines.append(timeline)

@@ -255,4 +255,48 @@ struct MatrixObservationTests {
         #expect(await eventually { !service.hasMoreHistory })
         #expect(changes.all.isEmpty)
     }
+
+    @Test("Flipping canPin updates a mounted hover toolbar without invalidating resting TimelineRow bodies")
+    func hoverToolbarObservesPinPermissionWithoutInvalidatingRows() {
+        let room = ChatRoom(id: "!open:example.org", name: "Open")
+        let service = MatrixService.scratch()
+        service.user = ChatUser(id: "@me:example.org", name: "Me")
+        service.rooms = [room]
+        service.selectedRoomID = room.id
+        let message = ChatMessage(
+            id: "$m1", roomID: room.id, senderID: "@ana:example.org", senderName: "Ana", body: "Hello",
+            timestamp: .now)
+        let context = TimelineRowContext()
+        context.matrix = service
+        context.appearance = AppearanceStore()
+        context.onTogglePin = { _ in }
+        context.canPin = false
+        let messageEntry = TimelineMessageEntry(
+            message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false,
+            highlighted: false, sendBusy: false)
+        let row = TimelineRow(
+            entry: TimelineEntry(id: message.id, kind: .message(messageEntry)), hovered: false, context: context)
+        let toolbar = HoveredMessageToolbar(entry: messageEntry, context: context)
+
+        let rowChanges = Recorder<Void>()
+        let toolbarChanges = Recorder<Void>()
+        withObservationTracking {
+            _ = row.body
+        } onChange: {
+            rowChanges.append(())
+        }
+        withObservationTracking {
+            _ = toolbar.body
+        } onChange: {
+            toolbarChanges.append(())
+        }
+        let beforePin = context.actions(for: messageEntry, target: nil).menu().first { $0.id == "pin" }
+        #expect(beforePin?.isEnabled == false)
+
+        context.canPin = true
+        #expect(rowChanges.all.isEmpty)
+        #expect(!toolbarChanges.all.isEmpty)
+        let afterPin = context.actions(for: messageEntry, target: nil).menu().first { $0.id == "pin" }
+        #expect(afterPin?.isEnabled == true)
+    }
 }
