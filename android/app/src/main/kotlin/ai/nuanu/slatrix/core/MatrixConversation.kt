@@ -257,8 +257,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     /** The timeline on screen; it and [pending] change only on [operations], which runs on one thread. */
     private var shown: Source? = null
     /** A timeline that replaces [shown] once it holds [pendingAnchor], or with none at its first update. */
-    private var pending: Source? = null
+    @Volatile private var pending: Source? = null
     private var pendingAnchor: String? = null
+    /** Whether this conversation can stay warm in cache: live, healthy, and without an in-flight focused jump. */
+    internal val canKeep: Boolean get() = !mutableState.value.focused && mutableState.value.error == null && pending == null
     /** Each timeline numbers its rows from zero, so each gets its own prefix and a swap never reuses a row's key. */
     private var opened = 0
     /**
@@ -547,9 +549,14 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
 
     /** Waits until every update already sent has been applied, so [pending] says whether the live timeline took over. */
     private suspend fun caughtUp() {
+        if (!updating.isActive) return
         val done = CompletableDeferred<Unit>()
-        updates.send(Update.CaughtUp(done))
-        done.await()
+        val guard = updating.invokeOnCompletion { done.complete(Unit) }
+        try {
+            if (updates.trySend(Update.CaughtUp(done)).isSuccess) done.await()
+        } finally {
+            guard.dispose()
+        }
     }
 
     /**
@@ -887,6 +894,13 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      * Marks the conversation unread, as Slack's Mark unread on a message does. Matrix can't move the fully-read marker
      * back, so it sets the room's unread flag; while the conversation stays open, its newest message doesn't read it again.
      */
+    /** Clears per-visit jump/unread state when parking a conversation in cache so Frame 1 of reuse never flashes it. */
+    internal fun clearVisit() {
+        target = null
+        mutableState.update { it.copy(highlight = null, startsAtUnread = false) }
+        operations.launch { readLock.withLock { heldUnread = false } }
+    }
+
     /**
      * Coming back to this conversation kept open: last visit's jump, its start at the New line and any Mark unread hold
      * stay behind, so it opens where the reader left it and reads as usual.
@@ -902,13 +916,14 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             } else if (listedRoot) {
                 mirror = null
             }
-            if (openedWith != null) openedCount = openedWith
+            openedCount = openedWith
         }
         mutableState.update { state ->
-            val updatedRows = if (threadRoot != null && nextRoot != null) {
+            val applyRoot = threadRoot != null && nextRoot != null && (!listedRoot || !holdsRoot)
+            val updatedRows = if (applyRoot) {
                 val rootIndex = state.rows.indexOfFirst { it is ConversationMessage && it.id == ROOT_KEY }
                 val current = state.rows.getOrNull(rootIndex) as? ConversationMessage
-                val merged = current?.withEdit(nextRoot)
+                val merged = current?.withEdit(nextRoot!!)
                 if (current != null && merged != current) state.rows.toMutableList().apply { this[rootIndex] = merged!! }
                 else state.rows
             } else state.rows

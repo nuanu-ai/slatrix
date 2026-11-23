@@ -190,8 +190,7 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
     private fun cacheKey(roomId: String, threadRoot: String?) = threadRoot?.let { "$roomId $it" } ?: roomId
 
     private fun canReuse(requested: OpenChannel, conversation: MatrixConversation): Boolean {
-        val state = conversation.state.value
-        if (requested.at != null || state.focused || state.error != null) return false
+        if (requested.at != null || !conversation.canKeep) return false
         return requested.threadRoot != null || requested.room.unread == UnreadBadge.None
     }
 
@@ -225,8 +224,8 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
             runCatching { left?.close() }
             // A cancelled constructor task may never enter the conversation's cleanup.
             runCatching { room?.close() }
-        } else if (open != null && !left.state.value.focused && left.state.value.error == null) {
-            left.revisit()
+        } else if (open != null && left.canKeep) {
+            left.clearVisit()
             val cache = cacheFor(open.threadRoot)
             cache[cacheKey(open.room.id, open.threadRoot)] = left to room
             val active = mutableSelected.value?.takeIf { (it.threadRoot == null) == (open.threadRoot == null) }

@@ -513,6 +513,7 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
             val context = LocalContext.current
             val recentStore = remember(context, userId) { RecentSearchStore(context, userId) }
             var recents by remember(recentStore) { mutableStateOf(recentStore.recents) }
+            DisposableEffect(Unit) { onDispose { pendingJump?.cancel() } }
             SearchScreen(inScope, userId, messages, { query -> if (query == null) search?.clear() else search?.search(query) },
                 { search?.loadMore() }, { hit ->
                     // A hit doesn't know its thread, so it is looked up first: a reply opens in its thread.
@@ -521,7 +522,7 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
                         pendingJump = scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
                 }, recents, { recents = recentStore.add(it) }, people?.results?.collectAsState()?.value ?: PeopleSearchState(),
-                { people?.search(it) }, { onPerson(it.id, it.name) }, onClose, open)
+                { people?.search(it) }, { onPerson(it.id, it.name) }, { pendingJump?.cancel(); onClose() }, open)
         }, userAvatarUrl = userAvatarUrl, activityCount = {
             // As the Activity list is scoped; invitations show on Home whatever the workspace, so they all count.
             val inScope = state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
