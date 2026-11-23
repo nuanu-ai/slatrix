@@ -313,6 +313,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             if (threadRoot == null && view == ConversationView.Timeline) operations.launch { countThreads() }
             // A thread shows its reply wherever it is; a channel first checks whether its live timeline holds it.
             var deciding = at != null && threadRoot == null
+            var initialThreadPaged = false
             var oldest: String? = null
             for (update in updates) {
                 if (update is Update.CaughtUp) { update.done.complete(Unit); continue }
@@ -362,6 +363,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 mutableState.update {
                     it.copy(rows = withRoot(rows), loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
                         highlight = it.highlight ?: at?.takeIf { id -> !resume && source.holds(id) }, firstUnread = unread).counted()
+                }
+                if (threadRoot != null && view == ConversationView.Timeline && !initialThreadPaged &&
+                    mutableState.value.hasMore && rows.none { it is ConversationMessage && it.eventId != threadRoot }) {
+                    initialThreadPaged = true
+                    loadOlder()
                 }
             }
         } catch (cancelled: CancellationException) {
@@ -422,7 +428,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 }
             }
         } ?: return
-        mutableState.update { it.copy(names = names, avatars = avatars) }
+        mutableState.update { if (it.names == names && it.avatars == avatars) it else it.copy(names = names, avatars = avatars) }
     }
 
     private suspend fun timeline(): Timeline {
@@ -555,9 +561,15 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     rootSummary = copy?.thread?.replies
                     if (copy != null) root = copy.asThreadRoot()
                     mutableState.update { state ->
-                        (if (copy == null) state
-                            else state.copy(rows = state.rows.map { if (it is ConversationMessage && it.id == ROOT_KEY) it.withEdit(copy) else it }))
-                            .counted()
+                        val nextRows = if (copy == null) state.rows else {
+                            val rootIndex = state.rows.indexOfFirst { it is ConversationMessage && it.id == ROOT_KEY }
+                            val current = state.rows.getOrNull(rootIndex) as? ConversationMessage
+                            val edited = current?.withEdit(copy)
+                            if (current != null && edited != current) state.rows.toMutableList().apply { this[rootIndex] = edited!! }
+                            else state.rows
+                        }
+                        val updated = if (nextRows === state.rows) state else state.copy(rows = nextRows)
+                        updated.counted()
                     }
                 }
             }

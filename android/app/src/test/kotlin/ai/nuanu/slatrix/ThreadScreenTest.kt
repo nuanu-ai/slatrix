@@ -223,6 +223,56 @@ class ThreadScreenTest {
         room.value = channel.copy(name = "Mira", direct = true, isPrivate = false)
         compose.onNode(isToggleable()).assert(hasText("Also send as direct message"))
     }
+
+    // capability: thread.open
+    @Test fun aTallColdThreadLandsAtItsNewestReplyWithoutJumpingFromTheRoot() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        fun message(id: String, body: String, minutes: Int) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", body,
+            null, minutes * 60_000L, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val root = message("thread-root", "Ship on Friday?", 0).copy(eventId = "\$root")
+        val state = mutableStateOf(ConversationState(listOf(root), loading = true, hasMore = true, replies = 80))
+        var olderRequested = 0
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, { olderRequested++ }, {}, {}, {}, {},
+                    threadRoot = "\$root")
+            }
+        }
+        compose.onNodeWithText("Ship on Friday?").assertExists()
+
+        // When 80 replies arrive (well over 4 screens tall), the viewport must stay anchored at the newest reply
+        // instead of riding the moved root to index 80 at the top (which would also trigger a spurious older-history fetch).
+        val replies = (1..80).map { message("r-$it", "Reply $it", it) }
+        compose.runOnIdle {
+            state.value = ConversationState(listOf(root) + replies, loading = false, hasMore = true, replies = 80)
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Reply 80").assertExists()
+        assertEquals("Landing at the newest reply of an 80-reply thread must not jump to the root and page older history",
+            0, olderRequested)
+    }
+
+    // capability: thread.reply
+    @Test fun aThreadOpenedToReplyReservesItsExpandedComposerHeightBeforeDraftLoads() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        val root = ConversationMessage("thread-root", "\$root", "@sam:example.org", "Sam", "Ship on Friday?", null, 0L,
+            MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val draft = mutableStateOf(ComposerState(loading = true))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(root), loading = false, hasMore = false), draft.value,
+                    {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root", replying = true)
+            }
+        }
+        compose.waitForIdle()
+        compose.onNode(isToggleable()).assert(hasText("Also send to") and hasText("design"))
+        val before = compose.onNodeWithContentDescription("Add a reply").getUnclippedBoundsInRoot()
+
+        draft.value = ComposerState(loading = false)
+        compose.waitForIdle()
+        val after = compose.onNodeWithContentDescription("Add a reply").getUnclippedBoundsInRoot()
+        assertEquals("Expanded composer should not shift vertically once the draft loads", before.top, after.top)
+    }
 }
 
 /** One room with a thread of five replies, whose timeline waits for [page]; the room's other calls answer nothing. */

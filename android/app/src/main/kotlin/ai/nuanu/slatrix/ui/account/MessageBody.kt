@@ -190,7 +190,9 @@ fun MessageBody(message: ConversationMessage, color: Color, me: String?, names: 
         }
         else -> {}
     }
-    val groups = remember(message.runs, names) { groups(MessageBodyRenderer.named(message.runs, names)) }
+    val hasMentions = remember(message.runs) { message.runs.any { it.mention != null } }
+    val mentionNames = if (hasMentions) names else emptyMap()
+    val groups = remember(message.runs, mentionNames) { groups(MessageBodyRenderer.named(message.runs, mentionNames)) }
     // The marker fills the list indent, so a wrapped line starts under the item's first word, as on the Mac.
     val indent = with(LocalDensity.current) { (textStyle.fontSize * UiMetrics.ListIndentScale).toDp() }
     // Slack ends an edited message's last line with a quiet "(edited)", or puts it under a code block.
