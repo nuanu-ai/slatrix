@@ -567,15 +567,17 @@ class LiveChannelScreenTest {
     }
 
     // capability: thread.open
-    @Test fun aMessagesRepliesBarOpensItsThreadWithTheCountItShowsAndItsMenuWithNone() {
+    @Test fun aMessagesRepliesBarOpensItsThreadWithTheCountItShowsAndItsMenuToReply() {
         var counted: Pair<String, Int>? = null
         var opened: String? = null
+        var viewed: String? = null
         compose.setContent {
             SlatrixTheme {
                 // The device counts no replies on it; the server's list of the room's threads counts five.
                 LiveChannelScreen(room, ConversationState(listOf(message("Can we ship Friday?", 0).copy(thread = MessageThread(0, null, null),
                     listedThread = MessageThread(5, "Sam", null))), loading = false, hasMore = false), ComposerState(loading = false),
-                    {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread = { opened = it }, onOpenReplies = { root, replies -> counted = root to replies })
+                    {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread = { viewed = it }, onOpenReplies = { root, replies -> counted = root to replies },
+                    onReplyInThread = { opened = it })
             }
         }
         compose.onNodeWithText("5 replies", useUnmergedTree = true).performTouchInput { click() }
@@ -583,6 +585,7 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Can we ship Friday?").performTouchInput { longClick() }
         compose.onNodeWithText("Reply in thread").performClick()
         compose.runOnIdle { assertEquals("\$Can we ship Friday?", opened) }
+        assertNull(viewed)
     }
 
     // capability: message.reply
@@ -631,12 +634,14 @@ class LiveChannelScreenTest {
             0L, MessageKind.Text, MessageSendState.Sent, false, "S", 0,
             replyTo = ReplyPreview(reply, ReplyPreview.State.Ready, "Sam", body), repliedToThread = true)
         val origin = CompletableDeferred<ThreadOrigin?>()
+        var replying: String? = null
         var opened: String? = null
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(listOf(copy("copy", "On it", "\$reply"), copy("quote", "Done", "\$plain")),
                     loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
-                    onOpenThread = { opened = it }, loadThreadOrigin = { if (it == "\$reply") origin.await() else null })
+                    onOpenThread = { opened = it }, loadThreadOrigin = { if (it == "\$reply") origin.await() else null },
+                    onReplyInThread = { replying = it })
             }
         }
         // Until the thread is known its line holds its place, so the row keeps its height when it lands.
@@ -649,6 +654,7 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Can we ship Friday?").assertIsDisplayed().performClick()
         assertEquals(before, compose.onNodeWithText("On it").getUnclippedBoundsInRoot())
         compose.runOnIdle { assertEquals("\$root", opened) }
+        assertNull("Viewing a thread isn't replying in it", replying)
     }
 
     private val clipboard get() = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)

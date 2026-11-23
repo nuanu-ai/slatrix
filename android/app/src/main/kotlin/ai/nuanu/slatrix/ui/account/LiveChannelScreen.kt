@@ -138,7 +138,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Opens a thread from its replies bar, with the count the bar shows. */
     onOpenReplies: (rootEventId: String, replies: Int) -> Unit = { _, _ -> },
     /** Opened to reply, so the field takes the keyboard, as Slack's thread does after Reply in thread. */
-    replying: Boolean = false) {
+    replying: Boolean = false,
+    /** Opens a thread to reply in it, from a message's menu; [onOpenThread] opens one to read. */
+    onReplyInThread: (rootEventId: String) -> Unit = onOpenThread) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val videos = rememberVideoPlayback(loadFile)
@@ -289,7 +291,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     LaunchedEffect(sheetTop != null) { if (sheetTop != null) focus.animateTo(1f, Motion.pane()) else focus.snapTo(0f) }
     // Inside a thread, Reply has nowhere further to go.
     menu?.let { pressed ->
-        MessageActionsHost(pressed.message, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent,
+        MessageActionsHost(pressed.message, actions, onReplyInThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent,
             { sheetTop = it }) { menu = null }
     }
     var reacted by remember { mutableStateOf<ConversationMessage?>(null) }

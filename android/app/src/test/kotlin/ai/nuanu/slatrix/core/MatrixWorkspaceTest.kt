@@ -231,9 +231,10 @@ class MatrixWorkspaceTest {
         val root = ConversationMessage("channel-row", "\$root", "@sam:example.org", "Sam", "Ship?", null, 1_000, MessageKind.Text,
             MessageSendState.Sent, false, "S", 0, thread = MessageThread(3, null, null))
         val failed = OpenChannel(workspaceRoom("!alpha:example.org", "Alpha"), threadRoot = "\$root", root = root, openedWith = 3,
-            error = "Couldn’t open this conversation.")
+            replying = true, error = "Couldn’t open this conversation.")
 
         workspace.retry(failed)
+        assertTrue("Still opened to reply", requireNotNull(workspace.selected.value).replying)
         val waiting = requireNotNull(workspace.selected.value).waiting()
         assertEquals("Ship?", (waiting.rows.single() as ConversationMessage).body)
         assertEquals(3, waiting.replies)

@@ -57,6 +57,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -146,8 +147,9 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
     var linking by remember { mutableStateOf<TextRange?>(null) }
     val focus = LocalFocusManager.current
     val fieldFocus = remember { FocusRequester() }
-    // Once, when the field can take it: the draft loads first, and a keyboard put away afterwards stays away.
-    var tookFocus by remember { mutableStateOf(false) }
+    // Once, when the field can take it: the draft loads first, and a keyboard put away afterwards stays away, also
+    // when the phone turns.
+    var tookFocus by rememberSaveable { mutableStateOf(false) }
     if (takesFocus && !tookFocus && !composer.loading) LaunchedEffect(Unit) {
         fieldFocus.requestFocus()
         tookFocus = true

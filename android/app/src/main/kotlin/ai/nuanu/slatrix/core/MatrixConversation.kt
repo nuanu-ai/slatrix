@@ -195,6 +195,8 @@ internal fun opening(root: ConversationMessage?, error: String? = null, openedWi
     ConversationState(rows = listOfNotNull(root?.asThreadRoot()), loading = root == null, error = error,
         replies = ThreadRepliesLine.count(false, emptyList(), root?.thread?.replies, openedWith))
 private const val NOTICE_MILLIS = 4_000L
+/** Requests in a row for one reply's parent before its quote says it is unavailable. */
+private const val QUOTE_ATTEMPTS = 2
 
 /** The relation that puts an attachment in a thread, as the Mac sends it. */
 private fun threadRelation(root: String): String {
@@ -273,16 +275,20 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private sealed interface Update {
         data class Batch(val source: Source, val diff: List<TimelineDiff>) : Update
         class CaughtUp(val done: CompletableDeferred<Unit>) : Update
+        /** A request for the parent of [replyId] ended, the [attempt]th in a row. */
+        class Asked(val source: Source, val replyId: String, val attempt: Int) : Update
     }
 
     private inner class Source(val timeline: Timeline, val focused: Boolean) {
         /** The read marker sits among the rows, since where it falls is where the New line goes. */
         val items = mutableListOf<Any?>()
         var handle: TaskHandle? = null
-        /** Replies whose parent this timeline is being asked for. */
-        val asking: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
-        /** Replies whose request ended with the SDK still holding no parent, so nothing more comes for them. */
-        val unanswered: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+        /**
+         * Replies whose parent this timeline is being asked for, and those the SDK stopped loading without saying so.
+         * Only the update loop touches either, mapping included, so a reply built again is never missed.
+         */
+        val asking = mutableSetOf<String>()
+        val unanswered = mutableSetOf<String>()
 
         fun holds(eventId: String?) = eventId != null && items.any { (it as? ConversationMessage)?.eventId == eventId }
 
@@ -309,6 +315,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             var oldest: String? = null
             for (update in updates) {
                 if (update is Update.CaughtUp) { update.done.complete(Unit); continue }
+                if (update is Update.Asked) {
+                    if (update.source === shown || update.source === pending) update.source.asked(update.replyId, update.attempt)
+                    continue
+                }
                 val (source, batch) = update as Update.Batch
                 if (source !== shown && source !== pending) continue
                 // asEvent blocks on the SDK, so a batch is mapped off the main thread.
@@ -983,28 +993,35 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             is EmbeddedEventDetails.Unavailable -> {
                 // The SDK holds no parent each time it builds the reply again, after a reset or a late decryption, so it
                 // is asked each time, in the timeline that holds this copy of the reply.
-                if (replyId != null && asking.add(replyId)) {
-                    unanswered.remove(replyId)
-                    operations.launch {
-                        try {
-                            // It answers with the parent or an error in an update of the reply, before this returns.
-                            quietly { timeline.fetchDetailsForEvent(replyId) }
-                            // It can also give up with the reply still waiting, and then says nothing more.
-                            val details = withContext(Dispatchers.Default) {
-                                quietly { timeline.getEventTimelineItemByEventId(replyId) }
-                                    ?.let { (it.content as? TimelineItemContent.MsgLike)?.content?.inReplyTo?.event() }
-                            }
-                            if (details !is EmbeddedEventDetails.Ready && details !is EmbeddedEventDetails.Error) {
-                                unanswered.add(replyId)
-                                // An empty batch maps the rows again, now with the quote marked.
-                                updates.trySend(Update.Batch(this@replyPreview, emptyList()))
-                            }
-                        } finally {
-                            asking.remove(replyId)
-                        }
-                    }
-                }
+                if (replyId != null) ask(replyId)
                 ReplyPreview(id, ReplyPreview.State.Loading)
+            }
+        }
+    }
+
+    private fun Source.ask(replyId: String, attempt: Int = 1) {
+        if (!asking.add(replyId)) return
+        unanswered.remove(replyId)
+        operations.launch {
+            // The SDK answers with the parent or an error in an update of the reply.
+            try { quietly { timeline.fetchDetailsForEvent(replyId) } } finally { updates.trySend(Update.Asked(this@ask, replyId, attempt)) }
+        }
+    }
+
+    /** What the SDK holds for the reply once its request ended, read in the update loop, between batches. */
+    private suspend fun Source.asked(replyId: String, attempt: Int) {
+        asking.remove(replyId)
+        val details = withContext(Dispatchers.Default) {
+            quietly { timeline.getEventTimelineItemByEventId(replyId) }?.let { (it.content as? TimelineItemContent.MsgLike)?.content?.inReplyTo?.event() }
+        }
+        when {
+            // Built again during the request, so this copy was never asked for.
+            details is EmbeddedEventDetails.Unavailable && attempt < QUOTE_ATTEMPTS -> ask(replyId, attempt + 1)
+            // It gave up with the reply still waiting, and says nothing more: a quote never stays blank.
+            details is EmbeddedEventDetails.Unavailable || details is EmbeddedEventDetails.Pending -> {
+                unanswered.add(replyId)
+                // An empty batch maps the rows again, now with the quote marked.
+                updates.trySend(Update.Batch(this, emptyList()))
             }
         }
     }

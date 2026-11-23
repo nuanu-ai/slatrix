@@ -137,7 +137,7 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
 
     /** Opens [open] again, as it was asked for, after it failed to. */
     fun retry(open: OpenChannel) =
-        open(open.room, open.threadRoot, open.at.takeUnless { open.resume }, open.root, open.openedWith, open.listedRoot)
+        open(open.room, open.threadRoot, open.at.takeUnless { open.resume }, open.root, open.openedWith, open.listedRoot, open.replying)
 
     /**
      * Opens [room] at [eventId], highlighted; a reply in the thread [threadRoot] opens the channel at the root, for the

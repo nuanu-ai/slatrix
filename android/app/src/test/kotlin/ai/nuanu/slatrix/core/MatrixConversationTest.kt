@@ -377,8 +377,12 @@ class MatrixConversationTest {
         ), messages.map { it.replyTo })
         // The SDK finds the reply in the timeline and fetches what it quotes, so it is asked by each reply's own ID.
         assertEquals(setOf("\$b", "\$c"), setOf(timeline.fetched.receive(), timeline.fetched.receive()))
+        // This SDK never answers, so asking stops and both quotes say so.
+        val unanswered = withContext(Dispatchers.Default) {
+            withTimeout(2_000) { conversation.state.first { state -> state.rows.messages.drop(1).all { it.replyTo?.state == ReplyPreview.State.Unavailable } } }
+        }
+        assertEquals(ReplyPreview.State.Ready, unanswered.rows.messages.first().replyTo?.state)
         conversation.close()
-        assertTrue("Asked once for each reply", timeline.fetched.tryReceive().isFailure)
     }
 
     // capability: message.reply-preview
@@ -402,19 +406,39 @@ class MatrixConversationTest {
     }
 
     // capability: message.reply-preview
-    @Test fun aQuoteTheSdkStopsLoadingSaysItIsUnavailable() = runTest {
-        val timeline = ConversationTimeline(listOf(quoting(EmbeddedEventDetails.Unavailable)))
-        // The SDK marks the parent as loading, then gives up on one it can't show without saying so in the reply.
+    @Test fun aReplyBuiltAgainWhileItsQuoteLoadsIsAskedForItAgain() = runTest {
+        val waiting = quoting(EmbeddedEventDetails.Unavailable)
+        val timeline = ConversationTimeline(listOf(waiting))
+        var asks = 0
+        // The first request ends with the reply built again, so the copy the timeline now holds was never asked for.
         timeline.onFetch = {
-            timeline.emit(listOf(TimelineDiff.Set(0u, quoting(EmbeddedEventDetails.Pending))))
-            throw IllegalStateException("unsupported event")
+            timeline.emit(listOf(if (++asks == 1) TimelineDiff.Reset(listOf(waiting)) else TimelineDiff.Set(0u, quoting(quotedParent))))
         }
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
         withContext(Dispatchers.Default) {
-            withTimeout(2_000) {
-                conversation.state.first { it.rows.messages.singleOrNull()?.replyTo?.state == ReplyPreview.State.Unavailable }
-            }
+            withTimeout(2_000) { conversation.state.first { it.rows.messages.singleOrNull()?.replyTo?.state == ReplyPreview.State.Ready } }
         }
+        conversation.close()
+    }
+
+    // capability: message.reply-preview
+    @Test fun aQuoteTheSdkStopsLoadingSaysItIsUnavailable() = runTest {
+        val timeline = ConversationTimeline(listOf(quoting(EmbeddedEventDetails.Unavailable)))
+        val givesUp = CompletableDeferred<Unit>()
+        // The SDK marks the parent as loading, then gives up on one it can't show without saying so in the reply.
+        timeline.onFetch = {
+            timeline.emit(listOf(TimelineDiff.Set(0u, quoting(EmbeddedEventDetails.Pending))))
+            givesUp.await()
+            throw IllegalStateException("unsupported event")
+        }
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        suspend fun quote(state: ReplyPreview.State) = withContext(Dispatchers.Default) {
+            withTimeout(2_000) { conversation.state.first { it.rows.messages.singleOrNull()?.replyTo?.state == state } }
+        }
+        assertEquals("\$b", timeline.fetched.receive())
+        quote(ReplyPreview.State.Loading)
+        givesUp.complete(Unit)
+        quote(ReplyPreview.State.Unavailable)
         conversation.close()
     }
 
@@ -423,6 +447,8 @@ class MatrixConversationTest {
         val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
         val around = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier"), quoting(EmbeddedEventDetails.Unavailable)))
         around.onFetch = { around.emit(listOf(TimelineDiff.Set(1u, quoting(quotedParent)))) }
+        // Only the timeline around the message holds this copy of the reply; a request anywhere else answers nothing.
+        live.onFetch = { kotlinx.coroutines.awaitCancellation() }
         val conversation = MatrixConversation(backgroundScope, JumpRoom(live, around), at = "\$old")
         val shown = withContext(Dispatchers.Default) {
             withTimeout(2_000) {
@@ -1486,11 +1512,11 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     override suspend fun fetchMembers() = memberFetch.await()
     val fetched = Channel<String>(Channel.UNLIMITED)
     /** What the SDK does with a reply asked for its parent, before the request returns. */
-    var onFetch: (String) -> Unit = {}
+    var onFetch: suspend (String) -> Unit = {}
     override suspend fun fetchDetailsForEvent(eventId: String) { fetched.send(eventId); onFetch(eventId) }
     override suspend fun addListener(listener: TimelineListener): TaskHandle {
         listeners += listener
-        listener.onUpdate(listOf(TimelineDiff.Reset(cached)))
+        listener.onUpdate(listOf(TimelineDiff.Reset(synchronized(items) { items.toList() })))
         return object : TaskHandle(NoHandle) { override fun cancel() { listenerCancelled.complete(Unit) } }
     }
     var pageFailure: Exception? = null
