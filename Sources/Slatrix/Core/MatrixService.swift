@@ -103,11 +103,17 @@ enum SendQueueActions {
         return try await timeline.retrySend(itemId: itemID, target: .event)
     }
 
-    static func cancel(itemID: EventOrTransactionId, timeline: Timeline) async throws -> Bool {
+    static func cancel(
+        itemID: EventOrTransactionId, room: Room? = nil, timeline: Timeline, resumeQueue: Bool = false
+    ) async throws -> Bool {
         guard case .transactionId = itemID else { return false }
         // The SDK may queue a compensating redaction if sending was already in
         // flight and succeeds. A remote event ID is never accepted here.
-        return try await timeline.abortSend(itemId: itemID, target: .event)
+        let cancelled = try await timeline.abortSend(itemId: itemID, target: .event)
+        if cancelled, resumeQueue, let room, !room.isSendQueueEnabled() {
+            room.enableSendQueue(enable: true)
+        }
+        return cancelled
     }
 }
 
@@ -1241,7 +1247,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         roomSubscriptions.attach(service.roomListService())
         try await connectionRecovery.attach(
-            service, client: newClient,
+            service, client: newClient, homeserverURL: homeserverURL,
             onSendingResumed: { [weak self] in self?.refusedChanges?.cancel() },
             onUpdate: { [weak self] feedback in
                 guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
@@ -3770,7 +3776,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard let context = try pendingSendContext(message) else { return false }
         var cancelled = false
         try await performSendAction(context, message: message) {
-            cancelled = try await SendQueueActions.cancel(itemID: context.itemID, timeline: context.timeline)
+            cancelled = try await SendQueueActions.cancel(
+                itemID: context.itemID, room: context.room, timeline: context.timeline,
+                resumeQueue: self.connectionState == .running)
+        }
+        if cancelled {
+            connectionRecovery.cancelRoomResume(roomID: message.roomID)
         }
         return cancelled
     }

@@ -6,7 +6,12 @@ import Testing
 
 private final class QueueRoom: Room, @unchecked Sendable {
     let enabled = Recorder<Bool>()
-    override func enableSendQueue(enable: Bool) { enabled.append(enable) }
+    var queueEnabled = false
+    override func isSendQueueEnabled() -> Bool { queueEnabled }
+    override func enableSendQueue(enable: Bool) {
+        queueEnabled = enable
+        enabled.append(enable)
+    }
 }
 
 private final class QueueTimeline: Timeline, @unchecked Sendable {
@@ -165,6 +170,16 @@ struct SendQueueTests {
     func cancelAborts() async throws {
         #expect(try await SendQueueActions.cancel(itemID: local, timeline: timeline))
         #expect(timeline.aborted.all == [local])
+    }
+
+    @Test(
+        "Cancelling a failed message re-enables a paused room queue only while connected",
+        arguments: [true, false])
+    func cancelUnblocksQueueOnlyWhenConnected(connected: Bool) async throws {
+        room.queueEnabled = false
+        #expect(
+            try await SendQueueActions.cancel(itemID: local, room: room, timeline: timeline, resumeQueue: connected))
+        #expect(room.enabled.all == (connected ? [true] : []))
     }
 
     @Test("A failed abort never falls back to redacting or re-sending")
