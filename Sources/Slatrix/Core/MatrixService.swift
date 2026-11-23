@@ -20,6 +20,13 @@ enum MatrixServiceError: LocalizedError {
     }
 }
 
+/// An upload failure thrown after the SDK accepted the file for queueing, so the attachment may have sent.
+struct AttachmentDeliveryError: LocalizedError {
+    let underlying: Error
+    let message: String
+    var errorDescription: String? { message }
+}
+
 // Read-only links remain useful for deleted remote events. Keep their target
 // separate from mutation targets, whose eligibility intentionally excludes them.
 struct MessagePermalinkTarget: Identifiable {
@@ -597,10 +604,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var isRetryingConnection = false
     private(set) var canRetryConnection = false
     private(set) var sessionExpired = false
+    /// Increments each time sync transitions back to `.running`, so views can retry failed reads and gates.
+    private(set) var reconnectCount = 0
     private var clientDelegateHandle: TaskHandle?
     private let connectionRecovery = ConnectionRecovery()
     private var refusedChanges: RefusedChanges?
     private var profileLoadTask: Task<Void, Never>?
+    private var needsInitialProfileLoad = false
+    private var failedSubscriptionRoomID: String?
+    private var failedOpen: (roomID: String, eventID: String?)?
     private var profileRevision: UInt64 = 0
     private var avatarRevision: UInt64 = 0
     private var roomDetailsSaves = Set<String>()
@@ -1282,19 +1294,28 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         requestRefresh()
         // Cached rooms and sync can become usable without waiting on profile
         // HTTP requests. A late profile response belongs only to this account.
+        Task { [weak self] in await self?.loadRecentEmoji() }
+        needsInitialProfileLoad = true
+        loadInitialProfile()
+    }
+
+    private func loadInitialProfile() {
+        guard needsInitialProfileLoad, profileLoadTask == nil, let activeClient = client else { return }
+        let generation = sessionGeneration
         let loadedProfileRevision = profileRevision
         let loadedAvatarRevision = avatarRevision
-        Task { [weak self] in await self?.loadRecentEmoji() }
         profileLoadTask = Task { [weak self] in
+            defer { if let self, self.sessionGeneration == generation { self.profileLoadTask = nil } }
             do {
-                let name = try await newClient.displayName()
-                let avatar = try await newClient.avatarUrl()
+                let name = try await activeClient.displayName()
+                let avatar = try await activeClient.avatarUrl()
                 guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
+                self.needsInitialProfileLoad = false
                 if self.profileRevision == loadedProfileRevision { self.user?.name = name }
                 if self.avatarRevision == loadedAvatarRevision { self.user?.avatarURL = avatar }
             } catch {
                 guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
-                if self.errorMessage == nil {
+                if self.connectionState == .running, self.errorMessage == nil {
                     self.errorMessage = "Couldn’t load your profile."
                 }
             }
@@ -1370,6 +1391,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         notificationRetries.reset()
         profileLoadTask?.cancel()
         profileLoadTask = nil
+        needsInitialProfileLoad = false
+        failedSubscriptionRoomID = nil
+        failedOpen = nil
+        reconnectCount = 0
         connectionErrorMessage = nil
         connectionState = .idle
         isRetryingConnection = false
@@ -1689,6 +1714,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         timeline = kept.timeline
         timelineHandle = kept.listener
         openState = .ready
+        failedOpen = nil
         messages = kept.messages
         members = kept.members
         canMentionRoom = false
@@ -1820,9 +1846,20 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             guard selection == token else { return true }
             showConversation(id, eventID: eventID, token: token)
             openState = .failed
+            failedOpen = (id, eventID)
             errorMessage = Self.safeError(error)
         }
         return true
+    }
+
+    func retryOpenRoom() async {
+        guard openState == .failed, let failed = failedOpen, selectedRoomID == failed.roomID else { return }
+        failedOpen = nil
+        if let eventID = failed.eventID {
+            await open(failed.roomID, at: eventID)
+        } else {
+            await selectRoom(failed.roomID)
+        }
     }
 
     /// A timeline of `room` and its listener, whose updates show once `token` is on screen; nil, with nothing left
@@ -1852,6 +1889,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         timeline = next
         timelineHandle = listener
         openState = .ready
+        failedOpen = nil
         hasMoreForwardHistory = eventID != nil
         if eventID == nil {
             liveTimeline = KeptTimeline(
@@ -1960,11 +1998,22 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Recent conversations stay subscribed: sync keeps their timelines whole, and their member lists stay loaded.
     private func updateSubscriptions(_ id: String) {
         let recent = recentTimelines.roomIDs + (liveTimeline.map { [$0.roomID] } ?? [])
+        let startedReconnect = reconnectCount
+        if failedSubscriptionRoomID == id { failedSubscriptionRoomID = nil }
         Task { [weak self] in
-            do { try await self?.roomSubscriptions.setActiveRoom(id, recent: recent) } catch is CancellationError {
+            do {
+                try await self?.roomSubscriptions.setActiveRoom(id, recent: recent)
+                guard let self, self.failedSubscriptionRoomID == id else { return }
+                self.failedSubscriptionRoomID = nil
+            } catch is CancellationError {
             } catch {
                 guard let self, self.selectedRoomID == id else { return }
-                self.errorMessage = Self.safeError(error)
+                if self.connectionState == .running, self.reconnectCount != startedReconnect {
+                    self.updateSubscriptions(id)
+                    return
+                }
+                self.failedSubscriptionRoomID = id
+                if self.connectionState == .running { self.errorMessage = Self.safeError(error) }
             }
         }
     }
@@ -1975,6 +2024,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard selection == token, shownSelection != token else { return }
         shownSelection = token
         openState = .opening
+        failedOpen = nil
         if selectedRoomID != id || !messages.isEmpty { shownTimelineID = token }
         if let live = liveTimeline {
             live.revision = timelineRevision
@@ -2287,10 +2337,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         if let current = olderPages[key] { return current }
         let task = Task { [weak self] in
             defer { self?.olderPages[key] = nil }
-            return try await target.paginateBackwards(numEvents: 100)
+            let endReached = try await target.paginateBackwards(numEvents: 100)
+            if let self, target === self.timeline { self.blankPages += 1 }
+            return endReached
         }
         olderPages[key] = task
-        if target === timeline { blankPages += 1 }
         return task
     }
     /// Older pages on their way, by timeline.
@@ -2860,10 +2911,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         } else {
             target = try requireTimeline()
         }
-        let handle = try target.sendAttachment(params: parameters, attachment: kind)
+        do {
+            let handle = try target.sendAttachment(params: parameters, attachment: kind)
+            try await handle.join()
+        } catch {
+            throw AttachmentDeliveryError(underlying: error, message: Self.safeError(error))
+        }
         if let destination { sends[Conversation(roomID: destination, threadRootID: threadRootID), default: 0] += 1 }
         await returnToLive(after: token, threadRootID: threadRootID)
-        try await handle.join()
     }
 
     /// An image's size upright, from its header alone: EXIF orientations 5 to 8 turn it a quarter, swapping the sides.
@@ -3473,8 +3528,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             status = .ready
             savedMessages.resume()
             watchPresence()
-            // A thread page that failed while the connection was down is asked for again as it comes back.
-            if returned, threadPageError != nil { retryThreadPage() }
+            if returned {
+                reconnectCount &+= 1
+                // A thread page, room open, subscription or initial profile that failed while down retries now.
+                if threadPageError != nil { retryThreadPage() }
+                if openState == .failed { Task { [weak self] in await self?.retryOpenRoom() } }
+                if let id = failedSubscriptionRoomID, id == selectedRoomID { updateSubscriptions(id) }
+                if needsInitialProfileLoad { loadInitialProfile() }
+            }
         case .failed: status = .error
         case .idle, .connecting, .offline, .stopped: status = .syncing
         }
@@ -3675,19 +3736,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     func setTyping(_ typing: Bool, roomID: String, sessionID: UUID) async {
         guard sessionGeneration == sessionID, connectionStopTask == nil, !isPreview, !Task.isCancelled,
-            !typing || selectedRoomID == roomID, let client
+            connectionState == .running, !typing || selectedRoomID == roomID, let client
         else { return }
-        do {
-            guard let room = try client.getRoom(roomId: roomID), room.membership() == .joined else { return }
-            // Capture the room before suspension. A late stop notice may clean
-            // up its original room, but must never address the newly selected one.
-            try await room.typingNotice(isTyping: typing)
-        } catch {
-            guard sessionGeneration == sessionID, connectionStopTask == nil, !isPreview,
-                !Task.isCancelled, selectedRoomID == roomID
-            else { return }
-            errorMessage = Self.safeError(error)
-        }
+        guard let room = try? client.getRoom(roomId: roomID), room.membership() == .joined else { return }
+        // Capture the room before suspension. A late stop notice may clean
+        // up its original room, but must never address the newly selected one.
+        try? await room.typingNotice(isTyping: typing)
     }
     func setProfile(name: String) async throws {
         guard connectionStopTask == nil else { throw CancellationError() }
@@ -3860,6 +3914,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
     }
     static func safeError(_ error: Error) -> String {
+        if let error = error as? AttachmentDeliveryError { return safeError(error.underlying) }
         if let error = error as? MatrixServiceError { return error.localizedDescription }
         if let error = error as? ForwardMessageError { return error.localizedDescription }
         if let error = error as? ForwardMessageReviewChanged { return error.localizedDescription }

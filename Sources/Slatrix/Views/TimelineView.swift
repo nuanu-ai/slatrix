@@ -110,6 +110,14 @@ struct TimelineView: View {
                     .conversationRow(m, isThread: false).padding(.bottom, insets.bottom)
             }
         }
+        .overlay {
+            if !thread && messages.isEmpty && matrix.openState == .failed {
+                VStack(spacing: m.sp12) {
+                    Text("Couldn’t load messages.").font(m.font(.body)).foregroundStyle(colors.textSecondary)
+                    Button("Retry") { Task { await matrix.retryOpenRoom() } }.buttonStyle(.secondary)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
         .overlay(alignment: .top) {
             if contentAbove.wrappedValue {
                 Divider().overlay(colors.border).padding(.top, insets.top)
@@ -213,6 +221,7 @@ struct TimelineView: View {
         let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
         let inputs = TimelineLayoutCache.EntryInputs(
             rows: rows, hasOlder: hasOlder, reachedStart: reachedStart, reading: !thread && matrix.timelineLoading,
+            openFailed: !thread && matrix.openState == .failed,
             hasNewer: hasNewer,
             loadingHistory: loadingOlder, welcome: welcome,
             pinned: room.pinnedEventIDs,
@@ -236,7 +245,9 @@ struct TimelineView: View {
         entries.reserveCapacity(rows.count + 2)
         // A thread's older replies load under its root and the line counting them.
         var olderAt = 0
-        if !hasOlder && !thread && (reachedStart || rows.isEmpty && !matrix.timelineLoading) {
+        if !hasOlder && !thread && matrix.openState != .failed
+            && (reachedStart || rows.isEmpty && !matrix.timelineLoading)
+        {
             entries.append(
                 TimelineEntry(
                     id: "welcome",
@@ -424,6 +435,7 @@ struct TimelineView: View {
         var hasOlder: Bool
         var reachedStart: Bool
         var reading: Bool
+        var openFailed: Bool
         var hasNewer: Bool
         var loadingHistory: Bool
         var welcome: TimelineWelcome

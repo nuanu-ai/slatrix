@@ -21,6 +21,7 @@ private final class TypingRoom: Room, @unchecked Sendable {
 private final class RoomsClient: Client, @unchecked Sendable {
     var roomsByID: [String: Room] = [:]
     override func getRoom(roomId: String) throws -> Room? { roomsByID[roomId] }
+    override func session() throws -> Session { throw URLError(.userAuthenticationRequired) }
 }
 
 private final class SendTimeline: Timeline, @unchecked Sendable {
@@ -39,6 +40,7 @@ private final class SendTimeline: Timeline, @unchecked Sendable {
     let attachments = Recorder<AttachmentKind>()
     /// A video's poster as it is when it goes up; the upload removes it after.
     let posters = Recorder<Data>()
+    var failAttachmentJoin = false
     override func sendAttachment(params: UploadParameters, attachment: AttachmentKind) throws
         -> SendAttachmentJoinHandle
     {
@@ -46,12 +48,20 @@ private final class SendTimeline: Timeline, @unchecked Sendable {
         if case .video(_, .file(let path)?) = attachment, let poster = FileManager.default.contents(atPath: path) {
             posters.append(poster)
         }
-        return SentAttachment(noHandle: .init())
+        return SentAttachment(failJoin: failAttachmentJoin)
     }
 }
 
 private final class SentAttachment: SendAttachmentJoinHandle, @unchecked Sendable {
-    override func join() async throws {}
+    let failJoin: Bool
+    init(failJoin: Bool = false) {
+        self.failJoin = failJoin
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func join() async throws {
+        if failJoin { throw MatrixServiceError.request("upload queue failed") }
+    }
 }
 
 private let roomID = "!original:example.org"
@@ -73,6 +83,8 @@ struct ComposerSendTests {
         service.selectedRoomID = roomID
         service.rooms = [ChatRoom(id: roomID, name: "Send")]
         configure(session)
+        service.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
     }
 
     private func configure(_ session: UUID) {
@@ -162,6 +174,17 @@ struct ComposerSendTests {
         #expect(main.attachments.all.isEmpty && thread.attachments.all.isEmpty)
     }
 
+    @Test("An attachment failure during handle.join throws AttachmentDeliveryError and does not bump sends")
+    func attachmentJoinFailureDoesNotBumpSends() async throws {
+        let scratch = try TemporaryDirectory()
+        let file = try scratch.file("notes.txt", Data("hello".utf8))
+        main.failAttachmentJoin = true
+        await #expect(throws: AttachmentDeliveryError.self) {
+            try await service.uploadFile(file, roomID: roomID)
+        }
+        #expect(service.sends[Conversation(roomID: roomID, threadRootID: nil)] == nil)
+    }
+
     @Test("A send the SDK refuses to queue fails without being retried", arguments: [false, true])
     func enqueueFailure(threaded: Bool) async {
         let target = threaded ? thread : main
@@ -213,11 +236,21 @@ struct ComposerSendTests {
         #expect(room.notices.all.isEmpty)
     }
 
-    @Test("A typing failure in the current room is shown")
-    func currentFailureShown() async {
+    @Test(
+        "Typing notices are skipped whenever the connection is not running",
+        arguments: [MatrixConnectionState.idle, .connecting, .offline, .stopped, .failed])
+    func typingSkippedWhenNotRunning(state: MatrixConnectionState) async {
+        service.applyConnection(
+            MatrixConnectionFeedback(state: state, isRetrying: false, canRetry: true, errorMessage: nil))
+        await service.setTyping(true, roomID: roomID, sessionID: session)
+        #expect(room.notices.all.isEmpty && service.errorMessage == nil)
+    }
+
+    @Test("A typing failure never writes to the conversation error banner")
+    func typingFailureNeverSetsErrorBanner() async {
         room.failTyping = true
         await service.setTyping(true, roomID: roomID, sessionID: session)
-        #expect(service.errorMessage == "typing request failed")
+        #expect(room.notices.all == [true] && service.errorMessage == nil)
     }
 
     enum Change: CaseIterable { case room, session, cancellation }

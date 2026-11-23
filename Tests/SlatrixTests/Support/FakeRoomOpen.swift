@@ -297,10 +297,19 @@ final class FakeMembers: RoomMembersIterator, @unchecked Sendable {
 
 /// Records each set of rooms the app asks sync to keep subscribed.
 final class FakeRoomListService: RoomListService, @unchecked Sendable {
+    private let lock = NSLock()
     let subscriptions = Recorder<[String]>()
+    private var failNext = false
+    var failsSubscriptions: Bool {
+        get { lock.withLock { failNext } }
+        set { lock.withLock { failNext = newValue } }
+    }
     init() { super.init(noHandle: .init()) }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
-    override func setRoomSubscriptions(roomIds: [String]) async throws { subscriptions.append(roomIds) }
+    override func setRoomSubscriptions(roomIds: [String]) async throws {
+        subscriptions.append(roomIds)
+        if failsSubscriptions { throw URLError(.notConnectedToInternet) }
+    }
 }
 
 /// A send's handle, carrying its transaction.

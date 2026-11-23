@@ -477,6 +477,13 @@ struct RootView: View {
             .onChange(of: navigationGeneration) { _, generation in
                 if let request = pendingMatrixLink, request.navigation != generation { cancelMatrixLink() }
             }
+            .onChange(of: matrix.connectionState) { previous, current in
+                if previous != .running, current == .running, threadLoadError != nil, let root = threadRoot,
+                    openingThreadID == nil
+                {
+                    openThread(root, room: root.roomID, openedWith: matrix.threadOpening?.openedWith)
+                }
+            }
     }
 
     private var roomObservedContent: some View {
@@ -1031,6 +1038,8 @@ struct RootView: View {
     private var automaticReadTarget: ReadReceiptTarget? { ReadStatePolicy.automaticTarget(readContext, hold: readHold) }
     private func markReadState(_ targetRoom: ChatRoom, unread: Bool) {
         guard !matrix.isPreview, targetRoom.membership == "join" else { return }
+        let rollbackContext =
+            unread && targetRoom.id == matrix.selectedRoomID && !readHold.blocks(readContext) ? readContext : nil
         if targetRoom.id == matrix.selectedRoomID {
             if unread { readHold.markUnread(readContext) } else { readHold.clearForExplicitRead(readContext) }
         }
@@ -1039,6 +1048,7 @@ struct RootView: View {
             guard matrix.notificationSessionID == account else { return }
             do { try await matrix.setMarkedUnread(targetRoom.id, value: unread) } catch {
                 guard matrix.notificationSessionID == account else { return }
+                if let rollbackContext { readHold.rollbackMarkUnread(rollbackContext) }
                 matrix.errorMessage = MatrixService.safeError(error)
             }
         }
@@ -2449,8 +2459,11 @@ struct RootView: View {
             try assertComposerContext(context)
             try assertComposerDestination(room: room, threadID: threadID)
             try await matrix.uploadFile(file, threadRootID: threadID, roomID: room.id)
-        } catch {
+        } catch let delivery as AttachmentDeliveryError {
             if isCurrentComposer(context) { await attachmentDrafts.didFail(file, at: address) }
+            throw delivery.underlying
+        } catch {
+            if isCurrentComposer(context) { await attachmentDrafts.didCancel(file, at: address) }
             throw error
         }
         if isCurrentComposer(context) { await attachmentDrafts.didSend(file, at: address) }
@@ -3020,6 +3033,12 @@ private struct SeenInputs: Equatable {
     }
 }
 
+/// Pairs a read target with the session's reconnect count so receipts that failed while disconnected re-attempt.
+private struct ReconnectReadKey<Target: Equatable>: Equatable {
+    let target: Target
+    let reconnect: Int
+}
+
 /// Marks what the reader can see as read. Apart from the window, so a new message reruns only these checks.
 private struct ReadTracking: View {
     let matrix: MatrixService
@@ -3030,10 +3049,19 @@ private struct ReadTracking: View {
     var body: some View {
         let context = inputs.readContext(matrix)
         let thread = inputs.threadReadContext(matrix)
+        let reconnect = matrix.reconnectCount
         Color.clear
             .onChange(of: context) { _, context in onReadContext(context) }
-            .task(id: ReadStatePolicy.automaticTarget(context, hold: inputs.readHold)) { await acknowledgeTimeline() }
-            .task(id: ThreadReadPolicy.target(thread)) { await acknowledgeThread() }
+            .task(
+                id: ReadStatePolicy.automaticTarget(context, hold: inputs.readHold).map {
+                    ReconnectReadKey(target: $0, reconnect: reconnect)
+                }
+            ) { await acknowledgeTimeline() }
+            .task(
+                id: ThreadReadPolicy.target(thread).map {
+                    ReconnectReadKey(target: $0, reconnect: reconnect)
+                }
+            ) { await acknowledgeThread() }
             // Activity takes what the reader has seen off its count, the messages that land in view too.
             .onChange(
                 of: SeenInputs(
