@@ -16,6 +16,7 @@ struct PinnedMessagesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Divider().overlay(colors.border)
             if let error = service.errorMessage {
                 HStack {
                     InlineErrorView(message: error)

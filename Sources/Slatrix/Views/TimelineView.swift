@@ -111,9 +111,11 @@ struct TimelineView: View {
             }
         }
         .overlay(alignment: .top) {
-            if contentAbove.wrappedValue {
-                Divider().overlay(colors.border).padding(.top, insets.top)
-            }
+            Divider().overlay(colors.border)
+                .opacity(contentAbove.wrappedValue ? 1 : 0)
+                .animation(Motion.overlay, value: contentAbove.wrappedValue)
+                .padding(.top, insets.top)
+                .allowsHitTesting(false)
         }
         .overlay(alignment: .bottom) {
             if jumpVisible && !messages.isEmpty {
@@ -709,7 +711,7 @@ struct MessageRow: View {
                     actions.react?(reaction.key)
                 } label: {
                     ReactionChip(mine: reaction.mine) {
-                        Text(EmojiCatalog.presented(reaction.key)).font(m.font(.subheadline)).lineLimit(1)
+                        Text(EmojiCatalog.presented(reaction.key)).font(m.font(.body)).lineLimit(1)
                         Text("\(reaction.count)").font(m.font(.subheadline, .semibold)).fixedSize()
                             .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
                     }
@@ -771,10 +773,11 @@ private struct SendingClock: View {
     }
 }
 
-/// A reaction's pill: 24 pt, gray at rest; yours are tinted.
+/// A reaction's pill: 24 pt, gray at rest; yours are tinted with an accent edge.
 private struct ReactionChip<Content: View>: View {
     let mine: Bool
     @ViewBuilder let content: Content
+    @State private var hovering = false
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
@@ -783,6 +786,9 @@ private struct ReactionChip<Content: View>: View {
         HStack(alignment: .firstTextBaseline, spacing: m.sp4) { content }.padding(.horizontal, m.sp8)
             .frame(height: m.sp24)
             .background(mine ? colors.accentTint : colors.sunken, in: Capsule())
+            .overlay { if hovering { Capsule().fill(colors.hover) } }
+            .overlay { if mine { Capsule().strokeBorder(colors.accentLine, lineWidth: 1) } }
+            .onHover { hovering = $0 }
     }
 }
 

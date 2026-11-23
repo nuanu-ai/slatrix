@@ -72,7 +72,8 @@ private struct AfterLoadingDelay<Content: View>: View {
     @ViewBuilder let content: Content
     @State private var shown = false
     var body: some View {
-        ZStack { if shown { content } }
+        ZStack { if shown { content.transition(.opacity) } }
+            .animation(Motion.overlay, value: shown)
             .loadingInterval(interval, while: active && !hasContent)
             .task(id: [active && !hasContent, offline]) {
                 shown = false

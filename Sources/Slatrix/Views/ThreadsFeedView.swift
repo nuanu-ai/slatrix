@@ -202,6 +202,7 @@ private struct ThreadFeedRow: View {
                             root.error ?? latest?.error ?? "Right-click to retry")
                 }
             }.padding(.horizontal, m.sp20).padding(.vertical, m.sp20).frame(maxWidth: .infinity, alignment: .leading)
+                .modifier(FeedRowHover())
                 .contentShape(Rectangle())
                 .accessibilityElement(children: .combine).accessibilityLabel(
                     "Thread in \(item.roomName), \(rootMessage.senderName), \(Self.preview(rootMessage)), \(item.replyCount) replies"

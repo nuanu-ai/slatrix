@@ -811,8 +811,10 @@ struct RootView: View {
                                 if paneCovers {
                                     inspector(room).overlay(alignment: .top) { Divider().overlay(colors.border) }
                                         .padding(.top, m.paneHeader)
+                                        .transition(.move(edge: .trailing).combined(with: .opacity))
                                 }
                             }
+                            .animation(Motion.pane, value: paneCovers)
                             // Banners float over the conversation instead of pushing it down, under whichever header is
                             // on top: a pane in the conversation's place brings its own, with its close button. A thread
                             // there floats its own notice in the same column, first, so neither lies over the other.
@@ -838,8 +840,10 @@ struct RootView: View {
                                 Sized(widths, width: { m(paneWidth($0) ?? Self.paneWidth) }) {
                                     inspector(room).layoutIsolated()
                                 }
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
                             }
-                        }.frameCard(colors.theme.framed, leading: sidebarCollapsed)
+                        }.animation(Motion.pane, value: paneOpen && paneBeside)
+                            .frameCard(colors.theme.framed, leading: sidebarCollapsed)
                     }
                     .covered(coverage.drawer)
                     .overlay(alignment: .leading) { drawer }
@@ -918,6 +922,12 @@ struct RootView: View {
                 }
             }
         }
+        .animation(
+            Motion.overlay,
+            value: [
+                pendingMatrixLink != nil, pendingThreadOpen != nil, threadOpenError != nil, navigationNotice != nil,
+                platform.pendingNotification != nil, localError != nil, attachmentDrafts.errorMessage != nil,
+            ])
     }
 
     @ViewBuilder private func inspector(_ room: ChatRoom?) -> some View {
@@ -1595,6 +1605,7 @@ struct RootView: View {
             }
             Text(body).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(3)
         }.padding(.horizontal, m.sp20).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(FeedRowHover())
             .contentShape(Rectangle())
     }
     private func openThreadDraft(_ address: ThreadDraftAddress) {
@@ -3211,10 +3222,14 @@ private struct ConnectionBanner: View {
 private struct ErrorBanner: View {
     let matrix: MatrixService
     var body: some View {
-        if let error = matrix.errorMessage {
-            Banner(
-                text: error, symbol: "exclamationmark.triangle.fill", onDismiss: { matrix.errorMessage = nil })
+        ZStack {
+            if let error = matrix.errorMessage {
+                Banner(
+                    text: error, symbol: "exclamationmark.triangle.fill", onDismiss: { matrix.errorMessage = nil }
+                ).transition(.opacity)
+            }
         }
+        .animation(Motion.overlay, value: matrix.errorMessage != nil)
     }
 }
 
@@ -3253,16 +3268,6 @@ private struct ViewerInvalidation: View {
             .onChange(of: matrix.sharedFiles.items) {
                 if viewer.files != nil { viewer.update(from: matrix.sharedFiles.items.map(\.message)) }
             }
-    }
-}
-
-/// What lies outside a rounded rectangle within its square bounds: its four corners.
-private struct OutsideCorners: Shape {
-    let radius: CGFloat
-    func path(in rect: CGRect) -> Path {
-        var path = Path(rect)
-        path.addPath(RoundedRectangle(cornerRadius: radius).path(in: rect))
-        return path
     }
 }
 

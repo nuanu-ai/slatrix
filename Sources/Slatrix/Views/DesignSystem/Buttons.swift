@@ -89,7 +89,10 @@ struct ButtonChrome<Label: View>: View {
                 // Hover and press darken a filled button and tint a bordered one.
                 .overlay {
                     if state == .hover || state == .pressed {
-                        shape.fill(kind == .secondary ? colors.hover : .black.opacity(state == .pressed ? 0.16 : 0.08))
+                        shape.fill(
+                            kind == .secondary
+                                ? (state == .pressed ? colors.pressed : colors.hover)
+                                : .black.opacity(state == .pressed ? 0.16 : 0.08))
                     }
                 }
                 .overlay { if kind == .secondary { shape.strokeBorder(colors.borderStrong, lineWidth: 0.5) } }

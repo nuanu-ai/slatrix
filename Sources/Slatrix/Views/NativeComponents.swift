@@ -5,12 +5,13 @@ import SwiftUI
 struct EmptyStateView<Action: View>: View {
     private static var textWidth: CGFloat { 360 }
     @Environment(\.metrics) private var m
+    @ThemeColors private var colors
     let symbol: String
     let title: String
     @ViewBuilder var action: () -> Action
     var body: some View {
         VStack(spacing: m.sp12) {
-            Image(systemName: symbol).font(m.font(.title1)).foregroundStyle(.secondary)
+            Image(systemName: symbol).font(m.font(.title1)).foregroundStyle(colors.textSecondary)
             Text(title).font(m.font(.body, .semibold)).multilineTextAlignment(.center).frame(
                 maxWidth: m(Self.textWidth))
             action().buttonStyle(.textLink).font(m.font(.body))

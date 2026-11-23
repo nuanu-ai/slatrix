@@ -13,8 +13,12 @@ struct ReplyPreviewView: View {
     @State private var thread: (root: ChatMessage, preview: String)?
     /// A message that only looked like a copy: its quote isn't in a thread.
     @State private var notInThread = false
+    @State private var hovering = false
 
     var body: some View {
+        let interactive =
+            (message.repliedToThread && !notInThread && thread != nil && onOpenThread != nil)
+            || (!(message.repliedToThread && !notInThread) && preview.state == .ready && onOpen != nil)
         HStack(spacing: m.sp8) {
             RoundedRectangle(cornerRadius: m(2)).fill(appearance.colors.textSecondary.opacity(0.4)).frame(width: m(3))
             // Every state takes the loaded preview's two lines, so the row keeps its height when the original lands; one
@@ -36,7 +40,7 @@ struct ReplyPreviewView: View {
                                 SkeletonLines(widths: [240])
                             }
                         }.lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }.buttonStyle(.row).disabled(thread == nil || onOpenThread == nil).help("View thread")
+                    }.buttonStyle(.row).disabled(thread == nil || onOpenThread == nil).linkCursor().help("View thread")
                 } else if preview.state == .ready {
                     Button {
                         onOpen?(preview.eventID)
@@ -44,7 +48,7 @@ struct ReplyPreviewView: View {
                         lines(sender: preview.senderName, body: preview.body, deleted: preview.isRedacted).frame(
                             maxWidth: .infinity, alignment: .leading
                         ).contentShape(Rectangle())
-                    }.buttonStyle(.row).disabled(onOpen == nil).help("Show original message")
+                    }.buttonStyle(.row).disabled(onOpen == nil).linkCursor().help("Show original message")
                 } else if preview.state == .failed {
                     HStack(spacing: m.sp8) {
                         Text("Original message unavailable").font(m.font(.caption))
@@ -61,7 +65,13 @@ struct ReplyPreviewView: View {
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
                 .loadingInterval(.replyLoading, while: preview.state == .pending)
-        }.padding(.vertical, m.sp4).padding(.bottom, m.sp4).fixedSize(horizontal: false, vertical: true)
+        }.padding(.vertical, m.sp4).padding(.horizontal, m.sp4)
+            .background(
+                hovering && interactive ? appearance.colors.hover : .clear,
+                in: RoundedRectangle(cornerRadius: m.radiusSmall)
+            )
+            .padding(.horizontal, -m.sp4).padding(.bottom, m.sp4).fixedSize(horizontal: false, vertical: true)
+            .onHover { hovering = $0 }
             .task(id: origin?.replyPreviewIdentity) { [target = origin] in
                 guard !Task.isCancelled, preview.state == .unavailable, let target else { return }
                 // SDK Pending replaces the row identity and cancels this view

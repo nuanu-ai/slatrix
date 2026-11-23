@@ -63,6 +63,7 @@ struct ChannelHeader: View {
         let matrix: MatrixService
         let room: ChatRoom
         let perform: (Action) -> Void
+        @State private var hovering = false
         @Environment(\.metrics) private var m
         @EnvironmentObject private var appearance: AppearanceStore
 
@@ -83,6 +84,8 @@ struct ChannelHeader: View {
                                     .foregroundStyle(colors.textSecondary)
                             }
                             Text(room.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
+                            Image(systemName: "chevron.down").font(m.font(.subheadline, .semibold))
+                                .foregroundStyle(colors.textSecondary)
                         }
                         // Who is typing shows under the name, as Telegram shows it, in place of the topic.
                         if let line = typing ?? (room.topic.isEmpty ? nil : room.topic) {
@@ -90,7 +93,10 @@ struct ChannelHeader: View {
                         }
                     }.lineLimit(1).truncationMode(.tail).animation(Motion.content, value: typing)
                 }
-            }.buttonStyle(.row).help(room.isDirect ? room.name : "Open channel details")
+                .padding(.horizontal, m.sp8).padding(.vertical, m.sp4)
+                .background(hovering ? colors.hover : .clear, in: RoundedRectangle(cornerRadius: m.radius))
+            }.buttonStyle(.row).padding(.leading, -m.sp8).onHover { hovering = $0 }
+                .help(room.isDirect ? room.name : "Open channel details")
                 .contextMenu {
                     NativeMessageMenuCommands(
                         commands: ChannelHeader.menu(for: room, isPreview: matrix.isPreview, perform: perform))
